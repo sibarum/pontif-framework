@@ -1,6 +1,6 @@
 # Pontif Framework
 
-High-level AST builders on top of GraalVM's Truffle framework. Pontif — from *pontifex*, "bridge-builder" — spans the gap between language-design ideas and a working Truffle interpreter. Bring your own parser, assemble an AST from ready-made nodes, and let the framework handle resolution, dispatch, sort checking, and execution.
+High-level AST builders on top of GraalVM's Truffle framework. Bring your own parser, assemble an AST from ready-made nodes, and let the framework handle resolution, dispatch, sort checking, and execution.
 
 ## What it is
 

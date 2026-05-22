@@ -1,12 +1,17 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.FunctionDecl;
+import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.symbolic.algebra.ProofResult;
+import sibarum.pontif.core.types.Sort;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +43,62 @@ public final class IrInterpreter {
             case IrExpr.Call c -> evalCall(c, env, module);
             case IrExpr.Lambda lambda -> new Closure(lambda, env);
             case IrExpr.Apply apply -> evalApply(apply, env, module);
+            case IrExpr.Match m -> evalMatch(m, env, module);
+            case IrExpr.Record r -> {
+                Map<String, Object> members = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    members.put(e.getKey(), eval(e.getValue(), env, module));
+                }
+                yield new RecordValue(members);
+            }
+            case IrExpr.FieldAccess fa -> {
+                Object baseValue = eval(fa.base(), env, module);
+                if (!(baseValue instanceof RecordValue rec)) {
+                    throw new RuntimeCheckException(
+                            "Field access '." + fa.fieldName() + "' requires a record value, got "
+                                    + (baseValue == null ? "null" : baseValue.getClass().getSimpleName())
+                                    + ": " + baseValue,
+                            fa.origin());
+                }
+                yield rec.get(fa.fieldName(), fa.origin());
+            }
         };
+    }
+
+    private Object evalMatch(IrExpr.Match match, Environment env, CompiledModule module) {
+        Object value = eval(match.scrutinee(), env, module);
+        SymExpr symbolicValue = toSymExpr(value);
+        for (int i = 0; i < match.branches().size(); i++) {
+            IrExpr.MatchBranch branch = match.branches().get(i);
+            Sort pattern = IrCompiler.compileSort(branch.pattern());
+            ProofResult result = Refinements.satisfies(symbolicValue, pattern, simplifier);
+            if (result instanceof ProofResult.Passed) {
+                try {
+                    return eval(branch.result(), env, module);
+                } catch (RuntimeCheckException rce) {
+                    if (rce.origin().isPresent()) {
+                        throw rce;
+                    }
+                    throw new RuntimeCheckException(rce.getMessage(), match.origin(), rce);
+                }
+            }
+            if (result instanceof ProofResult.Residual residual) {
+                throw new RuntimeCheckException(
+                        "Match branch " + i + " (pattern " + pattern
+                                + ") could not be decided at runtime against value " + value
+                                + "; residual obligation: " + residual.obligation(),
+                        match.origin());
+            }
+        }
+        StringBuilder patterns = new StringBuilder("[");
+        for (int i = 0; i < match.branches().size(); i++) {
+            if (i > 0) patterns.append(", ");
+            patterns.append(IrCompiler.compileSort(match.branches().get(i).pattern()));
+        }
+        patterns.append("]");
+        throw new RuntimeCheckException(
+                "No match branch accepted value " + value + " against patterns " + patterns,
+                match.origin());
     }
 
     private Object evalApply(IrExpr.Apply apply, Environment env, CompiledModule module) {

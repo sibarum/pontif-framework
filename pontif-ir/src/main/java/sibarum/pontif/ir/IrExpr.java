@@ -3,11 +3,13 @@ package sibarum.pontif.ir;
 import sibarum.pontif.core.Origin;
 
 import java.util.List;
+import java.util.Map;
 
 public sealed interface IrExpr
         permits IrExpr.Lit, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call,
-                IrExpr.Lambda, IrExpr.Apply {
+                IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
+                IrExpr.Record, IrExpr.FieldAccess {
 
     Origin origin();
 
@@ -25,6 +27,10 @@ public sealed interface IrExpr
     static Call call(String functionName, List<IrExpr> args) { return new Call(functionName, args, Origin.NONE); }
     static Lambda lambda(List<IrParam> params, IrSort returnSort, IrExpr body) { return new Lambda(params, returnSort, body, Origin.NONE); }
     static Apply apply(IrExpr fn, List<IrExpr> args) { return new Apply(fn, args, Origin.NONE); }
+    static Match match(IrExpr scrutinee, List<MatchBranch> branches) { return new Match(scrutinee, branches, Origin.NONE); }
+    static MatchBranch matchBranch(IrSort pattern, IrExpr result) { return new MatchBranch(pattern, result); }
+    static Record record(Map<String, IrExpr> members) { return new Record(members, Origin.NONE); }
+    static FieldAccess fieldAccess(IrExpr base, String fieldName) { return new FieldAccess(base, fieldName, Origin.NONE); }
 
     record Lit(long value, Origin origin) implements IrExpr {}
 
@@ -61,6 +67,49 @@ public sealed interface IrExpr
             args = List.copyOf(args);
             if (fn == null) {
                 throw new IllegalArgumentException("Apply function expression must be non-null");
+            }
+        }
+    }
+
+    record Match(IrExpr scrutinee, List<MatchBranch> branches, Origin origin) implements IrExpr {
+        public Match {
+            if (scrutinee == null) {
+                throw new IllegalArgumentException("Match scrutinee must be non-null");
+            }
+            branches = List.copyOf(branches);
+            if (branches.isEmpty()) {
+                throw new IllegalArgumentException("Match must have at least one branch");
+            }
+        }
+    }
+
+    record MatchBranch(IrSort pattern, IrExpr result) {
+        public MatchBranch {
+            if (pattern == null) {
+                throw new IllegalArgumentException("MatchBranch pattern must be non-null");
+            }
+            if (result == null) {
+                throw new IllegalArgumentException("MatchBranch result must be non-null");
+            }
+        }
+    }
+
+    record Record(Map<String, IrExpr> members, Origin origin) implements IrExpr {
+        public Record {
+            if (members == null) {
+                throw new IllegalArgumentException("Record members must be non-null");
+            }
+            members = Map.copyOf(members);
+        }
+    }
+
+    record FieldAccess(IrExpr base, String fieldName, Origin origin) implements IrExpr {
+        public FieldAccess {
+            if (base == null) {
+                throw new IllegalArgumentException("FieldAccess base must be non-null");
+            }
+            if (fieldName == null || fieldName.isEmpty()) {
+                throw new IllegalArgumentException("FieldAccess field name must be non-empty");
             }
         }
     }

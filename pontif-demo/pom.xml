@@ -20,6 +20,10 @@
             <artifactId>pontif-ast</artifactId>
         </dependency>
         <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.graalvm.truffle</groupId>
             <artifactId>truffle-api</artifactId>
         </dependency>

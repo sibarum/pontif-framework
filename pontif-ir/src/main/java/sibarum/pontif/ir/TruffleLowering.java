@@ -11,14 +11,22 @@ import sibarum.pontif.ast.bind.Var;
 import sibarum.pontif.ast.func.CallNode;
 import sibarum.pontif.ast.func.FunctionEntryNode;
 import sibarum.pontif.ast.func.FunctionRegistry;
+import sibarum.pontif.ast.lambda.ApplyNode;
+import sibarum.pontif.ast.lambda.LambdaNode;
 import sibarum.pontif.ast.literal.Bool;
 import sibarum.pontif.ast.literal.IntLiteral;
+import sibarum.pontif.ast.match.MatchNode;
+import sibarum.pontif.ast.record.FieldAccessNode;
+import sibarum.pontif.ast.record.RecordNode;
 import sibarum.pontif.core.PontifNode;
 import sibarum.pontif.core.PontifRootNode;
 import sibarum.pontif.core.Resolver;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 
 public final class TruffleLowering {
@@ -84,15 +92,35 @@ public final class TruffleLowering {
                     lowerExpr(l.value(), module, registry),
                     lowerExpr(l.body(), module, registry));
             case IrExpr.Call c -> lowerCall(c, module, registry);
-            case IrExpr.Lambda lambda -> throw new UnsupportedOperationException(
-                    "Lambda lowering to Truffle is not yet implemented; will land in the paired Truffle slice. "
-                            + "Origin: " + lambda.origin());
-            case IrExpr.Apply apply -> throw new UnsupportedOperationException(
-                    "Apply lowering to Truffle is not yet implemented; will land in the paired Truffle slice. "
-                            + "Origin: " + apply.origin());
+            case IrExpr.Lambda lambda -> lowerLambda(lambda, module, registry);
+            case IrExpr.Apply apply -> lowerApply(apply, module, registry);
+            case IrExpr.Match m -> lowerMatch(m, module, registry);
+            case IrExpr.Record r -> lowerRecord(r, module, registry);
+            case IrExpr.FieldAccess fa -> FieldAccessNode.of(lowerExpr(fa.base(), module, registry), fa.fieldName());
         };
         node.withOrigin(expr.origin());
         return node;
+    }
+
+    private PontifNode lowerRecord(IrExpr.Record record, CompiledModule module, FunctionRegistry registry) {
+        List<String> fieldNames = new ArrayList<>(record.members().size());
+        List<PontifNode> valueNodes = new ArrayList<>(record.members().size());
+        for (Map.Entry<String, IrExpr> e : record.members().entrySet()) {
+            fieldNames.add(e.getKey());
+            valueNodes.add(lowerExpr(e.getValue(), module, registry));
+        }
+        return RecordNode.of(fieldNames, valueNodes);
+    }
+
+    private PontifNode lowerMatch(IrExpr.Match match, CompiledModule module, FunctionRegistry registry) {
+        PontifNode scrutinee = lowerExpr(match.scrutinee(), module, registry);
+        List<MatchNode.Branch> branches = new ArrayList<>(match.branches().size());
+        for (IrExpr.MatchBranch b : match.branches()) {
+            branches.add(MatchNode.Branch.of(
+                    IrCompiler.compileSort(b.pattern()),
+                    lowerExpr(b.result(), module, registry)));
+        }
+        return MatchNode.of(scrutinee, compiler.simplifier(), branches);
     }
 
     private PontifNode lowerBinOp(IrExpr.BinOp op, CompiledModule module, FunctionRegistry registry) {
@@ -109,6 +137,52 @@ public final class TruffleLowering {
             case EQ -> Cmp.of(l, r, Cmp.Op.EQ);
             case NE -> Cmp.of(l, r, Cmp.Op.NE);
         };
+    }
+
+    private PontifNode lowerLambda(IrExpr.Lambda lambda, CompiledModule module, FunctionRegistry registry) {
+        // Captures = body's free vars minus the lambda's own params.
+        LinkedHashSet<String> freeVars = IrFreeVars.freeVars(lambda.body());
+        for (IrParam p : lambda.params()) {
+            freeVars.remove(p.name());
+        }
+        List<String> captureNames = new ArrayList<>(freeVars);
+
+        // Build a Resolver for the lambda body. Frame layout:
+        //   [capture_0, ..., capture_{N-1}, param_0, ..., param_{M-1}, locals...]
+        // FunctionEntryNode unpacks frame.getArguments() = [captures..., args...] into
+        // these slots in order, so the body's Var lookups resolve to the right slots.
+        Resolver bodyResolver = new Resolver();
+        int[] entrySlots = new int[captureNames.size() + lambda.params().size()];
+        int slotIndex = 0;
+        for (String capName : captureNames) {
+            int slot = bodyResolver.allocateSlot(capName);
+            bodyResolver.pushScope(capName, slot);
+            entrySlots[slotIndex++] = slot;
+        }
+        for (IrParam p : lambda.params()) {
+            int slot = bodyResolver.allocateSlot(p.name());
+            bodyResolver.pushScope(p.name(), slot);
+            entrySlots[slotIndex++] = slot;
+        }
+
+        PontifNode body = lowerExpr(lambda.body(), module, registry);
+        body.resolve(bodyResolver);
+
+        FunctionEntryNode entryNode = new FunctionEntryNode(entrySlots, body);
+        FrameDescriptor descriptor = bodyResolver.build();
+        PontifRootNode root = new PontifRootNode(null, descriptor, entryNode);
+        CallTarget callTarget = root.getCallTarget();
+
+        return LambdaNode.of(callTarget, captureNames, lambda.params().size());
+    }
+
+    private PontifNode lowerApply(IrExpr.Apply apply, CompiledModule module, FunctionRegistry registry) {
+        PontifNode fnNode = lowerExpr(apply.fn(), module, registry);
+        PontifNode[] argNodes = new PontifNode[apply.args().size()];
+        for (int i = 0; i < apply.args().size(); i++) {
+            argNodes[i] = lowerExpr(apply.args().get(i), module, registry);
+        }
+        return ApplyNode.of(fnNode, argNodes);
     }
 
     private PontifNode lowerCall(IrExpr.Call call, CompiledModule module, FunctionRegistry registry) {

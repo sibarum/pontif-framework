@@ -53,14 +53,21 @@ public final class IrCompiler {
         diagnostics.add(ProofResult.passed());
     }
 
-    public Sort compileSort(IrSort sort) {
+    public static Sort compileSort(IrSort sort) {
         return switch (sort) {
             case IrSort.Named n -> Sort.of(n.name());
             case IrSort.Refined r -> Sort.refined(r.name(), compileSymExpr(r.predicate()));
+            case IrSort.Structural s -> {
+                java.util.Map<String, Sort> members = new java.util.LinkedHashMap<>();
+                for (java.util.Map.Entry<String, IrSort> e : s.members().entrySet()) {
+                    members.put(e.getKey(), compileSort(e.getValue()));
+                }
+                yield Sort.structural(s.name(), members);
+            }
         };
     }
 
-    public SymExpr compileSymExpr(IrExpr expr) {
+    public static SymExpr compileSymExpr(IrExpr expr) {
         return switch (expr) {
             case IrExpr.Lit l -> SymExpr.lit(l.value());
             case IrExpr.Bool b -> SymExpr.bool(b.value());
@@ -74,17 +81,34 @@ public final class IrCompiler {
                         SymExpr.lam(l.name(), compileSymExpr(l.body())),
                         compileSymExpr(l.value()));
             }
-            case IrExpr.Call c -> throw new UnsupportedOperationException(
-                    "Function calls inside refinement predicates are not yet supported (call to '"
-                            + c.functionName() + "')");
+            case IrExpr.Call c -> {
+                // Multi-arg call lifted as a left-fold of App over Var(functionName).
+                // Simplifier rules can pattern-match App-chains rooted at a named Var
+                // and reduce them against the dispatch table when arguments are concrete.
+                SymExpr fn = SymExpr.var(c.functionName());
+                for (IrExpr arg : c.args()) {
+                    fn = SymExpr.app(fn, compileSymExpr(arg));
+                }
+                yield fn;
+            }
             case IrExpr.Lambda lambda -> throw new UnsupportedOperationException(
                     "Lambdas inside refinement predicates are not yet supported");
             case IrExpr.Apply apply -> throw new UnsupportedOperationException(
                     "Function applications inside refinement predicates are not yet supported");
+            case IrExpr.Match match -> throw new UnsupportedOperationException(
+                    "Match expressions inside refinement predicates are not yet supported");
+            case IrExpr.Record r -> {
+                java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
+                for (java.util.Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    members.put(e.getKey(), compileSymExpr(e.getValue()));
+                }
+                yield SymExpr.record(members);
+            }
+            case IrExpr.FieldAccess fa -> SymExpr.fieldAccess(compileSymExpr(fa.base()), fa.fieldName());
         };
     }
 
-    private SymExpr compileBinOp(IrExpr.BinOp op) {
+    private static SymExpr compileBinOp(IrExpr.BinOp op) {
         SymExpr l = compileSymExpr(op.left());
         SymExpr r = compileSymExpr(op.right());
         return switch (op.op()) {

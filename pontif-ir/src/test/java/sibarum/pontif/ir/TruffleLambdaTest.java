@@ -1,0 +1,241 @@
+package sibarum.pontif.ir;
+
+import org.junit.jupiter.api.Test;
+import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.symbolic.RewriteRule;
+import sibarum.pontif.core.symbolic.RuntimeCheckException;
+import sibarum.pontif.core.symbolic.Simplifier;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class TruffleLambdaTest {
+
+    private static List<RewriteRule> defaultRules() {
+        List<RewriteRule> rules = new ArrayList<>();
+        rules.add(cmpLitLit());
+        return rules;
+    }
+
+    private static RewriteRule cmpLitLit() {
+        return (expr, simp) -> {
+            if (expr instanceof sibarum.pontif.core.symbolic.SymExpr.Cmp(
+                    sibarum.pontif.core.symbolic.SymExpr.Lit l,
+                    sibarum.pontif.core.symbolic.SymExpr.CmpOp op,
+                    sibarum.pontif.core.symbolic.SymExpr.Lit r)) {
+                boolean truth = switch (op) {
+                    case LT -> l.value() < r.value();
+                    case LE -> l.value() <= r.value();
+                    case GT -> l.value() > r.value();
+                    case GE -> l.value() >= r.value();
+                    case EQ -> l.value() == r.value();
+                    case NE -> l.value() != r.value();
+                };
+                return Optional.of(sibarum.pontif.core.symbolic.SymExpr.bool(truth));
+            }
+            return Optional.empty();
+        };
+    }
+
+    private static Simplifier simplifier() {
+        return new Simplifier(defaultRules());
+    }
+
+    private static Object runTruffle(IrModule module) {
+        Simplifier simp = simplifier();
+        IrCompiler compiler = new IrCompiler(simp);
+        CompiledModule compiled = compiler.compile(module);
+        TruffleProgram program = new TruffleLowering(compiler).lower(compiled);
+        return program.run();
+    }
+
+    private static final IrSort INT = IrSort.named("Int");
+    private static final IrSort FN = IrSort.named("Function");
+
+    // --- Basic Apply ---
+
+    @Test
+    void truffle_closedLambda_appliedToLiteral() {
+        // (\x -> x + 1)(5) = 6
+        IrExpr lambda = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)));
+        IrExpr app = IrExpr.apply(lambda, List.of(IrExpr.lit(5)));
+        assertEquals(6L, runTruffle(new IrModule("app", List.of(), app)));
+    }
+
+    @Test
+    void truffle_multiArgLambda_invokedWithMultipleArgs() {
+        // (\(x, y) -> x * y)(3, 4) = 12
+        IrExpr lambda = IrExpr.lambda(
+                List.of(new IrParam("x", INT), new IrParam("y", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.var("y")));
+        IrExpr app = IrExpr.apply(lambda, List.of(IrExpr.lit(3), IrExpr.lit(4)));
+        assertEquals(12L, runTruffle(new IrModule("mul", List.of(), app)));
+    }
+
+    // --- Closure capture ---
+
+    @Test
+    void truffle_closureCapturesEnclosingLetBinding() {
+        // let n = 10 in let f = \x -> x + n in f(5)  = 15
+        IrExpr lambda = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.var("n")));
+        IrExpr body = IrExpr.letIn("f", FN, lambda,
+                IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(5))));
+        IrExpr main = IrExpr.letIn("n", INT, IrExpr.lit(10), body);
+        assertEquals(15L, runTruffle(new IrModule("capture", List.of(), main)));
+    }
+
+    @Test
+    void truffle_closureDoesNotSeeBindingsAddedAfterCreation() {
+        // let f = \x -> x in let n = 100 in f(5)  = 5  (n is unused)
+        IrExpr identity = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.var("x"));
+        IrExpr main = IrExpr.letIn("f", FN, identity,
+                IrExpr.letIn("n", INT, IrExpr.lit(100),
+                        IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(5)))));
+        assertEquals(5L, runTruffle(new IrModule("scope", List.of(), main)));
+    }
+
+    // --- Higher-order ---
+
+    @Test
+    void truffle_higherOrder_lambdaAsArgumentToAnotherLambda() {
+        // let doubler = \x -> x * 2 in let applyTo5 = \f -> f(5) in applyTo5(doubler) = 10
+        IrExpr doubler = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.lit(2)));
+        IrExpr applyTo5 = IrExpr.lambda(
+                List.of(new IrParam("f", FN)),
+                INT,
+                IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(5))));
+        IrExpr main = IrExpr.letIn("doubler", FN, doubler,
+                IrExpr.letIn("applyTo5", FN, applyTo5,
+                        IrExpr.apply(IrExpr.var("applyTo5"), List.of(IrExpr.var("doubler")))));
+        assertEquals(10L, runTruffle(new IrModule("ho", List.of(), main)));
+    }
+
+    @Test
+    void truffle_currying_lambdaReturningLambda() {
+        // let addN = \n -> \x -> x + n in let add5 = addN(5) in add5(3) = 8
+        IrExpr inner = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.var("n")));
+        IrExpr addN = IrExpr.lambda(
+                List.of(new IrParam("n", INT)),
+                FN,
+                inner);
+        IrExpr main = IrExpr.letIn("addN", FN, addN,
+                IrExpr.letIn("add5", FN,
+                        IrExpr.apply(IrExpr.var("addN"), List.of(IrExpr.lit(5))),
+                        IrExpr.apply(IrExpr.var("add5"), List.of(IrExpr.lit(3)))));
+        assertEquals(8L, runTruffle(new IrModule("curry", List.of(), main)));
+    }
+
+    @Test
+    void truffle_closureSurvivesEnclosingScopeExit() {
+        // let make = \n -> \x -> n + x in let f = make(100) in f(1)  = 101
+        IrExpr inner = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("n"), IrExpr.var("x")));
+        IrExpr make = IrExpr.lambda(
+                List.of(new IrParam("n", INT)),
+                FN,
+                inner);
+        IrExpr main = IrExpr.letIn("make", FN, make,
+                IrExpr.letIn("f", FN,
+                        IrExpr.apply(IrExpr.var("make"), List.of(IrExpr.lit(100))),
+                        IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(1)))));
+        assertEquals(101L, runTruffle(new IrModule("survive", List.of(), main)));
+    }
+
+    // --- Apply errors with origins ---
+
+    @Test
+    void truffle_applyWithWrongArity_throwsWithMatchOrigin() {
+        Origin applySite = Origin.at("test.ptf", 7, 3);
+        IrExpr identity = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.var("x"));
+        IrExpr app = new IrExpr.Apply(identity, List.of(IrExpr.lit(1), IrExpr.lit(2)), applySite);
+        RuntimeCheckException ex = assertThrows(
+                RuntimeCheckException.class,
+                () -> runTruffle(new IrModule("arity", List.of(), app)));
+        assertEquals(applySite, ex.origin());
+        assertTrue(ex.getMessage().toLowerCase().contains("arity"),
+                "expected arity diagnostic; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("test.ptf:7:3"),
+                "expected origin in message; got: " + ex.getMessage());
+    }
+
+    @Test
+    void truffle_applyOnNonClosure_throwsWithApplyOrigin() {
+        Origin applySite = Origin.at("test.ptf", 9, 5);
+        IrExpr app = new IrExpr.Apply(IrExpr.lit(5), List.of(IrExpr.lit(1)), applySite);
+        RuntimeCheckException ex = assertThrows(
+                RuntimeCheckException.class,
+                () -> runTruffle(new IrModule("notFn", List.of(), app)));
+        assertEquals(applySite, ex.origin());
+        assertTrue(ex.getMessage().contains("test.ptf:9:5"),
+                "expected origin in message; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().toLowerCase().contains("closure"),
+                "expected closure diagnostic; got: " + ex.getMessage());
+    }
+
+    // --- Interactions with named functions ---
+
+    @Test
+    void truffle_namedFunctionCanInternallyUseLambda() {
+        // fn process(x: Int) -> Int = (\y -> y * 3)(x)
+        IrStmt.FunctionDecl processFn = IrStmt.functionDecl(
+                "process",
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.apply(
+                        IrExpr.lambda(
+                                List.of(new IrParam("y", INT)),
+                                INT,
+                                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("y"), IrExpr.lit(3))),
+                        List.of(IrExpr.var("x"))));
+        IrModule module = new IrModule("internal",
+                List.of(processFn),
+                IrExpr.call("process", List.of(IrExpr.lit(7))));
+        assertEquals(21L, runTruffle(module));
+    }
+
+    // --- Interaction with Match ---
+
+    @Test
+    void truffle_lambdaBodyContainingMatch_appliedCorrectly() {
+        // (\x -> match x with | zero -> 100 | positive -> x * 2)(5) = 10
+        IrSort positive = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        IrSort zero = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(0)));
+        IrExpr lambda = IrExpr.lambda(
+                List.of(new IrParam("x", INT)),
+                INT,
+                IrExpr.match(IrExpr.var("x"), List.of(
+                        IrExpr.matchBranch(zero, IrExpr.lit(100)),
+                        IrExpr.matchBranch(positive,
+                                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.lit(2))))));
+        IrExpr app = IrExpr.apply(lambda, List.of(IrExpr.lit(5)));
+        assertEquals(10L, runTruffle(new IrModule("lamMatch", List.of(), app)));
+    }
+}
