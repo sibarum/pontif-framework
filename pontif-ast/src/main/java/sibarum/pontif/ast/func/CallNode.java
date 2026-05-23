@@ -2,7 +2,9 @@ package sibarum.pontif.ast.func;
 
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.frame.VirtualFrame;
+import sibarum.pontif.ast.lambda.LambdaValue;
 import sibarum.pontif.core.PontifNode;
+import sibarum.pontif.core.Resolver;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
@@ -14,6 +16,24 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * A call by name. Two execution paths, picked at runtime by lexical scope:
+ *
+ * <ol>
+ *   <li>If {@code functionName} is bound in the enclosing scope (a let-binding
+ *       or parameter holding a closure), the local binding wins. The bound value
+ *       must be a {@link LambdaValue}; we invoke it directly. This is the
+ *       "value-level call" path — same as if the user had written
+ *       {@code (apply f args)}.</li>
+ *   <li>Otherwise, dispatch through the {@link DispatchTable}, picking the
+ *       overload whose refinement closes under the argument values. This is
+ *       the "named-function call" path.</li>
+ * </ol>
+ *
+ * The split is decided once at {@link #resolve(Resolver) resolve} time, based on
+ * whether the {@code Resolver} contains the name. After resolution, the branch
+ * is a single slot-check at execute time.
+ */
 public final class CallNode extends PontifNode {
 
     private final String functionName;
@@ -21,6 +41,9 @@ public final class CallNode extends PontifNode {
     private final DispatchTable dispatch;
     private final Simplifier simplifier;
     private final FunctionRegistry registry;
+
+    /** Frame slot of a locally-bound closure with this name, or -1 if none. */
+    private int closureSlot = -1;
 
     private CallNode(
             String functionName,
@@ -45,7 +68,48 @@ public final class CallNode extends PontifNode {
     }
 
     @Override
+    public void resolve(Resolver resolver) {
+        if (resolver.contains(functionName)) {
+            closureSlot = resolver.lookup(functionName);
+        }
+        for (PontifNode child : children()) {
+            child.resolve(resolver);
+        }
+    }
+
+    @Override
     public Object execute(VirtualFrame frame) {
+        // Local binding wins over the dispatch table — lexical scope.
+        if (closureSlot >= 0) {
+            return executeAsClosure(frame);
+        }
+        return executeAsDispatch(frame);
+    }
+
+    private Object executeAsClosure(VirtualFrame frame) {
+        Object fnValue = frame.getObject(closureSlot);
+        if (!(fnValue instanceof LambdaValue lambda)) {
+            throw new RuntimeCheckException(
+                    "'" + functionName + "' is bound locally but is not a closure; "
+                            + "got " + (fnValue == null ? "null" : fnValue.getClass().getSimpleName())
+                            + ": " + fnValue,
+                    origin());
+        }
+        Object[] args = new Object[argNodes.length];
+        for (int i = 0; i < argNodes.length; i++) {
+            args[i] = argNodes[i].execute(frame);
+        }
+        try {
+            return lambda.invoke(args);
+        } catch (RuntimeCheckException rce) {
+            if (rce.origin().isPresent()) {
+                throw rce;
+            }
+            throw new RuntimeCheckException(rce.getMessage(), origin(), rce);
+        }
+    }
+
+    private Object executeAsDispatch(VirtualFrame frame) {
         Object[] args = new Object[argNodes.length];
         List<SymExpr> argSymbolics = new ArrayList<>();
         for (int i = 0; i < argNodes.length; i++) {
@@ -91,6 +155,13 @@ public final class CallNode extends PontifNode {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof Boolean b) return SymExpr.bool(b);
+        if (value instanceof sibarum.pontif.ast.record.RecordValue r) {
+            java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
+            for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
+                members.put(e.getKey(), toSymExpr(e.getValue()));
+            }
+            return SymExpr.record(members);
+        }
         throw new IllegalArgumentException(
                 "Cannot convert runtime value to SymExpr (type "
                         + (value == null ? "null" : value.getClass().getSimpleName()) + "): " + value);

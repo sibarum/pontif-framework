@@ -9,9 +9,9 @@ import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.symbolic.categorical.Functor;
 import sibarum.pontif.core.symbolic.categorical.FunctorLaws;
 import sibarum.pontif.core.symbolic.categorical.Functors;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.LambdaRules;
-import sibarum.pontif.demo.symbolic.TotalExpressionRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.LambdaRules;
+import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,21 +35,21 @@ class FunctorTest {
     // --- alpha equivalence ---
 
     @Test
-    void alphaEquivalence_sameBoundNameMatches() {
+    void alphaEquivalence_sameBoundNameMatches() throws Exception {
         assertTrue(AlphaEquivalence.equivalent(
                 SymExpr.lam("x", SymExpr.var("x")),
                 SymExpr.lam("x", SymExpr.var("x"))));
     }
 
     @Test
-    void alphaEquivalence_differentBoundNamesMatch() {
+    void alphaEquivalence_differentBoundNamesMatch() throws Exception {
         assertTrue(AlphaEquivalence.equivalent(
                 SymExpr.lam("x", SymExpr.var("x")),
                 SymExpr.lam("y", SymExpr.var("y"))));
     }
 
     @Test
-    void alphaEquivalence_freeVariablesMustMatchByName() {
+    void alphaEquivalence_freeVariablesMustMatchByName() throws Exception {
         assertFalse(AlphaEquivalence.equivalent(
                 SymExpr.var("a"),
                 SymExpr.var("b")));
@@ -59,7 +59,7 @@ class FunctorTest {
     }
 
     @Test
-    void alphaEquivalence_freeVarInsideLam_keepsFreeStatus() {
+    void alphaEquivalence_freeVarInsideLam_keepsFreeStatus() throws Exception {
         // λx.y vs λz.y — both have free y, alpha-equivalent
         assertTrue(AlphaEquivalence.equivalent(
                 SymExpr.lam("x", SymExpr.var("y")),
@@ -71,7 +71,7 @@ class FunctorTest {
     }
 
     @Test
-    void alphaEquivalence_innerShadowing() {
+    void alphaEquivalence_innerShadowing() throws Exception {
         // λx.λx.x vs λa.λb.b — both bind innermost, alpha-equivalent
         SymExpr a = SymExpr.lam("x", SymExpr.lam("x", SymExpr.var("x")));
         SymExpr b = SymExpr.lam("a", SymExpr.lam("b", SymExpr.var("b")));
@@ -79,7 +79,7 @@ class FunctorTest {
     }
 
     @Test
-    void alphaEquivalence_distinguishesBindingDepth() {
+    void alphaEquivalence_distinguishesBindingDepth() throws Exception {
         // λx.λy.x  (refers to OUTER)  vs  λx.λy.y  (refers to INNER) — NOT alpha-equivalent
         SymExpr outerRef = SymExpr.lam("x", SymExpr.lam("y", SymExpr.var("x")));
         SymExpr innerRef = SymExpr.lam("x", SymExpr.lam("y", SymExpr.var("y")));
@@ -89,14 +89,14 @@ class FunctorTest {
     // --- identity functor ---
 
     @Test
-    void identityFunctor_appliedToObject_returnsObject() {
+    void identityFunctor_appliedToObject_returnsObject() throws Exception {
         Functor id = Functors.identity();
         SymExpr result = id.applyToObject(SymExpr.lit(42), SIMPLIFIER);
         assertEquals(SymExpr.lit(42), result);
     }
 
     @Test
-    void identityFunctor_appliedToMorphism_returnsMorphism() {
+    void identityFunctor_appliedToMorphism_returnsMorphism() throws Exception {
         Functor id = Functors.identity();
         SymExpr square = SymExpr.lam("y", SymExpr.mul(SymExpr.var("y"), SymExpr.var("y")));
         SymExpr mapped = id.applyToMorphism(square, SIMPLIFIER);
@@ -105,13 +105,13 @@ class FunctorTest {
     }
 
     @Test
-    void identityFunctor_satisfiesIdentityLaw() {
+    void identityFunctor_satisfiesIdentityLaw() throws Exception {
         ProofResult result = FunctorLaws.proveIdentityPreserved(Functors.identity(), SIMPLIFIER);
         assertTrue(result.isPassed(), "Identity functor should preserve identity; " + result);
     }
 
     @Test
-    void identityFunctor_satisfiesCompositionLaw() {
+    void identityFunctor_satisfiesCompositionLaw() throws Exception {
         ProofResult result = FunctorLaws.proveCompositionPreserved(Functors.identity(), SIMPLIFIER);
         assertTrue(result.isPassed(), "Identity functor should preserve composition; " + result);
     }
@@ -119,14 +119,14 @@ class FunctorTest {
     // --- constant functor ---
 
     @Test
-    void constantFunctor_appliedToObject_returnsFixedObject() {
+    void constantFunctor_appliedToObject_returnsFixedObject() throws Exception {
         Functor const42 = Functors.constant("Const42", SymExpr.lit(42));
         assertEquals(SymExpr.lit(42), const42.applyToObject(SymExpr.lit(99), SIMPLIFIER));
         assertEquals(SymExpr.lit(42), const42.applyToObject(SymExpr.var("anything"), SIMPLIFIER));
     }
 
     @Test
-    void constantFunctor_appliedToMorphism_returnsIdentityOnFixed() {
+    void constantFunctor_appliedToMorphism_returnsIdentityOnFixed() throws Exception {
         Functor const42 = Functors.constant("Const42", SymExpr.lit(42));
         SymExpr square = SymExpr.lam("y", SymExpr.mul(SymExpr.var("y"), SymExpr.var("y")));
         SymExpr mapped = const42.applyToMorphism(square, SIMPLIFIER);
@@ -135,14 +135,14 @@ class FunctorTest {
     }
 
     @Test
-    void constantFunctor_satisfiesIdentityLaw() {
+    void constantFunctor_satisfiesIdentityLaw() throws Exception {
         Functor const42 = Functors.constant("Const42", SymExpr.lit(42));
         ProofResult result = FunctorLaws.proveIdentityPreserved(const42, SIMPLIFIER);
         assertTrue(result.isPassed(), "Constant functor should preserve identity; " + result);
     }
 
     @Test
-    void constantFunctor_satisfiesCompositionLaw() {
+    void constantFunctor_satisfiesCompositionLaw() throws Exception {
         Functor const42 = Functors.constant("Const42", SymExpr.lit(42));
         ProofResult result = FunctorLaws.proveCompositionPreserved(const42, SIMPLIFIER);
         assertTrue(result.isPassed(), "Constant functor should preserve composition; " + result);
@@ -151,13 +151,13 @@ class FunctorTest {
     // --- composition of functors ---
 
     @Test
-    void identityCompIdentity_actsAsIdentity_onObject() {
+    void identityCompIdentity_actsAsIdentity_onObject() throws Exception {
         Functor composed = Functors.compose(Functors.identity(), Functors.identity());
         assertEquals(SymExpr.lit(7), composed.applyToObject(SymExpr.lit(7), SIMPLIFIER));
     }
 
     @Test
-    void identityCompIdentity_actsAsIdentity_onMorphism() {
+    void identityCompIdentity_actsAsIdentity_onMorphism() throws Exception {
         Functor composed = Functors.compose(Functors.identity(), Functors.identity());
         SymExpr morph = SymExpr.lam("x", SymExpr.add(SymExpr.var("x"), SymExpr.lit(1)));
         SymExpr mapped = composed.applyToMorphism(morph, SIMPLIFIER);
@@ -165,14 +165,14 @@ class FunctorTest {
     }
 
     @Test
-    void identityCompIdentity_satisfiesBothLaws() {
+    void identityCompIdentity_satisfiesBothLaws() throws Exception {
         Functor composed = Functors.compose(Functors.identity(), Functors.identity());
         assertTrue(FunctorLaws.proveIdentityPreserved(composed, SIMPLIFIER).isPassed());
         assertTrue(FunctorLaws.proveCompositionPreserved(composed, SIMPLIFIER).isPassed());
     }
 
     @Test
-    void constantCompIdentity_actsAsConstant() {
+    void constantCompIdentity_actsAsConstant() throws Exception {
         Functor const5 = Functors.constant("Const5", SymExpr.lit(5));
         Functor composed = Functors.compose(const5, Functors.identity());
         assertEquals(SymExpr.lit(5), composed.applyToObject(SymExpr.lit(99), SIMPLIFIER));
@@ -181,7 +181,7 @@ class FunctorTest {
     }
 
     @Test
-    void identityCompConstant_actsAsConstant() {
+    void identityCompConstant_actsAsConstant() throws Exception {
         Functor const5 = Functors.constant("Const5", SymExpr.lit(5));
         Functor composed = Functors.compose(Functors.identity(), const5);
         assertEquals(SymExpr.lit(5), composed.applyToObject(SymExpr.lit(99), SIMPLIFIER));
@@ -192,7 +192,7 @@ class FunctorTest {
     // --- non-functor (a deliberate counterexample to confirm laws actually check something) ---
 
     @Test
-    void badPretendFunctor_failsCompositionLaw() {
+    void badPretendFunctor_failsCompositionLaw() throws Exception {
         // A pair of lambdas that is NOT a valid functor: morphismMap throws away the morphism
         // and returns the doubling-of-x function.  This breaks F(g∘f) = F(g)∘F(f) because
         // F(anything) is a fixed lambda that ignores its input.
@@ -211,7 +211,7 @@ class FunctorTest {
     }
 
     @Test
-    void identityFunctor_hasMatchingSourceTarget_isEndofunctor() {
+    void identityFunctor_hasMatchingSourceTarget_isEndofunctor() throws Exception {
         Functor id = Functors.identity();
         assertTrue(id.isEndofunctor());
     }

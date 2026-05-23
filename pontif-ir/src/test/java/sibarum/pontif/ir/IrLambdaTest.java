@@ -41,11 +41,11 @@ class IrLambdaTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object run(IrModule module) {
+    private static Object run(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -58,7 +58,7 @@ class IrLambdaTest {
     // --- Basic Lambda and Apply ---
 
     @Test
-    void lambdaEvaluatesToClosure() {
+    void lambdaEvaluatesToClosure() throws Exception {
         // \x -> x + 1   (just constructed, never applied)
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -71,7 +71,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void applyInvokesLambdaWithArgument() {
+    void applyInvokesLambdaWithArgument() throws Exception {
         // (\x -> x + 1)(5) = 6
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -85,7 +85,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void multiArgLambda_invokedWithMultipleArgs() {
+    void multiArgLambda_invokedWithMultipleArgs() throws Exception {
         // (\(x, y) -> x * y)(3, 4) = 12
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT), new IrParam("y", INT)),
@@ -101,7 +101,7 @@ class IrLambdaTest {
     // --- Closures over lexical scope ---
 
     @Test
-    void closureCapturesEnclosingLetBinding() {
+    void closureCapturesEnclosingLetBinding() throws Exception {
         // let n = 10 in
         //   let f = \x -> x + n in
         //     Apply(f, [5])
@@ -122,7 +122,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void closureDoesNotSeeBindingsAddedAfterItsCreation() {
+    void closureDoesNotSeeBindingsAddedAfterItsCreation() throws Exception {
         // let f = \x -> x   in
         //   let n = 100 in
         //     Apply(f, [5])
@@ -146,7 +146,7 @@ class IrLambdaTest {
     // --- Higher-order ---
 
     @Test
-    void higherOrder_lambdaAsArgumentToAnotherLambda() {
+    void higherOrder_lambdaAsArgumentToAnotherLambda() throws Exception {
         // let doubler = \x -> x * 2 in
         //   let applyTo5 = \f -> Apply(f, [5]) in
         //     Apply(applyTo5, [doubler])
@@ -172,7 +172,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void currying_lambdaReturningLambda() {
+    void currying_lambdaReturningLambda() throws Exception {
         // let addN = \n -> \x -> x + n in
         //   let add5 = Apply(addN, [5]) in
         //     Apply(add5, [3])
@@ -198,7 +198,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void closureSurvivesEnclosingScopeExit() {
+    void closureSurvivesEnclosingScopeExit() throws Exception {
         // Curried closures: the inner closure captures `n` from outer let.
         // After the outer Apply, the inner closure still holds the captured n.
         // let make = \n -> \x -> n + x in
@@ -228,7 +228,7 @@ class IrLambdaTest {
     // --- Apply errors ---
 
     @Test
-    void applyWithWrongArity_throws() {
+    void applyWithWrongArity_throws() throws Exception {
         // (\x -> x)(1, 2) — arity mismatch
         IrExpr identity = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -247,7 +247,7 @@ class IrLambdaTest {
     }
 
     @Test
-    void applyOnNonClosure_throws() {
+    void applyOnNonClosure_throws() throws Exception {
         // Apply(5, [1]) — 5 is not a function
         IrExpr app = IrExpr.apply(IrExpr.lit(5), List.of(IrExpr.lit(1)));
         IrModule module = new IrModule("notFn", List.of(), app);
@@ -258,7 +258,7 @@ class IrLambdaTest {
     // --- Interactions with named functions and dispatch ---
 
     @Test
-    void namedFunctionCanInternallyUseLambda() {
+    void namedFunctionCanInternallyUseLambda() throws Exception {
         // fn process(x: Int) -> Int = Apply(\y -> y * 3, [x])
         IrStmt.FunctionDecl processFn = IrStmt.functionDecl(
                 "process",
@@ -281,7 +281,7 @@ class IrLambdaTest {
     // --- Self-application is allowed (lexical scope captures bindings) ---
 
     @Test
-    void lambdaCanReferenceItsOwnBinding_butOnlyIfBoundFirst() {
+    void lambdaCanReferenceItsOwnBinding_butOnlyIfBoundFirst() throws Exception {
         // let rec wouldn't work without explicit fixpoint;
         // here we just demonstrate that the captured environment of a let-bound lambda
         // doesn't include itself (would need a separate "letrec" construct).

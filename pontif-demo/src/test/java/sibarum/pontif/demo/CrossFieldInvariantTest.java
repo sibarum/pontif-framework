@@ -9,11 +9,11 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.HypothesisRules;
-import sibarum.pontif.demo.symbolic.LambdaRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
-import sibarum.pontif.demo.symbolic.StructuralRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.LambdaRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.StructuralRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +47,7 @@ class CrossFieldInvariantTest {
     // --- Direct test of proof engine (manual context) ---
 
     @Test
-    void methodBody_withoutSiblingInvariants_residuals() {
+    void methodBody_withoutSiblingInvariants_residuals() throws Exception {
         SymExpr record = SymExpr.record(Map.of(
                 "x", SymExpr.var("a"),
                 "y", SymExpr.var("b")));
@@ -63,7 +63,7 @@ class CrossFieldInvariantTest {
     }
 
     @Test
-    void methodBody_withSiblingInvariants_passes() {
+    void methodBody_withSiblingInvariants_passes() throws Exception {
         SymExpr record = SymExpr.record(Map.of(
                 "x", SymExpr.var("a"),
                 "y", SymExpr.var("b")));
@@ -84,7 +84,7 @@ class CrossFieldInvariantTest {
     // --- Automatic propagation by satisfiesStructural ---
 
     @Test
-    void satisfiesStructural_propagatesSiblingInvariants_methodVerifies() {
+    void satisfiesStructural_propagatesSiblingInvariants_methodVerifies() throws Exception {
         // Counter type with refined data and a method that uses it.
         // Even though x, y are symbolic, the method should verify under their invariants.
         Sort sumType = Sort.structural("Sum", Map.of(
@@ -109,7 +109,7 @@ class CrossFieldInvariantTest {
     }
 
     @Test
-    void satisfiesStructural_concreteData_methodUsingFieldsPasses() {
+    void satisfiesStructural_concreteData_methodUsingFieldsPasses() throws Exception {
         // Concrete data: count = 5. Method: next = count + 1.
         // Without cross-field reasoning the body would still simplify to a constant (FIELD_ACCESS folds
         // count to 5), so this test mainly confirms cross-field propagation doesn't break the concrete case.
@@ -129,7 +129,7 @@ class CrossFieldInvariantTest {
     // --- Self-exclusion: a member's own invariant doesn't validate itself ---
 
     @Test
-    void memberOwnInvariantExcluded_symbolicDataResidualsHonestly() {
+    void memberOwnInvariantExcluded_symbolicDataResidualsHonestly() throws Exception {
         // Single refined data member with symbolic value — no other members to provide
         // invariants. Result: residual, not passed (self-invariant excluded so we can't
         // circularly assume what we're trying to prove).
@@ -147,7 +147,7 @@ class CrossFieldInvariantTest {
     // --- A non-method member can also benefit from sibling invariants ---
 
     @Test
-    void dataMember_derivedFromSibling_verifiesUnderSiblingInvariant() {
+    void dataMember_derivedFromSibling_verifiesUnderSiblingInvariant() throws Exception {
         // A "derived" data member that's actually a computation referencing a sibling.
         // Verifying the derived member uses the sibling's invariant.
         Sort sort = Sort.structural("Derived", Map.of(
@@ -169,7 +169,7 @@ class CrossFieldInvariantTest {
     // --- Headline: full counter with concrete count and verifying method ---
 
     @Test
-    void headline_counterWithCrossFieldReasoning() {
+    void headline_counterWithCrossFieldReasoning() throws Exception {
         // Counter:
         //   count : Int[@>=0]      (concrete value 0)
         //   isEmpty : (Unit) -> Int[@>=0] = self.count   — trivial, but uses self
@@ -201,7 +201,7 @@ class CrossFieldInvariantTest {
     }
 
     @Test
-    void symbolicValuedRecord_crossFieldReasoning_keepsMethodVerified() {
+    void symbolicValuedRecord_crossFieldReasoning_keepsMethodVerified() throws Exception {
         // Same Counter type, but count is var("c") symbolic.
         // With slice C propagation, the next method body verifies under count's @>=0 invariant.
         // (The count member itself residuals, but that's a separate concern.)
@@ -228,7 +228,7 @@ class CrossFieldInvariantTest {
     }
 
     @Test
-    void siblingInvariantPropagation_handlesNestedFieldAccess() {
+    void siblingInvariantPropagation_handlesNestedFieldAccess() throws Exception {
         // Simpler version: a record with a positive field and a method that returns "the
         // positive field plus 5" — verified to be >= 5.
         Sort sort = Sort.structural("S", Map.of(

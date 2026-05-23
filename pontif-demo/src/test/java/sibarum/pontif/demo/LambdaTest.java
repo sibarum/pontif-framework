@@ -5,9 +5,9 @@ import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.LambdaRules;
-import sibarum.pontif.demo.symbolic.TotalExpressionRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.LambdaRules;
+import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,7 +32,7 @@ class LambdaTest {
     }
 
     @Test
-    void identityFunction() {
+    void identityFunction() throws Exception {
         // (λx.x)(5) = 5
         SymExpr expr = SymExpr.app(
                 SymExpr.lam("x", SymExpr.var("x")),
@@ -41,7 +41,7 @@ class LambdaTest {
     }
 
     @Test
-    void constantFunction() {
+    void constantFunction() throws Exception {
         // (λx.7)(anything) = 7
         SymExpr expr = SymExpr.app(
                 SymExpr.lam("x", SymExpr.lit(7)),
@@ -50,7 +50,7 @@ class LambdaTest {
     }
 
     @Test
-    void squaringFunction_concrete() {
+    void squaringFunction_concrete() throws Exception {
         // (λx. x · x)(3) = 9 — needs CONSTANT_FOLD_MUL from ArithmeticRules
         SymExpr expr = SymExpr.app(
                 SymExpr.lam("x", SymExpr.mul(SymExpr.var("x"), SymExpr.var("x"))),
@@ -59,7 +59,7 @@ class LambdaTest {
     }
 
     @Test
-    void squaringTheImaginaryUnit_composesAllRules() {
+    void squaringTheImaginaryUnit_composesAllRules() throws Exception {
         // (λx. x · x)(i) = -1 — composes lambda calc with Total Expression rules
         SymExpr i = SymExpr.pow(SymExpr.lit(-1), SymExpr.frac(1, 2));
         SymExpr expr = SymExpr.app(
@@ -69,7 +69,7 @@ class LambdaTest {
     }
 
     @Test
-    void compositionOfTwoFunctions() {
+    void compositionOfTwoFunctions() throws Exception {
         // compose = λg. λf. λx. g(f(x))
         SymExpr compose = SymExpr.lam("g",
                 SymExpr.lam("f",
@@ -89,7 +89,7 @@ class LambdaTest {
     }
 
     @Test
-    void higherOrderApplyTwice() {
+    void higherOrderApplyTwice() throws Exception {
         // applyTwice = λf. λx. f(f(x))
         SymExpr applyTwice = SymExpr.lam("f",
                 SymExpr.lam("x",
@@ -103,7 +103,7 @@ class LambdaTest {
     }
 
     @Test
-    void captureAvoidance_innerLambdaIsRenamed() {
+    void captureAvoidance_innerLambdaIsRenamed() throws Exception {
         // (λx. λy. x)(y) — applying to free var "y" must NOT capture
         // After beta: should be λy_fresh. y  (the inner y is renamed, body's x is replaced with outer y)
         SymExpr expr = SymExpr.app(
@@ -119,7 +119,7 @@ class LambdaTest {
     }
 
     @Test
-    void shadowing_outerVarDoesNotLeakInto_innerScope() {
+    void shadowing_outerVarDoesNotLeakInto_innerScope() throws Exception {
         // (λx. λx. x)(5) — beta-reduces by removing the outer x
         // The inner x shadows; the substitution of outer x → 5 has no effect on the inner λx.x
         SymExpr expr = SymExpr.app(
@@ -133,7 +133,7 @@ class LambdaTest {
     }
 
     @Test
-    void untypedLambda_paramTypeIsNull() {
+    void untypedLambda_paramTypeIsNull() throws Exception {
         SymExpr untyped = SymExpr.lam("x", SymExpr.var("x"));
         SymExpr.Lam asLam = assertInstanceOf(SymExpr.Lam.class, untyped);
         assertNull(asLam.paramType());
@@ -142,7 +142,7 @@ class LambdaTest {
     }
 
     @Test
-    void typedLambda_paramTypeIsRecorded() {
+    void typedLambda_paramTypeIsRecorded() throws Exception {
         Sort nat = Sort.of("Nat");
         SymExpr typed = SymExpr.lam("x", nat, SymExpr.var("x"));
         SymExpr.Lam asLam = assertInstanceOf(SymExpr.Lam.class, typed);
@@ -153,7 +153,7 @@ class LambdaTest {
     }
 
     @Test
-    void lambdaAsValue_passedToHigherOrder() {
+    void lambdaAsValue_passedToHigherOrder() throws Exception {
         // Pass a typed lambda as an argument and let it survive a beta-reduction unchanged
         Sort nat = Sort.of("Nat");
         SymExpr typedSquare = SymExpr.lam("y", nat,
@@ -166,7 +166,7 @@ class LambdaTest {
     }
 
     @Test
-    void unappliedLambda_isFixedPointOfSimplification() {
+    void unappliedLambda_isFixedPointOfSimplification() throws Exception {
         // An unapplied lambda doesn't reduce — it's a value
         SymExpr value = SymExpr.lam("x", SymExpr.var("x"));
         assertEquals(value, LAMBDA.simplify(value));

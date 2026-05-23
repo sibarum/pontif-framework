@@ -11,9 +11,9 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.HypothesisRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,39 +38,39 @@ class SignAnalysisTest {
     // --- Lattice arithmetic ---
 
     @Test
-    void positivePlusPositiveIsPositive() {
+    void positivePlusPositiveIsPositive() throws Exception {
         assertEquals(Sign.POSITIVE, Sign.POSITIVE.add(Sign.POSITIVE));
     }
 
     @Test
-    void nonNegativePlusNonNegativeIsNonNegative() {
+    void nonNegativePlusNonNegativeIsNonNegative() throws Exception {
         assertEquals(Sign.NON_NEGATIVE, Sign.NON_NEGATIVE.add(Sign.NON_NEGATIVE));
     }
 
     @Test
-    void positivePlusNegativeIsTop() {
+    void positivePlusNegativeIsTop() throws Exception {
         assertEquals(Sign.TOP, Sign.POSITIVE.add(Sign.NEGATIVE));
     }
 
     @Test
-    void positiveTimesPositiveIsPositive() {
+    void positiveTimesPositiveIsPositive() throws Exception {
         assertEquals(Sign.POSITIVE, Sign.POSITIVE.multiply(Sign.POSITIVE));
     }
 
     @Test
-    void negativeTimesNegativeIsPositive() {
+    void negativeTimesNegativeIsPositive() throws Exception {
         assertEquals(Sign.POSITIVE, Sign.NEGATIVE.multiply(Sign.NEGATIVE));
     }
 
     @Test
-    void zeroTimesAnythingIsZero() {
+    void zeroTimesAnythingIsZero() throws Exception {
         assertEquals(Sign.ZERO, Sign.ZERO.multiply(Sign.POSITIVE));
         assertEquals(Sign.ZERO, Sign.ZERO.multiply(Sign.TOP));
         assertEquals(Sign.ZERO, Sign.TOP.multiply(Sign.ZERO));
     }
 
     @Test
-    void contradictoryHypothesesGiveBottom() {
+    void contradictoryHypothesesGiveBottom() throws Exception {
         // x > 0 ∧ x = 0 → BOTTOM
         Sign s = Sign.POSITIVE.meet(Sign.ZERO);
         assertEquals(Sign.BOTTOM, s);
@@ -79,7 +79,7 @@ class SignAnalysisTest {
     // --- computeSign over compound expressions ---
 
     @Test
-    void sumOfPositiveVars_isPositive() {
+    void sumOfPositiveVars_isPositive() throws Exception {
         SymExpr expr = SymExpr.add(SymExpr.var("x"), SymExpr.var("y"));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GT, SymExpr.lit(0)),
@@ -88,7 +88,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void productOfPositiveVars_isPositive() {
+    void productOfPositiveVars_isPositive() throws Exception {
         SymExpr expr = SymExpr.mul(SymExpr.var("x"), SymExpr.var("y"));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GT, SymExpr.lit(0)),
@@ -97,7 +97,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void productOfTwoNegatives_isPositive() {
+    void productOfTwoNegatives_isPositive() throws Exception {
         SymExpr expr = SymExpr.mul(SymExpr.var("x"), SymExpr.var("y"));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.LT, SymExpr.lit(0)),
@@ -106,7 +106,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void squareOfAnyVar_isNonNegative() {
+    void squareOfAnyVar_isNonNegative() throws Exception {
         // x * x for unknown x → NON_NEGATIVE (squares are always >= 0)
         SymExpr expr = SymExpr.mul(SymExpr.var("x"), SymExpr.var("x"));
         // No hypotheses about x
@@ -115,7 +115,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void squareOfNonNegativeVar_isNonNegative() {
+    void squareOfNonNegativeVar_isNonNegative() throws Exception {
         SymExpr expr = SymExpr.mul(SymExpr.var("x"), SymExpr.var("x"));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GE, SymExpr.lit(0)));
@@ -123,14 +123,14 @@ class SignAnalysisTest {
     }
 
     @Test
-    void powEvenExponentOfUnknown_isNonNegative() {
+    void powEvenExponentOfUnknown_isNonNegative() throws Exception {
         // x^2 → NON_NEGATIVE regardless of x's sign
         SymExpr expr = SymExpr.pow(SymExpr.var("x"), SymExpr.lit(2));
         assertEquals(Sign.NON_NEGATIVE, SignAnalysis.computeSign(expr, List.of()));
     }
 
     @Test
-    void powEvenExponentOfPositive_isPositive() {
+    void powEvenExponentOfPositive_isPositive() throws Exception {
         SymExpr expr = SymExpr.pow(SymExpr.var("x"), SymExpr.lit(2));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GT, SymExpr.lit(0)));
@@ -138,7 +138,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void powOddExponentOfNegative_isNegative() {
+    void powOddExponentOfNegative_isNegative() throws Exception {
         SymExpr expr = SymExpr.pow(SymExpr.var("x"), SymExpr.lit(3));
         List<SymExpr> hyps = List.of(
                 SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.LT, SymExpr.lit(0)));
@@ -148,7 +148,7 @@ class SignAnalysisTest {
     // --- Sign-based discharge in the Simplifier ---
 
     @Test
-    void simplifier_dischargesCompoundCmpFromSignHypothesis() {
+    void simplifier_dischargesCompoundCmpFromSignHypothesis() throws Exception {
         // Hypothesis: x > 0, y > 0
         // Goal: x + y > 0  — compound subject
         SymExpr goal = SymExpr.cmp(
@@ -162,7 +162,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void simplifier_squareIsNonNegativeWithoutHypotheses() {
+    void simplifier_squareIsNonNegativeWithoutHypotheses() throws Exception {
         // x * x >= 0  is true for ANY x — sign analysis derives NON_NEGATIVE for x*x
         SymExpr goal = SymExpr.cmp(
                 SymExpr.mul(SymExpr.var("x"), SymExpr.var("x")),
@@ -172,7 +172,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void simplifier_squareIsPositiveWhenBaseIsPositive() {
+    void simplifier_squareIsPositiveWhenBaseIsPositive() throws Exception {
         SymExpr goal = SymExpr.cmp(
                 SymExpr.mul(SymExpr.var("x"), SymExpr.var("x")),
                 SymExpr.CmpOp.GT,
@@ -183,7 +183,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void simplifier_doesNotProveStrictPositivityFromNonNegative() {
+    void simplifier_doesNotProveStrictPositivityFromNonNegative() throws Exception {
         // x >= 0 ⊬ x*x > 0  (x could be 0)
         SymExpr goal = SymExpr.cmp(
                 SymExpr.mul(SymExpr.var("x"), SymExpr.var("x")),
@@ -199,7 +199,7 @@ class SignAnalysisTest {
     // --- The headline: square() now verifies under rung 2.5 ---
 
     @Test
-    void squareFunction_definitionVerifiesUnderRung25() {
+    void squareFunction_definitionVerifiesUnderRung25() throws Exception {
         // square(x: Int[@>=0]) : Int[@>=0] = x * x
         // Under rung 2.5, the precondition x>=0 derives sign(x)=NON_NEGATIVE,
         // so sign(x*x) = NON_NEGATIVE which satisfies @>=0.
@@ -217,7 +217,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void squareFunction_strictPositiveReturnSort_stillResidual() {
+    void squareFunction_strictPositiveReturnSort_stillResidual() throws Exception {
         // square(x: Int[@>=0]) : Int[@>0] = x * x
         // x*x > 0 doesn't follow from x>=0 (x could be 0), so honest residual
         Sort nonNegative = Sort.refined("Int",
@@ -236,7 +236,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void squareFunction_strictPositiveBothEnds_passesUnderRung25() {
+    void squareFunction_strictPositiveBothEnds_passesUnderRung25() throws Exception {
         // square(x: Int[@>0]) : Int[@>0] = x * x
         // x > 0 → sign(x) = POSITIVE → sign(x*x) = POSITIVE → satisfies @>0
         Sort positive = Sort.refined("Int",
@@ -253,7 +253,7 @@ class SignAnalysisTest {
     }
 
     @Test
-    void sumOfSquaresIsNonNegative_verifiesForAnyInputs() {
+    void sumOfSquaresIsNonNegative_verifiesForAnyInputs() throws Exception {
         // f(x: Int, y: Int) : Int[@>=0] = x*x + y*y
         // No precondition needed — sign analysis derives x*x >= 0 and y*y >= 0
         // unconditionally; their sum is >= 0.

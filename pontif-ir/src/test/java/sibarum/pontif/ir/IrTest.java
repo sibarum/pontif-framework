@@ -42,21 +42,21 @@ class IrTest {
         };
     }
 
-    private static Simplifier defaultSimplifier() {
+    private static Simplifier defaultSimplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
     // --- Trivial: literals and arithmetic ---
 
     @Test
-    void evaluatesLiteral() {
+    void evaluatesLiteral() throws Exception {
         IrModule module = new IrModule("trivial", List.of(), IrExpr.lit(42));
         CompiledModule compiled = new IrCompiler(defaultSimplifier()).compile(module);
         assertEquals(42L, new IrInterpreter(defaultSimplifier()).eval(compiled));
     }
 
     @Test
-    void evaluatesArithmetic() {
+    void evaluatesArithmetic() throws Exception {
         IrModule module = new IrModule("arith", List.of(),
                 IrExpr.binOp(IrExpr.Op.ADD, IrExpr.lit(2), IrExpr.lit(3)));
         CompiledModule compiled = new IrCompiler(defaultSimplifier()).compile(module);
@@ -64,7 +64,7 @@ class IrTest {
     }
 
     @Test
-    void evaluatesLetIn() {
+    void evaluatesLetIn() throws Exception {
         // let x = 7 in x * x
         IrExpr expr = IrExpr.letIn(
                 "x", IrSort.named("Int"), IrExpr.lit(7),
@@ -77,7 +77,7 @@ class IrTest {
     // --- Function declaration + call ---
 
     @Test
-    void unrefinedFunction_callableWithAnyArg() {
+    void unrefinedFunction_callableWithAnyArg() throws Exception {
         // fn double(x: Int) -> Int = x + x
         IrStmt.FunctionDecl doubleDecl = IrStmt.functionDecl(
                 "double",
@@ -96,7 +96,7 @@ class IrTest {
     // --- The headline: refinement-typed function ---
 
     @Test
-    void headline_powWithRefinementTypes_callableWithSatisfyingArgs() {
+    void headline_powWithRefinementTypes_callableWithSatisfyingArgs() throws Exception {
         // fn pow(b: Int[@>0], x: Int[@>=1]) -> Int[@>0] = b
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
@@ -120,7 +120,7 @@ class IrTest {
     }
 
     @Test
-    void powCalledWithViolatingArg_throwsAtCall() {
+    void powCalledWithViolatingArg_throwsAtCall() throws Exception {
         // pow(-3, 2): -3 violates @>0; should be caught by the dispatch/runtime check
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
@@ -145,7 +145,7 @@ class IrTest {
     }
 
     @Test
-    void powCalledWithViolatingSecondArg_throws() {
+    void powCalledWithViolatingSecondArg_throws() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort atLeastOne = IrSort.refined("Int",
@@ -171,7 +171,7 @@ class IrTest {
     // --- Multi-dispatch via the IR ---
 
     @Test
-    void twoOverloadsForSameName_specificOneWins() {
+    void twoOverloadsForSameName_specificOneWins() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort anyInt = IrSort.named("Int");
@@ -200,7 +200,7 @@ class IrTest {
     }
 
     @Test
-    void twoOverloadsForSameName_specificFails_falsthroughToGeneral() {
+    void twoOverloadsForSameName_specificFails_falsthroughToGeneral() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort anyInt = IrSort.named("Int");
@@ -229,7 +229,7 @@ class IrTest {
     // --- Composition: function calling function ---
 
     @Test
-    void nestedFunctionCalls() {
+    void nestedFunctionCalls() throws Exception {
         IrSort anyInt = IrSort.named("Int");
 
         // fn inc(n: Int) -> Int = n + 1
@@ -258,7 +258,7 @@ class IrTest {
     // --- LetIn + Call interaction ---
 
     @Test
-    void letInBindsAndCallSeesBinding() {
+    void letInBindsAndCallSeesBinding() throws Exception {
         IrSort anyInt = IrSort.named("Int");
 
         IrStmt.FunctionDecl addOne = IrStmt.functionDecl(

@@ -81,6 +81,13 @@ public final class MatchNode extends PontifNode {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof Boolean b) return SymExpr.bool(b);
+        if (value instanceof sibarum.pontif.ast.record.RecordValue r) {
+            java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
+            for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
+                members.put(e.getKey(), toSymExpr(e.getValue()));
+            }
+            return SymExpr.record(members);
+        }
         throw new IllegalArgumentException(
                 "Cannot convert runtime value to SymExpr (type "
                         + (value == null ? "null" : value.getClass().getSimpleName()) + "): " + value);

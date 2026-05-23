@@ -5,8 +5,8 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.Algebra;
 import sibarum.pontif.core.symbolic.algebra.BasisElement;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.TotalExpressionRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -8,7 +8,8 @@ import java.util.Map;
 public sealed interface SymExpr
         permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Bool, SymExpr.Self,
                 SymExpr.Add, SymExpr.Mul, SymExpr.Pow,
-                SymExpr.Cmp, SymExpr.Lam, SymExpr.App, SymExpr.Case,
+                SymExpr.Cmp, SymExpr.And, SymExpr.Or,
+                SymExpr.Lam, SymExpr.App, SymExpr.Case,
                 SymExpr.Record, SymExpr.FieldAccess {
 
     static Var var(String name) { return new Var(name); }
@@ -20,6 +21,8 @@ public sealed interface SymExpr
     static Mul mul(SymExpr left, SymExpr right) { return new Mul(left, right); }
     static Pow pow(SymExpr base, SymExpr exponent) { return new Pow(base, exponent); }
     static Cmp cmp(SymExpr left, CmpOp op, SymExpr right) { return new Cmp(left, op, right); }
+    static And and(SymExpr left, SymExpr right) { return new And(left, right); }
+    static Or or(SymExpr left, SymExpr right) { return new Or(left, right); }
     static Lam lam(String param, SymExpr body) { return new Lam(param, null, body); }
     static Lam lam(String param, Sort paramType, SymExpr body) { return new Lam(param, paramType, body); }
     static App app(SymExpr fn, SymExpr arg) { return new App(fn, arg); }
@@ -69,6 +72,9 @@ public sealed interface SymExpr
     record Pow(SymExpr base, SymExpr exponent) implements SymExpr {}
 
     record Cmp(SymExpr left, CmpOp op, SymExpr right) implements SymExpr {}
+
+    record And(SymExpr left, SymExpr right) implements SymExpr {}
+    record Or(SymExpr left, SymExpr right) implements SymExpr {}
 
     record Lam(String param, Sort paramType, SymExpr body) implements SymExpr {
         public Lam {

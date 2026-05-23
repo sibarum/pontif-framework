@@ -7,10 +7,10 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.HypothesisRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
-import sibarum.pontif.demo.symbolic.StructuralRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.StructuralRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +37,7 @@ class StructuralSortTest {
     // --- Construction ---
 
     @Test
-    void structuralSort_constructed() {
+    void structuralSort_constructed() throws Exception {
         Sort person = Sort.structural("Person", Map.of(
                 "name", Sort.of("String"),
                 "age", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(0)))));
@@ -47,7 +47,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void scalarAndStructural_areDifferentKinds() {
+    void scalarAndStructural_areDifferentKinds() throws Exception {
         Sort scalar = Sort.of("Int");
         Sort struct = Sort.structural("Empty", Map.of());
         assertFalse(scalar.isStructural());
@@ -57,7 +57,7 @@ class StructuralSortTest {
     // --- Records and field access ---
 
     @Test
-    void recordLiteral_constructs() {
+    void recordLiteral_constructs() throws Exception {
         SymExpr rec = SymExpr.record(Map.of(
                 "x", SymExpr.lit(5),
                 "y", SymExpr.lit(7)));
@@ -67,7 +67,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void fieldAccessOnRecord_simplifiesToMember() {
+    void fieldAccessOnRecord_simplifiesToMember() throws Exception {
         SymExpr rec = SymExpr.record(Map.of(
                 "x", SymExpr.lit(5),
                 "y", SymExpr.lit(7)));
@@ -76,14 +76,14 @@ class StructuralSortTest {
     }
 
     @Test
-    void fieldAccessOnSymbolicBase_staysSymbolic() {
+    void fieldAccessOnSymbolicBase_staysSymbolic() throws Exception {
         SymExpr access = SymExpr.fieldAccess(SymExpr.var("obj"), "field");
         SymExpr result = SIMPLIFIER.simplify(access);
         assertInstanceOf(SymExpr.FieldAccess.class, result);
     }
 
     @Test
-    void fieldAccessOnMissingField_staysSymbolic() {
+    void fieldAccessOnMissingField_staysSymbolic() throws Exception {
         // Asking for a field the record doesn't have — stays as FieldAccess
         // (residual, since runtime would error)
         SymExpr rec = SymExpr.record(Map.of("x", SymExpr.lit(5)));
@@ -95,7 +95,7 @@ class StructuralSortTest {
     // --- Satisfies ---
 
     @Test
-    void recordSatisfiesStructuralSort_exact() {
+    void recordSatisfiesStructuralSort_exact() throws Exception {
         Sort point = Sort.structural("Point", Map.of(
                 "x", Sort.of("Int"),
                 "y", Sort.of("Int")));
@@ -106,7 +106,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void recordWithExtraMembers_satisfiesStructuralSort_widthSubtyping() {
+    void recordWithExtraMembers_satisfiesStructuralSort_widthSubtyping() throws Exception {
         // Structural sorts are width-subtyped: extra members are fine.
         Sort point = Sort.structural("Point", Map.of(
                 "x", Sort.of("Int"),
@@ -119,7 +119,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void recordMissingRequiredMember_fails() {
+    void recordMissingRequiredMember_fails() throws Exception {
         Sort point = Sort.structural("Point", Map.of(
                 "x", Sort.of("Int"),
                 "y", Sort.of("Int")));
@@ -131,7 +131,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void recordWithRefinedMemberSatisfying_passes() {
+    void recordWithRefinedMemberSatisfying_passes() throws Exception {
         Sort positivePoint = Sort.structural("PositivePoint", Map.of(
                 "x", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0))),
                 "y", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)))));
@@ -142,7 +142,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void recordWithRefinedMemberViolating_fails() {
+    void recordWithRefinedMemberViolating_fails() throws Exception {
         Sort positivePoint = Sort.structural("PositivePoint", Map.of(
                 "x", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0))),
                 "y", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)))));
@@ -156,7 +156,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void recordWithSymbolicMember_yieldsResidual() {
+    void recordWithSymbolicMember_yieldsResidual() throws Exception {
         Sort point = Sort.structural("PositivePoint", Map.of(
                 "x", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)))));
         SymExpr p = SymExpr.record(Map.of("x", SymExpr.var("ux")));
@@ -165,14 +165,14 @@ class StructuralSortTest {
     }
 
     @Test
-    void nonRecordValue_failsStructuralSort() {
+    void nonRecordValue_failsStructuralSort() throws Exception {
         Sort point = Sort.structural("Point", Map.of("x", Sort.of("Int")));
         ProofResult r = Refinements.satisfies(SymExpr.lit(5), point, SIMPLIFIER);
         assertInstanceOf(ProofResult.Failed.class, r);
     }
 
     @Test
-    void symbolicValue_yieldsResidualOnStructuralSort() {
+    void symbolicValue_yieldsResidualOnStructuralSort() throws Exception {
         Sort point = Sort.structural("Point", Map.of("x", Sort.of("Int")));
         ProofResult r = Refinements.satisfies(SymExpr.var("obj"), point, SIMPLIFIER);
         assertInstanceOf(ProofResult.Residual.class, r);
@@ -181,7 +181,7 @@ class StructuralSortTest {
     // --- Implication (width subtyping) ---
 
     @Test
-    void biggerSortImpliesSmallerSort_widthSubtyping() {
+    void biggerSortImpliesSmallerSort_widthSubtyping() throws Exception {
         Sort big = Sort.structural("Person", Map.of(
                 "name", Sort.of("String"),
                 "age", Sort.of("Int"),
@@ -193,7 +193,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void smallerSortDoesNotImplyBiggerSort() {
+    void smallerSortDoesNotImplyBiggerSort() throws Exception {
         Sort big = Sort.structural("Person", Map.of(
                 "name", Sort.of("String"),
                 "age", Sort.of("Int")));
@@ -205,7 +205,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void memberRefinementImplication_widthAware() {
+    void memberRefinementImplication_widthAware() throws Exception {
         // {x: Int[@>5]} implies {x: Int[@>0]} (member sort tightens)
         Sort tight = Sort.structural("S", Map.of(
                 "x", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(5)))));
@@ -215,7 +215,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void structuralAndScalar_doNotImplyEachOther() {
+    void structuralAndScalar_doNotImplyEachOther() throws Exception {
         Sort struct = Sort.structural("S", Map.of("x", Sort.of("Int")));
         Sort scalar = Sort.of("Int");
         assertFalse(Refinements.imply(struct, scalar, SIMPLIFIER).isPassed());
@@ -225,7 +225,7 @@ class StructuralSortTest {
     // --- Nested structural sorts ---
 
     @Test
-    void nestedStructuralSort_satisfiedByNestedRecord() {
+    void nestedStructuralSort_satisfiedByNestedRecord() throws Exception {
         Sort innerSort = Sort.structural("Inner", Map.of(
                 "value", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)))));
         Sort outerSort = Sort.structural("Outer", Map.of(
@@ -238,7 +238,7 @@ class StructuralSortTest {
     }
 
     @Test
-    void nestedStructuralSort_violatedInnerMember_fails() {
+    void nestedStructuralSort_violatedInnerMember_fails() throws Exception {
         Sort innerSort = Sort.structural("Inner", Map.of(
                 "value", Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)))));
         Sort outerSort = Sort.structural("Outer", Map.of(
@@ -252,7 +252,7 @@ class StructuralSortTest {
     // --- The headline: the user's original keyPair sketch ---
 
     @Test
-    void keyPairSketch_fromOriginalUserExample() {
+    void keyPairSketch_fromOriginalUserExample() throws Exception {
         // keyPair : [@->public[String] & @->private[Array[byte][@->length=32]]]
         // We don't have Array yet; model it as a refined sort with a length-like field.
         Sort lengthIs32 = Sort.refined("Length", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(32)));

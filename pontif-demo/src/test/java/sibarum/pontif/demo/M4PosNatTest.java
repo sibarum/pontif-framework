@@ -16,12 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class M4PosNatTest {
 
     @Test
-    void posLitOfPositiveChecksAsPosNat() {
+    void posLitOfPositiveChecksAsPosNat() throws Exception {
         assertEquals(PosNat.SORT, PosNat.engine().check(PosLit.of(5)));
     }
 
     @Test
-    void posLitOfZeroViolatesRule() {
+    void posLitOfZeroViolatesRule() throws Exception {
         RuleViolation ex = assertThrows(
                 RuleViolation.class,
                 () -> PosNat.engine().check(PosLit.of(0)));
@@ -32,7 +32,7 @@ class M4PosNatTest {
     }
 
     @Test
-    void posLitOfNegativeViolatesRule() {
+    void posLitOfNegativeViolatesRule() throws Exception {
         RuleViolation ex = assertThrows(
                 RuleViolation.class,
                 () -> PosNat.engine().check(PosLit.of(-3)));
@@ -41,25 +41,25 @@ class M4PosNatTest {
     }
 
     @Test
-    void posLitEvaluatesLikeAnyOtherLiteral() {
+    void posLitEvaluatesLikeAnyOtherLiteral() throws Exception {
         assertEquals(7L, Pontif.evalLong(PosLit.of(7)));
     }
 
     @Test
-    void addOfPositivesChecksAsPosNat() {
+    void addOfPositivesChecksAsPosNat() throws Exception {
         var tree = Add.of(PosLit.of(2), PosLit.of(3));
         assertEquals(PosNat.SORT, PosNat.engineWithAdd().check(tree));
         assertEquals(5L, Pontif.evalLong(tree));
     }
 
     @Test
-    void addRejectsMixingPosNatAndIntLiteral() {
+    void addRejectsMixingPosNatAndIntLiteral() throws Exception {
         var tree = Add.of(PosLit.of(2), IntLiteral.of(3));
         assertThrows(RuleViolation.class, () -> PosNat.engineWithAdd().check(tree));
     }
 
     @Test
-    void engineWithoutPosLitRule_cannotCheckPosLitTree() {
+    void engineWithoutPosLitRule_cannotCheckPosLitTree() throws Exception {
         RuleEngine bare = new RuleEngine();
         RuleViolation ex = assertThrows(
                 RuleViolation.class,
@@ -69,7 +69,7 @@ class M4PosNatTest {
     }
 
     @Test
-    void sameAddNode_typeChecksDifferentlyUnderDifferentEngines() {
+    void sameAddNode_typeChecksDifferentlyUnderDifferentEngines() throws Exception {
         var tree = Add.of(PosLit.of(2), PosLit.of(3));
 
         assertEquals(PosNat.SORT, PosNat.engineWithAdd().check(tree));

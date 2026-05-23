@@ -42,11 +42,11 @@ class TruffleLambdaTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object runTruffle(IrModule module) {
+    private static Object runTruffle(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -60,7 +60,7 @@ class TruffleLambdaTest {
     // --- Basic Apply ---
 
     @Test
-    void truffle_closedLambda_appliedToLiteral() {
+    void truffle_closedLambda_appliedToLiteral() throws Exception {
         // (\x -> x + 1)(5) = 6
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -71,7 +71,7 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_multiArgLambda_invokedWithMultipleArgs() {
+    void truffle_multiArgLambda_invokedWithMultipleArgs() throws Exception {
         // (\(x, y) -> x * y)(3, 4) = 12
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT), new IrParam("y", INT)),
@@ -84,7 +84,7 @@ class TruffleLambdaTest {
     // --- Closure capture ---
 
     @Test
-    void truffle_closureCapturesEnclosingLetBinding() {
+    void truffle_closureCapturesEnclosingLetBinding() throws Exception {
         // let n = 10 in let f = \x -> x + n in f(5)  = 15
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -97,7 +97,7 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_closureDoesNotSeeBindingsAddedAfterCreation() {
+    void truffle_closureDoesNotSeeBindingsAddedAfterCreation() throws Exception {
         // let f = \x -> x in let n = 100 in f(5)  = 5  (n is unused)
         IrExpr identity = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -112,7 +112,7 @@ class TruffleLambdaTest {
     // --- Higher-order ---
 
     @Test
-    void truffle_higherOrder_lambdaAsArgumentToAnotherLambda() {
+    void truffle_higherOrder_lambdaAsArgumentToAnotherLambda() throws Exception {
         // let doubler = \x -> x * 2 in let applyTo5 = \f -> f(5) in applyTo5(doubler) = 10
         IrExpr doubler = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -129,7 +129,7 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_currying_lambdaReturningLambda() {
+    void truffle_currying_lambdaReturningLambda() throws Exception {
         // let addN = \n -> \x -> x + n in let add5 = addN(5) in add5(3) = 8
         IrExpr inner = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -147,7 +147,7 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_closureSurvivesEnclosingScopeExit() {
+    void truffle_closureSurvivesEnclosingScopeExit() throws Exception {
         // let make = \n -> \x -> n + x in let f = make(100) in f(1)  = 101
         IrExpr inner = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -167,7 +167,7 @@ class TruffleLambdaTest {
     // --- Apply errors with origins ---
 
     @Test
-    void truffle_applyWithWrongArity_throwsWithMatchOrigin() {
+    void truffle_applyWithWrongArity_throwsWithMatchOrigin() throws Exception {
         Origin applySite = Origin.at("test.ptf", 7, 3);
         IrExpr identity = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
@@ -185,7 +185,7 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_applyOnNonClosure_throwsWithApplyOrigin() {
+    void truffle_applyOnNonClosure_throwsWithApplyOrigin() throws Exception {
         Origin applySite = Origin.at("test.ptf", 9, 5);
         IrExpr app = new IrExpr.Apply(IrExpr.lit(5), List.of(IrExpr.lit(1)), applySite);
         RuntimeCheckException ex = assertThrows(
@@ -201,7 +201,7 @@ class TruffleLambdaTest {
     // --- Interactions with named functions ---
 
     @Test
-    void truffle_namedFunctionCanInternallyUseLambda() {
+    void truffle_namedFunctionCanInternallyUseLambda() throws Exception {
         // fn process(x: Int) -> Int = (\y -> y * 3)(x)
         IrStmt.FunctionDecl processFn = IrStmt.functionDecl(
                 "process",
@@ -222,7 +222,7 @@ class TruffleLambdaTest {
     // --- Interaction with Match ---
 
     @Test
-    void truffle_lambdaBodyContainingMatch_appliedCorrectly() {
+    void truffle_lambdaBodyContainingMatch_appliedCorrectly() throws Exception {
         // (\x -> match x with | zero -> 100 | positive -> x * 2)(5) = 10
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));

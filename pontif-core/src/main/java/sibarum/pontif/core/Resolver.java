@@ -39,6 +39,11 @@ public final class Resolver {
         return slot;
     }
 
+    /** Non-throwing scope query. Returns true iff {@link #lookup} would succeed. */
+    public boolean contains(String name) {
+        return scopes.peek().containsKey(name);
+    }
+
     public FrameDescriptor build() {
         return descriptorBuilder.build();
     }

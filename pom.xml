@@ -13,7 +13,10 @@
         <module>pontif-core</module>
         <module>pontif-ast</module>
         <module>pontif-ir</module>
+        <module>pontif-parser</module>
+        <module>pontif-runtime</module>
         <module>pontif-demo</module>
+        <module>pontif-playground</module>
     </modules>
 
     <properties>
@@ -22,6 +25,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <truffle.version>24.1.1</truffle.version>
         <junit.version>5.11.3</junit.version>
+        <dasum.version>1.0-SNAPSHOT</dasum.version>
     </properties>
 
     <dependencyManagement>
@@ -55,6 +59,16 @@
             <dependency>
                 <groupId>sibarum.pontif</groupId>
                 <artifactId>pontif-ir</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.pontif</groupId>
+                <artifactId>pontif-parser</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.pontif</groupId>
+                <artifactId>pontif-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

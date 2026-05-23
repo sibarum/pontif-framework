@@ -6,7 +6,7 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.UnresolvedSymbolException;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
 
 import java.util.Map;
 
@@ -19,14 +19,14 @@ class SymbolicExplorationTest {
     private static final Simplifier ARITH = new Simplifier(ArithmeticRules.all());
 
     @Test
-    void constantFolds() {
+    void constantFolds() throws Exception {
         assertEquals(
                 SymExpr.lit(5),
                 ARITH.simplify(SymExpr.add(SymExpr.lit(2), SymExpr.lit(3))));
     }
 
     @Test
-    void identityEliminates() {
+    void identityEliminates() throws Exception {
         assertEquals(SymExpr.var("x"),
                 ARITH.simplify(SymExpr.add(SymExpr.var("x"), SymExpr.lit(0))));
         assertEquals(SymExpr.var("x"),
@@ -34,7 +34,7 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void absorptionFires() {
+    void absorptionFires() throws Exception {
         assertEquals(SymExpr.lit(0),
                 ARITH.simplify(SymExpr.mul(SymExpr.var("x"), SymExpr.lit(0))));
         assertEquals(SymExpr.lit(0),
@@ -42,14 +42,14 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void selfCoalesces() {
+    void selfCoalesces() throws Exception {
         assertEquals(
                 SymExpr.mul(SymExpr.lit(2), SymExpr.var("x")),
                 ARITH.simplify(SymExpr.add(SymExpr.var("x"), SymExpr.var("x"))));
     }
 
     @Test
-    void chainsToFixedPoint() {
+    void chainsToFixedPoint() throws Exception {
         SymExpr expr = SymExpr.add(
                 SymExpr.var("x"),
                 SymExpr.add(
@@ -61,19 +61,19 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void substituteThenSimplify() {
+    void substituteThenSimplify() throws Exception {
         SymExpr expr = SymExpr.add(SymExpr.var("x"), SymExpr.lit(5));
         SymExpr substituted = Substitute.apply(expr, Map.of("x", SymExpr.lit(2)));
         assertEquals(SymExpr.lit(7), ARITH.simplify(substituted));
     }
 
     @Test
-    void forceGroundedReturnsValue() {
+    void forceGroundedReturnsValue() throws Exception {
         assertEquals(42L, Force.apply(SymExpr.lit(42)));
     }
 
     @Test
-    void forceComplexGroundedExpression() {
+    void forceComplexGroundedExpression() throws Exception {
         SymExpr expr = SymExpr.mul(
                 SymExpr.add(SymExpr.lit(2), SymExpr.lit(3)),
                 SymExpr.lit(4));
@@ -81,7 +81,7 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void forceUnresolvedThrows() {
+    void forceUnresolvedThrows() throws Exception {
         UnresolvedSymbolException ex = assertThrows(
                 UnresolvedSymbolException.class,
                 () -> Force.apply(SymExpr.var("x")));
@@ -90,7 +90,7 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void forceUnresolvedInsideExpressionThrows() {
+    void forceUnresolvedInsideExpressionThrows() throws Exception {
         UnresolvedSymbolException ex = assertThrows(
                 UnresolvedSymbolException.class,
                 () -> Force.apply(SymExpr.add(SymExpr.lit(1), SymExpr.var("ghost"))));
@@ -99,7 +99,7 @@ class SymbolicExplorationTest {
     }
 
     @Test
-    void partialEvalLeavesDeferredRoot() {
+    void partialEvalLeavesDeferredRoot() throws Exception {
         SymExpr expr = SymExpr.add(
                 SymExpr.var("x"),
                 SymExpr.add(SymExpr.lit(2), SymExpr.lit(3)));

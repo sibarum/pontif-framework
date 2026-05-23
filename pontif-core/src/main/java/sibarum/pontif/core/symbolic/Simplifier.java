@@ -44,6 +44,8 @@ public final class Simplifier {
             case SymExpr.Mul(SymExpr l, SymExpr r) -> new SymExpr.Mul(simplify(l), simplify(r));
             case SymExpr.Pow(SymExpr b, SymExpr e) -> new SymExpr.Pow(simplify(b), simplify(e));
             case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) -> new SymExpr.Cmp(simplify(l), op, simplify(r));
+            case SymExpr.And(SymExpr l, SymExpr r) -> new SymExpr.And(simplify(l), simplify(r));
+            case SymExpr.Or(SymExpr l, SymExpr r) -> new SymExpr.Or(simplify(l), simplify(r));
             case SymExpr.Lam(String param, Sort paramType, SymExpr body) -> new SymExpr.Lam(param, paramType, simplify(body));
             case SymExpr.App(SymExpr fn, SymExpr arg) -> new SymExpr.App(simplify(fn), simplify(arg));
             case SymExpr.Case(SymExpr scrutinee, List<SymExpr.CaseBranch> branches) -> {

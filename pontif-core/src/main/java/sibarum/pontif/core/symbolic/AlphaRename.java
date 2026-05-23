@@ -20,6 +20,8 @@ public final class AlphaRename {
             case SymExpr.Mul(SymExpr l, SymExpr r) -> isFreeIn(name, l) || isFreeIn(name, r);
             case SymExpr.Pow(SymExpr b, SymExpr e) -> isFreeIn(name, b) || isFreeIn(name, e);
             case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) -> isFreeIn(name, l) || isFreeIn(name, r);
+            case SymExpr.And(SymExpr l, SymExpr r) -> isFreeIn(name, l) || isFreeIn(name, r);
+            case SymExpr.Or(SymExpr l, SymExpr r) -> isFreeIn(name, l) || isFreeIn(name, r);
             case SymExpr.Lam(String param, Sort paramType, SymExpr body) ->
                     !param.equals(name) && isFreeIn(name, body);
             case SymExpr.App(SymExpr fn, SymExpr arg) -> isFreeIn(name, fn) || isFreeIn(name, arg);

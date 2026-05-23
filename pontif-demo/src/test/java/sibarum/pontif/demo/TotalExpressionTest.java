@@ -4,8 +4,8 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.TotalExpressionRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,29 +32,29 @@ class TotalExpressionTest {
     private static final SymExpr J       = SymExpr.pow(SymExpr.lit(1), HALF);   // 1^(1/2) — idempotent
 
     @Test
-    void epsilonSquaredIsZero() {
+    void epsilonSquaredIsZero() throws Exception {
         assertEquals(SymExpr.lit(0), TOTAL.simplify(SymExpr.mul(EPSILON, EPSILON)));
     }
 
     @Test
-    void iSquaredIsNegativeOne() {
+    void iSquaredIsNegativeOne() throws Exception {
         assertEquals(SymExpr.lit(-1), TOTAL.simplify(SymExpr.mul(I, I)));
     }
 
     @Test
-    void jSquaredIsOne() {
+    void jSquaredIsOne() throws Exception {
         assertEquals(SymExpr.lit(1), TOTAL.simplify(SymExpr.mul(J, J)));
     }
 
     @Test
-    void generatorsStandalone_doNotCollapse() {
+    void generatorsStandalone_doNotCollapse() throws Exception {
         assertEquals(J, TOTAL.simplify(J));
         assertEquals(EPSILON, TOTAL.simplify(EPSILON));
         assertEquals(I, TOTAL.simplify(I));
     }
 
     @Test
-    void differentBasisProductStaysSymbolic_ij() {
+    void differentBasisProductStaysSymbolic_ij() throws Exception {
         SymExpr ij = SymExpr.mul(I, J);
         SymExpr simplified = TOTAL.simplify(ij);
         assertNotEquals(SymExpr.lit(-1), simplified);
@@ -66,7 +66,7 @@ class TotalExpressionTest {
     }
 
     @Test
-    void differentBasisProductStaysSymbolic_epsilonI() {
+    void differentBasisProductStaysSymbolic_epsilonI() throws Exception {
         SymExpr simplified = TOTAL.simplify(SymExpr.mul(EPSILON, I));
         assertNotEquals(SymExpr.lit(0), simplified);
         assertNotEquals(SymExpr.lit(-1), simplified);
@@ -75,29 +75,29 @@ class TotalExpressionTest {
     }
 
     @Test
-    void fracHalfPlusHalfIsOne() {
+    void fracHalfPlusHalfIsOne() throws Exception {
         assertEquals(SymExpr.lit(1), TOTAL.simplify(SymExpr.add(HALF, HALF)));
     }
 
     @Test
-    void fracNormalizesToLitWhenDenomIsOne() {
+    void fracNormalizesToLitWhenDenomIsOne() throws Exception {
         assertEquals(SymExpr.lit(3), TOTAL.simplify(SymExpr.frac(6, 2)));
     }
 
     @Test
-    void powOfOneExponentCollapses() {
+    void powOfOneExponentCollapses() throws Exception {
         assertEquals(SymExpr.lit(-1),
                 TOTAL.simplify(SymExpr.pow(SymExpr.lit(-1), SymExpr.lit(1))));
     }
 
     @Test
-    void powOfZeroExponentBecomesOne() {
+    void powOfZeroExponentBecomesOne() throws Exception {
         assertEquals(SymExpr.lit(1),
                 TOTAL.simplify(SymExpr.pow(SymExpr.lit(-1), SymExpr.lit(0))));
     }
 
     @Test
-    void powLitIntExpFolds() {
+    void powLitIntExpFolds() throws Exception {
         assertEquals(SymExpr.lit(8),
                 TOTAL.simplify(SymExpr.pow(SymExpr.lit(2), SymExpr.lit(3))));
     }
@@ -105,7 +105,7 @@ class TotalExpressionTest {
     // --- Commutative normalization tests ---
 
     @Test
-    void commutativeReorder_jiBecomesij() {
+    void commutativeReorder_jiBecomesij() throws Exception {
         // J · I should canonicalize to I · J (I's base -1 sorts before J's base 1)
         SymExpr ji = SymExpr.mul(J, I);
         SymExpr expected = SymExpr.mul(I, J);
@@ -113,21 +113,21 @@ class TotalExpressionTest {
     }
 
     @Test
-    void ijiCollapsesToMinusJ_leftAssociated() {
+    void ijiCollapsesToMinusJ_leftAssociated() throws Exception {
         // (i · j) · i  →  i² · j  →  -1 · j
         SymExpr iji = SymExpr.mul(SymExpr.mul(I, J), I);
         assertEquals(SymExpr.mul(SymExpr.lit(-1), J), TOTAL.simplify(iji));
     }
 
     @Test
-    void ijiCollapsesToMinusJ_rightAssociated() {
+    void ijiCollapsesToMinusJ_rightAssociated() throws Exception {
         // i · (j · i)  →  i² · j  →  -1 · j
         SymExpr iji = SymExpr.mul(I, SymExpr.mul(J, I));
         assertEquals(SymExpr.mul(SymExpr.lit(-1), J), TOTAL.simplify(iji));
     }
 
     @Test
-    void ijSquaredCollapsesToMinusOne() {
+    void ijSquaredCollapsesToMinusOne() throws Exception {
         // (i · j)² = (ij)(ij) = i²j² = (-1)(1) = -1
         SymExpr ij = SymExpr.mul(I, J);
         SymExpr ijSquared = SymExpr.mul(ij, ij);
@@ -135,14 +135,14 @@ class TotalExpressionTest {
     }
 
     @Test
-    void epsilonSquaredTimesAnything_isZero() {
+    void epsilonSquaredTimesAnything_isZero() throws Exception {
         // ε² · i  →  0 · i  →  0
         SymExpr expr = SymExpr.mul(SymExpr.mul(EPSILON, EPSILON), I);
         assertEquals(SymExpr.lit(0), TOTAL.simplify(expr));
     }
 
     @Test
-    void allThreeGeneratorsTogether_staysSymbolicButCanonical() {
+    void allThreeGeneratorsTogether_staysSymbolicButCanonical() throws Exception {
         // ε · i · j — three distinct bases, no merges, but should canonicalize the order
         SymExpr expr = SymExpr.mul(SymExpr.mul(EPSILON, I), J);
         SymExpr simplified = TOTAL.simplify(expr);
@@ -158,7 +158,7 @@ class TotalExpressionTest {
     }
 
     @Test
-    void fourFactorIIJJ_collapsesToMinusOne() {
+    void fourFactorIIJJ_collapsesToMinusOne() throws Exception {
         // i · i · j · j = i² · j² = -1 · 1 = -1
         SymExpr expr = SymExpr.mul(
                 SymExpr.mul(I, I),
@@ -167,7 +167,7 @@ class TotalExpressionTest {
     }
 
     @Test
-    void fourFactorMixedOrder_iJiJ_collapsesToMinusOne() {
+    void fourFactorMixedOrder_iJiJ_collapsesToMinusOne() throws Exception {
         // i · j · i · j  same as (ij)² but written as a flat product
         SymExpr expr = SymExpr.mul(
                 SymExpr.mul(SymExpr.mul(I, J), I),

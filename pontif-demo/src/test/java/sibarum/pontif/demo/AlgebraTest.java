@@ -19,37 +19,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AlgebraTest {
 
     @Test
-    void dualNumbersIsClosed() {
+    void dualNumbersIsClosed() throws Exception {
         assertTrue(Algebras.dualNumbers().prove(Property.CLOSED).isPassed());
     }
 
     @Test
-    void dualNumbersIsAssociative() {
+    void dualNumbersIsAssociative() throws Exception {
         assertTrue(Algebras.dualNumbers().prove(Property.ASSOCIATIVE).isPassed());
     }
 
     @Test
-    void complexIsClosed() {
+    void complexIsClosed() throws Exception {
         assertTrue(Algebras.complex().prove(Property.CLOSED).isPassed());
     }
 
     @Test
-    void complexIsAssociative() {
+    void complexIsAssociative() throws Exception {
         assertTrue(Algebras.complex().prove(Property.ASSOCIATIVE).isPassed());
     }
 
     @Test
-    void splitComplexIsClosed() {
+    void splitComplexIsClosed() throws Exception {
         assertTrue(Algebras.splitComplex().prove(Property.CLOSED).isPassed());
     }
 
     @Test
-    void splitComplexIsAssociative() {
+    void splitComplexIsAssociative() throws Exception {
         assertTrue(Algebras.splitComplex().prove(Property.ASSOCIATIVE).isPassed());
     }
 
     @Test
-    void dualNumbers_twoPlusThreeEpsilon_squared() {
+    void dualNumbers_twoPlusThreeEpsilon_squared() throws Exception {
         Algebra dn = Algebras.dualNumbers();
         Multivector x = Multivector.of(Map.of(
                 "1", SymExpr.lit(2),
@@ -62,7 +62,7 @@ class AlgebraTest {
     }
 
     @Test
-    void complex_onePlusI_squared() {
+    void complex_onePlusI_squared() throws Exception {
         Algebra c = Algebras.complex();
         Multivector x = Multivector.of(Map.of(
                 "1", SymExpr.lit(1),
@@ -74,7 +74,7 @@ class AlgebraTest {
     }
 
     @Test
-    void complex_iTimesI_isNegativeOne() {
+    void complex_iTimesI_isNegativeOne() throws Exception {
         Algebra c = Algebras.complex();
         Multivector i = Multivector.of(Map.of("i", SymExpr.lit(1)));
         Multivector product = c.multiply(i, i);
@@ -83,7 +83,7 @@ class AlgebraTest {
     }
 
     @Test
-    void splitComplex_jTimesJ_isOne() {
+    void splitComplex_jTimesJ_isOne() throws Exception {
         Algebra sc = Algebras.splitComplex();
         Multivector j = Multivector.of(Map.of("j", SymExpr.lit(1)));
         Multivector product = sc.multiply(j, j);
@@ -92,7 +92,7 @@ class AlgebraTest {
     }
 
     @Test
-    void dualNumbers_epsilonSquared_isZero() {
+    void dualNumbers_epsilonSquared_isZero() throws Exception {
         Algebra dn = Algebras.dualNumbers();
         Multivector eps = Multivector.of(Map.of("ε", SymExpr.lit(1)));
         Multivector product = dn.multiply(eps, eps);
@@ -100,7 +100,7 @@ class AlgebraTest {
     }
 
     @Test
-    void incompleteCliffordBasis_isNotClosed() {
+    void incompleteCliffordBasis_isNotClosed() throws Exception {
         // Declare {1, i, j} but NOT ij — closure must fail because i · j
         // simplifies to a Mul(I, J) that isn't a basis element nor a scalar.
         Algebra incomplete = new Algebra(
@@ -121,7 +121,7 @@ class AlgebraTest {
     }
 
     @Test
-    void derivedTable_dualNumbers_hasExpectedEntries() {
+    void derivedTable_dualNumbers_hasExpectedEntries() throws Exception {
         Map<String, Map<String, SymExpr>> table = Algebras.dualNumbers().derivedTable();
         assertEquals(SymExpr.lit(1),                                   table.get("1").get("1"));
         assertEquals(Algebras.EPSILON,                                  table.get("1").get("ε"));
@@ -130,7 +130,7 @@ class AlgebraTest {
     }
 
     @Test
-    void derivedTable_complex_hasExpectedEntries() {
+    void derivedTable_complex_hasExpectedEntries() throws Exception {
         Map<String, Map<String, SymExpr>> table = Algebras.complex().derivedTable();
         assertEquals(SymExpr.lit(1),  table.get("1").get("1"));
         assertEquals(Algebras.I,      table.get("1").get("i"));

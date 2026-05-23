@@ -22,7 +22,7 @@ class IrStructuralSortTest {
     }
 
     @Test
-    void compileStructural_withNamedMembers_yieldsStructuralSort() {
+    void compileStructural_withNamedMembers_yieldsStructuralSort() throws Exception {
         Map<String, IrSort> members = new LinkedHashMap<>();
         members.put("x", IrSort.named("Int"));
         members.put("y", IrSort.named("Int"));
@@ -38,7 +38,7 @@ class IrStructuralSortTest {
     }
 
     @Test
-    void compileStructural_withRefinedMembers_carriesPredicates() {
+    void compileStructural_withRefinedMembers_carriesPredicates() throws Exception {
         Map<String, IrSort> members = new LinkedHashMap<>();
         members.put("count", positive());
         IrSort counter = IrSort.structural("Counter", members);
@@ -53,7 +53,7 @@ class IrStructuralSortTest {
     }
 
     @Test
-    void compileStructural_nestedStructurals_recurseProperly() {
+    void compileStructural_nestedStructurals_recurseProperly() throws Exception {
         // Box { inner: Point { x: Int, y: Int } }
         Map<String, IrSort> pointMembers = new LinkedHashMap<>();
         pointMembers.put("x", IrSort.named("Int"));
@@ -75,7 +75,7 @@ class IrStructuralSortTest {
     }
 
     @Test
-    void structural_emptyMembers_isAllowed_modelsEmptyRecord() {
+    void structural_emptyMembers_isAllowed_modelsEmptyRecord() throws Exception {
         IrSort unit = IrSort.structural("Unit", Map.of());
         Sort compiled = IrCompiler.compileSort(unit);
         assertTrue(compiled.isStructural());
@@ -83,31 +83,31 @@ class IrStructuralSortTest {
     }
 
     @Test
-    void structural_nullName_throwsAtConstruction() {
+    void structural_nullName_throwsAtConstruction() throws Exception {
         assertThrows(IllegalArgumentException.class,
                 () -> new IrSort.Structural(null, Map.of(), Origin.NONE));
     }
 
     @Test
-    void structural_emptyName_throwsAtConstruction() {
+    void structural_emptyName_throwsAtConstruction() throws Exception {
         assertThrows(IllegalArgumentException.class,
                 () -> new IrSort.Structural("", Map.of(), Origin.NONE));
     }
 
     @Test
-    void structural_nullMembers_throwsAtConstruction() {
+    void structural_nullMembers_throwsAtConstruction() throws Exception {
         assertThrows(IllegalArgumentException.class,
                 () -> new IrSort.Structural("S", null, Origin.NONE));
     }
 
     @Test
-    void factory_defaultsToOriginNONE() {
+    void factory_defaultsToOriginNONE() throws Exception {
         IrSort s = IrSort.structural("S", Map.of("a", IrSort.named("Int")));
         assertEquals(Origin.NONE, s.origin());
     }
 
     @Test
-    void functionDecl_canUseStructuralParamSort_compilesSuccessfully() {
+    void functionDecl_canUseStructuralParamSort_compilesSuccessfully() throws Exception {
         // fn area(p: Point) -> Int = 0
         // We can't yet construct or dispatch on Point values at runtime,
         // but the IR should compile without error — the param sort is just metadata

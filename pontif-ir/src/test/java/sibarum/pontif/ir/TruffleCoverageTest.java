@@ -47,18 +47,18 @@ class TruffleCoverageTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object runOnTruffle(IrModule module) {
+    private static Object runOnTruffle(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
         return new TruffleLowering(compiler).lower(compiled).run();
     }
 
-    private static Object runOnInterpreter(IrModule module) {
+    private static Object runOnInterpreter(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -67,49 +67,49 @@ class TruffleCoverageTest {
 
     // --- All six comparison operators ---
 
-    private static Object cmpResult(IrExpr.Op op, long left, long right) {
+    private static Object cmpResult(IrExpr.Op op, long left, long right) throws Exception {
         IrModule m = new IrModule("cmp_" + op, List.of(),
                 IrExpr.binOp(op, IrExpr.lit(left), IrExpr.lit(right)));
         return runOnTruffle(m);
     }
 
     @Test
-    void lt_truthTable() {
+    void lt_truthTable() throws Exception {
         assertEquals(true,  cmpResult(IrExpr.Op.LT, 3, 5));
         assertEquals(false, cmpResult(IrExpr.Op.LT, 5, 5));
         assertEquals(false, cmpResult(IrExpr.Op.LT, 7, 5));
     }
 
     @Test
-    void le_truthTable() {
+    void le_truthTable() throws Exception {
         assertEquals(true,  cmpResult(IrExpr.Op.LE, 3, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.LE, 5, 5));
         assertEquals(false, cmpResult(IrExpr.Op.LE, 7, 5));
     }
 
     @Test
-    void gt_truthTable() {
+    void gt_truthTable() throws Exception {
         assertEquals(false, cmpResult(IrExpr.Op.GT, 3, 5));
         assertEquals(false, cmpResult(IrExpr.Op.GT, 5, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.GT, 7, 5));
     }
 
     @Test
-    void ge_truthTable() {
+    void ge_truthTable() throws Exception {
         assertEquals(false, cmpResult(IrExpr.Op.GE, 3, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.GE, 5, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.GE, 7, 5));
     }
 
     @Test
-    void eq_truthTable() {
+    void eq_truthTable() throws Exception {
         assertEquals(false, cmpResult(IrExpr.Op.EQ, 3, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.EQ, 5, 5));
         assertEquals(false, cmpResult(IrExpr.Op.EQ, 7, 5));
     }
 
     @Test
-    void ne_truthTable() {
+    void ne_truthTable() throws Exception {
         assertEquals(true,  cmpResult(IrExpr.Op.NE, 3, 5));
         assertEquals(false, cmpResult(IrExpr.Op.NE, 5, 5));
         assertEquals(true,  cmpResult(IrExpr.Op.NE, 7, 5));
@@ -118,7 +118,7 @@ class TruffleCoverageTest {
     // --- Bool literal evaluated directly ---
 
     @Test
-    void boolLiteralEvaluatesDirectly() {
+    void boolLiteralEvaluatesDirectly() throws Exception {
         assertEquals(true,  runOnTruffle(new IrModule("t", List.of(), IrExpr.bool(true))));
         assertEquals(false, runOnTruffle(new IrModule("f", List.of(), IrExpr.bool(false))));
     }
@@ -128,7 +128,7 @@ class TruffleCoverageTest {
     // gives us conditional branching. Each branch is an overload whose refinement
     // matches a specific runtime case.
 
-    private static IrModule factorialModule(long n) {
+    private static IrModule factorialModule(long n) throws Exception {
         IrSort zero = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(0)));
         IrSort positive = IrSort.refined("Int",
@@ -159,7 +159,7 @@ class TruffleCoverageTest {
     }
 
     @Test
-    void factorial_recursionOnTruffle() {
+    void factorial_recursionOnTruffle() throws Exception {
         // fact(0) = 1, fact(1) = 1, fact(5) = 120, fact(10) = 3628800
         assertEquals(1L,       runOnTruffle(factorialModule(0)));
         assertEquals(1L,       runOnTruffle(factorialModule(1)));
@@ -168,14 +168,14 @@ class TruffleCoverageTest {
     }
 
     @Test
-    void factorial_negativeArg_dispatchesToNoMatch() {
+    void factorial_negativeArg_dispatchesToNoMatch() throws Exception {
         // fact(-1) — neither @=0 nor @>0 matches; dispatch fails
         assertThrows(RuntimeCheckException.class,
                 () -> runOnTruffle(factorialModule(-1)));
     }
 
     @Test
-    void factorial_interpreterAndTruffleAgree() {
+    void factorial_interpreterAndTruffleAgree() throws Exception {
         for (long n : new long[]{0, 1, 5, 7, 10}) {
             IrModule m = factorialModule(n);
             assertEquals(runOnInterpreter(m), runOnTruffle(m),
@@ -183,7 +183,7 @@ class TruffleCoverageTest {
         }
     }
 
-    private static IrModule fibonacciModule(long n) {
+    private static IrModule fibonacciModule(long n) throws Exception {
         IrSort eq0 = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(0)));
         IrSort eq1 = IrSort.refined("Int",
@@ -216,7 +216,7 @@ class TruffleCoverageTest {
     }
 
     @Test
-    void fibonacci_recursionOnTruffle() {
+    void fibonacci_recursionOnTruffle() throws Exception {
         // 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
         assertEquals(0L,  runOnTruffle(fibonacciModule(0)));
         assertEquals(1L,  runOnTruffle(fibonacciModule(1)));
@@ -228,7 +228,7 @@ class TruffleCoverageTest {
     // --- Deep call-chain origin propagation ---
 
     @Test
-    void originPropagates_throughThreeLevelCallChain() {
+    void originPropagates_throughThreeLevelCallChain() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort anyInt = IrSort.named("Int");
@@ -273,7 +273,7 @@ class TruffleCoverageTest {
     }
 
     @Test
-    void originPropagates_chainPreservedInCauseLinks() {
+    void originPropagates_chainPreservedInCauseLinks() throws Exception {
         // Same scenario as above, but verify the cause chain — each layer of CallNode
         // catches the inner exception and rewraps. The original cause should reach down.
         IrSort positive = IrSort.refined("Int",

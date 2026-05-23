@@ -3,8 +3,10 @@ package sibarum.pontif.ir;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import sibarum.pontif.ast.binary.Add;
+import sibarum.pontif.ast.binary.And;
 import sibarum.pontif.ast.binary.Cmp;
 import sibarum.pontif.ast.binary.Mul;
+import sibarum.pontif.ast.binary.Or;
 import sibarum.pontif.ast.binary.Sub;
 import sibarum.pontif.ast.bind.Let;
 import sibarum.pontif.ast.bind.Var;
@@ -117,7 +119,7 @@ public final class TruffleLowering {
         List<MatchNode.Branch> branches = new ArrayList<>(match.branches().size());
         for (IrExpr.MatchBranch b : match.branches()) {
             branches.add(MatchNode.Branch.of(
-                    IrCompiler.compileSort(b.pattern()),
+                    module.sortFor(b.pattern()),
                     lowerExpr(b.result(), module, registry)));
         }
         return MatchNode.of(scrutinee, compiler.simplifier(), branches);
@@ -136,6 +138,8 @@ public final class TruffleLowering {
             case GE -> Cmp.of(l, r, Cmp.Op.GE);
             case EQ -> Cmp.of(l, r, Cmp.Op.EQ);
             case NE -> Cmp.of(l, r, Cmp.Op.NE);
+            case AND -> And.of(l, r);
+            case OR -> Or.of(l, r);
         };
     }
 

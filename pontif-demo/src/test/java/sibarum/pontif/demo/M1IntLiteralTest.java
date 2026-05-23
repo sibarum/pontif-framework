@@ -9,17 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class M1IntLiteralTest {
 
     @Test
-    void evaluatesPositiveLiteral() {
+    void evaluatesPositiveLiteral() throws Exception {
         assertEquals(5L, Pontif.evalLong(IntLiteral.of(5)));
     }
 
     @Test
-    void evaluatesNegativeLiteral() {
+    void evaluatesNegativeLiteral() throws Exception {
         assertEquals(-42L, Pontif.evalLong(IntLiteral.of(-42)));
     }
 
     @Test
-    void evaluatesZero() {
+    void evaluatesZero() throws Exception {
         assertEquals(0L, Pontif.evalLong(IntLiteral.of(0)));
     }
 }

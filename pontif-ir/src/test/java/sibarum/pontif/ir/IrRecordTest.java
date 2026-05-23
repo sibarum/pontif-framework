@@ -44,18 +44,18 @@ class IrRecordTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object runInterpreter(IrModule module) {
+    private static Object runInterpreter(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
         return new IrInterpreter(simp).eval(compiled);
     }
 
-    private static Object runTruffle(IrModule module) {
+    private static Object runTruffle(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -77,7 +77,7 @@ class IrRecordTest {
     // --- Construction: interpreter ---
 
     @Test
-    void interpreter_buildSimpleRecord_yieldsRecordValueWithMembers() {
+    void interpreter_buildSimpleRecord_yieldsRecordValueWithMembers() throws Exception {
         IrExpr program = IrExpr.record(members("x", IrExpr.lit(3), "y", IrExpr.lit(4)));
         Object result = runInterpreter(new IrModule("m", List.of(), program));
         assertInstanceOf(RecordValue.class, result);
@@ -87,7 +87,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_emptyRecord_evaluatesToEmptyRecordValue() {
+    void interpreter_emptyRecord_evaluatesToEmptyRecordValue() throws Exception {
         IrExpr program = IrExpr.record(Map.of());
         Object result = runInterpreter(new IrModule("m", List.of(), program));
         assertInstanceOf(RecordValue.class, result);
@@ -95,7 +95,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_recordFieldsAreEvaluatedExpressions() {
+    void interpreter_recordFieldsAreEvaluatedExpressions() throws Exception {
         // { sum: 2 + 3, prod: 4 * 5 }
         IrExpr program = IrExpr.record(members(
                 "sum", IrExpr.binOp(IrExpr.Op.ADD, IrExpr.lit(2), IrExpr.lit(3)),
@@ -106,7 +106,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_nestedRecord_evaluatesRecursively() {
+    void interpreter_nestedRecord_evaluatesRecursively() throws Exception {
         // { p: {x: 1, y: 2}, label: true }
         IrExpr inner = IrExpr.record(members("x", IrExpr.lit(1), "y", IrExpr.lit(2)));
         IrExpr program = IrExpr.record(members("p", inner, "label", IrExpr.bool(true)));
@@ -121,7 +121,7 @@ class IrRecordTest {
     // --- Field access: interpreter ---
 
     @Test
-    void interpreter_fieldAccessOnLiteralRecord_returnsFieldValue() {
+    void interpreter_fieldAccessOnLiteralRecord_returnsFieldValue() throws Exception {
         // ({x: 7, y: 9}).x = 7
         IrExpr program = IrExpr.fieldAccess(
                 IrExpr.record(members("x", IrExpr.lit(7), "y", IrExpr.lit(9))),
@@ -130,7 +130,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_fieldAccessThroughLetBinding_works() {
+    void interpreter_fieldAccessThroughLetBinding_works() throws Exception {
         // let p = {x: 10, y: 20} in p.y  = 20
         IrExpr program = IrExpr.letIn("p",
                 IrSort.structural("Point", Map.of(
@@ -142,7 +142,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_nestedFieldAccess_walksMultipleLayers() {
+    void interpreter_nestedFieldAccess_walksMultipleLayers() throws Exception {
         // ({outer: {inner: 42}}).outer.inner = 42
         IrExpr program = IrExpr.fieldAccess(
                 IrExpr.fieldAccess(
@@ -154,7 +154,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_missingField_throwsWithAccessOrigin() {
+    void interpreter_missingField_throwsWithAccessOrigin() throws Exception {
         Origin accessSite = Origin.at("test.ptf", 3, 7);
         IrExpr program = new IrExpr.FieldAccess(
                 IrExpr.record(members("x", IrExpr.lit(1))),
@@ -171,7 +171,7 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_fieldAccessOnNonRecord_throwsWithOrigin() {
+    void interpreter_fieldAccessOnNonRecord_throwsWithOrigin() throws Exception {
         Origin accessSite = Origin.at("test.ptf", 5, 1);
         IrExpr program = new IrExpr.FieldAccess(IrExpr.lit(5), "x", accessSite);
         RuntimeCheckException ex = assertThrows(
@@ -187,7 +187,7 @@ class IrRecordTest {
     // --- Both paths agree ---
 
     @Test
-    void truffle_buildAndAccessRecord_matchesInterpreter() {
+    void truffle_buildAndAccessRecord_matchesInterpreter() throws Exception {
         IrExpr program = IrExpr.fieldAccess(
                 IrExpr.record(members("a", IrExpr.lit(11), "b", IrExpr.lit(22))),
                 "b");
@@ -197,7 +197,7 @@ class IrRecordTest {
     }
 
     @Test
-    void truffle_nestedRecordAndFieldAccess_matchesInterpreter() {
+    void truffle_nestedRecordAndFieldAccess_matchesInterpreter() throws Exception {
         IrExpr program = IrExpr.fieldAccess(
                 IrExpr.fieldAccess(
                         IrExpr.record(members(
@@ -210,7 +210,7 @@ class IrRecordTest {
     }
 
     @Test
-    void truffle_missingField_throwsWithAccessOrigin() {
+    void truffle_missingField_throwsWithAccessOrigin() throws Exception {
         Origin accessSite = Origin.at("test.ptf", 8, 2);
         IrExpr program = new IrExpr.FieldAccess(
                 IrExpr.record(members("x", IrExpr.lit(1))),
@@ -225,7 +225,7 @@ class IrRecordTest {
     }
 
     @Test
-    void truffle_fieldAccessOnNonRecord_throwsWithOrigin() {
+    void truffle_fieldAccessOnNonRecord_throwsWithOrigin() throws Exception {
         Origin accessSite = Origin.at("test.ptf", 9, 4);
         IrExpr program = new IrExpr.FieldAccess(IrExpr.lit(5), "x", accessSite);
         RuntimeCheckException ex = assertThrows(
@@ -239,7 +239,7 @@ class IrRecordTest {
     // --- Records flow through let-bindings, lambdas, and match ---
 
     @Test
-    void truffle_recordPassedThroughLambda_andFieldAccessedAfter() {
+    void truffle_recordPassedThroughLambda_andFieldAccessedAfter() throws Exception {
         // let p = {a: 100, b: 1} in (\r -> r.a + r.b)(p) = 101
         IrSort point = IrSort.structural("P", Map.of(
                 "a", IrSort.named("Int"), "b", IrSort.named("Int")));
@@ -256,7 +256,7 @@ class IrRecordTest {
     }
 
     @Test
-    void truffle_fieldAccessAsMatchScrutinee() {
+    void truffle_fieldAccessAsMatchScrutinee() throws Exception {
         // let p = {n: -3} in match p.n with | negative -> 42 | _ -> 0
         IrSort negative = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.LT, IrExpr.self(), IrExpr.lit(0)));
@@ -272,7 +272,7 @@ class IrRecordTest {
     // --- Lifting Record / FieldAccess into refinement predicates ---
 
     @Test
-    void compileSymExpr_record_liftsToSymExprRecord() {
+    void compileSymExpr_record_liftsToSymExprRecord() throws Exception {
         IrExpr ir = IrExpr.record(members("a", IrExpr.lit(1), "b", IrExpr.lit(2)));
         SymExpr sym = IrCompiler.compileSymExpr(ir);
         assertInstanceOf(SymExpr.Record.class, sym);
@@ -282,7 +282,7 @@ class IrRecordTest {
     }
 
     @Test
-    void compileSymExpr_fieldAccess_liftsToSymExprFieldAccess() {
+    void compileSymExpr_fieldAccess_liftsToSymExprFieldAccess() throws Exception {
         IrExpr ir = IrExpr.fieldAccess(IrExpr.self(), "count");
         SymExpr sym = IrCompiler.compileSymExpr(ir);
         SymExpr expected = SymExpr.fieldAccess(SymExpr.self(), "count");

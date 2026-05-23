@@ -44,20 +44,20 @@ class OriginTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
     // --- Origin construction and formatting ---
 
     @Test
-    void origin_NONE_isNotPresent() {
+    void origin_NONE_isNotPresent() throws Exception {
         assertFalse(Origin.NONE.isPresent());
         assertEquals("<unknown>", Origin.NONE.toString());
     }
 
     @Test
-    void origin_at_pointIsCorrectlyFormatted() {
+    void origin_at_pointIsCorrectlyFormatted() throws Exception {
         Origin o = Origin.at("counter.ptf", 14, 7);
         assertTrue(o.isPresent());
         assertTrue(o.isPoint());
@@ -65,19 +65,19 @@ class OriginTest {
     }
 
     @Test
-    void origin_span_singleLineRangeFormatsAsRange() {
+    void origin_span_singleLineRangeFormatsAsRange() throws Exception {
         Origin o = Origin.span("counter.ptf", 14, 7, 14, 23);
         assertEquals("counter.ptf:14:7-23", o.toString());
     }
 
     @Test
-    void origin_span_multiLineRangeFormatsWithBothPositions() {
+    void origin_span_multiLineRangeFormatsWithBothPositions() throws Exception {
         Origin o = Origin.span("counter.ptf", 14, 7, 18, 3);
         assertEquals("counter.ptf:14:7-18:3", o.toString());
     }
 
     @Test
-    void position_validatesPositiveValues() {
+    void position_validatesPositiveValues() throws Exception {
         assertThrows(IllegalArgumentException.class, () -> new Origin.Position(0, 1));
         assertThrows(IllegalArgumentException.class, () -> new Origin.Position(1, 0));
     }
@@ -85,7 +85,7 @@ class OriginTest {
     // --- Runtime errors carry origin ---
 
     @Test
-    void runtimeCheckFailure_includesOriginInMessage() {
+    void runtimeCheckFailure_includesOriginInMessage() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
 
@@ -112,7 +112,7 @@ class OriginTest {
     }
 
     @Test
-    void irRuntimeException_isCaughtByRuntimeCheckExceptionHandler() {
+    void irRuntimeException_isCaughtByRuntimeCheckExceptionHandler() throws Exception {
         // Existing handlers of RuntimeCheckException must continue to catch IrRuntimeException.
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
@@ -133,7 +133,7 @@ class OriginTest {
     }
 
     @Test
-    void dispatchFailure_carriesCallSiteOrigin() {
+    void dispatchFailure_carriesCallSiteOrigin() throws Exception {
         // Call to a function that doesn't exist
         Origin callSite = Origin.at("test.ptf", 42, 5);
         IrExpr badCall = new IrExpr.Call("doesNotExist", List.of(IrExpr.lit(5)), callSite);
@@ -150,7 +150,7 @@ class OriginTest {
     }
 
     @Test
-    void noOrigin_messagesAreUnformatted() {
+    void noOrigin_messagesAreUnformatted() throws Exception {
         // Calls without explicit origin still produce errors, just without origin prefix
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
@@ -180,14 +180,14 @@ class OriginTest {
     // --- Origin survives through compilation ---
 
     @Test
-    void nodeOriginIsPreservedThroughIRConstruction() {
+    void nodeOriginIsPreservedThroughIRConstruction() throws Exception {
         Origin o = Origin.span("x.ptf", 1, 1, 1, 10);
         IrExpr.Lit lit = new IrExpr.Lit(42, o);
         assertEquals(o, lit.origin());
     }
 
     @Test
-    void factoryHelpers_defaultToOriginNONE() {
+    void factoryHelpers_defaultToOriginNONE() throws Exception {
         IrExpr e = IrExpr.lit(42);
         assertEquals(Origin.NONE, e.origin());
     }

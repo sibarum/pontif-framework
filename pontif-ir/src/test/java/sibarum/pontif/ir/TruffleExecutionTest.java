@@ -43,11 +43,11 @@ class TruffleExecutionTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object runOnTruffle(IrModule module) {
+    private static Object runOnTruffle(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -59,34 +59,34 @@ class TruffleExecutionTest {
     // --- Simple value tests ---
 
     @Test
-    void evaluatesLiteralOnTruffle() {
+    void evaluatesLiteralOnTruffle() throws Exception {
         IrModule module = new IrModule("lit", List.of(), IrExpr.lit(42));
         assertEquals(42L, runOnTruffle(module));
     }
 
     @Test
-    void evaluatesArithmeticOnTruffle() {
+    void evaluatesArithmeticOnTruffle() throws Exception {
         IrModule module = new IrModule("arith", List.of(),
                 IrExpr.binOp(IrExpr.Op.ADD, IrExpr.lit(20), IrExpr.lit(22)));
         assertEquals(42L, runOnTruffle(module));
     }
 
     @Test
-    void evaluatesMul() {
+    void evaluatesMul() throws Exception {
         IrModule module = new IrModule("mul", List.of(),
                 IrExpr.binOp(IrExpr.Op.MUL, IrExpr.lit(6), IrExpr.lit(7)));
         assertEquals(42L, runOnTruffle(module));
     }
 
     @Test
-    void evaluatesSub() {
+    void evaluatesSub() throws Exception {
         IrModule module = new IrModule("sub", List.of(),
                 IrExpr.binOp(IrExpr.Op.SUB, IrExpr.lit(50), IrExpr.lit(8)));
         assertEquals(42L, runOnTruffle(module));
     }
 
     @Test
-    void evaluatesLetIn() {
+    void evaluatesLetIn() throws Exception {
         IrExpr expr = IrExpr.letIn(
                 "x", IrSort.named("Int"), IrExpr.lit(7),
                 IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.var("x")));
@@ -95,7 +95,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void evaluatesComparison() {
+    void evaluatesComparison() throws Exception {
         IrModule module = new IrModule("cmp", List.of(),
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.lit(5), IrExpr.lit(3)));
         assertEquals(true, runOnTruffle(module));
@@ -104,7 +104,7 @@ class TruffleExecutionTest {
     // --- Function call tests ---
 
     @Test
-    void simpleFunctionCallOnTruffle() {
+    void simpleFunctionCallOnTruffle() throws Exception {
         // fn double(x: Int) -> Int = x + x
         IrStmt.FunctionDecl doubleDecl = IrStmt.functionDecl(
                 "double",
@@ -122,7 +122,7 @@ class TruffleExecutionTest {
     // --- Headline: refinement-typed function on Truffle ---
 
     @Test
-    void powWithRefinementTypes_passesOnTruffle() {
+    void powWithRefinementTypes_passesOnTruffle() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort atLeastOne = IrSort.refined("Int",
@@ -144,7 +144,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void powCalledWithViolatingArg_throwsOnTruffle() {
+    void powCalledWithViolatingArg_throwsOnTruffle() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
 
@@ -164,7 +164,7 @@ class TruffleExecutionTest {
     // --- Multi-dispatch ---
 
     @Test
-    void multiDispatch_specificWinsOnTruffle() {
+    void multiDispatch_specificWinsOnTruffle() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort anyInt = IrSort.named("Int");
@@ -189,7 +189,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void multiDispatch_falsthroughToGeneralOnTruffle() {
+    void multiDispatch_falsthroughToGeneralOnTruffle() throws Exception {
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort anyInt = IrSort.named("Int");
@@ -216,7 +216,7 @@ class TruffleExecutionTest {
     // --- Composition ---
 
     @Test
-    void nestedFunctionCallsOnTruffle() {
+    void nestedFunctionCallsOnTruffle() throws Exception {
         IrSort anyInt = IrSort.named("Int");
 
         IrStmt.FunctionDecl inc = IrStmt.functionDecl(
@@ -239,7 +239,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void letInBindsAndCallSeesBindingOnTruffle() {
+    void letInBindsAndCallSeesBindingOnTruffle() throws Exception {
         IrSort anyInt = IrSort.named("Int");
 
         IrStmt.FunctionDecl addOne = IrStmt.functionDecl(
@@ -261,7 +261,7 @@ class TruffleExecutionTest {
     // --- Origin propagation through Truffle ---
 
     @Test
-    void truffleSide_runtimeCheckFailureCarriesOriginFromCallSite() {
+    void truffleSide_runtimeCheckFailureCarriesOriginFromCallSite() throws Exception {
         // Build a call with explicit origin
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
@@ -286,7 +286,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void truffleSide_dispatchFailureCarriesOrigin() {
+    void truffleSide_dispatchFailureCarriesOrigin() throws Exception {
         Origin callSite = Origin.at("test.ptf", 7, 2);
         IrExpr badCall = new IrExpr.Call("doesNotExist", List.of(IrExpr.lit(1)), callSite);
         IrModule module = new IrModule("missingTruffle", List.of(), badCall);
@@ -300,7 +300,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void truffleSide_pontifNodeCarriesOriginAfterLowering() {
+    void truffleSide_pontifNodeCarriesOriginAfterLowering() throws Exception {
         // Lower a single literal with an origin; verify the PontifNode has it set.
         Origin litOrigin = Origin.at("lit.ptf", 1, 1);
         IrExpr.Lit litWithOrigin = new IrExpr.Lit(42, litOrigin);
@@ -319,7 +319,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void truffleSide_innerCallExceptionGetsOuterCallOrigin() {
+    void truffleSide_innerCallExceptionGetsOuterCallOrigin() throws Exception {
         // f(x) calls g(x), g has a precondition violation. f's call site has an origin;
         // g's call site (inside f's body) has a different origin. The exception bubbles up.
         // Whichever Truffle CallNode catches it first attributes the origin.
@@ -360,7 +360,7 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void interpreterAndTruffleAgreeOnHeadline() {
+    void interpreterAndTruffleAgreeOnHeadline() throws Exception {
         // Same program, two backends, same answer.
         IrSort positive = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));

@@ -14,8 +14,8 @@ import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,7 +44,7 @@ class M6MatchTest {
     private static final Sort ANY = Sort.of("Int");
 
     @Test
-    void positiveLiteral_selectsPositiveBranch() {
+    void positiveLiteral_selectsPositiveBranch() throws Exception {
         // match 5 with | positive -> 42 | _ -> -1
         var tree = MatchNode.of(IntLiteral.of(5), SIMPLIFIER, List.of(
                 Branch.of(POSITIVE, IntLiteral.of(42)),
@@ -53,7 +53,7 @@ class M6MatchTest {
     }
 
     @Test
-    void negativeLiteral_fallsThroughToNegativeBranch() {
+    void negativeLiteral_fallsThroughToNegativeBranch() throws Exception {
         // match -3 with | positive -> 1 | negative -> 99 | _ -> 0
         var tree = MatchNode.of(IntLiteral.of(-3), SIMPLIFIER, List.of(
                 Branch.of(POSITIVE, IntLiteral.of(1)),
@@ -63,7 +63,7 @@ class M6MatchTest {
     }
 
     @Test
-    void zeroLiteral_selectsZeroBranch_betweenPositiveAndNegative() {
+    void zeroLiteral_selectsZeroBranch_betweenPositiveAndNegative() throws Exception {
         var tree = MatchNode.of(IntLiteral.of(0), SIMPLIFIER, List.of(
                 Branch.of(POSITIVE, IntLiteral.of(1)),
                 Branch.of(ZERO, IntLiteral.of(42)),
@@ -72,7 +72,7 @@ class M6MatchTest {
     }
 
     @Test
-    void firstMatchSemantics_takesFirstMatchingBranch() {
+    void firstMatchSemantics_takesFirstMatchingBranch() throws Exception {
         // 5 is both > 0 and >= 0; the first listed branch wins
         Sort nonNegative = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(0)));
@@ -83,7 +83,7 @@ class M6MatchTest {
     }
 
     @Test
-    void noMatchingBranch_throwsRuntimeCheckException() {
+    void noMatchingBranch_throwsRuntimeCheckException() throws Exception {
         // -3 doesn't match positive; no fallback branch
         var tree = MatchNode.of(IntLiteral.of(-3), SIMPLIFIER, List.of(
                 Branch.of(POSITIVE, IntLiteral.of(99))));
@@ -97,7 +97,7 @@ class M6MatchTest {
     }
 
     @Test
-    void matchOnVarScrutinee_branchesCanReferenceSameVar() {
+    void matchOnVarScrutinee_branchesCanReferenceSameVar() throws Exception {
         // let x = 6 in match x with
         //   | Int[self == 0] -> 0
         //   | Int[self > 0]  -> 2 * x
@@ -109,7 +109,7 @@ class M6MatchTest {
     }
 
     @Test
-    void factorialStyleIdiom_dispatchesOnZeroVsPositive() {
+    void factorialStyleIdiom_dispatchesOnZeroVsPositive() throws Exception {
         // The recursion-friendly shape: branch result computes from the bound value.
         // let x = 4 in match x with
         //   | zero     -> 1
@@ -123,7 +123,7 @@ class M6MatchTest {
     }
 
     @Test
-    void emptyBranchList_isRejectedAtConstruction() {
+    void emptyBranchList_isRejectedAtConstruction() throws Exception {
         assertThrows(IllegalArgumentException.class,
                 () -> MatchNode.of(IntLiteral.of(1), SIMPLIFIER, List.of()));
     }

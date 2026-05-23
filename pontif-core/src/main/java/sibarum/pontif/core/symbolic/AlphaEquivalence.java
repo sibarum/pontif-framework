@@ -46,6 +46,14 @@ public final class AlphaEquivalence {
                 if (!(b instanceof SymExpr.Cmp(SymExpr bl, SymExpr.CmpOp bop, SymExpr br))) yield false;
                 yield aop == bop && walk(al, bl, aStack, bStack) && walk(ar, br, aStack, bStack);
             }
+            case SymExpr.And(SymExpr al, SymExpr ar) -> {
+                if (!(b instanceof SymExpr.And(SymExpr bl, SymExpr br))) yield false;
+                yield walk(al, bl, aStack, bStack) && walk(ar, br, aStack, bStack);
+            }
+            case SymExpr.Or(SymExpr al, SymExpr ar) -> {
+                if (!(b instanceof SymExpr.Or(SymExpr bl, SymExpr br))) yield false;
+                yield walk(al, bl, aStack, bStack) && walk(ar, br, aStack, bStack);
+            }
             case SymExpr.Lam(String ap, Sort apt, SymExpr abody) -> {
                 if (!(b instanceof SymExpr.Lam(String bp, Sort bpt, SymExpr bbody))) yield false;
                 List<String> newA = new ArrayList<>(aStack.size() + 1);

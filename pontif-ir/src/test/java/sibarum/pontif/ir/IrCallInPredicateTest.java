@@ -21,14 +21,14 @@ class IrCallInPredicateTest {
     // --- Shape of the lifted Call ---
 
     @Test
-    void noArgCall_compilesToBareVar() {
+    void noArgCall_compilesToBareVar() throws Exception {
         IrExpr call = IrExpr.call("nothing", List.of());
         SymExpr sym = IrCompiler.compileSymExpr(call);
         assertEquals(SymExpr.var("nothing"), sym);
     }
 
     @Test
-    void oneArgCall_compilesToAppOfVarAndArg() {
+    void oneArgCall_compilesToAppOfVarAndArg() throws Exception {
         IrExpr call = IrExpr.call("isEven", List.of(IrExpr.lit(4)));
         SymExpr sym = IrCompiler.compileSymExpr(call);
         SymExpr expected = SymExpr.app(SymExpr.var("isEven"), SymExpr.lit(4));
@@ -36,7 +36,7 @@ class IrCallInPredicateTest {
     }
 
     @Test
-    void multiArgCall_compilesToLeftFoldOfApp() {
+    void multiArgCall_compilesToLeftFoldOfApp() throws Exception {
         // gcd(12, 18) → App(App(Var("gcd"), Lit(12)), Lit(18))
         IrExpr call = IrExpr.call("gcd", List.of(IrExpr.lit(12), IrExpr.lit(18)));
         SymExpr sym = IrCompiler.compileSymExpr(call);
@@ -47,7 +47,7 @@ class IrCallInPredicateTest {
     }
 
     @Test
-    void callOverSelf_compilesToAppOverSelf() {
+    void callOverSelf_compilesToAppOverSelf() throws Exception {
         // isPrime(self) → App(Var("isPrime"), Self)
         IrExpr call = IrExpr.call("isPrime", List.of(IrExpr.self()));
         SymExpr sym = IrCompiler.compileSymExpr(call);
@@ -58,7 +58,7 @@ class IrCallInPredicateTest {
     // --- Refined sorts compile end-to-end when their predicate uses Call ---
 
     @Test
-    void refinedSort_withCallInPredicate_compilesWithoutException() {
+    void refinedSort_withCallInPredicate_compilesWithoutException() throws Exception {
         // Int[isPrime(self)]
         IrSort sort = IrSort.refined("Int",
                 IrExpr.call("isPrime", List.of(IrExpr.self())));
@@ -71,7 +71,7 @@ class IrCallInPredicateTest {
     }
 
     @Test
-    void refinedSort_compositeCallPredicate_carriesAppFoldIntoSort() {
+    void refinedSort_compositeCallPredicate_carriesAppFoldIntoSort() throws Exception {
         // Int[gcd(self, 6) == 1]   (coprime-with-6)
         IrSort sort = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.EQ,
@@ -91,7 +91,7 @@ class IrCallInPredicateTest {
     // --- End-to-end: with a custom simplifier rule, the predicate actually reduces ---
 
     @Test
-    void refinedSort_predicateReducesWithCustomFunctionRule_passes() {
+    void refinedSort_predicateReducesWithCustomFunctionRule_passes() throws Exception {
         // twice(n) = 2 * n     (provided as a rewrite rule)
         // sort: Int[twice(self) > 10]
         // value: 6  →  twice(6) = 12 > 10 → true
@@ -109,7 +109,7 @@ class IrCallInPredicateTest {
     }
 
     @Test
-    void refinedSort_predicateReducesWithCustomFunctionRule_fails() {
+    void refinedSort_predicateReducesWithCustomFunctionRule_fails() throws Exception {
         // Same sort; value 4 → twice(4) = 8 > 10 → false
         IrSort sort = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GT,
@@ -125,7 +125,7 @@ class IrCallInPredicateTest {
     }
 
     @Test
-    void refinedSort_predicateWithUnreducedCall_yieldsResidual() {
+    void refinedSort_predicateWithUnreducedCall_yieldsResidual() throws Exception {
         // Sort: Int[isPrime(self)]; no rule provided, value is concrete.
         // Without a rule for isPrime, the predicate cannot reduce to Bool — it stays
         // residual. This documents the contract: representability does not imply

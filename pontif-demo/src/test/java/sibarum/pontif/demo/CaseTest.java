@@ -5,9 +5,9 @@ import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.CaseRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.CaseRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,7 +38,7 @@ class CaseTest {
     private static final Sort ANY = Sort.of("Int");
 
     @Test
-    void concreteMatch_selectsRightBranch_positive() {
+    void concreteMatch_selectsRightBranch_positive() throws Exception {
         // match 5 with | positive -> 2*self | _ -> self
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(5),
@@ -49,7 +49,7 @@ class CaseTest {
     }
 
     @Test
-    void concreteMatch_fallsThroughToNegativeBranch() {
+    void concreteMatch_fallsThroughToNegativeBranch() throws Exception {
         // match -3 with | positive -> 2*self | negative -> 0-self
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(-3),
@@ -60,7 +60,7 @@ class CaseTest {
     }
 
     @Test
-    void concreteMatch_zeroBranchFires() {
+    void concreteMatch_zeroBranchFires() throws Exception {
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(0),
                 List.of(
@@ -71,7 +71,7 @@ class CaseTest {
     }
 
     @Test
-    void noMatchingBranch_leavesCaseUnreduced() {
+    void noMatchingBranch_leavesCaseUnreduced() throws Exception {
         // -3 doesn't match positive; no fallback
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(-3),
@@ -82,7 +82,7 @@ class CaseTest {
     }
 
     @Test
-    void symbolicScrutinee_leavesCaseUnreduced() {
+    void symbolicScrutinee_leavesCaseUnreduced() throws Exception {
         // x is symbolic — can't decide which branch fires
         SymExpr expr = SymExpr.case_(
                 SymExpr.var("x"),
@@ -94,7 +94,7 @@ class CaseTest {
     }
 
     @Test
-    void firstMatchWins() {
+    void firstMatchWins() throws Exception {
         // 5 matches both POSITIVE and ANY; the first should fire
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(5),
@@ -105,7 +105,7 @@ class CaseTest {
     }
 
     @Test
-    void selfInArmBodyResolvesToScrutinee() {
+    void selfInArmBodyResolvesToScrutinee() throws Exception {
         // match 7 with | _ -> self * self
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(7),
@@ -114,7 +114,7 @@ class CaseTest {
     }
 
     @Test
-    void residualOnEarlierBranch_blocksLaterBranches() {
+    void residualOnEarlierBranch_blocksLaterBranches() throws Exception {
         // Symbolic scrutinee makes POSITIVE residual; we must NOT commit to ANY
         SymExpr expr = SymExpr.case_(
                 SymExpr.var("x"),
@@ -128,7 +128,7 @@ class CaseTest {
     }
 
     @Test
-    void failedEarlyBranch_allowsLaterBranchToFire() {
+    void failedEarlyBranch_allowsLaterBranchToFire() throws Exception {
         // Concrete -5 definitively FAILS POSITIVE (not residual), so we may take ANY
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(-5),
@@ -139,7 +139,7 @@ class CaseTest {
     }
 
     @Test
-    void nestedCase_innerSelfRefersToInnerScrutinee() {
+    void nestedCase_innerSelfRefersToInnerScrutinee() throws Exception {
         // match 3 with
         //   | _ -> match 7 with
         //            | _ -> self * self      <-- inner self should be 7, giving 49
@@ -153,7 +153,7 @@ class CaseTest {
     }
 
     @Test
-    void nestedCase_outerSelfPersistsIntoInnerScrutinee() {
+    void nestedCase_outerSelfPersistsIntoInnerScrutinee() throws Exception {
         // match 7 with
         //   | _ -> match self with               <-- self here is outer scrutinee, so 7
         //            | _ -> self + 1            <-- self here is inner scrutinee, also 7
@@ -167,7 +167,7 @@ class CaseTest {
     }
 
     @Test
-    void caseAsExpression_composesWithArithmetic() {
+    void caseAsExpression_composesWithArithmetic() throws Exception {
         // (match 5 with | positive -> 10 | _ -> 0) + 7  ==  17
         SymExpr inner = SymExpr.case_(
                 SymExpr.lit(5),
@@ -179,7 +179,7 @@ class CaseTest {
     }
 
     @Test
-    void singleBranchAny_alwaysFires() {
+    void singleBranchAny_alwaysFires() throws Exception {
         // The canonical "identity" pattern — Sort.of with no refinement
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(42),

@@ -7,8 +7,8 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,18 +32,18 @@ class RefinementTest {
     // --- Self and Bool primitives ---
 
     @Test
-    void selfIsItsOwnInstance() {
+    void selfIsItsOwnInstance() throws Exception {
         assertEquals(SymExpr.self(), SymExpr.self());
     }
 
     @Test
-    void boolLiteralForcesToBoolean() {
+    void boolLiteralForcesToBoolean() throws Exception {
         assertEquals(true, sibarum.pontif.core.symbolic.Force.apply(SymExpr.bool(true)));
         assertEquals(false, sibarum.pontif.core.symbolic.Force.apply(SymExpr.bool(false)));
     }
 
     @Test
-    void cmpOfConcreteLiteralsFoldsToBool() {
+    void cmpOfConcreteLiteralsFoldsToBool() throws Exception {
         assertEquals(SymExpr.bool(true),
                 SIMPLIFIER.simplify(SymExpr.cmp(SymExpr.lit(5), SymExpr.CmpOp.GT, SymExpr.lit(3))));
         assertEquals(SymExpr.bool(false),
@@ -55,21 +55,21 @@ class RefinementTest {
     // --- Satisfies: concrete-value refinement check ---
 
     @Test
-    void unrefined_sortAcceptsAnything() {
+    void unrefined_sortAcceptsAnything() throws Exception {
         Sort plain = Sort.of("Int");
         assertTrue(Refinements.satisfies(SymExpr.lit(42), plain, SIMPLIFIER).isPassed());
         assertTrue(Refinements.satisfies(SymExpr.lit(-1), plain, SIMPLIFIER).isPassed());
     }
 
     @Test
-    void positiveRefinement_acceptsPositive() {
+    void positiveRefinement_acceptsPositive() throws Exception {
         Sort positive = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
         assertTrue(Refinements.satisfies(SymExpr.lit(5), positive, SIMPLIFIER).isPassed());
     }
 
     @Test
-    void positiveRefinement_rejectsNonPositive() {
+    void positiveRefinement_rejectsNonPositive() throws Exception {
         Sort positive = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
         ProofResult r1 = Refinements.satisfies(SymExpr.lit(0), positive, SIMPLIFIER);
@@ -82,7 +82,7 @@ class RefinementTest {
     }
 
     @Test
-    void singletonRefinement_acceptsOnlyTheValue() {
+    void singletonRefinement_acceptsOnlyTheValue() throws Exception {
         // Int[@=1] — singleton type
         Sort one = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(1)));
@@ -92,7 +92,7 @@ class RefinementTest {
     }
 
     @Test
-    void symbolicValue_yieldsResidual() {
+    void symbolicValue_yieldsResidual() throws Exception {
         // Cannot decide whether Var("x") > 0 — residual
         Sort positive = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
@@ -103,7 +103,7 @@ class RefinementTest {
     // --- Implication: tighter refinement implies looser ---
 
     @Test
-    void unrefinedLooser_isImpliedByAnything() {
+    void unrefinedLooser_isImpliedByAnything() throws Exception {
         Sort tighter = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(5)));
         Sort looser = Sort.of("Int");
@@ -111,7 +111,7 @@ class RefinementTest {
     }
 
     @Test
-    void unrefinedTighter_yieldsResidualAgainstRefinedLooser() {
+    void unrefinedTighter_yieldsResidualAgainstRefinedLooser() throws Exception {
         Sort tighter = Sort.of("Int");
         Sort looser = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
@@ -120,7 +120,7 @@ class RefinementTest {
     }
 
     @Test
-    void identicalRefinements_imply() {
+    void identicalRefinements_imply() throws Exception {
         SymExpr predicate = SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0));
         Sort a = Sort.refined("Int", predicate);
         Sort b = Sort.refined("Int", predicate);
@@ -128,7 +128,7 @@ class RefinementTest {
     }
 
     @Test
-    void greaterThanFive_impliesGreaterThanZero() {
+    void greaterThanFive_impliesGreaterThanZero() throws Exception {
         Sort gt5 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(5)));
         Sort gt0 = Sort.refined("Int",
@@ -137,7 +137,7 @@ class RefinementTest {
     }
 
     @Test
-    void greaterThanZero_doesNotImplyGreaterThanFive() {
+    void greaterThanZero_doesNotImplyGreaterThanFive() throws Exception {
         Sort gt0 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
         Sort gt5 = Sort.refined("Int",
@@ -148,7 +148,7 @@ class RefinementTest {
     }
 
     @Test
-    void greaterEqualToTen_impliesGreaterThanFive() {
+    void greaterEqualToTen_impliesGreaterThanFive() throws Exception {
         Sort ge10 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(10)));
         Sort gt5 = Sort.refined("Int",
@@ -157,7 +157,7 @@ class RefinementTest {
     }
 
     @Test
-    void greaterEqualToFive_doesNotImplyStrictGreaterThanFive() {
+    void greaterEqualToFive_doesNotImplyStrictGreaterThanFive() throws Exception {
         // x >= 5 does NOT imply x > 5 (x could be exactly 5)
         Sort ge5 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(5)));
@@ -169,7 +169,7 @@ class RefinementTest {
     }
 
     @Test
-    void singletonImpliesRange() {
+    void singletonImpliesRange() throws Exception {
         // x = 7 implies x > 0
         Sort eq7 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(7)));
@@ -179,7 +179,7 @@ class RefinementTest {
     }
 
     @Test
-    void singletonDoesNotImplyDisjointSingleton() {
+    void singletonDoesNotImplyDisjointSingleton() throws Exception {
         Sort eq7 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(7)));
         Sort eq3 = Sort.refined("Int",
@@ -189,7 +189,7 @@ class RefinementTest {
     }
 
     @Test
-    void unknownPredicateShape_yieldsResidual() {
+    void unknownPredicateShape_yieldsResidual() throws Exception {
         // A more complex predicate (not Cmp(Self, op, Lit)) gives residual obligation
         Sort weird = Sort.refined("Int",
                 SymExpr.cmp(

@@ -10,9 +10,9 @@ import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.HypothesisRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,14 +48,14 @@ class DispatchTest {
     // --- Trivial cases ---
 
     @Test
-    void emptyTable_resolvingAnything_yieldsNoMatch() {
+    void emptyTable_resolvingAnything_yieldsNoMatch() throws Exception {
         DispatchTable table = new DispatchTable();
         DispatchResult r = table.resolve("anything", List.of(SymExpr.lit(5)), SIMPLIFIER);
         assertInstanceOf(DispatchResult.NoMatch.class, r);
     }
 
     @Test
-    void singleDeclaration_matchingArgs_resolves() {
+    void singleDeclaration_matchingArgs_resolves() throws Exception {
         FunctionDecl id = FunctionDecl.declaration("id",
                 List.of(new FunctionDecl.Param("x", ANY_INT)), ANY_INT);
         DispatchTable table = new DispatchTable().register(id);
@@ -65,7 +65,7 @@ class DispatchTest {
     }
 
     @Test
-    void singleDeclaration_failingArgs_yieldsNoMatch() {
+    void singleDeclaration_failingArgs_yieldsNoMatch() throws Exception {
         FunctionDecl positiveOnly = FunctionDecl.declaration("pos",
                 List.of(new FunctionDecl.Param("x", POSITIVE)), POSITIVE);
         DispatchTable table = new DispatchTable().register(positiveOnly);
@@ -76,7 +76,7 @@ class DispatchTest {
     // --- Specificity ---
 
     @Test
-    void moreSpecificOverloadWinsWhenBothMatch() {
+    void moreSpecificOverloadWinsWhenBothMatch() throws Exception {
         // pow(b: Int[@>0]) and pow(b: Int) — call with 5 matches both; @>0 is more specific
         FunctionDecl tight = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
@@ -90,7 +90,7 @@ class DispatchTest {
     }
 
     @Test
-    void registrationOrderDoesNotAffectSpecificity() {
+    void registrationOrderDoesNotAffectSpecificity() throws Exception {
         // Register general first, then specific — still picks specific
         FunctionDecl tight = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
@@ -103,7 +103,7 @@ class DispatchTest {
     }
 
     @Test
-    void specificFails_fallsThroughToGeneral() {
+    void specificFails_fallsThroughToGeneral() throws Exception {
         // pow(b: Int[@>0]) and pow(b: Int); call with -3 fails the specific, takes the general
         FunctionDecl tight = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
@@ -117,7 +117,7 @@ class DispatchTest {
     }
 
     @Test
-    void transitiveSpecificity_picksTheTightest() {
+    void transitiveSpecificity_picksTheTightest() throws Exception {
         // pow(b: Int[@>=1]) ⊂ pow(b: Int[@>=0]) ⊂ pow(b: Int)
         FunctionDecl tightest = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", AT_LEAST_ONE)), AT_LEAST_ONE);
@@ -135,7 +135,7 @@ class DispatchTest {
     // --- Ambiguity ---
 
     @Test
-    void incomparableOverloads_bothMatching_yieldAmbiguous() {
+    void incomparableOverloads_bothMatching_yieldAmbiguous() throws Exception {
         // pow(b: Int[@>0], x: Int) vs pow(b: Int, x: Int[@>0]) — neither dominates
         FunctionDecl tightLeft = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE),
@@ -155,7 +155,7 @@ class DispatchTest {
     }
 
     @Test
-    void incomparableOverloads_onlyOneMatching_resolves() {
+    void incomparableOverloads_onlyOneMatching_resolves() throws Exception {
         // Same as above but pow(-3, 5): tightLeft fails (b<0); tightRight succeeds
         FunctionDecl tightLeft = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE),
@@ -173,7 +173,7 @@ class DispatchTest {
     // --- Arity / name filtering ---
 
     @Test
-    void differentArities_onlyMatchingArityConsidered() {
+    void differentArities_onlyMatchingArityConsidered() throws Exception {
         FunctionDecl unary = FunctionDecl.declaration("f",
                 List.of(new FunctionDecl.Param("x", ANY_INT)), ANY_INT);
         FunctionDecl binary = FunctionDecl.declaration("f",
@@ -189,7 +189,7 @@ class DispatchTest {
     }
 
     @Test
-    void unrelatedName_yieldsNoMatch() {
+    void unrelatedName_yieldsNoMatch() throws Exception {
         FunctionDecl decl = FunctionDecl.declaration("foo",
                 List.of(new FunctionDecl.Param("x", ANY_INT)), ANY_INT);
         DispatchTable table = new DispatchTable().register(decl);
@@ -200,7 +200,7 @@ class DispatchTest {
     // --- Symbolic arguments ---
 
     @Test
-    void symbolicArg_withoutHypothesis_resolvesToMostGeneral() {
+    void symbolicArg_withoutHypothesis_resolvesToMostGeneral() throws Exception {
         FunctionDecl positiveOnly = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
         FunctionDecl general = FunctionDecl.declaration("pow",
@@ -218,7 +218,7 @@ class DispatchTest {
     }
 
     @Test
-    void symbolicArg_withHypothesis_resolvesStatically() {
+    void symbolicArg_withHypothesis_resolvesStatically() throws Exception {
         FunctionDecl positiveOnly = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
         FunctionDecl general = FunctionDecl.declaration("pow",
@@ -238,7 +238,7 @@ class DispatchTest {
     // --- Composes with runtime checks ---
 
     @Test
-    void dispatchedCall_executesAtRuntimeWithBoundValue() {
+    void dispatchedCall_executesAtRuntimeWithBoundValue() throws Exception {
         FunctionDecl positiveOnly = FunctionDecl.declaration("pow",
                 List.of(new FunctionDecl.Param("b", POSITIVE)), POSITIVE);
         DispatchTable table = new DispatchTable().register(positiveOnly);
@@ -253,7 +253,7 @@ class DispatchTest {
     // --- Singleton dispatch ---
 
     @Test
-    void singletonSortPrefersOverGeneral() {
+    void singletonSortPrefersOverGeneral() throws Exception {
         // pow(b: Int[@=0]) — singleton type
         // pow(b: Int) — general
         // Call pow(0): both match; singleton is more specific
@@ -270,7 +270,7 @@ class DispatchTest {
     // --- The headline demo ---
 
     @Test
-    void headlineDemo_powWithTwoOverloads() {
+    void headlineDemo_powWithTwoOverloads() throws Exception {
         // pow(b: Int[@>0], x: Int[@>=1]) : Int[@>0]   — the strong specification
         FunctionDecl tight = FunctionDecl.declaration("pow",
                 List.of(

@@ -44,6 +44,8 @@ public final class Force {
                     case NE -> ll != rr;
                 };
             }
+            case SymExpr.And(SymExpr l, SymExpr r) -> (Boolean) apply(l) && (Boolean) apply(r);
+            case SymExpr.Or(SymExpr l, SymExpr r) -> (Boolean) apply(l) || (Boolean) apply(r);
             case SymExpr.Lam l ->
                     throw new UnresolvedSymbolException(
                             "Cannot force a lambda to a primitive; lambdas are values, not groundable terms (param: " + l.param() + ")");

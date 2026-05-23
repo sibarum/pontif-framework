@@ -41,18 +41,18 @@ class IrMatchTest {
         };
     }
 
-    private static Simplifier simplifier() {
+    private static Simplifier simplifier() throws Exception {
         return new Simplifier(defaultRules());
     }
 
-    private static Object runInterpreter(IrModule module) {
+    private static Object runInterpreter(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
         return new IrInterpreter(simp).eval(compiled);
     }
 
-    private static Object runTruffle(IrModule module) {
+    private static Object runTruffle(IrModule module) throws Exception {
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -84,7 +84,7 @@ class IrMatchTest {
     // --- Interpreter path: branch selection ---
 
     @Test
-    void interpreter_positiveLiteral_selectsPositiveBranch() {
+    void interpreter_positiveLiteral_selectsPositiveBranch() throws Exception {
         IrExpr match = IrExpr.match(IrExpr.lit(5), List.of(
                 IrExpr.matchBranch(positive(), IrExpr.lit(42)),
                 IrExpr.matchBranch(anyInt(), IrExpr.lit(-1))));
@@ -93,7 +93,7 @@ class IrMatchTest {
     }
 
     @Test
-    void interpreter_zeroLiteral_selectsZeroBranchBetweenPositiveAndNegative() {
+    void interpreter_zeroLiteral_selectsZeroBranchBetweenPositiveAndNegative() throws Exception {
         IrExpr match = IrExpr.match(IrExpr.lit(0), List.of(
                 IrExpr.matchBranch(positive(), IrExpr.lit(1)),
                 IrExpr.matchBranch(zero(), IrExpr.lit(42)),
@@ -103,7 +103,7 @@ class IrMatchTest {
     }
 
     @Test
-    void interpreter_firstMatchSemantics_takesFirstOfMultipleAcceptingPatterns() {
+    void interpreter_firstMatchSemantics_takesFirstOfMultipleAcceptingPatterns() throws Exception {
         // 5 satisfies both positive and "non-negative"; the first listed wins.
         IrSort nonNegative = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(0)));
@@ -117,7 +117,7 @@ class IrMatchTest {
     // --- Truffle lowering path: same behaviour ---
 
     @Test
-    void truffle_positiveLiteral_selectsPositiveBranch() {
+    void truffle_positiveLiteral_selectsPositiveBranch() throws Exception {
         IrExpr match = IrExpr.match(IrExpr.lit(5), List.of(
                 IrExpr.matchBranch(positive(), IrExpr.lit(42)),
                 IrExpr.matchBranch(anyInt(), IrExpr.lit(-1))));
@@ -126,7 +126,7 @@ class IrMatchTest {
     }
 
     @Test
-    void truffle_zeroLiteral_selectsZeroBranchBetweenPositiveAndNegative() {
+    void truffle_zeroLiteral_selectsZeroBranchBetweenPositiveAndNegative() throws Exception {
         IrExpr match = IrExpr.match(IrExpr.lit(0), List.of(
                 IrExpr.matchBranch(positive(), IrExpr.lit(1)),
                 IrExpr.matchBranch(zero(), IrExpr.lit(42)),
@@ -136,7 +136,7 @@ class IrMatchTest {
     }
 
     @Test
-    void truffle_branchResultEvaluatesInScopeOfSurroundingBindings() {
+    void truffle_branchResultEvaluatesInScopeOfSurroundingBindings() throws Exception {
         // let x = 6 in match x with | zero -> 0 | positive -> x + 1
         IrExpr match = IrExpr.match(IrExpr.var("x"), List.of(
                 IrExpr.matchBranch(zero(), IrExpr.lit(0)),
@@ -150,7 +150,7 @@ class IrMatchTest {
     // --- Origin: no-match error carries the IrExpr.Match origin ---
 
     @Test
-    void interpreter_noMatch_throwsWithMatchOriginInMessage() {
+    void interpreter_noMatch_throwsWithMatchOriginInMessage() throws Exception {
         Origin matchSite = Origin.at("test.ptf", 17, 4);
         IrExpr match = new IrExpr.Match(IrExpr.lit(-3),
                 List.of(IrExpr.matchBranch(positive(), IrExpr.lit(99))),
@@ -171,7 +171,7 @@ class IrMatchTest {
     }
 
     @Test
-    void truffle_noMatch_throwsWithMatchOriginInMessage() {
+    void truffle_noMatch_throwsWithMatchOriginInMessage() throws Exception {
         Origin matchSite = Origin.span("test.ptf", 17, 4, 19, 10);
         IrExpr match = new IrExpr.Match(IrExpr.lit(-3),
                 List.of(IrExpr.matchBranch(positive(), IrExpr.lit(99))),
@@ -195,7 +195,7 @@ class IrMatchTest {
     //     only when the inner exception had no origin of its own (so deeper origins win).
 
     @Test
-    void interpreter_innerExceptionWithOwnOrigin_isNotOverwrittenByMatchOrigin() {
+    void interpreter_innerExceptionWithOwnOrigin_isNotOverwrittenByMatchOrigin() throws Exception {
         // Branch result calls a missing function; that call site has its own origin.
         // The dispatch failure should bubble up with its own origin intact, not the match's.
         Origin matchSite = Origin.at("outer.ptf", 5, 5);
@@ -219,7 +219,7 @@ class IrMatchTest {
     // --- Origin: no origin set => message has no bracket prefix ---
 
     @Test
-    void interpreter_noOrigin_noMatchMessageHasNoBracketPrefix() {
+    void interpreter_noOrigin_noMatchMessageHasNoBracketPrefix() throws Exception {
         IrExpr match = IrExpr.match(IrExpr.lit(-3),
                 List.of(IrExpr.matchBranch(positive(), IrExpr.lit(99))));
         IrModule module = new IrModule("m", List.of(), match);
@@ -236,14 +236,14 @@ class IrMatchTest {
     // --- Factory / validation ---
 
     @Test
-    void match_factoryDefaultsToOriginNONE() {
+    void match_factoryDefaultsToOriginNONE() throws Exception {
         IrExpr.Match m = (IrExpr.Match) IrExpr.match(IrExpr.lit(0),
                 List.of(IrExpr.matchBranch(zero(), IrExpr.lit(1))));
         assertEquals(Origin.NONE, m.origin());
     }
 
     @Test
-    void match_emptyBranches_isRejectedAtConstruction() {
+    void match_emptyBranches_isRejectedAtConstruction() throws Exception {
         assertThrows(IllegalArgumentException.class,
                 () -> IrExpr.match(IrExpr.lit(0), List.of()));
     }

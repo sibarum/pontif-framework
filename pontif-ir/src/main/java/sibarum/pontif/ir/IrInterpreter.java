@@ -70,7 +70,7 @@ public final class IrInterpreter {
         SymExpr symbolicValue = toSymExpr(value);
         for (int i = 0; i < match.branches().size(); i++) {
             IrExpr.MatchBranch branch = match.branches().get(i);
-            Sort pattern = IrCompiler.compileSort(branch.pattern());
+            Sort pattern = module.sortFor(branch.pattern());
             ProofResult result = Refinements.satisfies(symbolicValue, pattern, simplifier);
             if (result instanceof ProofResult.Passed) {
                 try {
@@ -93,7 +93,7 @@ public final class IrInterpreter {
         StringBuilder patterns = new StringBuilder("[");
         for (int i = 0; i < match.branches().size(); i++) {
             if (i > 0) patterns.append(", ");
-            patterns.append(IrCompiler.compileSort(match.branches().get(i).pattern()));
+            patterns.append(module.sortFor(match.branches().get(i).pattern()));
         }
         patterns.append("]");
         throw new RuntimeCheckException(
@@ -138,10 +138,37 @@ public final class IrInterpreter {
             case GE -> (Long) l >= (Long) r;
             case EQ -> java.util.Objects.equals(l, r);
             case NE -> !java.util.Objects.equals(l, r);
+            case AND -> (Boolean) l && (Boolean) r;
+            case OR -> (Boolean) l || (Boolean) r;
         };
     }
 
     private Object evalCall(IrExpr.Call call, Environment env, CompiledModule module) {
+        // Lexical scope wins: if the name is locally bound (let / param), invoke
+        // the bound value as a closure rather than dispatching by name.
+        if (env.contains(call.functionName())) {
+            Object fnValue = env.lookup(call.functionName());
+            if (!(fnValue instanceof Closure closure)) {
+                throw new RuntimeCheckException(
+                        "'" + call.functionName() + "' is bound locally but is not a closure; got "
+                                + (fnValue == null ? "null" : fnValue.getClass().getSimpleName())
+                                + ": " + fnValue,
+                        call.origin());
+            }
+            List<Object> args = new ArrayList<>();
+            for (IrExpr argExpr : call.args()) {
+                args.add(eval(argExpr, env, module));
+            }
+            try {
+                return closure.invoke(args, this, module);
+            } catch (RuntimeCheckException rce) {
+                if (rce.origin().isPresent()) {
+                    throw rce;
+                }
+                throw new RuntimeCheckException(rce.getMessage(), call.origin(), rce);
+            }
+        }
+
         List<Object> argValues = new ArrayList<>();
         List<SymExpr> argSymbolics = new ArrayList<>();
         for (IrExpr argExpr : call.args()) {
@@ -187,6 +214,13 @@ public final class IrInterpreter {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof Boolean b) return SymExpr.bool(b);
+        if (value instanceof RecordValue r) {
+            LinkedHashMap<String, SymExpr> members = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> e : r.members().entrySet()) {
+                members.put(e.getKey(), toSymExpr(e.getValue()));
+            }
+            return SymExpr.record(members);
+        }
         throw new IllegalArgumentException(
                 "Cannot convert runtime value to SymExpr (type "
                         + (value == null ? "null" : value.getClass().getSimpleName()) + "): " + value);

@@ -8,6 +8,7 @@ import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,30 +21,57 @@ public final class IrCompiler {
         this.simplifier = simplifier;
     }
 
-    public CompiledModule compile(IrModule module) {
+    public CompiledModule compile(IrModule module) throws CompileException {
+        // Resolve type aliases first — strips IrStmt.TypeAlias declarations and
+        // substitutes every Named reference to an alias with the aliased sort.
+        // After this pass, the rest of the pipeline sees a module with only
+        // function declarations and concrete sorts.
+        IrModule resolved = AliasResolver.resolve(module);
+
+        // Static sort propagation: catch field-access typos and missing-field
+        // references before they reach runtime. Best-effort; the runtime still
+        // validates fields it couldn't resolve here.
+        SortChecker.check(resolved);
+
         DispatchTable dispatch = new DispatchTable();
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
         List<ProofResult> diagnostics = new ArrayList<>();
+        // Eager pre-compilation: every IrSort reachable from the module gets
+        // compiled to a Sort here. Match-branch patterns and other runtime sort
+        // lookups read from this map via CompiledModule.sortFor, so the runtime
+        // path is exception-free.
+        Map<IrSort, Sort> compiledSorts = new IdentityHashMap<>();
 
-        for (IrStmt stmt : module.statements()) {
+        for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
-                case IrStmt.FunctionDecl fd -> compileFunctionDecl(fd, dispatch, functions, diagnostics);
+                case IrStmt.FunctionDecl fd -> {
+                    for (IrParam p : fd.params()) registerSort(p.sort(), compiledSorts);
+                    registerSort(fd.returnSort(), compiledSorts);
+                    registerSortsInExpr(fd.body(), compiledSorts);
+                    compileFunctionDecl(fd, dispatch, functions, diagnostics, compiledSorts);
+                }
+                case IrStmt.TypeAlias ta -> { /* dropped by AliasResolver — unreachable */ }
+                case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
             }
         }
 
-        return new CompiledModule(module.name(), dispatch, functions, module.main(), diagnostics);
+        registerSortsInExpr(resolved.main(), compiledSorts);
+
+        return new CompiledModule(
+                resolved.name(), dispatch, functions, resolved.main(), compiledSorts, diagnostics);
     }
 
     private void compileFunctionDecl(
             IrStmt.FunctionDecl fd,
             DispatchTable dispatch,
             Map<FunctionDecl, CompiledModule.CompiledFunction> functions,
-            List<ProofResult> diagnostics) {
+            List<ProofResult> diagnostics,
+            Map<IrSort, Sort> compiledSorts) throws CompileException {
         List<FunctionDecl.Param> params = new ArrayList<>();
         for (IrParam p : fd.params()) {
-            params.add(new FunctionDecl.Param(p.name(), compileSort(p.sort())));
+            params.add(new FunctionDecl.Param(p.name(), compiledSorts.get(p.sort())));
         }
-        Sort returnSort = compileSort(fd.returnSort());
+        Sort returnSort = compiledSorts.get(fd.returnSort());
         FunctionDecl decl = FunctionDecl.declaration(fd.name(), params, returnSort);
         dispatch.register(decl);
 
@@ -53,7 +81,75 @@ public final class IrCompiler {
         diagnostics.add(ProofResult.passed());
     }
 
-    public static Sort compileSort(IrSort sort) {
+    /**
+     * Compiles {@code sort} (and all inner sorts it contains) and stores each
+     * in {@code map} keyed by its {@link IrSort} identity. Idempotent — a sort
+     * already in the map is skipped, which makes it safe to call multiple times
+     * with overlapping subtrees.
+     */
+    private static void registerSort(IrSort sort, Map<IrSort, Sort> map) throws CompileException {
+        if (map.containsKey(sort)) return;
+        Sort compiled = compileSort(sort);
+        map.put(sort, compiled);
+        switch (sort) {
+            case IrSort.Named n -> { /* leaf */ }
+            case IrSort.Refined r -> { /* predicate is SymExpr — not an IrSort */ }
+            case IrSort.Structural s -> {
+                for (IrSort inner : s.members().values()) registerSort(inner, map);
+            }
+            case IrSort.Function f -> {
+                for (IrSort p : f.paramSorts()) registerSort(p, map);
+                registerSort(f.returnSort(), map);
+            }
+        }
+    }
+
+    /**
+     * Walks an IrExpr tree and registers every {@link IrSort} referenced
+     * (let-binding sorts, lambda param/return sorts, match-branch patterns).
+     */
+    private static void registerSortsInExpr(IrExpr expr, Map<IrSort, Sort> map) throws CompileException {
+        switch (expr) {
+            case IrExpr.Lit l -> { }
+            case IrExpr.Bool b -> { }
+            case IrExpr.Var v -> { }
+            case IrExpr.SelfRef s -> { }
+            case IrExpr.BinOp op -> {
+                registerSortsInExpr(op.left(), map);
+                registerSortsInExpr(op.right(), map);
+            }
+            case IrExpr.LetIn l -> {
+                registerSort(l.declaredSort(), map);
+                registerSortsInExpr(l.value(), map);
+                registerSortsInExpr(l.body(), map);
+            }
+            case IrExpr.Call c -> {
+                for (IrExpr arg : c.args()) registerSortsInExpr(arg, map);
+            }
+            case IrExpr.Lambda lam -> {
+                for (IrParam p : lam.params()) registerSort(p.sort(), map);
+                registerSort(lam.returnSort(), map);
+                registerSortsInExpr(lam.body(), map);
+            }
+            case IrExpr.Apply app -> {
+                registerSortsInExpr(app.fn(), map);
+                for (IrExpr arg : app.args()) registerSortsInExpr(arg, map);
+            }
+            case IrExpr.Match m -> {
+                registerSortsInExpr(m.scrutinee(), map);
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    registerSort(b.pattern(), map);
+                    registerSortsInExpr(b.result(), map);
+                }
+            }
+            case IrExpr.Record r -> {
+                for (IrExpr v : r.members().values()) registerSortsInExpr(v, map);
+            }
+            case IrExpr.FieldAccess fa -> registerSortsInExpr(fa.base(), map);
+        }
+    }
+
+    public static Sort compileSort(IrSort sort) throws CompileException {
         return switch (sort) {
             case IrSort.Named n -> Sort.of(n.name());
             case IrSort.Refined r -> Sort.refined(r.name(), compileSymExpr(r.predicate()));
@@ -64,10 +160,17 @@ public final class IrCompiler {
                 }
                 yield Sort.structural(s.name(), members);
             }
+            case IrSort.Function f -> {
+                java.util.List<Sort> params = new java.util.ArrayList<>(f.paramSorts().size());
+                for (IrSort p : f.paramSorts()) {
+                    params.add(compileSort(p));
+                }
+                yield Sort.function(params, compileSort(f.returnSort()));
+            }
         };
     }
 
-    public static SymExpr compileSymExpr(IrExpr expr) {
+    public static SymExpr compileSymExpr(IrExpr expr) throws CompileException {
         return switch (expr) {
             case IrExpr.Lit l -> SymExpr.lit(l.value());
             case IrExpr.Bool b -> SymExpr.bool(b.value());
@@ -91,12 +194,15 @@ public final class IrCompiler {
                 }
                 yield fn;
             }
-            case IrExpr.Lambda lambda -> throw new UnsupportedOperationException(
-                    "Lambdas inside refinement predicates are not yet supported");
-            case IrExpr.Apply apply -> throw new UnsupportedOperationException(
-                    "Function applications inside refinement predicates are not yet supported");
-            case IrExpr.Match match -> throw new UnsupportedOperationException(
-                    "Match expressions inside refinement predicates are not yet supported");
+            case IrExpr.Lambda lambda -> throw new CompileException(
+                    "Lambdas inside refinement predicates are not yet supported",
+                    lambda.origin());
+            case IrExpr.Apply apply -> throw new CompileException(
+                    "Function applications inside refinement predicates are not yet supported",
+                    apply.origin());
+            case IrExpr.Match match -> throw new CompileException(
+                    "Match expressions inside refinement predicates are not yet supported",
+                    match.origin());
             case IrExpr.Record r -> {
                 java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
                 for (java.util.Map.Entry<String, IrExpr> e : r.members().entrySet()) {
@@ -108,7 +214,7 @@ public final class IrCompiler {
         };
     }
 
-    private static SymExpr compileBinOp(IrExpr.BinOp op) {
+    private static SymExpr compileBinOp(IrExpr.BinOp op) throws CompileException {
         SymExpr l = compileSymExpr(op.left());
         SymExpr r = compileSymExpr(op.right());
         return switch (op.op()) {
@@ -121,6 +227,8 @@ public final class IrCompiler {
             case GE -> SymExpr.cmp(l, SymExpr.CmpOp.GE, r);
             case EQ -> SymExpr.cmp(l, SymExpr.CmpOp.EQ, r);
             case NE -> SymExpr.cmp(l, SymExpr.CmpOp.NE, r);
+            case AND -> SymExpr.and(l, r);
+            case OR -> SymExpr.or(l, r);
         };
     }
 

@@ -1,0 +1,159 @@
+# Pontif alt syntax — canonical reference
+#
+# ============================================================================
+# LOAD-BEARING PRINCIPLES
+# ============================================================================
+#
+# 1. BRACKETS WRAP SORTS.  `[...]` is the universal sort delimiter.
+#    A bare identifier in sort position is sugar for `[Ident]`:
+#         Int   ≡   [Int]
+#
+# 2. COLON NARROWS.  `:` is the universal "narrows to" operator:
+#         x:Int                       # param x narrows to Int
+#         [Int:@>0]                   # Int narrows to values where @>0
+#         [Point(x:[Int:0])]          # Point's x narrows to (Int equal to 0)
+#         function f():Ret            # f narrows to producing Ret
+#    RHS of `:` is always a SORT, never a value.  Singleton constraints
+#    use `[Sort:value]` (e.g., `x:[Int:0]`, not `x:0`).
+#
+# 3. @ IS THE PRINCIPAL SUBJECT of the enclosing refinement:
+#         - Refinement [Sort:pred]:  the value being refined
+#         - Match arm:               the scrutinee
+#    Each refinement binds its own `@`.  Nested refinements SHADOW the
+#    outer `@`.  Methods get `self` injected as the receiver (so the
+#    receiver has a stable name independent of `@`).
+#
+# 4. `|` IS OR, `&` IS AND, `!` IS NOT, AT EVERY LEVEL:
+#         - Between sorts:    [Int|Float]  (union),  [Even & Positive]
+#         - In predicates:    [Int:@<0 | @>10],  [Int:!(@>0)]
+#    The single-character forms are LOGICAL.  Bitwise operators do not
+#    exist in Pontif — this is a math language, not a systems language.
+#
+# 5. IMPLICIT `@==EXPR` SUGAR.  When a refinement predicate is a plain
+#    expression with no top-level comparison, an implicit `@==` is
+#    inserted.  Applied per-disjunct/conjunct for `|`/`&` chains:
+#         [Int:n*2]      ≡   [Int:@==n*2]
+#         [Bool:true]    ≡   [Bool:@==true]
+#         [Int:0|1]      ≡   [Int:@==0 | @==1]
+#
+# 6. BASE-INFERENCE.  When ONE base sort is unambiguous from context,
+#    the base may be omitted:
+#         match (x:Int) { [@<0] -> ... }   # base inferred = Int
+#    Required to be explicit when context is ambiguous (union scrutinee,
+#    top-level function return, etc.):
+#         function foo():[Int:@>0]         # required, not [@>0]
+#
+# 7. MODULE LISTS USE `.{ ... }`.  Brackets are reserved for sorts:
+#         requires math.{min, max, avg, floor}
+#         exports  @.{factorial, isEven, isOdd, sign}
+#    Reads as "from X, take {these}".
+#
+# 8. MATCH IS TOTAL.  Every match must exhaustively cover its scrutinee's
+#    sort — the compiler proves the union of arm predicates equals the
+#    scrutinee's sort, or the program fails to compile.  A non-exhaustive
+#    match would betray Pontif's whole identity (proof at compile time,
+#    not runtime).  There are no "default" arms; if you want a catch-all,
+#    write the predicate that catches it explicitly.
+#
+# ============================================================================
+
+module alt.syntax
+
+requires math.{min, max, avg, floor}
+exports  @.{factorial, isEven, isOdd, sign}
+
+# === Pure functions + overloading ===========================================
+
+function factorial(n:[Int:0])  :Int -> 1
+function factorial(n:[Int:@>0]):Int -> n * factorial(n-1)
+
+# Dispatch enables mutual recursion.  Return sort `[Int:0|1]` is two
+# singleton refinements OR'd together (per-disjunct @== sugar).
+
+function isEven(n:[Int:0])  :[Int:0|1] -> 1
+function isEven(n:[Int:@>0]):[Int:0|1] -> isOdd(n-1)
+function isOdd (n:[Int:0])  :[Int:0|1] -> 0
+function isOdd (n:[Int:@>0]):[Int:0|1] -> isEven(n-1)
+
+# === Pattern matching =======================================================
+
+# Inside `match SCRUTINEE`, an arm's @ is the scrutinee.  When the
+# scrutinee has a single unambiguous base, the base may be omitted.
+
+function sign(n:Int):[Int:-1|0|1] -> match n
+  [@<0 ] -> -1
+  [@==0] ->  0
+  [@>0 ] ->  1
+
+# === Provability ============================================================
+
+# Body must produce a value that satisfies the return refinement.
+function squareNonneg(x:[Int:@>=0]):[Int:@>=0] -> x*x
+
+# === Spec-only declarations =================================================
+# No body needed when the return sort pins a single value.
+
+function alwaysTrue() :[Bool:true]
+function alwaysFalse():[Bool:false]
+
+# Return type parameterized by argument — value fully determined.
+function timesTwo(n:Int):[Int:n*2]
+
+# === Function sorts =========================================================
+# Function sorts use `Function(params):return`, wrapped in brackets like
+# any other sort.  Params may be named (for dependent returns) or
+# anonymous (positional).
+
+# Named params — return sort references the input.
+function addN(n:Int):[Function(x:Int):[Int:x+n]]
+
+# Anonymous params — used when return doesn't depend on inputs.
+function applyTwice(f:[Function(Int):Int], x:Int):Int -> f(f(x))
+
+# === Structs ================================================================
+
+# Declaration introduces a name; uses wrap in brackets.
+struct Point(x:Int, y:Int)
+
+# Static value, maximally specified — no body needed.
+let Point.origin:[Point(x:[Int:0], y:[Int:0])]
+
+# Static function — `@` in the return refinement is the produced Int.
+function Point.manhattan(p:Point):[Int:p.x+p.y]
+
+# Instance method.  `self` is the receiver (injected by method desugar).
+# `@` inside each field constraint is that field's value-under-refinement
+# (an Int here), so we use `self.x` / `self.y` to reach receiver fields.
+method Point.add(p:Point):[Point(x:[Int:self.x+p.x], y:[Int:self.y+p.y])]
+
+# Match destructure — bare idents in clause positions BIND.  A clause
+# like `field:[Sort:pred]` constrains the field's sort instead of binding.
+# Mixing is allowed.
+function nested(p:Point):Int -> match p {
+  [Point(x, y)] -> match x {
+    [@<0 ] -> -y
+    [@>=0] ->  y
+  }
+}
+
+# ============================================================================
+# REFERENCE — all bracket forms at a glance
+# ============================================================================
+#
+#   [Int]                              # base sort  (= Int, bare-ident sugar)
+#   [Int|Float|Bool]                   # union of sorts
+#   [Even & Positive]                  # intersection (refinements of one base)
+#   [Int:@>0]                          # refined, explicit predicate
+#   [Int:@>0 & @<10]                   # refined, AND
+#   [Int:@==0 | @==1 | @==2]           # refined, OR
+#   [Int:!(@>0)]                       # refined, NOT  (non-positive Ints)
+#   [Int:0|1|2]                        # same, via per-disjunct @== sugar
+#   [Int:42]                           # singleton  (= [Int:@==42])
+#   [Bool:true]  /  [Bool:false]       # bool singletons
+#   [Point(x:Int, y:Int)]              # structural sort
+#   [Point(x:[Int:0], y:[Int:0])]      # struct with value constraints
+#   [Point(x:[Int:@>0])]               # struct with refined field
+#   [Point(x, y)]                      # match destructure (binds x, y)
+#   [Point(x:[Int:@>0], y)]            # mixed: constrain x, bind y
+#   [Function(Int, Int):Int]           # function sort, anonymous params
+#   [Function(x:Int):[Int:x+1]]        # function sort, named (dependent)

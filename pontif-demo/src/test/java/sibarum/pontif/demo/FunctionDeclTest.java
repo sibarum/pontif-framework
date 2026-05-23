@@ -8,8 +8,8 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -48,14 +48,14 @@ class FunctionDeclTest {
     // --- Construction smoke tests ---
 
     @Test
-    void declarationConstructsWithoutBody() {
+    void declarationConstructsWithoutBody() throws Exception {
         assertFalse(POW.hasBody());
         assertEquals(2, POW.parameters().size());
         assertEquals("pow", POW.name());
     }
 
     @Test
-    void definitionRequiresBody() {
+    void definitionRequiresBody() throws Exception {
         FunctionDecl def = FunctionDecl.definition(
                 "id",
                 List.of(new FunctionDecl.Param("x", POSITIVE)),
@@ -67,7 +67,7 @@ class FunctionDeclTest {
     // --- Call-site verification ---
 
     @Test
-    void validCall_passes() {
+    void validCall_passes() throws Exception {
         // pow(5, 2) — both arguments satisfy
         ProofResult r = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.lit(5), SymExpr.lit(2)),
@@ -76,7 +76,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void negativeBaseViolatesPositivePrecondition() {
+    void negativeBaseViolatesPositivePrecondition() throws Exception {
         // pow(-3, 2) — b violates @>0
         ProofResult r = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.lit(-3), SymExpr.lit(2)),
@@ -88,7 +88,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void zeroExponentViolatesGE1Precondition() {
+    void zeroExponentViolatesGE1Precondition() throws Exception {
         // pow(5, 0) — x violates @>=1
         ProofResult r = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.lit(5), SymExpr.lit(0)),
@@ -100,7 +100,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void arityMismatch_fails() {
+    void arityMismatch_fails() throws Exception {
         ProofResult r = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.lit(5)),  // only one arg
                 SIMPLIFIER);
@@ -111,7 +111,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void symbolicArgument_yieldsResidual() {
+    void symbolicArgument_yieldsResidual() throws Exception {
         // pow(x, 2) where x is symbolic — can't decide if x > 0
         ProofResult r = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.var("x"), SymExpr.lit(2)),
@@ -122,13 +122,13 @@ class FunctionDeclTest {
     // --- Definition verification ---
 
     @Test
-    void bodylessDeclaration_definitionVerifiesTrivially() {
+    void bodylessDeclaration_definitionVerifiesTrivially() throws Exception {
         ProofResult r = FunctionCheck.verifyDefinition(POW, SIMPLIFIER);
         assertTrue(r.isPassed());
     }
 
     @Test
-    void bodyProducingExactReturnValue_definitionVerifies() {
+    void bodyProducingExactReturnValue_definitionVerifies() throws Exception {
         // forty_two() : Int[@=42] = Lit(42)
         Sort exactly42 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(42)));
@@ -142,7 +142,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void bodyProducingWrongConcreteValue_definitionFails() {
+    void bodyProducingWrongConcreteValue_definitionFails() throws Exception {
         // forty_three() : Int[@=42] = Lit(43)
         Sort exactly42 = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(42)));
@@ -157,7 +157,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void bodyUsingParameters_definitionYieldsResidualWithoutRung25Rules() {
+    void bodyUsingParameters_definitionYieldsResidualWithoutRung25Rules() throws Exception {
         // square(x: Int[@>=0]) : Int[@>=0] = x * x
         // Without HypothesisRules / SignAnalysis in the rule set, the simplifier
         // cannot connect the precondition x>=0 to the postcondition x*x>=0 —
@@ -178,7 +178,7 @@ class FunctionDeclTest {
     // --- Singleton-typed parameter / return ---
 
     @Test
-    void singletonTypedParameter_acceptsOnlyTheValue() {
+    void singletonTypedParameter_acceptsOnlyTheValue() throws Exception {
         // f(x: Int[@=1]) : Int[@=1]
         FunctionDecl f = FunctionDecl.declaration(
                 "f",
@@ -190,7 +190,7 @@ class FunctionDeclTest {
     }
 
     @Test
-    void powCallChain_concretePassesAndFailsCorrectly() {
+    void powCallChain_concretePassesAndFailsCorrectly() throws Exception {
         // Direct demonstration of the user's original example
         ProofResult ok = FunctionCheck.verifyCall(POW,
                 List.of(SymExpr.lit(10), SymExpr.lit(3)),

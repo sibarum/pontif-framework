@@ -15,7 +15,8 @@ public sealed interface IrExpr
 
     enum Op {
         ADD, MUL, SUB,
-        LT, LE, GT, GE, EQ, NE
+        LT, LE, GT, GE, EQ, NE,
+        AND, OR
     }
 
     static Lit lit(long value) { return new Lit(value, Origin.NONE); }

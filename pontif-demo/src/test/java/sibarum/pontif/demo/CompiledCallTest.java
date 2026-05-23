@@ -10,9 +10,9 @@ import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.demo.symbolic.ArithmeticRules;
-import sibarum.pontif.demo.symbolic.HypothesisRules;
-import sibarum.pontif.demo.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +50,7 @@ class CompiledCallTest {
     // --- Static classification ---
 
     @Test
-    void allConcrete_allPassing_isStaticallyComplete() {
+    void allConcrete_allPassing_isStaticallyComplete() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.lit(5), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -61,7 +61,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void concreteFailure_isClassifiedStaticallyFailed() {
+    void concreteFailure_isClassifiedStaticallyFailed() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.lit(-3), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -72,7 +72,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void symbolicArgWithoutHypothesis_yieldsDeferredCheck() {
+    void symbolicArgWithoutHypothesis_yieldsDeferredCheck() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.var("x"), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -86,7 +86,7 @@ class CompiledCallTest {
     // --- The headline: proofs ELIMINATE runtime checks ---
 
     @Test
-    void symbolicArgWithHypothesis_isStaticallyPassed() {
+    void symbolicArgWithHypothesis_isStaticallyPassed() throws Exception {
         // The hypothesis `x > 0` should let rung-2 simplification discharge `b > 0`
         // statically, leaving no runtime check.
         Simplifier withHypothesis = SIMPLIFIER.withContext(
@@ -100,7 +100,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void symbolicArgWithStrongerHypothesis_alsoStaticallyPassed() {
+    void symbolicArgWithStrongerHypothesis_alsoStaticallyPassed() throws Exception {
         Simplifier withHypothesis = SIMPLIFIER.withContext(
                 Context.of(SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GE, SymExpr.lit(10))));
         CompiledCall call = FunctionCheck.compileCall(POW,
@@ -110,7 +110,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void symbolicArgWithTooWeakHypothesis_stillDeferred() {
+    void symbolicArgWithTooWeakHypothesis_stillDeferred() throws Exception {
         // x > -10 doesn't imply x > 0; the runtime check must remain
         Simplifier withWeakHypothesis = SIMPLIFIER.withContext(
                 Context.of(SymExpr.cmp(SymExpr.var("x"), SymExpr.CmpOp.GT, SymExpr.lit(-10))));
@@ -124,7 +124,7 @@ class CompiledCallTest {
     // --- Runtime execution of deferred checks ---
 
     @Test
-    void runtimeCheck_passesWhenActualValueSatisfies() {
+    void runtimeCheck_passesWhenActualValueSatisfies() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.var("x"), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -134,7 +134,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void runtimeCheck_throwsWhenActualValueViolates() {
+    void runtimeCheck_throwsWhenActualValueViolates() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.var("x"), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -148,7 +148,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void staticallyFailed_executeChecks_throwsImmediately() {
+    void staticallyFailed_executeChecks_throwsImmediately() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.lit(-3), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -160,7 +160,7 @@ class CompiledCallTest {
     }
 
     @Test
-    void staticallyPassedCall_executeChecks_doesNothing() {
+    void staticallyPassedCall_executeChecks_doesNothing() throws Exception {
         CompiledCall call = FunctionCheck.compileCall(POW,
                 List.of(SymExpr.lit(5), SymExpr.lit(2)),
                 SIMPLIFIER);
@@ -171,7 +171,7 @@ class CompiledCallTest {
     // --- Round-trip: the full pipeline showing how proofs reduce runtime overhead ---
 
     @Test
-    void proofPipeline_strongHypothesisEliminatesCheck_weakOneKeepsIt() {
+    void proofPipeline_strongHypothesisEliminatesCheck_weakOneKeepsIt() throws Exception {
         // Same call, same arguments — different hypothesis context yields different
         // amount of deferred work.
         SymExpr arg = SymExpr.var("x");

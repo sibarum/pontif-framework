@@ -32,29 +32,29 @@ class M3TypeRuleTest {
     }
 
     @Test
-    void intLiteralChecksAsNat() {
+    void intLiteralChecksAsNat() throws Exception {
         assertEquals(NAT, arithmeticEngine().check(IntLiteral.of(5)));
     }
 
     @Test
-    void boolLiteralChecksAsBool() {
+    void boolLiteralChecksAsBool() throws Exception {
         assertEquals(BOOL, arithmeticEngine().check(Bool.of(true)));
     }
 
     @Test
-    void addOfNatsChecksAsNat() {
+    void addOfNatsChecksAsNat() throws Exception {
         assertEquals(NAT, arithmeticEngine().check(Add.of(IntLiteral.of(2), IntLiteral.of(3))));
     }
 
     @Test
-    void nestedAddChecksAsNat() {
+    void nestedAddChecksAsNat() throws Exception {
         var inner = Add.of(IntLiteral.of(1), IntLiteral.of(2));
         var outer = Add.of(inner, IntLiteral.of(3));
         assertEquals(NAT, arithmeticEngine().check(outer));
     }
 
     @Test
-    void addOfNatAndBoolViolatesRule() {
+    void addOfNatAndBoolViolatesRule() throws Exception {
         RuleViolation ex = assertThrows(
                 RuleViolation.class,
                 () -> arithmeticEngine().check(Add.of(IntLiteral.of(2), Bool.of(true))));
@@ -64,7 +64,7 @@ class M3TypeRuleTest {
     }
 
     @Test
-    void unregisteredNodeViolatesRule() {
+    void unregisteredNodeViolatesRule() throws Exception {
         RuleEngine bare = new RuleEngine();
         RuleViolation ex = assertThrows(
                 RuleViolation.class,
@@ -75,7 +75,7 @@ class M3TypeRuleTest {
     }
 
     @Test
-    void checkingDoesNotPreventEvaluation() {
+    void checkingDoesNotPreventEvaluation() throws Exception {
         var tree = Add.of(IntLiteral.of(2), IntLiteral.of(3));
         assertEquals(NAT, arithmeticEngine().check(tree));
         assertEquals(5L, Pontif.evalLong(tree));

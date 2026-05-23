@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class M5LetVarTest {
 
     @Test
-    void planAcceptanceTest_letXEquals5InXPlus3() {
+    void planAcceptanceTest_letXEquals5InXPlus3() throws Exception {
         var tree = Let.of("x",
                 IntLiteral.of(5),
                 Add.of(Var.of("x"), IntLiteral.of(3)));
@@ -23,13 +23,13 @@ class M5LetVarTest {
     }
 
     @Test
-    void letBindingReturnsBoundValueWhenBodyIsJustVar() {
+    void letBindingReturnsBoundValueWhenBodyIsJustVar() throws Exception {
         var tree = Let.of("x", IntLiteral.of(42), Var.of("x"));
         assertEquals(42L, Pontif.evalLong(tree));
     }
 
     @Test
-    void nestedLetsWithIndependentNames() {
+    void nestedLetsWithIndependentNames() throws Exception {
         var tree = Let.of("x", IntLiteral.of(1),
                 Let.of("y", IntLiteral.of(2),
                         Add.of(Var.of("x"), Var.of("y"))));
@@ -37,7 +37,7 @@ class M5LetVarTest {
     }
 
     @Test
-    void shadowingPrefersInnermostBinding() {
+    void shadowingPrefersInnermostBinding() throws Exception {
         var tree = Let.of("x", IntLiteral.of(1),
                 Let.of("x", IntLiteral.of(2),
                         Var.of("x")));
@@ -45,7 +45,7 @@ class M5LetVarTest {
     }
 
     @Test
-    void innerScopeDoesNotLeakToOuterReference() {
+    void innerScopeDoesNotLeakToOuterReference() throws Exception {
         var tree = Let.of("x", IntLiteral.of(1),
                 Add.of(
                         Let.of("x", IntLiteral.of(2), Var.of("x")),
@@ -54,7 +54,7 @@ class M5LetVarTest {
     }
 
     @Test
-    void letValueEvaluatedInOuterScope_notLetrec() {
+    void letValueEvaluatedInOuterScope_notLetrec() throws Exception {
         var tree = Let.of("x", IntLiteral.of(5),
                 Let.of("x",
                         Add.of(Var.of("x"), IntLiteral.of(1)),
@@ -63,7 +63,7 @@ class M5LetVarTest {
     }
 
     @Test
-    void unboundVariableRaisesDiagnostic() {
+    void unboundVariableRaisesDiagnostic() throws Exception {
         UnboundVariableException ex = assertThrows(
                 UnboundVariableException.class,
                 () -> Pontif.evalLong(Var.of("undefined")));
@@ -72,7 +72,7 @@ class M5LetVarTest {
     }
 
     @Test
-    void unboundVariableInsideExpressionStillCaught() {
+    void unboundVariableInsideExpressionStillCaught() throws Exception {
         var tree = Add.of(IntLiteral.of(1), Var.of("ghost"));
         UnboundVariableException ex = assertThrows(
                 UnboundVariableException.class,

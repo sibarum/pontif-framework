@@ -22,6 +22,8 @@ public final class Substitute {
             case SymExpr.Mul(SymExpr l, SymExpr r) -> new SymExpr.Mul(apply(l, bindings), apply(r, bindings));
             case SymExpr.Pow(SymExpr b, SymExpr e) -> new SymExpr.Pow(apply(b, bindings), apply(e, bindings));
             case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) -> new SymExpr.Cmp(apply(l, bindings), op, apply(r, bindings));
+            case SymExpr.And(SymExpr l, SymExpr r) -> new SymExpr.And(apply(l, bindings), apply(r, bindings));
+            case SymExpr.Or(SymExpr l, SymExpr r) -> new SymExpr.Or(apply(l, bindings), apply(r, bindings));
             case SymExpr.App(SymExpr fn, SymExpr arg) -> new SymExpr.App(apply(fn, bindings), apply(arg, bindings));
             case SymExpr.Lam(String param, Sort paramType, SymExpr body) -> substituteIntoLam(param, paramType, body, bindings);
             case SymExpr.Case(SymExpr scrutinee, List<SymExpr.CaseBranch> branches) -> {
@@ -55,6 +57,8 @@ public final class Substitute {
             case SymExpr.Mul(SymExpr l, SymExpr r) -> new SymExpr.Mul(applySelf(l, value), applySelf(r, value));
             case SymExpr.Pow(SymExpr b, SymExpr e) -> new SymExpr.Pow(applySelf(b, value), applySelf(e, value));
             case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) -> new SymExpr.Cmp(applySelf(l, value), op, applySelf(r, value));
+            case SymExpr.And(SymExpr l, SymExpr r) -> new SymExpr.And(applySelf(l, value), applySelf(r, value));
+            case SymExpr.Or(SymExpr l, SymExpr r) -> new SymExpr.Or(applySelf(l, value), applySelf(r, value));
             case SymExpr.App(SymExpr fn, SymExpr arg) -> new SymExpr.App(applySelf(fn, value), applySelf(arg, value));
             case SymExpr.Lam(String param, Sort paramType, SymExpr body) -> new SymExpr.Lam(param, paramType, applySelf(body, value));
             case SymExpr.Case(SymExpr scrutinee, List<SymExpr.CaseBranch> branches) ->
