@@ -8,16 +8,16 @@
         <artifactId>pontif-framework</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>pontif-parser</artifactId>
+    <artifactId>pontif-receipts</artifactId>
 
     <dependencies>
         <dependency>
             <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-ir</artifactId>
+            <artifactId>pontif-core</artifactId>
         </dependency>
         <dependency>
             <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-predicates</artifactId>
+            <artifactId>pontif-ir</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

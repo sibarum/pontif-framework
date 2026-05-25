@@ -1,11 +1,17 @@
 package sibarum.pontif.parser;
 
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.ir.CompileException;
+import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.predicates.ComplementResult;
+import sibarum.pontif.predicates.PredicateArithmetic;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -786,11 +792,34 @@ public final class AltParser {
             if (braced) consume();
 
             List<IrExpr.MatchBranch> branches = new ArrayList<>();
-            while (peek().kind() == AltToken.Kind.LBRACKET) {
-                IrSort pattern = parseSort();
-                expect(AltToken.Kind.ARROW);
-                IrExpr result = parseExpr();
-                branches.add(new IrExpr.MatchBranch(pattern, result));
+            int defaultArmIndex = -1;
+            Origin defaultArmOrigin = null;
+            IrExpr defaultArmResult = null;
+
+            while (isMatchArmStart()) {
+                if (defaultArmIndex >= 0) {
+                    throw new ParseException(
+                            "Match arms after '_' default are not allowed; '_' must be the last arm",
+                            peek().origin());
+                }
+                if (isUnderscoreArm()) {
+                    AltToken underscore = consume();
+                    expect(AltToken.Kind.ARROW);
+                    IrExpr result = parseExpr();
+                    defaultArmIndex = branches.size();
+                    defaultArmOrigin = underscore.origin();
+                    defaultArmResult = result;
+                    // Placeholder pattern — replaced after the loop with the
+                    // computed complement of the other arms' predicates.
+                    branches.add(new IrExpr.MatchBranch(
+                            new IrSort.Named("__default_placeholder", underscore.origin()),
+                            result));
+                } else {
+                    IrSort pattern = parseSort();
+                    expect(AltToken.Kind.ARROW);
+                    IrExpr result = parseExpr();
+                    branches.add(new IrExpr.MatchBranch(pattern, result));
+                }
             }
             if (braced) expect(AltToken.Kind.RBRACE);
 
@@ -799,9 +828,17 @@ public final class AltParser {
                         "Match expression must have at least one branch",
                         start.origin());
             }
-            // TODO totality: prove the disjunction of arm predicates covers
-            // the scrutinee's sort. For now the runtime catches non-matching
-            // values with RuntimeCheckException — should be moved compile-time.
+
+            // `_` desugar: replace the placeholder pattern with the complement
+            // of the other arms' union over the scrutinee's sort. After this,
+            // the IR sees only explicit refinements; totality holds by
+            // construction (the complement covers exactly the leftover values).
+            if (defaultArmIndex >= 0) {
+                IrSort defaultPattern = computeDefaultArmPattern(
+                        scrutinee, branches, defaultArmIndex, defaultArmOrigin);
+                branches.set(defaultArmIndex,
+                        new IrExpr.MatchBranch(defaultPattern, defaultArmResult));
+            }
 
             // Destructure desugar: for each structural-pattern branch, wrap
             // the result with let-bindings so the pattern's field names refer
@@ -811,6 +848,136 @@ public final class AltParser {
         } finally {
             contextualBaseStack.pop();
         }
+    }
+
+    /** True if the next token starts a match arm — either `[` or the `_` default. */
+    private boolean isMatchArmStart() {
+        return peek().kind() == AltToken.Kind.LBRACKET || isUnderscoreArm();
+    }
+
+    /** True if the next token is the `_` default-arm marker (an IDENT with text "_"). */
+    private boolean isUnderscoreArm() {
+        AltToken t = peek();
+        return t.kind() == AltToken.Kind.IDENT && t.text().equals("_");
+    }
+
+    /**
+     * Computes the {@link IrSort.Refined} pattern for a {@code _} default arm.
+     * The predicate is the complement of the union of explicit arms'
+     * predicates, taken over the scrutinee's sort (via
+     * {@link PredicateArithmetic#complement}).
+     *
+     * <p>The result is in IR form so the IR sees only explicit predicates —
+     * the {@code _} is fully desugared by the time it leaves the parser.
+     */
+    private IrSort computeDefaultArmPattern(
+            IrExpr scrutinee,
+            List<IrExpr.MatchBranch> branches,
+            int defaultArmIndex,
+            Origin defaultArmOrigin) throws ParseException {
+        IrSort scrutineeIrSort = inferScrutineeSort(scrutinee);
+        if (scrutineeIrSort == null) {
+            throw new ParseException(
+                    "Cannot infer scrutinee's sort for '_' default arm desugar; "
+                            + "give the scrutinee a known sort or write the explicit complement predicate",
+                    defaultArmOrigin);
+        }
+
+        // Union the explicit arms' predicates as SymExpr.
+        SymExpr unionPredicate = null;
+        for (int i = 0; i < branches.size(); i++) {
+            if (i == defaultArmIndex) continue;
+            IrSort armPattern = branches.get(i).pattern();
+            if (!(armPattern instanceof IrSort.Refined refined)) {
+                throw new ParseException(
+                        "'_' default arm currently requires all other arms to use refined sorts "
+                                + "(e.g., [@<0]); got non-refined arm pattern: " + armPattern,
+                        defaultArmOrigin);
+            }
+            SymExpr armPred;
+            try {
+                armPred = IrCompiler.compileSymExpr(refined.predicate());
+            } catch (CompileException ce) {
+                throw new ParseException(
+                        "Cannot compile arm predicate for '_' desugar: " + ce.getMessage(),
+                        defaultArmOrigin);
+            }
+            unionPredicate = (unionPredicate == null) ? armPred : SymExpr.or(unionPredicate, armPred);
+        }
+        // No explicit arms — complement of false = entire domain.
+        if (unionPredicate == null) unionPredicate = SymExpr.bool(false);
+
+        Sort scrutineeSort;
+        try {
+            scrutineeSort = IrCompiler.compileSort(scrutineeIrSort);
+        } catch (CompileException ce) {
+            throw new ParseException(
+                    "Cannot compile scrutinee's sort for '_' desugar: " + ce.getMessage(),
+                    defaultArmOrigin);
+        }
+
+        ComplementResult complement = PredicateArithmetic.complement(unionPredicate, scrutineeSort);
+        if (complement instanceof ComplementResult.Unknown unknown) {
+            throw new ParseException(
+                    "Cannot infer '_' default arm's predicate (" + unknown.reason()
+                            + "); write the predicate explicitly",
+                    defaultArmOrigin);
+        }
+        SymExpr complementSym = ((ComplementResult.Computed) complement).predicate();
+        IrExpr complementIr = symExprToIrExpr(complementSym, defaultArmOrigin);
+
+        return new IrSort.Refined(baseSortName(scrutineeIrSort), complementIr, defaultArmOrigin);
+    }
+
+    /** Returns the scrutinee's IrSort if it's a known in-scope Var; null otherwise. */
+    private IrSort inferScrutineeSort(IrExpr expr) {
+        if (expr instanceof IrExpr.Var v) {
+            return currentScope.get(v.name());
+        }
+        return null;
+    }
+
+    /**
+     * Converts a {@link SymExpr} back to an {@link IrExpr}, for the subset of
+     * shapes produced by {@link PredicateArithmetic#complement} (Bool, Lit,
+     * Self, Cmp of those, And, Or). Anything outside that subset is a
+     * framework bug — the complement result should always stay within the
+     * Int-comparison fragment.
+     */
+    private static IrExpr symExprToIrExpr(SymExpr expr, Origin origin) {
+        return switch (expr) {
+            case SymExpr.Bool b -> new IrExpr.Bool(b.value(), origin);
+            case SymExpr.Lit l -> new IrExpr.Lit(l.value(), origin);
+            case SymExpr.Self s -> new IrExpr.SelfRef(origin);
+            case SymExpr.Cmp(SymExpr left, SymExpr.CmpOp op, SymExpr right) ->
+                    new IrExpr.BinOp(cmpOpToIrOp(op),
+                            symExprToIrExpr(left, origin),
+                            symExprToIrExpr(right, origin),
+                            origin);
+            case SymExpr.And(SymExpr l, SymExpr r) ->
+                    new IrExpr.BinOp(IrExpr.Op.AND,
+                            symExprToIrExpr(l, origin),
+                            symExprToIrExpr(r, origin),
+                            origin);
+            case SymExpr.Or(SymExpr l, SymExpr r) ->
+                    new IrExpr.BinOp(IrExpr.Op.OR,
+                            symExprToIrExpr(l, origin),
+                            symExprToIrExpr(r, origin),
+                            origin);
+            default -> throw new IllegalStateException(
+                    "Unexpected SymExpr in complement result (outside Int-comparison fragment): " + expr);
+        };
+    }
+
+    private static IrExpr.Op cmpOpToIrOp(SymExpr.CmpOp op) {
+        return switch (op) {
+            case LT -> IrExpr.Op.LT;
+            case LE -> IrExpr.Op.LE;
+            case GT -> IrExpr.Op.GT;
+            case GE -> IrExpr.Op.GE;
+            case EQ -> IrExpr.Op.EQ;
+            case NE -> IrExpr.Op.NE;
+        };
     }
 
     /**

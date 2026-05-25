@@ -44,6 +44,7 @@ import sibarum.dasum.gui.core.window.Window;
 import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
+import sibarum.pontif.playground.generated.Icons;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 
@@ -163,6 +164,7 @@ public final class App {
                 Status.setDefaultMessage(
                     "Pontif Playground — edit code, press Run.  Click here to view the event log.",
                     Variant.DEFAULT);
+                Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
                 wireInput(win, cursors);
 

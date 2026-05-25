@@ -23,9 +23,35 @@
 #    outer `@`.  Methods get `self` injected as the receiver (so the
 #    receiver has a stable name independent of `@`).
 #
-# 4. `|` IS OR, `&` IS AND, `!` IS NOT, AT EVERY LEVEL:
-#         - Between sorts:    [Int|Float]  (union),  [Even & Positive]
-#         - In predicates:    [Int:@<0 | @>10],  [Int:!(@>0)]
+# 4. `|` IS OR, `&` IS AND, `!` IS NOT, AT EVERY LEVEL.  The level is
+#    determined by where in the bracket form the operator sits:
+#
+#         - SORT LEVEL — inside [...] but not after a `:`:
+#               [Int|Float]                 # union of bare sorts
+#               [Even & Positive]           # intersection
+#               [[Int:0]|[Float:@>1]]       # union of refined sorts
+#               [Int|[Float:@>1]]           # mixed bare + refined
+#
+#         - PREDICATE LEVEL — inside [Base:...]:
+#               [Int:@<0 | @>10]            # predicate-level OR
+#               [Int:@>0 & @<10]            # predicate-level AND
+#               [Int:!(@>0)]                # predicate-level NOT
+#
+#    Once `:` is consumed inside a bracket form, the rest is predicate
+#    until the matching `]`.  To get a sort-level union of refined sorts,
+#    each refined sort is its own sub-bracket: `[[Int:0]|[Int:1]]`.
+#
+#    NORMALIZATION: same-base sort-level unions / intersections collapse
+#    at parse time to a single refined sort with merged predicate, so
+#    there's one canonical IR shape per refinement equivalence class:
+#         [[Int:0]|[Int:1]]      ≡   [Int:0|1]
+#         [[Int:@>0]&[Int:@<10]] ≡   [Int:@>0 & @<10]
+#    Cross-base unions / intersections stay as sort-level Union /
+#    Intersection in the IR (no shared base to merge under).  Origins
+#    are preserved: the outer Refined gets a span across the whole
+#    source form; each sub-predicate keeps its parse-time origin so
+#    error messages still point at the offending disjunct.
+#
 #    The single-character forms are LOGICAL.  Bitwise operators do not
 #    exist in Pontif — this is a math language, not a systems language.
 #
@@ -48,12 +74,31 @@
 #         exports  @.{factorial, isEven, isOdd, sign}
 #    Reads as "from X, take {these}".
 #
-# 8. MATCH IS TOTAL.  Every match must exhaustively cover its scrutinee's
-#    sort — the compiler proves the union of arm predicates equals the
-#    scrutinee's sort, or the program fails to compile.  A non-exhaustive
-#    match would betray Pontif's whole identity (proof at compile time,
-#    not runtime).  There are no "default" arms; if you want a catch-all,
-#    write the predicate that catches it explicitly.
+# 8. MATCH IS TOTAL.  Every match must cover every possible value of the
+#    scrutinee's sort — no undefined behavior.  The compiler proves the
+#    union of arm predicates equals the scrutinee's sort, or the program
+#    fails to compile.  A non-exhaustive match would betray Pontif's
+#    whole identity (proof at compile time, not runtime).
+#
+#    Arms are evaluated TOP-TO-BOTTOM.  The first arm whose predicate
+#    matches the scrutinee wins.  Overlap is allowed: write the specific
+#    case first, the general case below.  Later arms covering values
+#    already handled by earlier arms are dead code (allowed; the
+#    compiler may warn).
+#
+#    The `_` default arm is the ergonomic catch-all.  It desugars at
+#    parse time to the explicit complement of the other arms' union
+#    over the scrutinee's sort:
+#         match x { [@<0] -> A; _ -> B }
+#       ≡ match x { [@<0] -> A; [@>=0] -> B }
+#    Same totality guarantee either way — the IR only ever sees explicit
+#    predicates.  `_` must be the last arm; only one `_` per match.
+#
+#    DISPATCH IS DIFFERENT.  Function-overload dispatch is *unordered*:
+#    the compiler verifies pairwise at registration time that no two
+#    overloads' param patterns can match the same value (non-overlapping
+#    overloads).  Resolution is then a function of the argument value
+#    alone, independent of declaration order.
 #
 # ============================================================================
 
@@ -141,7 +186,7 @@ function nested(p:Point):Int -> match p {
 # ============================================================================
 #
 #   [Int]                              # base sort  (= Int, bare-ident sugar)
-#   [Int|Float|Bool]                   # union of sorts
+#   [Int|Float|Bool]                   # union of bare sorts
 #   [Even & Positive]                  # intersection (refinements of one base)
 #   [Int:@>0]                          # refined, explicit predicate
 #   [Int:@>0 & @<10]                   # refined, AND
@@ -150,6 +195,9 @@ function nested(p:Point):Int -> match p {
 #   [Int:0|1|2]                        # same, via per-disjunct @== sugar
 #   [Int:42]                           # singleton  (= [Int:@==42])
 #   [Bool:true]  /  [Bool:false]       # bool singletons
+#   [[Int:0]|[Float:@>1]]              # union of refined sorts (cross-base)
+#   [[Int:0]|[Int:1]] ≡ [Int:0|1]      # union of refined sorts (same-base, normalized)
+#   [Int|[Float:@>1]]                  # mixed bare + refined union
 #   [Point(x:Int, y:Int)]              # structural sort
 #   [Point(x:[Int:0], y:[Int:0])]      # struct with value constraints
 #   [Point(x:[Int:@>0])]               # struct with refined field
