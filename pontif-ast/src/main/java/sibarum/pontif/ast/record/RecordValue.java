@@ -3,6 +3,7 @@ package sibarum.pontif.ast.record;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -15,7 +16,7 @@ public final class RecordValue {
         if (members == null) {
             throw new IllegalArgumentException("RecordValue members must be non-null");
         }
-        this.members = Map.copyOf(members);
+        this.members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
     }
 
     public Map<String, Object> members() {
@@ -45,10 +46,7 @@ public final class RecordValue {
     public String toString() {
         StringBuilder sb = new StringBuilder("{");
         boolean first = true;
-        // Iterate via a fresh LinkedHashMap to keep toString output stable when input
-        // was insertion-ordered. Map.copyOf preserves source order for LinkedHashMap
-        // inputs but not for arbitrary Maps; toString stability is best-effort.
-        for (Map.Entry<String, Object> e : new LinkedHashMap<>(members).entrySet()) {
+        for (Map.Entry<String, Object> e : members.entrySet()) {
             if (!first) sb.append(", ");
             sb.append(e.getKey()).append(": ").append(e.getValue());
             first = false;

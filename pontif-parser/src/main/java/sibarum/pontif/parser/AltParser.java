@@ -117,6 +117,25 @@ public final class AltParser {
      */
     private final Map<String, IrSort.Structural> declaredStructs = new LinkedHashMap<>();
 
+    /**
+     * Top-level let-bindings declared so far, keyed by their (possibly dotted)
+     * name. Maps to the binding's inferred sort. Two uses: (1) bare references
+     * to a let name in expression position get rewritten to a 0-arg
+     * {@link IrExpr.Call} so dispatch can find the binding; (2) feeds
+     * {@link #inferMaximalSort} when a later let references an earlier one.
+     */
+    private final Map<String, IrSort> declaredTopLevelLets = new LinkedHashMap<>();
+
+    /**
+     * Latest declared return sort for each function/method name (most-recent
+     * overload wins). Consulted by {@link #inferMaximalSort} for {@link
+     * IrExpr.Call} expressions, where the per-call narrowing isn't computed yet
+     * (that's the in-progress "Dispatch as the star" priority work — see
+     * TODO.md). For now, inference uses the declared return sort as a lossy
+     * upper bound on the call's actual narrowing.
+     */
+    private final Map<String, IrSort> declaredFunctionReturns = new LinkedHashMap<>();
+
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
     }
@@ -313,6 +332,7 @@ public final class AltParser {
             for (IrParam p : params) currentScope.put(p.name(), p.sort());
             try {
                 IrExpr body = parseExpr();
+                declaredFunctionReturns.put(name, returnSort);
                 return new IrStmt.FunctionDecl(name, params, returnSort, body, start.origin());
             } finally {
                 currentScope.clear();
@@ -322,6 +342,7 @@ public final class AltParser {
         // No body — try synthesis.
         IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
         if (derived != null) {
+            declaredFunctionReturns.put(name, returnSort);
             return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
         }
         return new IrStmt.NoOp(
@@ -377,6 +398,7 @@ public final class AltParser {
             // Spec-only — try synthesis (same path as functions).
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
+                declaredFunctionReturns.put(name, returnSort);
                 return new IrStmt.FunctionDecl(
                         name, desugaredParams, returnSort, derived, start.origin());
             }
@@ -392,6 +414,7 @@ public final class AltParser {
         for (IrParam p : desugaredParams) currentScope.put(p.name(), p.sort());
         try {
             IrExpr body = parseExpr();
+            declaredFunctionReturns.put(name, returnSort);
             return new IrStmt.FunctionDecl(
                     name, desugaredParams, returnSort, body, start.origin());
         } finally {
@@ -466,24 +489,185 @@ public final class AltParser {
         };
     }
 
-    // --- Top-level let (placeholder) ---
-    // Form: `let qualified.name:Sort [= value]`
+    // --- Top-level let ---
+    // Form: `let qualified.name (:Sort)? (= value)?`
     //
-    // No semantics yet — value synthesis from "maximally specific" sorts (e.g.,
-    // `let Point.origin:[Point(x:[Int:0], y:[Int:0])]` deriving the record
-    // `(x:0, y:0)`) is a TODO item awaiting the proof engine. Parses cleanly
-    // and emits NoOp so other declarations after it still get processed.
+    // Three cases:
+    //   `let X:Sort = value`  — explicit sort + value.  Sort acts as a
+    //                           sanity-check (its base name must match the
+    //                           inferred value's base name); the binding's
+    //                           effective sort is the value's maximally
+    //                           specific inferred sort (so dispatch routing
+    //                           has the tightest narrowing available).
+    //   `let X = value`        — sort fully inferred from value via
+    //                           {@link #inferMaximalSort}.
+    //   `let X:Sort`           — spec-only.  Stays NoOp pending the proof
+    //                           engine; the qualified-name synthesis path is
+    //                           a separate TODO item.
+    //
+    // Lowering: the first two cases produce {@code IrStmt.FunctionDecl(name,
+    // [], inferredSort, value)} — a 0-arg function in the dispatch table.
+    // Bare references to the let name in expression position are rewritten
+    // to {@code Call(name, [])} (see {@link #parsePrimary}) so users don't
+    // have to write {@code origin()} everywhere.
 
     private IrStmt parseLet() throws ParseException {
         AltToken start = expectKeyword("let");
         String name = parseDottedName();
-        expect(AltToken.Kind.COLON);
-        IrSort sort = parseSort();
+        IrSort declaredSort = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();
+            declaredSort = parseSort();
+        }
+        IrExpr value = null;
         if (peek().kind() == AltToken.Kind.EQUALS) {
             consume();
-            parseExpr();  // discard — no value-synthesis pipeline yet
+            value = parseExpr();
         }
-        return new IrStmt.NoOp("let " + name + ":" + sort, start.origin());
+        if (declaredSort == null && value == null) {
+            throw new ParseException(
+                    "let '" + name + "' needs either a sort annotation (':Sort') "
+                            + "or a value ('= EXPR')",
+                    start.origin());
+        }
+        if (value == null) {
+            // Spec-only — synthesis from maximally-specific sort is a separate
+            // TODO item (see docs/TODO.md). Stay NoOp so other decls process.
+            return new IrStmt.NoOp("let " + name + ":" + declaredSort, start.origin());
+        }
+        IrSort inferredSort = inferMaximalSort(value);
+        if (declaredSort != null) {
+            String declaredBase = baseSortName(declaredSort);
+            String inferredBase = baseSortName(inferredSort);
+            if (declaredBase != null && inferredBase != null
+                    && !declaredBase.equals(inferredBase)) {
+                throw new ParseException(
+                        "let '" + name + "' declared as " + declaredSort
+                                + " but value's inferred sort is " + inferredSort
+                                + " (base sort mismatch)",
+                        start.origin());
+            }
+        }
+        declaredTopLevelLets.put(name, inferredSort);
+        return new IrStmt.FunctionDecl(
+                name, List.of(), inferredSort, value, start.origin());
+    }
+
+    /**
+     * Computes the maximally-specific sort for an expression. Used by
+     * top-level let to give bindings the tightest narrowing the parser can
+     * derive at parse time. Best-effort: falls back to coarser shapes when
+     * tighter inference would require machinery that doesn't exist yet
+     * (notably per-call dispatch return narrowing).
+     *
+     * <p>Coverage:
+     * <ul>
+     *   <li>{@code Lit v}        → {@code [Int:@==v]} singleton.
+     *   <li>{@code Bool v}       → {@code [Bool:@==v]} singleton.
+     *   <li>{@code Var name}     → scope lookup; falls back to declared
+     *       top-level lets, else the loose {@code "_"} sort.
+     *   <li>{@code Record}       → structural sort with recursively-inferred
+     *       field sorts. Struct name is recovered via field-set lookup in
+     *       {@link #declaredStructs}; if no unique match, the sort is
+     *       anonymous (still useful for field access).
+     *   <li>{@code FieldAccess}  → base's sort's field sort, if base inferable.
+     *   <li>{@code BinOp}        → {@code [Int:@==expr]} or {@code [Bool:@==expr]}
+     *       per the op kind, via the implicit-@==EXPR sugar shape Pontif uses
+     *       elsewhere.
+     *   <li>{@code Call name a*} → declared return sort of {@code name}
+     *       (lossy — per-call narrowing waits on the dispatch-inference
+     *       priority work).
+     *   <li>{@code Apply / Lambda / Match / SelfRef / LetIn} → coarse
+     *       fallback (the {@code "_"} sort). Tighter shapes can be added when
+     *       a use case justifies them.
+     * </ul>
+     */
+    private IrSort inferMaximalSort(IrExpr expr) {
+        return switch (expr) {
+            case IrExpr.Lit lit -> new IrSort.Refined(
+                    "Int",
+                    new IrExpr.BinOp(IrExpr.Op.EQ,
+                            new IrExpr.SelfRef(lit.origin()),
+                            lit,
+                            lit.origin()),
+                    lit.origin());
+            case IrExpr.Bool b -> new IrSort.Refined(
+                    "Bool",
+                    new IrExpr.BinOp(IrExpr.Op.EQ,
+                            new IrExpr.SelfRef(b.origin()),
+                            b,
+                            b.origin()),
+                    b.origin());
+            case IrExpr.Var v -> {
+                IrSort scoped = currentScope.get(v.name());
+                if (scoped != null) yield scoped;
+                IrSort topLevel = declaredTopLevelLets.get(v.name());
+                if (topLevel != null) yield topLevel;
+                yield IrSort.named("_");
+            }
+            case IrExpr.Record r -> {
+                Map<String, IrSort> memberSorts = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    memberSorts.put(e.getKey(), inferMaximalSort(e.getValue()));
+                }
+                String matchedName = findStructByFieldSet(r.members().keySet());
+                yield new IrSort.Structural(
+                        matchedName != null ? matchedName : "_record",
+                        memberSorts,
+                        r.origin());
+            }
+            case IrExpr.FieldAccess fa -> {
+                IrSort baseSort = inferMaximalSort(fa.base());
+                if (baseSort instanceof IrSort.Structural sp) {
+                    IrSort fieldSort = sp.members().get(fa.fieldName());
+                    if (fieldSort != null) yield fieldSort;
+                }
+                yield IrSort.named("_");
+            }
+            case IrExpr.BinOp op -> {
+                String baseName = switch (op.op()) {
+                    case ADD, SUB, MUL -> "Int";
+                    case LT, LE, GT, GE, EQ, NE, AND, OR -> "Bool";
+                };
+                yield new IrSort.Refined(
+                        baseName,
+                        new IrExpr.BinOp(IrExpr.Op.EQ,
+                                new IrExpr.SelfRef(op.origin()),
+                                op,
+                                op.origin()),
+                        op.origin());
+            }
+            case IrExpr.Call call -> {
+                IrSort declaredReturn = declaredFunctionReturns.get(call.functionName());
+                yield declaredReturn != null ? declaredReturn : IrSort.named("_");
+            }
+            case IrExpr.Apply ap -> IrSort.named("_");
+            case IrExpr.Lambda lam -> new IrSort.Function(
+                    lam.params().stream().map(IrParam::sort).toList(),
+                    lam.returnSort(),
+                    lam.origin());
+            case IrExpr.Match m -> IrSort.named("_");
+            case IrExpr.LetIn l -> inferMaximalSort(l.body());
+            case IrExpr.SelfRef s -> IrSort.named("_");
+        };
+    }
+
+    /**
+     * Looks up a declared struct by exact field-set match. Returns the struct
+     * name if exactly one declared struct has that field set, else null
+     * (zero or multiple matches — in the multi-match case the inferred sort
+     * stays anonymous and the user can disambiguate with an explicit
+     * {@code let X:Foo = ...}).
+     */
+    private String findStructByFieldSet(Set<String> fieldSet) {
+        String found = null;
+        for (Map.Entry<String, IrSort.Structural> e : declaredStructs.entrySet()) {
+            if (e.getValue().members().keySet().equals(fieldSet)) {
+                if (found != null) return null;  // ambiguous
+                found = e.getKey();
+            }
+        }
+        return found;
     }
 
     // --- Struct declarations ---
@@ -739,7 +923,8 @@ public final class AltParser {
 
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
         IrExpr expr = parsePrimary();
-        // Postfix: .IDENT (field access), (args) (call) — left-to-right
+        // Postfix: .IDENT (field access), (args) (positional call or struct
+        // literal), {x=val,...} (by-name struct literal) — left-to-right.
         while (true) {
             AltToken t = peek();
             if (t.kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
@@ -747,25 +932,120 @@ public final class AltParser {
                 AltToken name = consume();
                 expr = new IrExpr.FieldAccess(expr, name.text(), t.origin());
             } else if (t.kind() == AltToken.Kind.LPAREN) {
-                // Call on an expression. If the expression is a chain of
-                // FieldAccess rooted at a Var (e.g., `Point.manhattan`), treat
-                // the whole dotted name as a Call so it hits the dispatch
-                // table. Otherwise it's an Apply on an arbitrary expression.
-                consume();
+                AltToken open = consume();
+                // Struct-literal shortcut: a bare ident matching a declared
+                // struct constructs a record (positional), not a Call.
+                if (expr instanceof IrExpr.Var v && declaredStructs.containsKey(v.name())) {
+                    expr = parsePositionalStructLiteral(
+                            declaredStructs.get(v.name()), v.name(), open);
+                    continue;
+                }
+                // Otherwise it's a Call on a dotted name, or an Apply on an
+                // arbitrary expression.
                 List<IrExpr> args = parseArgList();
                 AltToken close = expect(AltToken.Kind.RPAREN);
-                Origin callOrigin = t.spanTo(close);
+                Origin callOrigin = open.spanTo(close);
                 String dotted = extractDottedName(expr);
                 if (dotted != null) {
                     expr = new IrExpr.Call(dotted, args, callOrigin);
                 } else {
                     expr = new IrExpr.Apply(expr, args, callOrigin);
                 }
+            } else if (t.kind() == AltToken.Kind.LBRACE
+                    && expr instanceof IrExpr.Var v
+                    && declaredStructs.containsKey(v.name())) {
+                // By-name struct literal `Foo{x=a, y=b}`. The brace form is
+                // reserved for declared-struct construction in this slice;
+                // anonymous and dotted-name forms are deferred.
+                AltToken open = consume();
+                expr = parseByNameStructLiteral(
+                        declaredStructs.get(v.name()), v.name(), open);
             } else {
                 break;
             }
         }
         return expr;
+    }
+
+    /**
+     * Parses {@code (a, b, ...)} after a struct-name root — positional struct
+     * literal. The opening paren is already consumed.
+     *
+     * <p>Validates arity equals the struct's field count and maps positional
+     * args to declared field names in declaration order. The resulting
+     * {@link IrExpr.Record} iterates fields in declared order regardless of
+     * how the call was written.
+     */
+    private IrExpr.Record parsePositionalStructLiteral(
+            IrSort.Structural decl, String typeName, AltToken openParen)
+            throws ParseException {
+        List<IrExpr> args = parseArgList();
+        AltToken close = expect(AltToken.Kind.RPAREN);
+        List<String> declaredFields = new ArrayList<>(decl.members().keySet());
+        if (args.size() != declaredFields.size()) {
+            throw new ParseException(
+                    "Struct literal for '" + typeName + "' expects "
+                            + declaredFields.size() + " positional arg(s) but got "
+                            + args.size() + "; declared fields: " + declaredFields,
+                    openParen.origin());
+        }
+        Map<String, IrExpr> ordered = new LinkedHashMap<>();
+        for (int i = 0; i < args.size(); i++) {
+            ordered.put(declaredFields.get(i), args.get(i));
+        }
+        return new IrExpr.Record(ordered, openParen.spanTo(close));
+    }
+
+    /**
+     * Parses {@code {x=a, y=b, ...}} after a struct-name root — by-name struct
+     * literal. The opening brace is already consumed.
+     *
+     * <p>Validates: every field name belongs to the struct, every declared
+     * field is present exactly once (no missing, no duplicates). Reorders
+     * the resulting {@link IrExpr.Record} into declared field iteration order
+     * so the IR is canonical regardless of source order.
+     */
+    private IrExpr.Record parseByNameStructLiteral(
+            IrSort.Structural decl, String typeName, AltToken openBrace)
+            throws ParseException {
+        Map<String, IrExpr> provided = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            AltToken fieldTok = expect(AltToken.Kind.IDENT);
+            String fieldName = fieldTok.text();
+            if (!decl.members().containsKey(fieldName)) {
+                throw new ParseException(
+                        "Struct '" + typeName + "' has no field '" + fieldName
+                                + "'; declared fields: " + decl.members().keySet(),
+                        fieldTok.origin());
+            }
+            if (provided.containsKey(fieldName)) {
+                throw new ParseException(
+                        "Field '" + fieldName + "' appears more than once in struct "
+                                + "literal for '" + typeName + "'",
+                        fieldTok.origin());
+            }
+            expect(AltToken.Kind.EQUALS);
+            IrExpr value = parseExpr();
+            provided.put(fieldName, value);
+            first = false;
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        for (String declaredField : decl.members().keySet()) {
+            if (!provided.containsKey(declaredField)) {
+                throw new ParseException(
+                        "Struct literal for '" + typeName + "' is missing field '"
+                                + declaredField + "'; required fields: "
+                                + decl.members().keySet(),
+                        openBrace.origin());
+            }
+        }
+        Map<String, IrExpr> ordered = new LinkedHashMap<>();
+        for (String declaredField : decl.members().keySet()) {
+            ordered.put(declaredField, provided.get(declaredField));
+        }
+        return new IrExpr.Record(ordered, openBrace.spanTo(close));
     }
 
     /**
@@ -1106,7 +1386,19 @@ public final class AltParser {
                 // as a Call (qualified name) or stays as FieldAccess (field
                 // read) is decided when we see (or don't see) a trailing `(`.
                 AltToken nameTok = consume();
-                yield new IrExpr.Var(nameTok.text(), nameTok.origin());
+                String name = nameTok.text();
+                // Top-level let names lower to 0-arg Calls so dispatch can
+                // find the binding (and so `origin.x` reads as expected,
+                // becoming Call("origin", []).x). Skip when shadowed by a
+                // param / in-scope binding, or when the next token is `(`
+                // (the user is explicitly calling — let the postfix path
+                // build the Call directly with their args).
+                if (peek().kind() != AltToken.Kind.LPAREN
+                        && !currentScope.containsKey(name)
+                        && declaredTopLevelLets.containsKey(name)) {
+                    yield new IrExpr.Call(name, List.of(), nameTok.origin());
+                }
+                yield new IrExpr.Var(name, nameTok.origin());
             }
             case LPAREN -> {
                 consume();

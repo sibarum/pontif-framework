@@ -2,6 +2,8 @@ package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -100,7 +102,10 @@ public sealed interface IrExpr
             if (members == null) {
                 throw new IllegalArgumentException("Record members must be non-null");
             }
-            members = Map.copyOf(members);
+            // Preserve insertion order — record-literal field iteration order is
+            // load-bearing for destructure desugar, error messages, and Truffle
+            // lowering. Map.copyOf would silently strip the order.
+            members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
         }
     }
 

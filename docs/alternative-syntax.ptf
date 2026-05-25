@@ -160,8 +160,35 @@ function applyTwice(f:[Function(Int):Int], x:Int):Int -> f(f(x))
 # Declaration introduces a name; uses wrap in brackets.
 struct Point(x:Int, y:Int)
 
-# Static value, maximally specified — no body needed.
-let Point.origin:[Point(x:[Int:0], y:[Int:0])]
+# Construction.  Two surface forms, both produce the same record value:
+#   - Positional `Point(a, b)`               — args in declared field order.
+#   - By-name    `Point{x=a, y=b}`           — order-free; canonicalized to
+#                                              declared order in the IR.
+# `=` is the field/value separator — it's value-level assignment, distinct
+# from `:` (narrows-to).  The brace form is the general "by-name args"
+# syntax: anywhere positional `name(args)` is legal, `name{field=val,...}`
+# will be too (function calls and match-patterns are future slices; in this
+# slice it's struct constructors only).
+function makePoint(a:Int, b:Int):Point -> Point(a, b)
+function shiftedPoint(p:Point):Point -> Point{x=p.x+1, y=p.y+1}
+
+# Static value via direct construction.  Sort is inferred maximally-specific
+# from the value (`origin` ends up with sort [Point(x:[Int:@==0], y:[Int:@==0])])
+# so dispatch has the tightest narrowing.  Bare references to `origin` in
+# expression position rewrite to a 0-arg call so users don't have to write
+# `origin()` everywhere.
+let origin = Point(0, 0)
+let n = 5                                # n : [Int:@==5]
+let b = true                             # b : [Bool:@==true]
+let z = n + 1                            # z : [Int:@==(n() + 1)]
+
+# An explicit sort annotation acts as a base-name sanity check; the binding's
+# effective sort is still the value's maximally-specific inferred sort.
+let origin2:Point = Point(0, 0)
+
+# Static value, maximally specified — value synthesized from the sort.
+# This form still emits NoOp pending the proof engine's synthesis pipeline.
+let Point.staticOrigin:[Point(x:[Int:0], y:[Int:0])]
 
 # Static function — `@` in the return refinement is the produced Int.
 function Point.manhattan(p:Point):[Int:p.x+p.y]
@@ -205,3 +232,8 @@ function nested(p:Point):Int -> match p {
 #   [Point(x:[Int:@>0], y)]            # mixed: constrain x, bind y
 #   [Function(Int, Int):Int]           # function sort, anonymous params
 #   [Function(x:Int):[Int:x+1]]        # function sort, named (dependent)
+#
+# Value-level (struct construction) — NOT in brackets:
+#   Point(1, 2)                        # positional construction
+#   Point{x=1, y=2}                    # by-name construction
+#   Point{y=2, x=1}                    # by-name, free order (canonicalized)

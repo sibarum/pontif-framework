@@ -248,14 +248,86 @@ class AltParserIntegrationTest {
 
                 function manhattan(p:Point):Int -> p.x + p.y
 
-                manhattan(Point)
+                manhattan(Point(3, 4))
                 """;
-        // We can't construct records via alt syntax yet, so the final call would
-        // fail at runtime — but parsing should succeed.
-        // Just verify the parser produces something sensible:
-        IrModule m = AltParser.parseModule(src, "t.ptf");
-        assertEquals(2, m.statements().size());
-        assertNotNull(m.main());
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void struct_literal_positional_and_by_name_are_equivalent() throws Exception {
+        // Both forms construct the same record value; field access yields the
+        // same result regardless of source ordering.
+        String src = """
+                struct Point(x:Int, y:Int)
+
+                function manhattan(p:Point):Int -> p.x + p.y
+
+                manhattan(Point{y=4, x=3})
+                """;
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void let_topLevel_integerSingleton_evaluates() throws Exception {
+        // `let n = 5` registers n as a 0-arg function returning 5.
+        // Bare `n` in main expression position rewrites to Call("n", []).
+        String src = """
+                let n = 5
+                n + 1
+                """;
+        assertEquals(6L, run(src));
+    }
+
+    @Test
+    void let_crossReference_inferredSortStillCompiles() throws Exception {
+        // `m` references `n` — the inferred sort of m is [Int:@==(n()+1)],
+        // which must lower through the compiler without complaint.
+        String src = """
+                let n = 5
+                let m = n + 1
+                m * 2
+                """;
+        assertEquals(12L, run(src));
+    }
+
+    @Test
+    void let_record_fieldAccess_evaluatesEndToEnd() throws Exception {
+        // The original "I can't access the variable after construction"
+        // case: `origin.x` must work because `origin` rewrites to Call("origin", [])
+        // and the dispatch table resolves it to the 0-arg let binding.
+        String src = """
+                struct Point(x:Int, y:Int)
+                let origin = Point(3, 4)
+                origin.x + origin.y
+                """;
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void let_recordAsFunctionArg() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                function manhattan(p:Point):Int -> p.x + p.y
+                let origin = Point(3, 4)
+                manhattan(origin)
+                """;
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void struct_literal_distance_endToEnd() throws Exception {
+        // Mixed positional and by-name construction passed to a function that
+        // reads multiple fields. Exercises the LinkedHashMap canonicalization:
+        // {y=4, x=3} reorders to (x=3, y=4) so field access by name still works.
+        String src = """
+                struct Point(x:Int, y:Int)
+
+                function distSq(p:Point, q:Point):Int ->
+                    (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)
+
+                distSq(Point(0, 0), Point{y=4, x=3})
+                """;
+        assertEquals(25L, run(src));
     }
 
     @Test

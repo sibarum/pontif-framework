@@ -25,7 +25,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         COLON,                  // :
         DOT,                    // .
         AT,                     // @
-        EQUALS,                 // = (reserved for diagnostics; not used by any current form)
+        EQUALS,                 // = (value-level assignment; used by parseLet and by-name struct literals)
         ARROW,                  // ->
 
         // Operators (text carries the specific operator: +, -, *, /, <, <=, >, >=, ==, !=, &, |, !)

@@ -2,6 +2,8 @@ package sibarum.pontif.core.types;
 
 import sibarum.pontif.core.symbolic.SymExpr;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,7 +16,10 @@ public record Sort(
 
     public Sort {
         if (members != null) {
-            members = Map.copyOf(members);
+            // Preserve insertion order — struct field iteration order is
+            // load-bearing for destructure / construction; Map.copyOf would
+            // silently strip it.
+            members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
         }
         if (functionParams != null) {
             functionParams = List.copyOf(functionParams);
