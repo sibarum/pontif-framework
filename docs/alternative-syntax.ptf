@@ -176,8 +176,10 @@ function shiftedPoint(p:Point):Point -> Point{x=p.x+1, y=p.y+1}
 # from the value (`origin` ends up with sort [Point(x:[Int:@==0], y:[Int:@==0])])
 # so dispatch has the tightest narrowing.  Bare references to `origin` in
 # expression position rewrite to a 0-arg call so users don't have to write
-# `origin()` everywhere.
+# `origin()` everywhere.  Dotted let names work the same way:
+# `Point.origin.x` becomes `Call("Point.origin", []).x`.
 let origin = Point(0, 0)
+let Point.origin = Point(0, 0)        # `Point.origin` and `Point.origin.x` both work
 let n = 5                                # n : [Int:@==5]
 let b = true                             # b : [Bool:@==true]
 let z = n + 1                            # z : [Int:@==(n() + 1)]
@@ -185,6 +187,21 @@ let z = n + 1                            # z : [Int:@==(n() + 1)]
 # An explicit sort annotation acts as a base-name sanity check; the binding's
 # effective sort is still the value's maximally-specific inferred sort.
 let origin2:Point = Point(0, 0)
+
+# In-expression let: same surface form, lives inside a function body or any
+# other expression context.  The body of each let is the rest of the
+# enclosing expression — wrap multi-let chains in `{ ... }` to give them a
+# clean closing boundary.  Block braces are a pure delimiter (no IR-level
+# meaning; the block unwraps to its inner expression).
+function shifted(p:Point):Point ->
+{
+  let dx = p.x + 1
+  let dy = p.y + 1
+  Point(dx, dy)
+}
+
+# Single-let bodies don't need the wrapper:
+function plusOne(n:Int):Int -> let m = n + 1 m * 2
 
 # Static value, maximally specified — value synthesized from the sort.
 # This form still emits NoOp pending the proof engine's synthesis pipeline.
@@ -196,7 +213,17 @@ function Point.manhattan(p:Point):[Int:p.x+p.y]
 # Instance method.  `self` is the receiver (injected by method desugar).
 # `@` inside each field constraint is that field's value-under-refinement
 # (an Int here), so we use `self.x` / `self.y` to reach receiver fields.
+# The form below is spec-only — it pins the return refinement but needs the
+# proof engine to synthesize the body.  Methods with explicit bodies (next
+# line) work at runtime today.
 method Point.add(p:Point):[Point(x:[Int:self.x+p.x], y:[Int:self.y+p.y])]
+
+# Method with an explicit body — callable from instance values via
+# `receiver.add(other)`, which the parser routes to `Point.add(receiver,
+# other)` when it knows the receiver is a Point.
+method Point.plus(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+function combine(p:Point, q:Point):Point -> p.plus(q)
+let shifted = origin.plus(Point(1, 2))   # works on a let-bound value too
 
 # Match destructure — bare idents in clause positions BIND.  A clause
 # like `field:[Sort:pred]` constrains the field's sort instead of binding.
@@ -237,3 +264,6 @@ function nested(p:Point):Int -> match p {
 #   Point(1, 2)                        # positional construction
 #   Point{x=1, y=2}                    # by-name construction
 #   Point{y=2, x=1}                    # by-name, free order (canonicalized)
+#
+# Block expression — pure delimiter, useful for multi-let bodies:
+#   { let a = 1 let b = 2 a + b }      # evaluates to 3

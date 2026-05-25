@@ -304,6 +304,128 @@ class AltParserIntegrationTest {
     }
 
     @Test
+    void letExpr_simpleBinding_evaluates() throws Exception {
+        // In-expression let: `let m = 5 m + 1` evaluates to 6.
+        String src = "function f(n:Int):Int -> let m = 5 m + 1\nf(0)";
+        assertEquals(6L, run(src));
+    }
+
+    @Test
+    void letExpr_referencesParam() throws Exception {
+        String src = "function f(n:Int):Int -> let m = n + 1 m * 2\nf(3)";
+        assertEquals(8L, run(src));
+    }
+
+    @Test
+    void letExpr_nestedBindings() throws Exception {
+        String src = """
+                function f(n:Int):Int ->
+                  let a = n + 1
+                  let b = a * 2
+                  a + b
+                f(3)
+                """;
+        // a = 4, b = 8, a + b = 12
+        assertEquals(12L, run(src));
+    }
+
+    @Test
+    void letExpr_shadowsParam() throws Exception {
+        // Inside the let body, `n` refers to the let-bound 10, not param 3.
+        String src = "function f(n:Int):Int -> let n = 10 n + 1\nf(3)";
+        assertEquals(11L, run(src));
+    }
+
+    @Test
+    void methodCall_onParam_evaluatesEndToEnd() throws Exception {
+        // method declared, then called from a function via instance syntax.
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                function f(p:Point):Int -> p.magnitudeSq()
+                f(Point(3, 4))
+                """;
+        assertEquals(25L, run(src));
+    }
+
+    @Test
+    void methodCall_onLetBoundValue_evaluatesEndToEnd() throws Exception {
+        // The let-bound value is rewritten to a 0-arg Call before being
+        // passed as `self`. Verifies the rewrite composes with method routing.
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                let origin = Point(3, 4)
+                origin.magnitudeSq()
+                """;
+        assertEquals(25L, run(src));
+    }
+
+    @Test
+    void methodCall_chained_evaluatesEndToEnd() throws Exception {
+        // Two methods on Point: shifted produces a new Point, magnitudeSq
+        // reads from one. Composes naturally.
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.shifted(dx:Int, dy:Int):Point ->
+                  Point(self.x + dx, self.y + dy)
+                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                function f(p:Point):Int -> p.shifted(1, 1).magnitudeSq()
+                f(Point(2, 3))
+                """;
+        // p = (2,3), shifted(1,1) = (3,4), magnitudeSq = 9+16 = 25
+        assertEquals(25L, run(src));
+    }
+
+    @Test
+    void dottedLet_fieldAccess_evaluatesEndToEnd() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                let Point.origin = Point(3, 4)
+                Point.origin.x + Point.origin.y
+                """;
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void blockExpr_aroundLetChain_evaluates() throws Exception {
+        // User's example: explicit block braces around a let chain make the
+        // body boundary unambiguous (no greedy-Pratt edge cases).
+        String src = """
+                struct Point(x:Int, y:Int)
+                function shifted(p:Point):Point ->
+                {
+                  let dx = p.x + 1
+                  let dy = p.y + 1
+                  Point(dx, dy)
+                }
+                shifted(Point(2, 3)).x + shifted(Point(2, 3)).y
+                """;
+        // dx = 3, dy = 4, Point(3, 4); .x + .y = 7
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void blockExpr_isPureUnwrap() throws Exception {
+        // `{ EXPR }` and `EXPR` are interchangeable at runtime.
+        assertEquals(42L, run("{ 42 }"));
+        assertEquals(42L, run("{ { { 42 } } }"));
+    }
+
+    @Test
+    void letExpr_recordValue_fieldAccess() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                function dist(p:Point):Int ->
+                  let dx = p.x
+                  let dy = p.y
+                  dx * dx + dy * dy
+                dist(Point(3, 4))
+                """;
+        assertEquals(25L, run(src));
+    }
+
+    @Test
     void let_recordAsFunctionArg() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)

@@ -639,7 +639,12 @@ public final class AltParser {
             }
             case IrExpr.Call call -> {
                 IrSort declaredReturn = declaredFunctionReturns.get(call.functionName());
-                yield declaredReturn != null ? declaredReturn : IrSort.named("_");
+                if (declaredReturn != null) yield declaredReturn;
+                // Top-level let names lower to 0-arg Calls — check there too
+                // so method-call routing can see a let-receiver's actual sort.
+                IrSort letSort = declaredTopLevelLets.get(call.functionName());
+                if (letSort != null) yield letSort;
+                yield IrSort.named("_");
             }
             case IrExpr.Apply ap -> IrSort.named("_");
             case IrExpr.Lambda lam -> new IrSort.Function(
@@ -940,11 +945,31 @@ public final class AltParser {
                             declaredStructs.get(v.name()), v.name(), open);
                     continue;
                 }
-                // Otherwise it's a Call on a dotted name, or an Apply on an
-                // arbitrary expression.
                 List<IrExpr> args = parseArgList();
                 AltToken close = expect(AltToken.Kind.RPAREN);
                 Origin callOrigin = open.spanTo(close);
+
+                // Instance-method call routing: `receiver.method(args)`
+                // where receiver's inferred sort has a base name matching a
+                // declared method `Type.method`. Rewrites to
+                // `Call("Type.method", [receiver, ...args])`. The receiver
+                // itself gets the top-level-let rewrite first, so a let-bound
+                // value is invoked as a 0-arg call before being passed as
+                // `self`.
+                if (expr instanceof IrExpr.FieldAccess fa) {
+                    IrExpr receiver = rewriteTopLevelLetAccess(fa.base());
+                    String methodName = methodNameForReceiver(receiver, fa.fieldName());
+                    if (methodName != null) {
+                        List<IrExpr> rewrittenArgs = new ArrayList<>(args.size() + 1);
+                        rewrittenArgs.add(receiver);
+                        rewrittenArgs.addAll(args);
+                        expr = new IrExpr.Call(methodName, rewrittenArgs, callOrigin);
+                        continue;
+                    }
+                }
+
+                // Otherwise it's a Call on a dotted name, or an Apply on an
+                // arbitrary expression.
                 String dotted = extractDottedName(expr);
                 if (dotted != null) {
                     expr = new IrExpr.Call(dotted, args, callOrigin);
@@ -964,7 +989,87 @@ public final class AltParser {
                 break;
             }
         }
+        return rewriteTopLevelLetAccess(expr);
+    }
+
+    /**
+     * If {@code receiver}'s inferred sort has a base name {@code Type} and a
+     * function/method {@code Type.field} is declared, returns the
+     * fully-qualified method name. Used by the instance-method call routing
+     * in {@link #parsePrimaryWithPostfix}.
+     */
+    private String methodNameForReceiver(IrExpr receiver, String field) {
+        IrSort receiverSort = inferMaximalSort(receiver);
+        String typeName = baseSortName(receiverSort);
+        if (typeName == null || typeName.equals("_") || typeName.equals("_record")) {
+            return null;
+        }
+        String methodName = typeName + "." + field;
+        return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
+    }
+
+    /**
+     * Rewrites top-level let accesses to 0-arg dispatch calls so the dispatch
+     * table resolves them. Handles two shapes:
+     * <ul>
+     *   <li>Bare {@code Var(name)} — if {@code name} is a declared top-level
+     *       let and not shadowed by {@link #currentScope}, becomes
+     *       {@code Call(name, [])}.
+     *   <li>{@code FieldAccess} chain rooted at a Var — if any prefix of the
+     *       dotted name matches a declared let (longest match wins), that
+     *       prefix becomes a 0-arg Call and the remaining suffix stays as a
+     *       chain of FieldAccesses on the Call.
+     * </ul>
+     * Non-let shapes pass through unchanged.
+     */
+    private IrExpr rewriteTopLevelLetAccess(IrExpr expr) {
+        if (expr instanceof IrExpr.Var v) {
+            if (!currentScope.containsKey(v.name())
+                    && declaredTopLevelLets.containsKey(v.name())) {
+                return new IrExpr.Call(v.name(), List.of(), v.origin());
+            }
+            return expr;
+        }
+        if (expr instanceof IrExpr.FieldAccess) {
+            return rewriteDottedLetAccess(expr);
+        }
         return expr;
+    }
+
+    /**
+     * Walks a FieldAccess chain to its leftmost Var, looks for the longest
+     * dotted prefix that matches a declared top-level let, and rewrites that
+     * prefix to a 0-arg Call (keeping any trailing field accesses as a chain
+     * on top). Returns the expression unchanged if no such prefix matches
+     * or if the chain's root is shadowed by {@link #currentScope}.
+     */
+    private IrExpr rewriteDottedLetAccess(IrExpr expr) {
+        List<String> segments = new ArrayList<>();
+        IrExpr cur = expr;
+        while (cur instanceof IrExpr.FieldAccess fa) {
+            segments.add(0, fa.fieldName());
+            cur = fa.base();
+        }
+        if (!(cur instanceof IrExpr.Var rootVar)) return expr;
+        if (currentScope.containsKey(rootVar.name())) return expr;
+        segments.add(0, rootVar.name());
+
+        int matchedLength = -1;
+        for (int i = segments.size(); i >= 1; i--) {
+            String prefix = String.join(".", segments.subList(0, i));
+            if (declaredTopLevelLets.containsKey(prefix)) {
+                matchedLength = i;
+                break;
+            }
+        }
+        if (matchedLength == -1) return expr;
+
+        String prefix = String.join(".", segments.subList(0, matchedLength));
+        IrExpr result = new IrExpr.Call(prefix, List.of(), rootVar.origin());
+        for (int i = matchedLength; i < segments.size(); i++) {
+            result = new IrExpr.FieldAccess(result, segments.get(i), expr.origin());
+        }
+        return result;
     }
 
     /**
@@ -1046,6 +1151,61 @@ public final class AltParser {
             ordered.put(declaredField, provided.get(declaredField));
         }
         return new IrExpr.Record(ordered, openBrace.spanTo(close));
+    }
+
+    /**
+     * In-expression let: {@code let NAME (:Sort)? = VALUE BODY}.
+     *
+     * <p>Surface form mirrors top-level {@link #parseLet} for the common case
+     * but lives inside an expression scope. No explicit separator between
+     * VALUE and BODY — the value is parsed greedily via {@link #parseExpr},
+     * stopping naturally at non-operator tokens; BODY is the next expression.
+     * Single-ident names only (dotted lets remain top-level).
+     *
+     * <p>Lowering: {@link IrExpr.LetIn}. The bound name is pushed into
+     * {@link #currentScope} for body parsing only; on exit, the previous
+     * binding (if any — e.g., a shadowed function param) is restored.
+     */
+    private IrExpr parseLetExpr() throws ParseException {
+        AltToken start = expectKeyword("let");
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        String name = nameTok.text();
+        if (KEYWORDS.contains(name)) {
+            throw new ParseException(
+                    "Cannot bind keyword '" + name + "' as a let-name",
+                    nameTok.origin());
+        }
+        IrSort declaredSort = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();
+            declaredSort = parseSort();
+        }
+        expect(AltToken.Kind.EQUALS);
+        IrExpr value = parseExpr();
+        IrSort inferred = inferMaximalSort(value);
+        if (declaredSort != null) {
+            String declaredBase = baseSortName(declaredSort);
+            String inferredBase = baseSortName(inferred);
+            if (declaredBase != null && inferredBase != null
+                    && !declaredBase.equals(inferredBase)) {
+                throw new ParseException(
+                        "let '" + name + "' declared as " + declaredSort
+                                + " but value's inferred sort is " + inferred
+                                + " (base sort mismatch)",
+                        start.origin());
+            }
+        }
+        IrSort prevBinding = currentScope.get(name);
+        boolean hadPrev = currentScope.containsKey(name);
+        currentScope.put(name, inferred);
+        IrExpr body;
+        try {
+            body = parseExpr();
+        } finally {
+            if (hadPrev) currentScope.put(name, prevBinding);
+            else currentScope.remove(name);
+        }
+        return new IrExpr.LetIn(name, inferred, value, body, start.origin());
     }
 
     /**
@@ -1376,6 +1536,9 @@ public final class AltParser {
                 if (t.text().equals("match")) {
                     yield parseMatch();
                 }
+                if (t.text().equals("let")) {
+                    yield parseLetExpr();
+                }
                 if (KEYWORDS.contains(t.text())) {
                     throw new ParseException(
                             "Unexpected keyword '" + t.text() + "' in expression position",
@@ -1385,25 +1548,27 @@ public final class AltParser {
                 // dotted chain via FieldAccess. Whether the whole chain ends
                 // as a Call (qualified name) or stays as FieldAccess (field
                 // read) is decided when we see (or don't see) a trailing `(`.
+                // Top-level-let access (bare or dotted) is rewritten to a
+                // 0-arg Call at the end of parsePrimaryWithPostfix.
                 AltToken nameTok = consume();
-                String name = nameTok.text();
-                // Top-level let names lower to 0-arg Calls so dispatch can
-                // find the binding (and so `origin.x` reads as expected,
-                // becoming Call("origin", []).x). Skip when shadowed by a
-                // param / in-scope binding, or when the next token is `(`
-                // (the user is explicitly calling — let the postfix path
-                // build the Call directly with their args).
-                if (peek().kind() != AltToken.Kind.LPAREN
-                        && !currentScope.containsKey(name)
-                        && declaredTopLevelLets.containsKey(name)) {
-                    yield new IrExpr.Call(name, List.of(), nameTok.origin());
-                }
-                yield new IrExpr.Var(name, nameTok.origin());
+                yield new IrExpr.Var(nameTok.text(), nameTok.origin());
             }
             case LPAREN -> {
                 consume();
                 IrExpr inner = parseExpr();
                 expect(AltToken.Kind.RPAREN);
+                yield inner;
+            }
+            case LBRACE -> {
+                // Block expression: `{ EXPR }`. A pure delimiter — the block
+                // evaluates to its inner expression with no new semantics.
+                // Useful for giving multi-let chains an explicit closing
+                // boundary so greedy Pratt parsing of `let X = value BODY`
+                // terminates at the `}` instead of wandering into whatever
+                // follows in the enclosing context.
+                consume();
+                IrExpr inner = parseExpr();
+                expect(AltToken.Kind.RBRACE);
                 yield inner;
             }
             case AT -> {
