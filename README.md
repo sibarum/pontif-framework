@@ -115,5 +115,15 @@ Maven 3.9+. GraalVM Truffle 24.1.1 pulled transitively.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See
-<https://www.apache.org/licenses/LICENSE-2.0>.
+Pontif is dual-licensed:
+
+- **Source code** is licensed under the
+  [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+  See `LICENSE`.
+- **Documentation** (everything under `docs/`, plus `README.md` and
+  other text content in the repository) is licensed under the
+  [Creative Commons Attribution 4.0 International License
+  (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). See
+  `LICENSE-docs`.
+
+See `NOTICE` for the full dual-license statement and attribution.

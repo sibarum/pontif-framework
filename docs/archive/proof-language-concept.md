@@ -1,3 +1,12 @@
+> **ARCHIVED — predates current Pontif design.** This sketch was
+> written under an earlier project name ("SPN") and uses concepts and
+> framing that do not match the current language. Kept for historical
+> context only. The canonical current docs are
+> `docs/alternative-syntax.ptf`, `docs/glossary.md`, `docs/traits.md`,
+> `docs/receipt-graph.md`, and `docs/backward-language-design.md`.
+
+---
+
 # Symbols + Numbers (SPN)
 
 *A proof-carrying programming language where correctness is compiled, not tested.*

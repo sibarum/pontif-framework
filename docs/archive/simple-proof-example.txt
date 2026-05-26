@@ -1,3 +1,8 @@
+## ARCHIVED — predates current Pontif design. This pseudocode sketch
+## was written under an earlier project name ("SPN") and does not match
+## the current language. See docs/alternative-syntax.ptf for the
+## canonical current syntax.
+
 ## This file is just pseudocode to illustrate how the type system could work.
 
 ## Module declaration at the top of the file
