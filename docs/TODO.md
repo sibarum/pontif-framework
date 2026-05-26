@@ -103,28 +103,103 @@ etc.).
 
 ---
 
-## Unblocked — receipt-graph subsystem (next priority candidate)
+## ⭐ Next priority — receipt-graph subsystem (phased)
 
-Now that dispatch inference (Phase D) lands inferred return
-narrowings on call sites, recursive call back-references in the
-receipt-graph carry meaningful inductive hypotheses — the original
-reason for the pause.
+Dispatch inference (Phase D) lands inferred return narrowings on call
+sites, so recursive back-references in the graph carry meaningful
+inductive hypotheses — the original reason for the pause. Plan is
+vertical-slice-first: validate the whole drafter→issuer→notary loop on
+the simplest *interesting* obligation before growing the drafter.
 
-1. **Drafter** — extend beyond the `double` slice (currently in
-   `pontif-receipts`) to handle match arms, recursive calls, and
-   cross-function CallRefs. Consume `InferenceContext.fromModule(…)`
-   to pull dispatched return narrowings into the graph.
-2. **Notary** — three verifications: graph exists, skeleton matches a
-   fresh draft, hypothesis is supported (not refuted) by the graph.
-   Refutation-only; reads `(issuer, conclusion, reference)` from
-   closing receipts. Backed by `SignAnalysis` + `Refinements`.
-3. **Built-in default issuer + trust integration.** `SignAnalysis` +
-   equality covers the trivial fragment; trusted by the notary by
-   default, user-disablable.
-4. **Issuer plugin interface (Maven-style).** Still gated on Pontif's
-   not-yet-designed package-management / build tool. Receipt-graph
-   data shape is public; the plugin protocol on top of it is what's
-   deferred.
+### R1 — End-to-end loop on `square` ✅ landed
+
+Full drafter → issuer → notary loop on `square(x:Int):[Int:@>=0] ->
+x*x`, no drafter changes (existing non-recursive slice).
+
+- **`ReceiptGraphPrinter`** — indented-text tree renderer with
+  precedence-aware infix `SymExpr` + `Sort` renderers. The review
+  mechanism for later drafter phases. Renders the factorial shape
+  identically to the design doc.
+- **`BuiltinIssuer`** — eager-close: walks the graph, substitutes the
+  result var's body definition into the obligation, gathers path
+  facts (guard + sub-call IHs + non-defining receipts), discharges via
+  `SignAnalysis` then `Refinements`. Emits `ClosingReceipt` referencing
+  the discharging branch. ISSUER_ID `<pontif-default>`.
+- **`Notary`** — three verifications: `graphExists` (trivial),
+  `skeletonMatches` (re-draft + record structural equality — the
+  deterministic drafter makes `.equals()` the skeleton check),
+  `hypothesisSupported` (negate conclusion, substitute definition,
+  try to discharge the negation → refuted=reject, else accept).
+- **`PathFacts`** — shared helper gathering a branch's facts + result
+  var definition; used by both issuer (discharge obligation) and
+  notary (refute negation). Extension point for R3/R4's
+  back-reference IH traversal.
+
+### R2 — Drafter: match arms ✅ landed
+
+`Drafter.draftFunction` dispatches on body type: `match` → one
+`Branch` per arm via `draftMatchBranches`, non-match → the existing
+single unconditional branch. Each arm's guard is its
+`IrSort.Refined` pattern predicate with `@` bound to the renamed
+scrutinee (`[@<0]` over `match n` → `n_0 < 0`); the body equation is
+`r_0 = armResult`. Scrutinee can be any expression (binds `@` to e.g.
+`n_0 + 1`), not just a Var. Non-Refined (structural) patterns produce
+a guardless branch for now — struct-match drafting is a later slice.
+Skeleton-match round-trips for match bodies.
+
+### R3 — Drafter: recursion + cross-function CallRefs ✅ landed
+
+Calls in a body equation are hoisted (`hoistCalls`, post-order) into
+`CallRef`s with fresh result vars (`r_1`, `r_2`, … from a per-function
+counter), the call replaced by a var ref so the equation reads
+`r_0 = n_0 * r_1`. CallRef result-var sort = callee's return narrowing
+via `NarrowingInference.infer` over `InferenceContext.fromModule`
+(declared return for the recursive/single-overload case;
+`StaticDispatch`-resolved for overloaded cross-function calls). The
+recursive `CallRef` *is* the back-reference (no-duplicate-edges — it
+names the enclosing function, not a re-expansion) and carries the IH
+`r_1 >= 1` automatically. `factorial` renders byte-for-byte like the
+design doc. Verified: recursive, cross-function, and nested-call
+(`inc(inc(n))` → r_1, r_2 post-order) cases; skeleton-match
+round-trips.
+
+### R4 — Notary + issuer on the richer graphs ✅ landed
+
+The R1 issuer/notary already traversed branches and (via `PathFacts`)
+pulled in back-reference IHs, so the only missing piece was a leaf
+arithmetic step. **Empirical finding:** factorial discharged *nothing*
+out of the box — not because of the induction (that worked: the
+back-reference brought `r_1 >= 1` into scope and `SignAnalysis` gave
+`POSITIVE × POSITIVE = POSITIVE` for the product) but because
+`Sign.satisfies` is calibrated for the *rational* domain (`SymExpr.Frac`,
+used by the algebra layer), where `> 0` does NOT imply `>= 1`. Over
+Pontif's integer-only refinement domain it does.
+
+Fix: `IntegerDischarge` — an issuer-layer wrapper that adds the
+**integer-strictness bridge** (`POSITIVE ⟹ >= 1`, `NEGATIVE ⟹ <= -1`)
+on top of `SignAnalysis`/`Refinements`, leaving the shared `Sign`
+lattice domain-neutral (it still serves the rational algebra layer
+correctly). Used by both `BuiltinIssuer` (discharge) and `Notary`
+(refute negation). With it, factorial closes on **both** branches —
+base `1 >= 1` and recursive `n_0 * r_1 >= 1` — and the notary accepts
+both while still refuting a bogus `r_0 <= 0`.
+
+**Soundness gate:** the bridge is sound only while the refinement
+domain is integer-only; documented in `IntegerDischarge` as the
+integer counterpart of why float refinements were deferred.
+
+### R5 — Build-artifact emission
+
+Wire the drafter + formatter into the compile path so compiling a
+program emits its receipt-graph(s) to text files (e.g.
+`target/receipt-graphs/`) for review. Drafter stays standalone (per
+doc "invokable standalone"); don't bloat `CompiledModule`.
+
+### Deferred — issuer plugin interface (Maven-style)
+
+Still gated on Pontif's not-yet-designed package-management / build
+tool. Receipt-graph data shape is public; the plugin protocol on top
+of it is what's deferred.
 
 ---
 
@@ -368,10 +443,16 @@ to ship — these are obligations whose closing receipts the notary
 can't refute today, where a richer issuer or external solver would
 earn its keep.
 
-- **Inductive postconditions / magnitude-of-product.** The trivial
-  issuer handles sign-analysis (`x*x >= 0` for any `x:Int`), but not
-  things like `factorial(n) >= 1`. Z3-style linear arithmetic, an
-  inductive prover, or a hand-written issuer module all fit.
+- **Inductive postconditions beyond sign reasoning.** The trivial
+  issuer handles more than first assumed: `x*x >= 0`, and — since R4's
+  integer-strictness bridge — `factorial(n) >= 1` (the induction is
+  carried by the graph's back-reference; the bridge supplies the
+  `POSITIVE ⟹ >= 1` leaf step). What's still out of reach is anything
+  needing genuine linear/non-linear arithmetic the sign lattice can't
+  express — e.g. `sum(n) == n*(n+1)/2`, or bounds that depend on the
+  *magnitude* of a recursive result rather than just its sign. Z3-style
+  arithmetic, an inductive prover, or a hand-written issuer module fit
+  there.
 - **Proof Authority (PA) trust model — roadmap goal, low priority.**
   Borrow from how Certificate Authorities work: designate certain
   issuers / oracle modules as trusted *Proof Authorities*, and

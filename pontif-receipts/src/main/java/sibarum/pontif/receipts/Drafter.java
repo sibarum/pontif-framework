@@ -2,11 +2,16 @@ package sibarum.pontif.receipts;
 
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrCompiler;
+import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
+import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.ir.InferenceContext;
+import sibarum.pontif.ir.NarrowingInference;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,21 +31,32 @@ import java.util.Optional;
  * downstream consumers (issuers, notary) operate on the receipt-graph,
  * not on IR.
  *
- * <p><b>Current slice (vertical):</b> non-recursive arithmetic bodies — no
- * match arms, no recursive or external calls. The function's body is
- * transcribed into a single unconditional {@link Branch} carrying one
- * {@link InitialReceipt} of shape {@code r_0 = body}, where the body's
- * parameter references have been renamed to their call-instance form
- * ({@code n} → {@code n_0}).
- *
- * <p><b>Subsequent slices</b> will layer in:
+ * <p><b>Current slice (vertical):</b>
  * <ul>
- *   <li>Match arms → one {@link Branch} per arm with guard + initial receipt
- *       for the arm body.
- *   <li>Recursive calls → {@link CallRef} as a back-reference (by name) to
- *       the function's own root, with a fresh {@link Var} per call instance.
- *   <li>External calls → {@link CallRef} to other functions in the module.
+ *   <li>Non-recursive arithmetic bodies → a single unconditional
+ *       {@link Branch} carrying one {@link InitialReceipt} of shape
+ *       {@code r_0 = body}.
+ *   <li>{@code match} bodies → one {@link Branch} per arm. The arm's
+ *       guard is its refinement pattern's predicate with {@code @}
+ *       bound to the (renamed) scrutinee (e.g., {@code [@<0]} over
+ *       {@code match n} becomes guard {@code n_0 < 0}); the arm's body
+ *       equation is {@code r_0 = armResult}.
  * </ul>
+ * In all cases parameter references are renamed to their call-instance
+ * form ({@code n} → {@code n_0}).
+ *
+ * <p>Calls inside a body equation are <b>hoisted</b> into {@link CallRef}s:
+ * each call gets a fresh result var ({@code r_1}, {@code r_2}, …) and is
+ * replaced by a reference to it, so the body equation reads in terms of
+ * the call results (e.g. {@code n * factorial(n-1)} → CallRef
+ * {@code factorial(n_0 - 1) -> r_1} plus equation {@code r_0 = n_0 * r_1}).
+ * A {@code CallRef} naming the enclosing function <em>is</em> the
+ * back-reference (no-duplicate-edges rule); a {@code CallRef} naming
+ * another function is an external call. The call result var's sort is
+ * the callee's return narrowing (declared for the recursive case,
+ * {@link StaticDispatch}-resolved for overloaded cross-function calls
+ * via {@link NarrowingInference}), so the back-reference carries the
+ * inductive hypothesis automatically.
  *
  * <p>See {@code docs/receipt-graph.md} for the design and worked example.
  */
@@ -50,10 +66,13 @@ public final class Drafter {
 
     /** Drafts a receipt-graph for every {@link IrStmt.FunctionDecl} in the module. */
     public static ReceiptGraph draft(IrModule module) throws CompileException {
+        // Module-wide inference context: overloads + declared returns + struct
+        // defs, used to resolve each hoisted call's return narrowing.
+        InferenceContext baseCtx = InferenceContext.fromModule(module);
         Map<String, Node> roots = new LinkedHashMap<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                roots.put(fd.name(), draftFunction(fd));
+                roots.put(fd.name(), draftFunction(fd, baseCtx));
             }
         }
         return new ReceiptGraph(roots);
@@ -63,37 +82,175 @@ public final class Drafter {
      * Drafts a single function as call instance 0. Each parameter {@code n}
      * becomes the symbolic variable {@code n_0}; the result variable is
      * {@code r_0}. Body references to params are renamed accordingly so the
-     * receipt reads in terms of the call-instance variables.
+     * receipt reads in terms of the call-instance variables. Sub-call result
+     * vars ({@code r_1}, {@code r_2}, …) are allocated by a per-function
+     * counter shared across all branches.
      */
-    private static Node draftFunction(IrStmt.FunctionDecl fd) throws CompileException {
+    private static Node draftFunction(IrStmt.FunctionDecl fd, InferenceContext baseCtx)
+            throws CompileException {
         int callIndex = 0;
 
         // Build params + a rename map (body's IrExpr.Var("n") → SymExpr.Var("n_0")).
         List<Param> params = new ArrayList<>(fd.params().size());
         Map<String, SymExpr> renameBindings = new HashMap<>();
+        InferenceContext ctx = baseCtx;
         for (IrParam p : fd.params()) {
             String varName = p.name() + "_" + callIndex;
             params.add(new Param(varName, IrCompiler.compileSort(p.sort())));
             renameBindings.put(p.name(), SymExpr.var(varName));
+            // Seed the param under its ORIGINAL name so call-arg narrowing
+            // inference (which sees the un-renamed body) can resolve it.
+            ctx = ctx.withVar(p.name(), p.sort());
         }
 
         Var resultVar = new Var(
                 "r_" + callIndex,
                 IrCompiler.compileSort(fd.returnSort()));
 
-        // Lift the body to a SymExpr, then rename param references.
-        SymExpr bodySym = IrCompiler.compileSymExpr(fd.body());
-        SymExpr renamedBody = Substitute.apply(bodySym, renameBindings);
+        // Sub-call result vars start at r_1 (r_0 is the function result).
+        int[] callCounter = {1};
 
-        // Body equation: result_var == body (with renamed param refs).
+        List<Branch> branches = fd.body() instanceof IrExpr.Match match
+                ? draftMatchBranches(match, resultVar, renameBindings, ctx, callCounter)
+                : List.of(draftUnconditionalBranch(fd.body(), resultVar, renameBindings, ctx, callCounter));
+
+        return new Node(fd.name(), params, resultVar, branches);
+    }
+
+    /**
+     * Drafts a single unconditional branch from a non-{@code match} body:
+     * calls hoisted into {@link CallRef}s, one body equation
+     * {@code r_0 = body} with param refs renamed and calls replaced by
+     * their result vars.
+     */
+    private static Branch draftUnconditionalBranch(
+            IrExpr body, Var resultVar, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, int[] callCounter)
+            throws CompileException {
+        List<CallRef> calls = new ArrayList<>();
+        SymExpr rhs = transcribeBody(body, renameBindings, ctx, callCounter, calls);
         InitialReceipt bodyReceipt = new InitialReceipt(
-                SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, renamedBody));
+                SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
+        return new Branch(Optional.empty(), List.of(bodyReceipt), calls);
+    }
 
-        Branch branch = new Branch(
-                Optional.empty(),
-                List.of(bodyReceipt),
-                List.of());
+    /**
+     * Drafts one {@link Branch} per match arm. The scrutinee is lifted +
+     * renamed once; each arm's refinement-pattern predicate becomes the
+     * branch guard (with {@code @} bound to the scrutinee). The arm's
+     * result is transcribed with calls hoisted into the branch's
+     * {@link CallRef}s, leaving a body equation {@code r_0 = armResult}.
+     *
+     * <p>Arms whose pattern isn't an {@link IrSort.Refined} (e.g.
+     * structural patterns) currently produce a guardless branch — struct
+     * match drafting is a later slice.
+     */
+    private static List<Branch> draftMatchBranches(
+            IrExpr.Match match, Var resultVar, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, int[] callCounter)
+            throws CompileException {
+        SymExpr scrutinee = Substitute.apply(
+                IrCompiler.compileSymExpr(match.scrutinee()), renameBindings);
 
-        return new Node(fd.name(), params, resultVar, List.of(branch));
+        List<Branch> branches = new ArrayList<>(match.branches().size());
+        for (IrExpr.MatchBranch arm : match.branches()) {
+            Optional<SymExpr> guard = Optional.empty();
+            if (arm.pattern() instanceof IrSort.Refined refined) {
+                SymExpr predicate = Substitute.apply(
+                        IrCompiler.compileSymExpr(refined.predicate()), renameBindings);
+                // Bind @ (the refinement subject) to the scrutinee.
+                guard = Optional.of(Substitute.applySelf(predicate, scrutinee));
+            }
+            List<CallRef> calls = new ArrayList<>();
+            SymExpr rhs = transcribeBody(arm.result(), renameBindings, ctx, callCounter, calls);
+            InitialReceipt bodyReceipt = new InitialReceipt(
+                    SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
+            branches.add(new Branch(guard, List.of(bodyReceipt), calls));
+        }
+        return branches;
+    }
+
+    /**
+     * Transcribes a body expression into the body-equation RHS: hoists
+     * every call into {@code calls} (replacing it with a fresh result var)
+     * then lifts the call-free expression to a {@link SymExpr} with param
+     * refs renamed.
+     */
+    private static SymExpr transcribeBody(
+            IrExpr body, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, int[] callCounter, List<CallRef> calls)
+            throws CompileException {
+        IrExpr hoisted = hoistCalls(body, renameBindings, ctx, callCounter, calls);
+        return Substitute.apply(IrCompiler.compileSymExpr(hoisted), renameBindings);
+    }
+
+    /**
+     * Walks {@code expr}, replacing every {@link IrExpr.Call} with a fresh
+     * result-var reference and appending a {@link CallRef} to {@code calls}.
+     * Post-order: a call's arguments are hoisted before the call itself, so
+     * nested calls ({@code f(g(x))}) get earlier result-var numbers.
+     *
+     * <p>The {@code CallRef}'s argument bindings are the (call-free) args
+     * lifted to {@link SymExpr} and renamed; its result var's sort is the
+     * callee's return narrowing per {@link #resolveCallReturnSort}.
+     */
+    private static IrExpr hoistCalls(
+            IrExpr expr, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, int[] callCounter, List<CallRef> calls)
+            throws CompileException {
+        return switch (expr) {
+            case IrExpr.Call c -> {
+                List<IrExpr> hoistedArgs = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) {
+                    hoistedArgs.add(hoistCalls(a, renameBindings, ctx, callCounter, calls));
+                }
+                String varName = "r_" + (callCounter[0]++);
+                Sort returnSort = resolveCallReturnSort(c, ctx);
+                List<SymExpr> argBindings = new ArrayList<>(hoistedArgs.size());
+                for (IrExpr a : hoistedArgs) {
+                    argBindings.add(Substitute.apply(IrCompiler.compileSymExpr(a), renameBindings));
+                }
+                calls.add(new CallRef(c.functionName(), argBindings, new Var(varName, returnSort)));
+                yield IrExpr.var(varName);
+            }
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(),
+                    hoistCalls(op.left(), renameBindings, ctx, callCounter, calls),
+                    hoistCalls(op.right(), renameBindings, ctx, callCounter, calls),
+                    op.origin());
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    hoistCalls(fa.base(), renameBindings, ctx, callCounter, calls),
+                    fa.fieldName(), fa.origin());
+            case IrExpr.Record r -> {
+                java.util.Map<String, IrExpr> members = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    members.put(e.getKey(),
+                            hoistCalls(e.getValue(), renameBindings, ctx, callCounter, calls));
+                }
+                yield new IrExpr.Record(r.typeName(), members, r.origin());
+            }
+            case IrExpr.LetIn l -> new IrExpr.LetIn(
+                    l.name(), l.declaredSort(),
+                    hoistCalls(l.value(), renameBindings, ctx, callCounter, calls),
+                    hoistCalls(l.body(), renameBindings, ctx, callCounter, calls),
+                    l.origin());
+            // Leaves and forms not yet call-hoisted (Apply/Lambda/Match nested
+            // in a body equation are rare; transcribed as-is for now).
+            default -> expr;
+        };
+    }
+
+    /**
+     * The {@link Sort} for a hoisted call's result var: the callee's return
+     * narrowing, resolved through {@link NarrowingInference} (which picks the
+     * dispatched overload for overloaded callees, falling back to the
+     * declared return). Falls back to bare {@code Int} when inference yields
+     * nothing — that simply means the call contributes no inductive
+     * hypothesis.
+     */
+    private static Sort resolveCallReturnSort(IrExpr.Call call, InferenceContext ctx)
+            throws CompileException {
+        IrSort narrowing = NarrowingInference.infer(call, ctx);
+        return narrowing != null ? IrCompiler.compileSort(narrowing) : Sort.of("Int");
     }
 }
