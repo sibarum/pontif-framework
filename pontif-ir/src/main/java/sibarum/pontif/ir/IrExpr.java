@@ -32,7 +32,8 @@ public sealed interface IrExpr
     static Apply apply(IrExpr fn, List<IrExpr> args) { return new Apply(fn, args, Origin.NONE); }
     static Match match(IrExpr scrutinee, List<MatchBranch> branches) { return new Match(scrutinee, branches, Origin.NONE); }
     static MatchBranch matchBranch(IrSort pattern, IrExpr result) { return new MatchBranch(pattern, result); }
-    static Record record(Map<String, IrExpr> members) { return new Record(members, Origin.NONE); }
+    static Record record(Map<String, IrExpr> members) { return new Record(null, members, Origin.NONE); }
+    static Record record(String typeName, Map<String, IrExpr> members) { return new Record(typeName, members, Origin.NONE); }
     static FieldAccess fieldAccess(IrExpr base, String fieldName) { return new FieldAccess(base, fieldName, Origin.NONE); }
 
     record Lit(long value, Origin origin) implements IrExpr {}
@@ -97,7 +98,14 @@ public sealed interface IrExpr
         }
     }
 
-    record Record(Map<String, IrExpr> members, Origin origin) implements IrExpr {
+    /**
+     * Record literal. {@code typeName} carries the nominal struct type
+     * when known (e.g., {@code "Point"} for {@code Point(1, 2)}), null
+     * for anonymous records (S-expr {@code (record ...)} construction).
+     * Used downstream by the dispatch table's trait-fallback rule to
+     * identify the concrete type of an argument.
+     */
+    record Record(String typeName, Map<String, IrExpr> members, Origin origin) implements IrExpr {
         public Record {
             if (members == null) {
                 throw new IllegalArgumentException("Record members must be non-null");
@@ -106,6 +114,11 @@ public sealed interface IrExpr
             // load-bearing for destructure desugar, error messages, and Truffle
             // lowering. Map.copyOf would silently strip the order.
             members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
+        }
+
+        /** Backward-compat constructor used by tests and S-expr parser. */
+        public Record(Map<String, IrExpr> members, Origin origin) {
+            this(null, members, origin);
         }
     }
 

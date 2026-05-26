@@ -81,9 +81,13 @@ public final class AlphaEquivalence {
                 }
                 yield allMatch;
             }
-            case SymExpr.Record(Map<String, SymExpr> aMembers) -> {
-                if (!(b instanceof SymExpr.Record(Map<String, SymExpr> bMembers))) yield false;
+            case SymExpr.Record(Map<String, SymExpr> aMembers, String aTypeName) -> {
+                if (!(b instanceof SymExpr.Record(Map<String, SymExpr> bMembers, String bTypeName))) yield false;
                 if (!aMembers.keySet().equals(bMembers.keySet())) yield false;
+                // Alpha-equivalence is structural — typeName is dispatch
+                // metadata, not part of structural equivalence. Two records
+                // with the same members but different type names are still
+                // alpha-equivalent at this level.
                 boolean allMatch = true;
                 for (Map.Entry<String, SymExpr> e : aMembers.entrySet()) {
                     if (!walk(e.getValue(), bMembers.get(e.getKey()), aStack, bStack)) {

@@ -85,7 +85,7 @@ public final class Refinements {
 
     private static ProofResult satisfiesStructural(SymExpr value, Sort sort, Simplifier simplifier) {
         SymExpr simplifiedValue = simplifier.simplify(value);
-        if (!(simplifiedValue instanceof SymExpr.Record(java.util.Map<String, SymExpr> members))) {
+        if (!(simplifiedValue instanceof SymExpr.Record(java.util.Map<String, SymExpr> members, String recordTypeName))) {
             if (simplifiedValue instanceof SymExpr.Var) {
                 return ProofResult.residual(simplifiedValue);
             }

@@ -196,13 +196,19 @@ class IrMatchTest {
 
     @Test
     void interpreter_innerExceptionWithOwnOrigin_isNotOverwrittenByMatchOrigin() throws Exception {
-        // Branch result calls a missing function; that call site has its own origin.
-        // The dispatch failure should bubble up with its own origin intact, not the match's.
+        // Branch result triggers a runtime failure (field access on a literal —
+        // the base isn't a record). The inner exception's origin must win
+        // over the outer match's origin.
+        //
+        // (Previously this test used a call to an undeclared function, but
+        // that's now caught at compile time by SortChecker. A runtime-only
+        // failure is the right trigger for testing runtime origin
+        // propagation.)
         Origin matchSite = Origin.at("outer.ptf", 5, 5);
-        Origin callSite = Origin.at("inner.ptf", 100, 1);
-        IrExpr badCall = new IrExpr.Call("doesNotExist", List.of(IrExpr.lit(1)), callSite);
+        Origin fieldSite = Origin.at("inner.ptf", 100, 1);
+        IrExpr badFieldAccess = new IrExpr.FieldAccess(IrExpr.lit(5), "x", fieldSite);
         IrExpr match = new IrExpr.Match(IrExpr.lit(5),
-                List.of(IrExpr.matchBranch(positive(), badCall)),
+                List.of(IrExpr.matchBranch(positive(), badFieldAccess)),
                 matchSite);
         IrModule module = new IrModule("m", List.of(), match);
 
@@ -210,7 +216,7 @@ class IrMatchTest {
                 RuntimeCheckException.class,
                 () -> runInterpreter(module));
 
-        assertEquals(callSite, ex.origin(),
+        assertEquals(fieldSite, ex.origin(),
                 "inner origin should win over outer match origin when present");
         assertTrue(ex.getMessage().contains("inner.ptf:100:1"),
                 "message should carry inner origin; got: " + ex.getMessage());

@@ -55,12 +55,12 @@ public final class Simplifier {
                         .toList();
                 yield new SymExpr.Case(newScrutinee, newBranches);
             }
-            case SymExpr.Record(Map<String, SymExpr> members) -> {
+            case SymExpr.Record(Map<String, SymExpr> members, String typeName) -> {
                 Map<String, SymExpr> simpMembers = new LinkedHashMap<>();
                 for (Map.Entry<String, SymExpr> e : members.entrySet()) {
                     simpMembers.put(e.getKey(), simplify(e.getValue()));
                 }
-                yield new SymExpr.Record(simpMembers);
+                yield new SymExpr.Record(simpMembers, typeName);
             }
             case SymExpr.FieldAccess(SymExpr base, String name) -> new SymExpr.FieldAccess(simplify(base), name);
         };

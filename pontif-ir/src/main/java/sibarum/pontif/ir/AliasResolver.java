@@ -65,10 +65,22 @@ public final class AliasResolver {
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 newStatements.add(rewriteFunctionDecl(fd, resolvedAliases));
+            } else if (stmt instanceof IrStmt.TraitImpl ti) {
+                List<IrStmt.FunctionDecl> rewrittenMethods = new ArrayList<>(ti.methods().size());
+                for (IrStmt.FunctionDecl m : ti.methods()) {
+                    rewrittenMethods.add(rewriteFunctionDecl(m, resolvedAliases));
+                }
+                newStatements.add(new IrStmt.TraitImpl(
+                        ti.typeName(), ti.traitName(), rewrittenMethods, ti.origin()));
+            } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait) {
+                // Trait declarations are kept — SortChecker needs the contract
+                // info to validate TraitImpl statements. Struct TypeAliases are
+                // dropped (they've served their purpose: substitution).
+                newStatements.add(ta);
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
             }
-            // TypeAlias statements are dropped from output — they've served their purpose.
+            // Struct TypeAlias statements are dropped from output.
         }
         IrExpr newMain = rewriteExpr(module.main(), resolvedAliases);
 
@@ -111,6 +123,17 @@ public final class AliasResolver {
                     resolvedParams.add(resolveSort(p, aliases, path));
                 }
                 yield new IrSort.Function(resolvedParams, resolveSort(f.returnSort(), aliases, path), f.origin());
+            }
+            case IrSort.Trait t -> {
+                // Trait sort's method signatures are Function sorts; recurse
+                // into each to substitute any aliased param/return types.
+                Map<String, IrSort.Function> resolvedMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                    resolvedMethods.put(
+                            e.getKey(),
+                            (IrSort.Function) resolveSort(e.getValue(), aliases, path));
+                }
+                yield new IrSort.Trait(t.name(), resolvedMethods, t.origin());
             }
         };
     }
@@ -183,7 +206,7 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     newMembers.put(e.getKey(), rewriteExpr(e.getValue(), resolved));
                 }
-                yield new IrExpr.Record(newMembers, r.origin());
+                yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), resolved), fa.fieldName(), fa.origin());
@@ -210,6 +233,15 @@ public final class AliasResolver {
                 List<IrSort> newParams = new ArrayList<>(f.paramSorts().size());
                 for (IrSort p : f.paramSorts()) newParams.add(substituteResolved(p, resolved));
                 yield new IrSort.Function(newParams, substituteResolved(f.returnSort(), resolved), f.origin());
+            }
+            case IrSort.Trait t -> {
+                Map<String, IrSort.Function> newMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                    newMethods.put(
+                            e.getKey(),
+                            (IrSort.Function) substituteResolved(e.getValue(), resolved));
+                }
+                yield new IrSort.Trait(t.name(), newMethods, t.origin());
             }
         };
     }

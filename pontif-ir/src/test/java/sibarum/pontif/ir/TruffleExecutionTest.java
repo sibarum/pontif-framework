@@ -286,13 +286,16 @@ class TruffleExecutionTest {
     }
 
     @Test
-    void truffleSide_dispatchFailureCarriesOrigin() throws Exception {
+    void truffleSide_dispatchFailureCarriesOrigin() {
+        // Call to an undeclared function is now a compile-time error caught
+        // by SortChecker before lowering reaches Truffle. The call site's
+        // origin is preserved on the CompileException.
         Origin callSite = Origin.at("test.ptf", 7, 2);
         IrExpr badCall = new IrExpr.Call("doesNotExist", List.of(IrExpr.lit(1)), callSite);
         IrModule module = new IrModule("missingTruffle", List.of(), badCall);
 
-        RuntimeCheckException ex = assertThrows(
-                RuntimeCheckException.class,
+        CompileException ex = assertThrows(
+                CompileException.class,
                 () -> runOnTruffle(module));
 
         assertEquals(callSite, ex.origin());

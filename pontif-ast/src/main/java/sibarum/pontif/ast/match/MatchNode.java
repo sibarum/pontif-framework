@@ -86,7 +86,7 @@ public final class MatchNode extends PontifNode {
             for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
                 members.put(e.getKey(), toSymExpr(e.getValue()));
             }
-            return SymExpr.record(members);
+            return SymExpr.record(r.typeName(), members);
         }
         throw new IllegalArgumentException(
                 "Cannot convert runtime value to SymExpr (type "

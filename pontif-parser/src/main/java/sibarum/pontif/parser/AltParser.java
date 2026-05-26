@@ -53,6 +53,7 @@ public final class AltParser {
     private static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
             "function", "method", "struct", "let",
+            "assign", "trait", "Type",
             "match",
             "true", "false");
 
@@ -136,6 +137,15 @@ public final class AltParser {
      */
     private final Map<String, IrSort> declaredFunctionReturns = new LinkedHashMap<>();
 
+    /**
+     * Names of declared 0-arg functions (functions whose param list is empty).
+     * Treated equivalently to top-level lets at bare-access sites — both are
+     * 0-arg dispatch entries, both auto-Call on unqualified or dotted bare
+     * reference. Populated only for {@code function} decls; methods always
+     * have at least the {@code self} param.
+     */
+    private final Set<String> declaredZeroArgFunctions = new java.util.HashSet<>();
+
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
     }
@@ -218,7 +228,7 @@ public final class AltParser {
         AltToken t = peek();
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let").contains(t.text());
+                "function", "method", "struct", "let", "assign").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -229,6 +239,23 @@ public final class AltParser {
             sb.append('.').append(consume().text());
         }
         return sb.toString();
+    }
+
+    /**
+     * Like {@link #parseDottedName} but also accepts a trailing {@code .OP}
+     * segment so function/method declarations can use operator-character
+     * names — e.g., {@code method Point.+(p:Point):Point -> ...} registers
+     * under the dispatch key {@code Point.+}. The trailing operator can only
+     * be the final segment (operator-named modules don't exist).
+     */
+    private String parseDeclarationName() throws ParseException {
+        String name = parseDottedName();
+        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.OP) {
+            consume();  // DOT
+            AltToken opTok = consume();
+            return name + "." + opTok.text();
+        }
+        return name;
     }
 
     private IrStmt parseTopLevelDecl() throws ParseException {
@@ -246,6 +273,7 @@ public final class AltParser {
             case "struct"   -> parseStruct();
             case "method"   -> parseMethod();
             case "let"      -> parseLet();
+            case "assign"   -> parseAssignTrait();
             default -> throw new ParseException(
                     "Unknown top-level keyword '" + head.text() + "'",
                     head.origin());
@@ -316,7 +344,7 @@ public final class AltParser {
 
     private IrStmt parseFunction() throws ParseException {
         AltToken start = expectKeyword("function");
-        String name = parseDottedName();
+        String name = parseDeclarationName();
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
@@ -333,6 +361,7 @@ public final class AltParser {
             try {
                 IrExpr body = parseExpr();
                 declaredFunctionReturns.put(name, returnSort);
+                if (params.isEmpty()) declaredZeroArgFunctions.add(name);
                 return new IrStmt.FunctionDecl(name, params, returnSort, body, start.origin());
             } finally {
                 currentScope.clear();
@@ -343,6 +372,7 @@ public final class AltParser {
         IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
         if (derived != null) {
             declaredFunctionReturns.put(name, returnSort);
+            if (params.isEmpty()) declaredZeroArgFunctions.add(name);
             return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
         }
         return new IrStmt.NoOp(
@@ -363,7 +393,7 @@ public final class AltParser {
      */
     private IrStmt parseMethod() throws ParseException {
         AltToken start = expectKeyword("method");
-        String name = parseDottedName();
+        String name = parseDeclarationName();
         int dotIdx = name.indexOf('.');
         if (dotIdx < 0) {
             throw new ParseException(
@@ -530,6 +560,25 @@ public final class AltParser {
                             + "or a value ('= EXPR')",
                     start.origin());
         }
+        // Trait declaration: `let X:Type{...}` (no value). Lower to TypeAlias
+        // with the binding's name patched into the trait sort. Each contract
+        // method is also registered in `declaredFunctionReturns` under
+        // `TraitName.methodName` so method-call routing on trait-typed
+        // receivers (e.g., `d.quack()` where `d:Duck`) finds them.
+        if (declaredSort instanceof IrSort.Trait t) {
+            if (value != null) {
+                throw new ParseException(
+                        "let '" + name + "' with trait sort can't have a value — "
+                                + "trait declarations are type-level only",
+                        start.origin());
+            }
+            IrSort.Trait named = new IrSort.Trait(name, t.methods(), t.origin());
+            for (Map.Entry<String, IrSort.Function> e : named.methods().entrySet()) {
+                declaredFunctionReturns.put(
+                        name + "." + e.getKey(), e.getValue().returnSort());
+            }
+            return new IrStmt.TypeAlias(name, named, start.origin());
+        }
         if (value == null) {
             // Spec-only — synthesis from maximally-specific sort is a separate
             // TODO item (see docs/TODO.md). Stay NoOp so other decls process.
@@ -684,6 +733,76 @@ public final class AltParser {
     // resolve field names without re-stating their types. Slice-5 restriction:
     // the struct must be declared before any use that omits field types.
 
+    // --- Trait impl blocks ---
+    // Form: `assign trait TypeName:TraitName { method-decls... }`
+    //
+    // Each method inside the braces has the compact form
+    // `name(params):returnSort -> body` (no `method` keyword, no `Type.`
+    // prefix — both implicit from the block header). The parser desugars
+    // to an `IrStmt.TraitImpl` whose methods are full FunctionDecls with
+    // self prepended and the type-qualified name.
+
+    private IrStmt parseAssignTrait() throws ParseException {
+        AltToken start = expectKeyword("assign");
+        expectKeyword("trait");
+        AltToken typeNameTok = expect(AltToken.Kind.IDENT);
+        expect(AltToken.Kind.COLON);
+        AltToken traitNameTok = expect(AltToken.Kind.IDENT);
+        expect(AltToken.Kind.LBRACE);
+
+        String typeName = typeNameTok.text();
+        IrSort selfSort = new IrSort.Named(typeName, typeNameTok.origin());
+
+        List<IrStmt.FunctionDecl> methods = new ArrayList<>();
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            methods.add(parseTraitImplMethod(typeName, selfSort));
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        return new IrStmt.TraitImpl(
+                typeName, traitNameTok.text(), methods, start.spanTo(close));
+    }
+
+    /**
+     * Parses one method inside an {@code assign trait} block.
+     * Surface form: {@code methodName(params):returnSort -> body}.
+     * The parser prepends a {@code self:TypeName} param and qualifies the
+     * method's name to {@code TypeName.methodName}. Body parses with self
+     * + user params in {@link #currentScope}.
+     */
+    private IrStmt.FunctionDecl parseTraitImplMethod(String typeName, IrSort selfSort)
+            throws ParseException {
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        if (KEYWORDS.contains(nameTok.text())) {
+            throw new ParseException(
+                    "Cannot use keyword '" + nameTok.text() + "' as a method name",
+                    nameTok.origin());
+        }
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.COLON);
+        IrSort returnSort = parseSort();
+        expect(AltToken.Kind.ARROW);
+
+        List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
+        allParams.add(new IrParam("self", selfSort));
+        allParams.addAll(userParams);
+
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : allParams) currentScope.put(p.name(), p.sort());
+        try {
+            IrExpr body = parseExpr();
+            String qualified = typeName + "." + nameTok.text();
+            declaredFunctionReturns.put(qualified, returnSort);
+            return new IrStmt.FunctionDecl(
+                    qualified, allParams, returnSort, body, nameTok.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+    }
+
     private IrStmt parseStruct() throws ParseException {
         AltToken start = expectKeyword("struct");
         AltToken nameTok = expect(AltToken.Kind.IDENT);
@@ -726,6 +845,12 @@ public final class AltParser {
             return parseBracketSort();
         }
         if (t.kind() == AltToken.Kind.IDENT) {
+            // `Type{...}` — trait literal at sort level. The trait's name is
+            // empty here (it's anonymous); parseLet patches it with the
+            // let-binding's name before producing the TypeAlias.
+            if (t.text().equals("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+                return parseTraitTypeLiteral();
+            }
             // Bare-ident sugar: `Int` ≡ `[Int]`.
             AltToken nameTok = consume();
             return new IrSort.Named(nameTok.text(), nameTok.origin());
@@ -733,6 +858,42 @@ public final class AltParser {
         throw new ParseException(
                 "Expected a sort (bare ident or '[...]'); got " + t.kind() + " '" + t.text() + "'",
                 t.origin());
+    }
+
+    /**
+     * Parses {@code Type{methodName:FunctionSort, ...}} — the trait literal.
+     * Each entry must be {@code methodName:[Function(...):Ret]} (function
+     * sort). The returned {@link IrSort.Trait} has an empty placeholder
+     * name; {@link #parseLet} patches it with the binding name from the
+     * enclosing {@code let X:Type{...}} declaration.
+     */
+    private IrSort.Trait parseTraitTypeLiteral() throws ParseException {
+        AltToken typeTok = expect(AltToken.Kind.IDENT);  // "Type"
+        AltToken open = expect(AltToken.Kind.LBRACE);
+        Map<String, IrSort.Function> methods = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            AltToken methodName = expect(AltToken.Kind.IDENT);
+            expect(AltToken.Kind.COLON);
+            IrSort methodSort = parseSort();
+            if (!(methodSort instanceof IrSort.Function fn)) {
+                throw new ParseException(
+                        "Trait method '" + methodName.text() + "' must have a "
+                                + "function sort like [Function(args):Ret]; got " + methodSort,
+                        methodName.origin());
+            }
+            if (methods.containsKey(methodName.text())) {
+                throw new ParseException(
+                        "Duplicate method '" + methodName.text() + "' in trait body",
+                        methodName.origin());
+            }
+            methods.put(methodName.text(), fn);
+            first = false;
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        // Placeholder name; parseLet patches it with the binding's name.
+        return new IrSort.Trait("_pending", methods, typeTok.spanTo(close));
     }
 
     private IrSort parseBracketSort() throws ParseException {
@@ -921,9 +1082,58 @@ public final class AltParser {
             if (prec < minPrec) break;
             consume();
             IrExpr right = parseExpr(prec + 1);  // left-associative
-            left = new IrExpr.BinOp(opKind(t.text()), left, right, t.origin());
+            // Operator-overload routing: if the left operand's inferred sort
+            // has a Type.{op} method declared, emit a Call to it instead of a
+            // primitive BinOp. The primitive path stays unchanged for Int/Bool
+            // operands; refinement predicates are unaffected because SelfRef
+            // and field-accesses-through-SelfRef yield the "_" placeholder
+            // sort which the routing skips.
+            String overload = tryOperatorOverloadRoute(left, t.text());
+            if (overload != null) {
+                left = new IrExpr.Call(
+                        overload, List.of(left, right), t.origin());
+            } else {
+                left = new IrExpr.BinOp(opKind(t.text()), left, right, t.origin());
+            }
         }
         return left;
+    }
+
+    /**
+     * Set of operators that can be overloaded via {@code method Type.OP(...)}.
+     * Arithmetic and comparison. Logical {@code &} and {@code |} are excluded
+     * — they always go through BinOp regardless of any method named
+     * {@code Type.&}.
+     */
+    private static final Set<String> OVERLOADABLE_OPS = Set.of(
+            "+", "-", "*",
+            "<", "<=", ">", ">=", "==", "!=");
+
+    /**
+     * Returns the dispatch name {@code "<TypeName>.<op>"} when {@code left}'s
+     * inferred sort has that method declared; null otherwise (BinOp stays).
+     * Skipped when:
+     * <ul>
+     *   <li>The op is not in {@link #OVERLOADABLE_OPS}.</li>
+     *   <li>Left's base sort is a primitive ({@code Int}, {@code Bool},
+     *       {@code Function}) or a sentinel ({@code _}, {@code _record}).</li>
+     *   <li>No such method is registered in {@link #declaredFunctionReturns}.</li>
+     * </ul>
+     */
+    private String tryOperatorOverloadRoute(IrExpr left, String opText) {
+        if (!OVERLOADABLE_OPS.contains(opText)) return null;
+        IrSort leftSort = inferMaximalSort(left);
+        String typeName = baseSortName(leftSort);
+        if (typeName == null
+                || typeName.equals("_")
+                || typeName.equals("_record")
+                || typeName.equals("Int")
+                || typeName.equals("Bool")
+                || typeName.equals("Function")) {
+            return null;
+        }
+        String methodName = typeName + "." + opText;
+        return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
     }
 
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
@@ -1009,23 +1219,26 @@ public final class AltParser {
     }
 
     /**
-     * Rewrites top-level let accesses to 0-arg dispatch calls so the dispatch
-     * table resolves them. Handles two shapes:
+     * Rewrites top-level let and 0-arg-function accesses to 0-arg dispatch
+     * calls so the dispatch table resolves them. Lets and 0-arg functions
+     * are treated equivalently — both are 0-arg dispatch entries from the
+     * call-site's perspective, both auto-Call on bare reference. Handles
+     * two shapes:
      * <ul>
-     *   <li>Bare {@code Var(name)} — if {@code name} is a declared top-level
-     *       let and not shadowed by {@link #currentScope}, becomes
-     *       {@code Call(name, [])}.
-     *   <li>{@code FieldAccess} chain rooted at a Var — if any prefix of the
-     *       dotted name matches a declared let (longest match wins), that
-     *       prefix becomes a 0-arg Call and the remaining suffix stays as a
-     *       chain of FieldAccesses on the Call.
+     *   <li>Bare {@code Var(name)} — if {@code name} is a declared let or a
+     *       declared 0-arg function and not shadowed by {@link #currentScope},
+     *       becomes {@code Call(name, [])}.
+     *   <li>{@code FieldAccess} chain rooted at a Var — the longest dotted
+     *       prefix matching a let or 0-arg function becomes a 0-arg Call,
+     *       with the remaining suffix kept as a chain of FieldAccesses.
      * </ul>
-     * Non-let shapes pass through unchanged.
+     * Functions with at least one declared param are never auto-Called
+     * (they require explicit args).
      */
     private IrExpr rewriteTopLevelLetAccess(IrExpr expr) {
         if (expr instanceof IrExpr.Var v) {
             if (!currentScope.containsKey(v.name())
-                    && declaredTopLevelLets.containsKey(v.name())) {
+                    && isZeroArgDispatchEntry(v.name())) {
                 return new IrExpr.Call(v.name(), List.of(), v.origin());
             }
             return expr;
@@ -1037,11 +1250,22 @@ public final class AltParser {
     }
 
     /**
+     * True if {@code name} is a 0-arg dispatch entry — either a declared
+     * top-level let, or a function declared with no params. Both auto-Call
+     * on bare reference.
+     */
+    private boolean isZeroArgDispatchEntry(String name) {
+        return declaredTopLevelLets.containsKey(name)
+                || declaredZeroArgFunctions.contains(name);
+    }
+
+    /**
      * Walks a FieldAccess chain to its leftmost Var, looks for the longest
-     * dotted prefix that matches a declared top-level let, and rewrites that
-     * prefix to a 0-arg Call (keeping any trailing field accesses as a chain
-     * on top). Returns the expression unchanged if no such prefix matches
-     * or if the chain's root is shadowed by {@link #currentScope}.
+     * dotted prefix that matches a 0-arg dispatch entry (let or 0-arg
+     * function), and rewrites that prefix to a 0-arg Call (keeping any
+     * trailing field accesses as a chain on top). Returns the expression
+     * unchanged if no such prefix matches or if the chain's root is shadowed
+     * by {@link #currentScope}.
      */
     private IrExpr rewriteDottedLetAccess(IrExpr expr) {
         List<String> segments = new ArrayList<>();
@@ -1057,7 +1281,7 @@ public final class AltParser {
         int matchedLength = -1;
         for (int i = segments.size(); i >= 1; i--) {
             String prefix = String.join(".", segments.subList(0, i));
-            if (declaredTopLevelLets.containsKey(prefix)) {
+            if (isZeroArgDispatchEntry(prefix)) {
                 matchedLength = i;
                 break;
             }
@@ -1098,7 +1322,7 @@ public final class AltParser {
         for (int i = 0; i < args.size(); i++) {
             ordered.put(declaredFields.get(i), args.get(i));
         }
-        return new IrExpr.Record(ordered, openParen.spanTo(close));
+        return new IrExpr.Record(typeName, ordered, openParen.spanTo(close));
     }
 
     /**
@@ -1150,7 +1374,7 @@ public final class AltParser {
         for (String declaredField : decl.members().keySet()) {
             ordered.put(declaredField, provided.get(declaredField));
         }
-        return new IrExpr.Record(ordered, openBrace.spanTo(close));
+        return new IrExpr.Record(typeName, ordered, openBrace.spanTo(close));
     }
 
     /**
@@ -1487,6 +1711,7 @@ public final class AltParser {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             case IrSort.Function f -> null;
+            case IrSort.Trait t -> t.name();
         };
     }
 

@@ -14,6 +14,7 @@ import sibarum.pontif.parser.ParseException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -334,6 +335,173 @@ class AltParserIntegrationTest {
         // Inside the let body, `n` refers to the let-bound 10, not param 3.
         String src = "function f(n:Int):Int -> let n = 10 n + 1\nf(3)";
         assertEquals(11L, run(src));
+    }
+
+    @Test
+    void trait_endToEnd_fromAltSyntax() throws Exception {
+        // The full Pontif trait story, top to bottom:
+        //   - Declare a trait via `let Duck:Type{...}`.
+        //   - Declare a struct via `struct Donald(...)`.
+        //   - Assign the trait via `assign trait Donald:Duck { ... }`.
+        //   - Function takes a trait-typed param; call with a Donald.
+        String src = """
+                let Duck:Type{quack:[Function():Int]}
+                struct Donald(name:Int)
+                assign trait Donald:Duck {
+                  quack():Int -> self.name + 100
+                }
+                function describe(d:Duck):Int -> d.quack()
+                describe(Donald(7))
+                """;
+        // Donald(7).name = 7; quack returns self.name + 100 = 107.
+        assertEquals(107L, run(src));
+    }
+
+    @Test
+    void trait_directTraitMethodCall_fromAltSyntax() throws Exception {
+        // Trait.method call directly on a struct value — slice-1 fallback.
+        String src = """
+                let Duck:Type{quack:[Function():Int]}
+                struct Donald(name:Int)
+                assign trait Donald:Duck {
+                  quack():Int -> 42
+                }
+                let donald = Donald(0)
+                donald.quack()
+                """;
+        assertEquals(42L, run(src));
+    }
+
+    @Test
+    void staticAccess_zeroArgFunction_bareReferenceEvaluates() throws Exception {
+        // `Point.zero` (no parens) routes to a 0-arg Call via the
+        // bare-access rewrite. Same shape as `let Point.zero = Point(0,0)`.
+        String src = """
+                struct Point(x:Int, y:Int)
+                function Point.zero():Point -> Point(0, 0)
+                Point.zero.x
+                """;
+        assertEquals(0L, run(src));
+    }
+
+    @Test
+    void staticAccess_letAndZeroArgFunction_produceSameValue() throws Exception {
+        // The two declaration forms are interchangeable at use sites.
+        String viaLet = """
+                struct Point(x:Int, y:Int)
+                let Point.origin = Point(7, 8)
+                Point.origin.x + Point.origin.y
+                """;
+        String viaFn = """
+                struct Point(x:Int, y:Int)
+                function Point.origin():Point -> Point(7, 8)
+                Point.origin.x + Point.origin.y
+                """;
+        assertEquals(run(viaLet), run(viaFn));
+        assertEquals(15L, run(viaFn));
+    }
+
+    @Test
+    void staticAccess_unqualifiedZeroArg_evaluates() throws Exception {
+        String src = """
+                function five():Int -> 5
+                five + 1
+                """;
+        assertEquals(6L, run(src));
+    }
+
+    @Test
+    void operatorOverload_pointPlusPoint_evaluates() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                function sum(a:Point, b:Point):Point -> a + b
+                sum(Point(1, 2), Point(3, 4)).x
+                """;
+        // a + b → Point(4, 6). .x → 4.
+        assertEquals(4L, run(src));
+    }
+
+    @Test
+    void operatorOverload_pointEquality_evaluates() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+                function eq(a:Point, b:Point):Bool -> a == b
+                eq(Point(1, 2), Point(1, 2))
+                """;
+        assertEquals(true, run(src));
+    }
+
+    @Test
+    void operatorOverload_pointEquality_negative() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+                function eq(a:Point, b:Point):Bool -> a == b
+                eq(Point(1, 2), Point(1, 99))
+                """;
+        assertEquals(false, run(src));
+    }
+
+    @Test
+    void operatorOverload_chainsLeftToRight() throws Exception {
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                function tri(a:Point, b:Point, c:Point):Point -> a + b + c
+                tri(Point(1, 1), Point(2, 2), Point(3, 3)).x
+                """;
+        // (1+2)+3 = 6 in x
+        assertEquals(6L, run(src));
+    }
+
+    @Test
+    void operatorOverload_primitiveArithmeticUnchanged() throws Exception {
+        // With Point.+ declared, Int+Int must still route through BinOp.
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                3 + 4
+                """;
+        assertEquals(7L, run(src));
+    }
+
+    @Test
+    void operatorOverload_mixesWithMethodCalls() throws Exception {
+        // Both `pointA.shifted(...)` and `p + q` work in the same function.
+        String src = """
+                struct Point(x:Int, y:Int)
+                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.shifted(dx:Int, dy:Int):Point ->
+                  Point(self.x + dx, self.y + dy)
+                function f(p:Point, q:Point):Int -> (p + q).shifted(10, 10).x
+                f(Point(1, 1), Point(2, 2))
+                """;
+        // p+q = Point(3,3); shifted(10,10) = Point(13,13); .x = 13
+        assertEquals(13L, run(src));
+    }
+
+    @Test
+    void gibberishTypeNames_failAtCompileTime() {
+        // The exact example the user posted. Should fail at compile time
+        // with a clear "unknown sort" error pointing at the param/return
+        // sort, NOT silently parse and fail at runtime.
+        String src = """
+                function shifted(p:Zzzzz):Xxxxx -> {
+                  let dx = p.x + 1
+                  let dy = p.y + 1
+                  Qqqqq(dx, dy)
+                }
+                shifted(0)
+                """;
+        Exception ex = assertThrows(Exception.class, () -> run(src));
+        assertTrue(ex instanceof sibarum.pontif.ir.CompileException,
+                () -> "Expected CompileException; got " + ex.getClass().getSimpleName()
+                        + ": " + ex.getMessage());
+        String msg = ex.getMessage();
+        assertTrue(msg.contains("Zzzzz") || msg.contains("Xxxxx") || msg.contains("Qqqqq"),
+                () -> "Expected gibberish name in error; got: " + msg);
     }
 
     @Test

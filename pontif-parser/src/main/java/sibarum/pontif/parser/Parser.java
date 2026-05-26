@@ -164,11 +164,89 @@ public final class Parser {
                     peek().origin());
         }
         Token headSymbol = tokens.get(pos + 1);
-        if (headSymbol.kind() == Token.Kind.SYMBOL
-                && headSymbol.text().equals(language.typeAliasKeyword())) {
-            return parseTypeAlias();
+        if (headSymbol.kind() == Token.Kind.SYMBOL) {
+            String head = headSymbol.text();
+            if (head.equals(language.typeAliasKeyword())) {
+                return parseTypeAlias();
+            }
+            if (head.equals(language.interfaceKeyword())) {
+                return parseInterface();
+            }
+            if (head.equals(language.implKeyword())) {
+                return parseImpl();
+            }
         }
         return parseFunctionDecl();
+    }
+
+    /**
+     * Trait declaration: {@code (interface Name (methodName (paramSort*) returnSort) ...)}.
+     * Lowers to {@code IrStmt.TypeAlias(Name, IrSort.Trait(Name, methods))}.
+     * Each method's signature is param-sorts and return-sort *without* the
+     * implicit {@code self} — SortChecker prepends it per implementor.
+     */
+    public IrStmt.TypeAlias parseInterface() throws ParseException {
+        Token open = expect(Token.Kind.LPAREN);
+        expectSymbol(language.interfaceKeyword());
+        Token nameTok = expect(Token.Kind.SYMBOL);
+        java.util.LinkedHashMap<String, IrSort.Function> methods = new java.util.LinkedHashMap<>();
+        while (peek().kind() != Token.Kind.RPAREN) {
+            expect(Token.Kind.LPAREN);
+            Token methodName = expect(Token.Kind.SYMBOL);
+            expect(Token.Kind.LPAREN);
+            List<IrSort> paramSorts = new ArrayList<>();
+            while (peek().kind() != Token.Kind.RPAREN) {
+                paramSorts.add(parseSort());
+            }
+            expect(Token.Kind.RPAREN);
+            IrSort returnSort = parseSort();
+            expect(Token.Kind.RPAREN);
+            methods.put(methodName.text(),
+                    new IrSort.Function(paramSorts, returnSort, methodName.origin()));
+        }
+        Token close = expect(Token.Kind.RPAREN);
+        Origin origin = open.spanTo(close);
+        return new IrStmt.TypeAlias(
+                nameTok.text(),
+                new IrSort.Trait(nameTok.text(), methods, origin),
+                origin);
+    }
+
+    /**
+     * Trait impl: {@code (impl TypeName TraitName (function methodName (params*) returnSort body) ...)}.
+     * Each method is parsed as a regular function decl; the parser
+     * automatically:
+     * <ul>
+     *   <li>prepends a {@code (self TypeName)} param, and
+     *   <li>rewrites the method's name to {@code TypeName.methodName}.
+     * </ul>
+     * Lowers to {@link IrStmt.TraitImpl}.
+     */
+    public IrStmt.TraitImpl parseImpl() throws ParseException {
+        Token open = expect(Token.Kind.LPAREN);
+        expectSymbol(language.implKeyword());
+        Token typeNameTok = expect(Token.Kind.SYMBOL);
+        Token traitNameTok = expect(Token.Kind.SYMBOL);
+        String typeName = typeNameTok.text();
+        IrSort selfSort = new IrSort.Named(typeName, typeNameTok.origin());
+
+        List<IrStmt.FunctionDecl> methods = new ArrayList<>();
+        while (peek().kind() != Token.Kind.RPAREN) {
+            IrStmt.FunctionDecl raw = parseFunctionDecl();
+            // Prepend (self : TypeName) and qualify the name.
+            List<IrParam> params = new ArrayList<>(raw.params().size() + 1);
+            params.add(new IrParam("self", selfSort));
+            params.addAll(raw.params());
+            methods.add(new IrStmt.FunctionDecl(
+                    typeName + "." + raw.name(),
+                    params,
+                    raw.returnSort(),
+                    raw.body(),
+                    raw.origin()));
+        }
+        Token close = expect(Token.Kind.RPAREN);
+        return new IrStmt.TraitImpl(
+                typeName, traitNameTok.text(), methods, open.spanTo(close));
     }
 
     public IrStmt.TypeAlias parseTypeAlias() throws ParseException {

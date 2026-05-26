@@ -50,7 +50,28 @@ public final class IrCompiler {
                     registerSortsInExpr(fd.body(), compiledSorts);
                     compileFunctionDecl(fd, dispatch, functions, diagnostics, compiledSorts);
                 }
-                case IrStmt.TypeAlias ta -> { /* dropped by AliasResolver — unreachable */ }
+                case IrStmt.TraitImpl ti -> {
+                    // Register methods as regular FunctionDecls in the
+                    // dispatch table, then add the (typeName, traitName)
+                    // pair to the trait registry so the slice-1 fallback
+                    // rule can resolve trait-method calls at runtime.
+                    for (IrStmt.FunctionDecl m : ti.methods()) {
+                        for (IrParam p : m.params()) registerSort(p.sort(), compiledSorts);
+                        registerSort(m.returnSort(), compiledSorts);
+                        registerSortsInExpr(m.body(), compiledSorts);
+                        compileFunctionDecl(m, dispatch, functions, diagnostics, compiledSorts);
+                    }
+                    dispatch.traitRegistry().register(ti.traitName(), ti.typeName());
+                }
+                case IrStmt.TypeAlias ta -> {
+                    // AliasResolver keeps trait TypeAliases so SortChecker
+                    // can find contracts; also register the trait name so
+                    // bare-named param sorts can be identified as traits at
+                    // dispatch time, even before any impl block is seen.
+                    if (ta.sort() instanceof IrSort.Trait t) {
+                        dispatch.traitRegistry().declareTrait(t.name());
+                    }
+                }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
             }
         }
@@ -100,6 +121,10 @@ public final class IrCompiler {
             case IrSort.Function f -> {
                 for (IrSort p : f.paramSorts()) registerSort(p, map);
                 registerSort(f.returnSort(), map);
+            }
+            case IrSort.Trait t -> {
+                // Method contract sorts are Function sorts; recurse into each.
+                for (IrSort.Function f : t.methods().values()) registerSort(f, map);
             }
         }
     }
@@ -167,6 +192,14 @@ public final class IrCompiler {
                 }
                 yield Sort.function(params, compileSort(f.returnSort()));
             }
+            case IrSort.Trait t -> {
+                // At the Sort layer, a trait collapses to a bare named sort.
+                // The runtime trait-fallback rule looks up the name in the
+                // TraitRegistry to find satisfying concrete types — the
+                // method contract itself is only needed at compile time for
+                // SortChecker validation, not at runtime.
+                yield Sort.of(t.name());
+            }
         };
     }
 
@@ -208,7 +241,7 @@ public final class IrCompiler {
                 for (java.util.Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     members.put(e.getKey(), compileSymExpr(e.getValue()));
                 }
-                yield SymExpr.record(members);
+                yield SymExpr.record(r.typeName(), members);
             }
             case IrExpr.FieldAccess fa -> SymExpr.fieldAccess(compileSymExpr(fa.base()), fa.fieldName());
         };

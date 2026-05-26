@@ -49,7 +49,7 @@ public final class IrInterpreter {
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     members.put(e.getKey(), eval(e.getValue(), env, module));
                 }
-                yield new RecordValue(members);
+                yield new RecordValue(r.typeName(), members);
             }
             case IrExpr.FieldAccess fa -> {
                 Object baseValue = eval(fa.base(), env, module);
@@ -219,7 +219,7 @@ public final class IrInterpreter {
             for (Map.Entry<String, Object> e : r.members().entrySet()) {
                 members.put(e.getKey(), toSymExpr(e.getValue()));
             }
-            return SymExpr.record(members);
+            return SymExpr.record(r.typeName(), members);
         }
         throw new IllegalArgumentException(
                 "Cannot convert runtime value to SymExpr (type "

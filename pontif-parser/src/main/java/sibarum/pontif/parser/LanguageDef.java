@@ -25,6 +25,8 @@ public record LanguageDef(
         String refinedSortKeyword,
         String functionSortKeyword,
         String structSortKeyword,
+        String interfaceKeyword,
+        String implKeyword,
         String trueLiteral,
         String falseLiteral,
         String selfReference,
@@ -55,6 +57,7 @@ public record LanguageDef(
                 "module", "defn", "deftype",
                 "let", "call", "match", "lambda", "record", "field",
                 "refined", "function", "struct",
+                "interface", "impl",
                 "true", "false", "self",
                 ops);
     }
@@ -87,6 +90,8 @@ public record LanguageDef(
                 || text.equals(refinedSortKeyword)
                 || text.equals(functionSortKeyword)
                 || text.equals(structSortKeyword)
+                || text.equals(interfaceKeyword)
+                || text.equals(implKeyword)
                 || text.equals(trueLiteral)
                 || text.equals(falseLiteral)
                 || text.equals(selfReference)
@@ -99,67 +104,75 @@ public record LanguageDef(
     // canonical record fields keep their order; only the named field varies.
 
     public LanguageDef withModuleKeyword(String s) {
-        return new LanguageDef(s, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(s, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withFunctionDeclKeyword(String s) {
-        return new LanguageDef(moduleKeyword, s, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, s, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withTypeAliasKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, s, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, s, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withLetKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, s, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, s, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withCallKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, s, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, s, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withMatchKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, s, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, s, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withLambdaKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, s, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, s, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withRecordKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, s, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, s, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withFieldKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, s, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, s, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withRefinedSortKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, s, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, s, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withFunctionSortKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, s, structSortKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, s, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withStructSortKeyword(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, s, trueLiteral, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, s, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+    }
+
+    public LanguageDef withInterfaceKeyword(String s) {
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, s, implKeyword, trueLiteral, falseLiteral, selfReference, binaryOps);
+    }
+
+    public LanguageDef withImplKeyword(String s) {
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, s, trueLiteral, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withTrueLiteral(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, s, falseLiteral, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, s, falseLiteral, selfReference, binaryOps);
     }
 
     public LanguageDef withFalseLiteral(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, s, selfReference, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, s, selfReference, binaryOps);
     }
 
     public LanguageDef withSelfReference(String s) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, s, binaryOps);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, s, binaryOps);
     }
 
     public LanguageDef withBinaryOps(Map<String, IrExpr.Op> ops) {
-        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, trueLiteral, falseLiteral, selfReference, ops);
+        return new LanguageDef(moduleKeyword, functionDeclKeyword, typeAliasKeyword, letKeyword, callKeyword, matchKeyword, lambdaKeyword, recordKeyword, fieldKeyword, refinedSortKeyword, functionSortKeyword, structSortKeyword, interfaceKeyword, implKeyword, trueLiteral, falseLiteral, selfReference, ops);
     }
 
     /**

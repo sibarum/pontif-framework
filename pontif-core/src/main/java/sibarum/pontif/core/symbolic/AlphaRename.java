@@ -34,7 +34,7 @@ public final class AlphaRename {
                 }
                 yield found;
             }
-            case SymExpr.Record(Map<String, SymExpr> members) -> {
+            case SymExpr.Record(Map<String, SymExpr> members, String typeName) -> {
                 boolean found = false;
                 for (SymExpr v : members.values()) {
                     if (isFreeIn(name, v)) { found = true; break; }

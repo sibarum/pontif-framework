@@ -180,6 +180,13 @@ function shiftedPoint(p:Point):Point -> Point{x=p.x+1, y=p.y+1}
 # `Point.origin.x` becomes `Call("Point.origin", []).x`.
 let origin = Point(0, 0)
 let Point.origin = Point(0, 0)        # `Point.origin` and `Point.origin.x` both work
+
+# Lets and 0-arg functions are interchangeable at use sites.  Both are 0-arg
+# dispatch entries; both auto-Call on bare reference (qualified or not).
+# Functions with at least one param require explicit parens at the call site.
+function Point.zero():Point -> Point(0, 0)
+function five():Int -> 5
+let twelve = Point.zero.x + Point.zero.y + 12 + five
 let n = 5                                # n : [Int:@==5]
 let b = true                             # b : [Bool:@==true]
 let z = n + 1                            # z : [Int:@==(n() + 1)]
@@ -224,6 +231,38 @@ method Point.add(p:Point):[Point(x:[Int:self.x+p.x], y:[Int:self.y+p.y])]
 method Point.plus(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
 function combine(p:Point, q:Point):Point -> p.plus(q)
 let shifted = origin.plus(Point(1, 2))   # works on a let-bound value too
+
+# Operator overloading.  Methods whose name is an operator character (or
+# operator string) are routed from infix binary expressions: when the left
+# operand's inferred sort has a `Type.<op>` method, `a <op> b` lowers to
+# `Type.<op>(a, b)` instead of the primitive BinOp.  Primitive operands
+# (Int, Bool) always keep the fast BinOp path.  Refinement-predicate
+# arithmetic stays primitive too — overloads are strictly a runtime,
+# value-level concern.  Overloadable: + - * < <= > >= == !=
+method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+function shift(a:Point, b:Point):Point -> a + b
+function same(a:Point, b:Point):Bool -> a == b
+
+# === Traits =================================================================
+# A trait is a sort that describes a method contract.  Types opt in via
+# `assign trait`; satisfaction is checked at narrowing time by SortChecker
+# and dispatch is resolved at runtime by consulting the TraitRegistry.
+# Narrowing handles polymorphism — no parallel trait-dispatch mechanism.
+let Duck:Type{
+  quack:[Function():Int]
+}
+
+assign trait Point:Duck {
+  quack():Int -> self.x + self.y
+}
+
+# A trait-typed parameter: any value whose concrete type satisfies Duck
+# is accepted.  Inside the body, `d.quack()` routes through the dispatch
+# table's trait-fallback to the concrete `Point.quack` (or any other
+# registered Duck implementor).
+function describe(d:Duck):Int -> d.quack()
+describe(Point(3, 4))   # → 7
 
 # Match destructure — bare idents in clause positions BIND.  A clause
 # like `field:[Sort:pred]` constrains the field's sort instead of binding.

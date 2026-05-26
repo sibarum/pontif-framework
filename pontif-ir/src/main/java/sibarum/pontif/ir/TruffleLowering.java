@@ -111,7 +111,7 @@ public final class TruffleLowering {
             fieldNames.add(e.getKey());
             valueNodes.add(lowerExpr(e.getValue(), module, registry));
         }
-        return RecordNode.of(fieldNames, valueNodes);
+        return RecordNode.of(record.typeName(), fieldNames, valueNodes);
     }
 
     private PontifNode lowerMatch(IrExpr.Match match, CompiledModule module, FunctionRegistry registry) {

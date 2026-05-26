@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Function {
+public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Function, IrSort.Trait {
 
     Origin origin();
 
@@ -23,6 +23,10 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
 
     static Function function(List<IrSort> paramSorts, IrSort returnSort) {
         return new Function(paramSorts, returnSort, Origin.NONE);
+    }
+
+    static Trait trait(String name, Map<String, IrSort.Function> methods) {
+        return new Trait(name, methods, Origin.NONE);
     }
 
     record Named(String name, Origin origin) implements IrSort {}
@@ -55,6 +59,27 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                 throw new IllegalArgumentException("Function returnSort must be non-null");
             }
             paramSorts = List.copyOf(paramSorts);
+        }
+    }
+
+    /**
+     * Trait sort: a named contract over method signatures. Values of this
+     * sort are concrete struct types whose {@code Type.method}
+     * declarations satisfy the contract — registered explicitly via
+     * {@link IrStmt.TraitImpl} blocks. The contract method signatures
+     * here exclude the implicit {@code self} parameter; SortChecker
+     * prepends it at validation time.
+     */
+    record Trait(String name, Map<String, IrSort.Function> methods, Origin origin) implements IrSort {
+        public Trait {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("Trait name must be non-empty");
+            }
+            if (methods == null) {
+                throw new IllegalArgumentException("Trait methods must be non-null");
+            }
+            methods = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(methods));
         }
     }
 }

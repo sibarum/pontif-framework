@@ -10,13 +10,29 @@ import java.util.Objects;
 
 public final class RecordValue {
 
+    private final String typeName;
     private final Map<String, Object> members;
 
     public RecordValue(Map<String, Object> members) {
+        this(null, members);
+    }
+
+    /**
+     * @param typeName the nominal struct type name (e.g., {@code "Point"}),
+     *                 or {@code null} for anonymous records. Used downstream
+     *                 by the dispatch table's trait-fallback rule to identify
+     *                 the concrete type of an argument.
+     */
+    public RecordValue(String typeName, Map<String, Object> members) {
         if (members == null) {
             throw new IllegalArgumentException("RecordValue members must be non-null");
         }
+        this.typeName = typeName;
         this.members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
+    }
+
+    public String typeName() {
+        return typeName;
     }
 
     public Map<String, Object> members() {
@@ -44,7 +60,9 @@ public final class RecordValue {
 
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("{");
+        StringBuilder sb = new StringBuilder();
+        if (typeName != null) sb.append(typeName);
+        sb.append("{");
         boolean first = true;
         for (Map.Entry<String, Object> e : members.entrySet()) {
             if (!first) sb.append(", ");

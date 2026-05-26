@@ -28,7 +28,8 @@ public sealed interface SymExpr
     static App app(SymExpr fn, SymExpr arg) { return new App(fn, arg); }
     static Case case_(SymExpr scrutinee, List<CaseBranch> branches) { return new Case(scrutinee, branches); }
     static CaseBranch branch(Sort pattern, SymExpr result) { return new CaseBranch(pattern, result); }
-    static Record record(Map<String, SymExpr> members) { return new Record(members); }
+    static Record record(Map<String, SymExpr> members) { return new Record(members, null); }
+    static Record record(String typeName, Map<String, SymExpr> members) { return new Record(members, typeName); }
     static FieldAccess fieldAccess(SymExpr base, String fieldName) { return new FieldAccess(base, fieldName); }
 
     enum CmpOp { LT, LE, GT, GE, EQ, NE }
@@ -109,7 +110,14 @@ public sealed interface SymExpr
         }
     }
 
-    record Record(Map<String, SymExpr> members) implements SymExpr {
+    /**
+     * Symbolic record value. {@code typeName} carries the nominal struct
+     * type (e.g., {@code "Point"}) when known — needed by the dispatch
+     * table's trait-fallback rule to identify the concrete type of an
+     * argument. May be {@code null} for anonymous records (S-expr
+     * {@code (record ...)} construction, refinement-predicate fragments).
+     */
+    record Record(Map<String, SymExpr> members, String typeName) implements SymExpr {
         public Record {
             members = Map.copyOf(members);
         }

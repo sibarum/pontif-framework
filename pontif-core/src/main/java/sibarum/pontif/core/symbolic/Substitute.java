@@ -35,12 +35,12 @@ public final class Substitute {
                         .toList();
                 yield new SymExpr.Case(newScrutinee, newBranches);
             }
-            case SymExpr.Record(Map<String, SymExpr> members) -> {
+            case SymExpr.Record(Map<String, SymExpr> members, String typeName) -> {
                 Map<String, SymExpr> newMembers = new LinkedHashMap<>();
                 for (Map.Entry<String, SymExpr> e : members.entrySet()) {
                     newMembers.put(e.getKey(), apply(e.getValue(), bindings));
                 }
-                yield new SymExpr.Record(newMembers);
+                yield new SymExpr.Record(newMembers, typeName);
             }
             case SymExpr.FieldAccess(SymExpr base, String name) -> new SymExpr.FieldAccess(apply(base, bindings), name);
         };
@@ -63,12 +63,12 @@ public final class Substitute {
             case SymExpr.Lam(String param, Sort paramType, SymExpr body) -> new SymExpr.Lam(param, paramType, applySelf(body, value));
             case SymExpr.Case(SymExpr scrutinee, List<SymExpr.CaseBranch> branches) ->
                     new SymExpr.Case(applySelf(scrutinee, value), branches);
-            case SymExpr.Record(Map<String, SymExpr> members) -> {
+            case SymExpr.Record(Map<String, SymExpr> members, String typeName) -> {
                 Map<String, SymExpr> newMembers = new LinkedHashMap<>();
                 for (Map.Entry<String, SymExpr> e : members.entrySet()) {
                     newMembers.put(e.getKey(), applySelf(e.getValue(), value));
                 }
-                yield new SymExpr.Record(newMembers);
+                yield new SymExpr.Record(newMembers, typeName);
             }
             case SymExpr.FieldAccess(SymExpr base, String name) -> new SymExpr.FieldAccess(applySelf(base, value), name);
         };

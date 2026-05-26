@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 
 import java.util.List;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.NoOp {
 
     Origin origin();
 
@@ -22,6 +22,10 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
 
     static NoOp noOp(String label) {
         return new NoOp(label, Origin.NONE);
+    }
+
+    static TraitImpl traitImpl(String typeName, String traitName, List<FunctionDecl> methods) {
+        return new TraitImpl(typeName, traitName, methods, Origin.NONE);
     }
 
     record FunctionDecl(
@@ -52,6 +56,34 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             if (sort == null) {
                 throw new IllegalArgumentException("Type alias sort must be non-null");
             }
+        }
+    }
+
+    /**
+     * Trait impl block — assigns a trait to a struct type and bundles
+     * the impl methods together. At compile time, methods are registered
+     * in the dispatch table as regular {@link FunctionDecl}s (with the
+     * type-qualified name and self-prepended params) and the
+     * {@code (typeName, traitName)} pair is added to the
+     * {@link sibarum.pontif.core.symbolic.TraitRegistry}.
+     *
+     * <p>SortChecker validates each contract method has a matching impl
+     * (after self-prepending). Surface form (alt syntax):
+     * {@code assign trait T:Tr { ... }}.
+     */
+    record TraitImpl(
+            String typeName,
+            String traitName,
+            List<FunctionDecl> methods,
+            Origin origin) implements IrStmt {
+        public TraitImpl {
+            if (typeName == null || typeName.isEmpty()) {
+                throw new IllegalArgumentException("TraitImpl typeName must be non-empty");
+            }
+            if (traitName == null || traitName.isEmpty()) {
+                throw new IllegalArgumentException("TraitImpl traitName must be non-empty");
+            }
+            methods = List.copyOf(methods);
         }
     }
 

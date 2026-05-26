@@ -133,16 +133,18 @@ class OriginTest {
     }
 
     @Test
-    void dispatchFailure_carriesCallSiteOrigin() throws Exception {
-        // Call to a function that doesn't exist
+    void dispatchFailure_carriesCallSiteOrigin() {
+        // Call to a function that doesn't exist — now caught at compile time
+        // by SortChecker's unknown-function-name validation. The origin still
+        // propagates onto the CompileException so the editor can point at
+        // the offending call site.
         Origin callSite = Origin.at("test.ptf", 42, 5);
         IrExpr badCall = new IrExpr.Call("doesNotExist", List.of(IrExpr.lit(5)), callSite);
         IrModule module = new IrModule("missing", List.of(), badCall);
-        CompiledModule compiled = new IrCompiler(simplifier()).compile(module);
 
-        RuntimeCheckException ex = assertThrows(
-                RuntimeCheckException.class,
-                () -> new IrInterpreter(simplifier()).eval(compiled));
+        CompileException ex = assertThrows(
+                CompileException.class,
+                () -> new IrCompiler(simplifier()).compile(module));
 
         assertEquals(callSite, ex.origin());
         assertTrue(ex.getMessage().contains("test.ptf:42:5"));
