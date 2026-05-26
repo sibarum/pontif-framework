@@ -233,6 +233,12 @@ public final class SortChecker {
                 // recurse into them to validate param/return types.
                 for (IrSort.Function f : t.methods().values()) validateSortNames(f);
             }
+            case IrSort.Union u -> {
+                for (IrSort b : u.branches()) validateSortNames(b);
+            }
+            case IrSort.Intersection i -> {
+                for (IrSort b : i.branches()) validateSortNames(b);
+            }
         }
     }
 

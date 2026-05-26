@@ -902,9 +902,8 @@ public final class AltParser {
 
         // Contextual form: `[pred]` — no base, take from contextualBaseStack
         // (pushed by parseMatch when the scrutinee has an inferable sort).
-        // Slice 4 scope: works in match arms; other contexts (struct refinement,
-        // function sorts, union/intersection) come in later slices.
-        if (first.kind() != AltToken.Kind.IDENT) {
+        if (first.kind() != AltToken.Kind.IDENT
+                && first.kind() != AltToken.Kind.LBRACKET) {
             String inferredBase = contextualBaseStack.isEmpty()
                     ? null
                     : contextualBaseStack.peek();
@@ -919,45 +918,109 @@ public final class AltParser {
             IrExpr cooked = applyPredicateSugar(pred);
             return new IrSort.Refined(inferredBase, cooked, open.spanTo(close));
         }
-        AltToken baseTok = consume();
 
-        if (peek().kind() == AltToken.Kind.RBRACKET) {
+        // Parse the first branch. Could be a nested `[...]` or a bare
+        // ident with optional refinement / struct / function tail.
+        IrSort firstBranch = parseBracketBranch();
+
+        // Sort-level `|` or `&` between branches?
+        if (peek().kind() == AltToken.Kind.OP
+                && (peek().text().equals("|") || peek().text().equals("&"))) {
+            String op = consume().text();
+            List<IrSort> branches = new ArrayList<>();
+            branches.add(firstBranch);
+            branches.add(parseBracketBranch());
+            while (peek().kind() == AltToken.Kind.OP && peek().text().equals(op)) {
+                consume();
+                branches.add(parseBracketBranch());
+            }
             AltToken close = expect(AltToken.Kind.RBRACKET);
-            return new IrSort.Named(baseTok.text(), open.spanTo(close));
+            return normalizeMultiBranch(branches, op, open.spanTo(close));
         }
 
+        AltToken close = expect(AltToken.Kind.RBRACKET);
+        return firstBranch;
+    }
+
+    /**
+     * Parses a single sort element that can appear as a branch inside a
+     * bracket-sort's {@code |}/{@code &}-joined list. Either a nested
+     * {@code [...]} form (recurse) or a bare ident with optional
+     * refinement, struct-fields, or function-sort tail.
+     */
+    private IrSort parseBracketBranch() throws ParseException {
+        if (peek().kind() == AltToken.Kind.LBRACKET) {
+            return parseBracketSort();
+        }
+        AltToken baseTok = expect(AltToken.Kind.IDENT);
+
         if (peek().kind() == AltToken.Kind.COLON) {
-            consume();  // COLON
+            consume();
             IrExpr pred = parseExpr();
-            AltToken close = expect(AltToken.Kind.RBRACKET);
             IrExpr cooked = applyPredicateSugar(pred);
-            return new IrSort.Refined(baseTok.text(), cooked, open.spanTo(close));
+            return new IrSort.Refined(baseTok.text(), cooked, baseTok.origin());
         }
 
         if (peek().kind() == AltToken.Kind.LPAREN) {
-            // [Function(P1, P2, ...):R] — function sort. `Function` is a reserved
-            // builtin sort name; users cannot declare structs named Function.
             if (baseTok.text().equals("Function")) {
-                IrSort.Function fnSort = parseFunctionSortBody(baseTok);
-                AltToken close = expect(AltToken.Kind.RBRACKET);
-                return new IrSort.Function(
-                        fnSort.paramSorts(), fnSort.returnSort(), open.spanTo(close));
+                return parseFunctionSortBody(baseTok);
             }
-            // [Name(field:Sort, ...)] structural form. Each clause is either:
-            //   - `field:Sort` — explicit field sort
-            //   - `field`      — bare name, sort looked up from declaredStructs
             consume();  // LPAREN
             Map<String, IrSort> members = parseStructFields(baseTok.text(), baseTok.origin());
             expect(AltToken.Kind.RPAREN);
-            AltToken close = expect(AltToken.Kind.RBRACKET);
-            return new IrSort.Structural(baseTok.text(), members, open.spanTo(close));
+            return new IrSort.Structural(baseTok.text(), members, baseTok.origin());
         }
 
-        throw new ParseException(
-                "Expected ':' (refinement predicate), '(' (struct fields), or ']' (bare sort) "
-                        + "after '" + baseTok.text() + "'; got " + peek().kind()
-                        + " '" + peek().text() + "'",
-                peek().origin());
+        // Bare name — `Int`, `Bool`, etc.
+        return new IrSort.Named(baseTok.text(), baseTok.origin());
+    }
+
+    /**
+     * Builds the canonical IR shape for a multi-branch bracket-sort.
+     * Same-base branches (all bare or refined over the same base name)
+     * collapse to a single {@link IrSort.Refined} with an {@code OR}-joined
+     * or {@code AND}-joined predicate. Cross-base branches stay as a
+     * {@link IrSort.Union} or {@link IrSort.Intersection}.
+     */
+    private static IrSort normalizeMultiBranch(List<IrSort> branches, String op, Origin origin) {
+        String commonBase = sameBaseName(branches);
+        if (commonBase == null) {
+            return op.equals("|")
+                    ? new IrSort.Union(branches, origin)
+                    : new IrSort.Intersection(branches, origin);
+        }
+        IrExpr.Op irOp = op.equals("|") ? IrExpr.Op.OR : IrExpr.Op.AND;
+        IrExpr combined = null;
+        for (IrSort b : branches) {
+            IrExpr branchPred = b instanceof IrSort.Refined r
+                    ? r.predicate()
+                    : new IrExpr.Bool(true, b.origin());
+            combined = combined == null
+                    ? branchPred
+                    : new IrExpr.BinOp(irOp, combined, branchPred, origin);
+        }
+        return new IrSort.Refined(commonBase, combined, origin);
+    }
+
+    /**
+     * Returns the shared base-name across {@code branches} if all are
+     * either bare {@link IrSort.Named} or {@link IrSort.Refined} over the
+     * same name; null otherwise (signals cross-base — caller emits Union
+     * or Intersection instead of normalizing).
+     */
+    private static String sameBaseName(List<IrSort> branches) {
+        String base = null;
+        for (IrSort b : branches) {
+            String n = switch (b) {
+                case IrSort.Named bn -> bn.name();
+                case IrSort.Refined r -> r.name();
+                default -> null;
+            };
+            if (n == null) return null;
+            if (base == null) base = n;
+            else if (!base.equals(n)) return null;
+        }
+        return base;
     }
 
     /**
@@ -1712,6 +1775,9 @@ public final class AltParser {
             case IrSort.Structural s -> s.name();
             case IrSort.Function f -> null;
             case IrSort.Trait t -> t.name();
+            // Cross-base unions/intersections have no single base name.
+            case IrSort.Union u -> null;
+            case IrSort.Intersection i -> null;
         };
     }
 

@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Function, IrSort.Trait {
+public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Function, IrSort.Trait, IrSort.Union, IrSort.Intersection {
 
     Origin origin();
 
@@ -27,6 +27,14 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
 
     static Trait trait(String name, Map<String, IrSort.Function> methods) {
         return new Trait(name, methods, Origin.NONE);
+    }
+
+    static Union union(List<IrSort> branches) {
+        return new Union(branches, Origin.NONE);
+    }
+
+    static Intersection intersection(List<IrSort> branches) {
+        return new Intersection(branches, Origin.NONE);
     }
 
     record Named(String name, Origin origin) implements IrSort {}
@@ -80,6 +88,52 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             }
             methods = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(methods));
+        }
+    }
+
+    /**
+     * Union of cross-base sorts. Same-base unions (e.g.,
+     * {@code [Int:0]|[Int:1]}) are normalized at parse time into a single
+     * {@link Refined} sort with an {@code OR}-joined predicate; this variant
+     * is reserved for unions whose branches don't share a common base
+     * (e.g., {@code Int|Float}).
+     *
+     * <p>Branches are stored in source order. The dispatcher accepts a
+     * value against a Union sort iff the value satisfies at least one
+     * branch.
+     */
+    record Union(List<IrSort> branches, Origin origin) implements IrSort {
+        public Union {
+            if (branches == null) {
+                throw new IllegalArgumentException("Union branches must be non-null");
+            }
+            branches = List.copyOf(branches);
+            if (branches.size() < 2) {
+                throw new IllegalArgumentException(
+                        "Union must have at least two branches; got " + branches.size());
+            }
+        }
+    }
+
+    /**
+     * Intersection of cross-base sorts. Same-base intersections (e.g.,
+     * {@code [Int:@>0]&[Int:@<10]}) are normalized at parse time into a
+     * single {@link Refined} sort with an {@code AND}-joined predicate;
+     * this variant is reserved for the rare cross-base case.
+     *
+     * <p>The dispatcher accepts a value against an Intersection sort iff
+     * the value satisfies every branch.
+     */
+    record Intersection(List<IrSort> branches, Origin origin) implements IrSort {
+        public Intersection {
+            if (branches == null) {
+                throw new IllegalArgumentException("Intersection branches must be non-null");
+            }
+            branches = List.copyOf(branches);
+            if (branches.size() < 2) {
+                throw new IllegalArgumentException(
+                        "Intersection must have at least two branches; got " + branches.size());
+            }
         }
     }
 }

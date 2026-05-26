@@ -1,90 +1,119 @@
 # Pontif Framework
 
-High-level AST builders on top of GraalVM's Truffle framework. Bring your own parser, assemble an AST from ready-made nodes, and let the framework handle resolution, dispatch, sort checking, and execution.
+An experimental typed language built on top of GraalVM's Truffle. The
+type system is the star: refinements, multi-dispatch, traits, union /
+intersection sorts, and narrowing-driven polymorphism all share a
+single symbolic-predicate kernel.
 
 ## What it is
 
-Truffle is powerful, but every literal, every binary operator, and every binding form is your problem. Pontif ships a curated toolkit of those nodes — literals, arithmetic, comparison, let/var bindings, function entry/call/registry, lambdas, closures — alongside a typed intermediate representation and a Truffle lowering. Building a small language reads like wiring components together rather than writing a Truffle compiler from scratch.
+Pontif is a language for **proof-assistant-grade type correctness in
+real programming**. A sort like `[Int:@>0]` is a refined type — a base
+plus a symbolic predicate. Values belong to the sort exactly when the
+predicate holds, and the same `SymExpr` / `Simplifier` that checks
+sorts also drives multi-dispatch, trait satisfaction, match-arm
+selection, and inference.
 
-**BYO-parser.** Pontif intentionally ships no grammar and no parser. You construct ASTs programmatically (or generate them from your own front-end), then call `Pontif.eval(tree)` to run them.
+The framework ships:
 
-## The unified pattern system
+- Both an **S-expression reference parser** and a richer **alt-syntax
+  parser** (`pontif-parser`).
+- A typed IR (`pontif-ir`) — sorts (named, refined, structural,
+  function, trait, union, intersection), function/method declarations,
+  trait impls, dispatch tables.
+- A Truffle lowering and an `IrInterpreter` (`pontif-runtime`).
+- A playground for editing and running snippets (`pontif-playground`).
 
-A single pattern-and-predicate language runs through every layer of the framework, so the same machinery answers questions that would normally live in separate subsystems:
+## A taste of the language
 
-- **Type interfaces.** A sort like `Nat[x > 0]` is a refined sort — a name plus a symbolic predicate. Values belong to the sort exactly when the predicate holds.
-- **Function and method signatures.** Parameter sorts can be refined. `square(n: Nat[n > 0])` is a real signature, not a doc comment.
-- **Multi-dispatch.** When several declarations share a name, the dispatch table picks the one whose argument refinements close under the call site. The same `SymExpr` / `Simplifier` that checks sorts also selects the overload.
-- **Pattern matching.** Cases over sealed AST hierarchies and refined sorts share that predicate language; branch selection and sort checking are facets of the same question.
+```pontif
+struct Point(x:Int, y:Int)
 
-Because one simplifier underpins all of these, "is this value a `Nat`?", "does this call resolve?", and "which branch runs?" are the same question asked in different positions.
+method Point.+(p:Point):Point ->
+  Point(self.x + p.x, self.y + p.y)
 
-**Proofs are an opt-in feature, not the framing.** If you want the simplifier to *prove* a predicate at compile time — to reject impossible calls or unreachable branches — wire in the proof machinery on the declarations that need it. If you don't, the same predicate still serves as a runtime check. Nothing about the rest of the framework changes either way.
+let Addable:Type{
+  +:[Function(self):self]
+}
+assign trait Point:Addable {
+  +(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+}
+
+function double(p:Point):Point -> p + p
+
+double(Point(3, 4))   # → Point(6, 8)
+```
+
+What's at work above, in roughly the order it appears:
+
+- **Structs** with field sorts.
+- **Methods** namespaced under a type, with operator-character names
+  (overloaded `+`, `==`, etc.).
+- **Traits** declared as a kind-of-sort (`Type{...}`) and assigned to
+  types via `assign trait T:Tr {...}`. **Narrowing handles
+  polymorphism** — a trait-typed param accepts any value whose
+  concrete type satisfies the trait, checked through the same `:`
+  operator that does refinement narrowing everywhere else.
+- **Refinement sorts** (`[Int:@>0]`) for narrow types.
+- **Union and intersection sorts** at the bracket level (`[Int|Bool]`,
+  `[[Int:@>0] & [Int:@<10]]`) with same-base normalization at parse
+  time.
+
+See `docs/alternative-syntax.ptf` for the canonical reference (and
+`docs/glossary.md` for terms).
 
 ## Modules
 
 | Module | What it provides |
 | --- | --- |
-| `pontif-core` | Truffle language registration (`PontifLanguage`, `Pontif.eval`), the `PontifNode` base class, source-position `Origin`, symbolic algebra (`SymExpr`, `Simplifier`, alpha-equivalence, substitution), the sort/type system (`Sort`, `RuleEngine`), refinements, and multi-dispatch (`DispatchTable`, `FunctionDecl`, `FunctionCheck`). |
-| `pontif-ast` | Ready-made Truffle nodes — literals (`IntLiteral`, `Bool`), binary ops (`Add`, `Sub`, `Mul`, `Cmp`), bindings (`Let`, `Var`), and function machinery (`CallNode`, `FunctionEntryNode`, `FunctionRegistry`). |
-| `pontif-ir` | A typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`) with sorts, refinements, lambdas, and closures. `IrCompiler` resolves declarations and discharges sort rules; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
-| `pontif-demo` | Worked examples and tests — including a positive-natural (`PosNat`) sort defined entirely by a refinement, plus end-to-end tests for dispatch, refinements, lambdas, sort rules, and Truffle execution. |
+| `pontif-core` | Symbolic algebra (`SymExpr`, `Simplifier`, alpha-equivalence, substitution), the sort system (`Sort`, with refined/structural/function/union/intersection variants), refinements, multi-dispatch (`DispatchTable`, `FunctionDecl`, `FunctionCheck`, `TraitRegistry`), Truffle language registration. |
+| `pontif-ast` | Ready-made Truffle nodes — literals, arithmetic, comparison, let-bindings, lambdas/closures, records, field access, match, function entry/call. |
+| `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). `AliasResolver` substitutes type aliases; `SortChecker` validates sorts, calls, and trait impls; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
+| `pontif-predicates` | Predicate-arithmetic kernel — complement, intersection, satisfiability over a sort's domain. Used by the alt parser's `_`-arm desugar and (eventually) overload-overlap checks. |
+| `pontif-parser` | Two parsers sharing the same IR: a stable S-expression parser (`Parser`) for tests / reference, and the canonical alt-syntax parser (`AltParser`) for user-written Pontif code. |
+| `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic graph builder), receipt data shapes for the eventual notary / issuer story. Currently a regression-test slice; paused pending dispatch inference. |
+| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — wires the parser, simplifier, IR compiler, and interpreter / Truffle into a single `eval(src) → Object` flow. |
+| `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
+| `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, lambdas, match. |
 
-## Quick example
+## Status
 
-Build a small AST and run it:
+Active experimental development. Public APIs are not yet stable —
+expect breaking changes while the version reads `1.0-SNAPSHOT`.
 
-```java
-import sibarum.pontif.ast.binary.Add;
-import sibarum.pontif.ast.literal.IntLiteral;
-import sibarum.pontif.core.Pontif;
+Capabilities that work end-to-end in alt syntax:
 
-long result = Pontif.evalLong(
-    Add.of(IntLiteral.of(2), IntLiteral.of(3))
-);
-// → 5
-```
+- Refinement sorts (`[Int:@>0]`, `[Int:0|1|2]`)
+- Struct declarations, struct literals (positional `Point(1, 2)` and
+  by-name `Point{x=1, y=2}`)
+- Top-level `let` (inferred or annotated sort) and in-expression
+  `let X = value BODY` (with optional `{ ... }` block wrapper)
+- Functions and overloads, methods, instance method calls, operator
+  overloading (`+ - * < <= > >= == !=`), static / 0-arg-function bare
+  access
+- Pattern matching with `_` default arm desugaring
+- Traits via `let Trait:Type{...}` / `assign trait T:Trait { ... }`
+  with trait-typed parameters and trait-method dispatch
+- Union and intersection sorts at the bracket level (`[Int|Bool]`,
+  `[[Int:@>0] & [Int:@<10]]`) with same-base normalization
 
-The same nodes compose under a parser, a code generator, or another DSL. See `pontif-demo/src/test/java` for richer examples — let-bindings, multi-dispatch, refined sorts, lambdas, and full IR-to-Truffle lowering.
-
-## Requirements
-
-- **JDK 25** (source and target level — sealed interfaces, records, switch pattern matching)
-- **Maven 3.9+**
-- **GraalVM Truffle 24.1.1** (pulled transitively)
+See `docs/TODO.md` for the active work list. The current priority is
+**dispatch inference at compile time** — overload-overlap checks and
+call-site narrowing propagation, which unblocks the paused
+receipt-graph subsystem.
 
 ## Build and test
 
 ```
 mvn clean install              # build all modules
-mvn -pl pontif-demo test       # run the demo and integration tests
+mvn test                       # run every test in the reactor
+mvn -pl pontif-demo test       # run the demo & integration tests
 ```
 
-## Coordinates
-
-```xml
-<dependency>
-  <groupId>sibarum.pontif</groupId>
-  <artifactId>pontif-core</artifactId>
-  <version>1.0-SNAPSHOT</version>
-</dependency>
-```
-
-Replace the artifact id with `pontif-ast` or `pontif-ir` as needed; the framework is a Maven multi-module project and each module is published independently.
-
-## Status
-
-Active development. The four modules build, the demo tests pass, and the framework is being shaped by working through small example languages. The public API is not yet stable — expect breaking changes while the version reads `1.0-SNAPSHOT`.
-
-Planned and in-flight directions:
-
-- **Richer feature builders** — modules and namespaces, imports/exports, exceptions, loops and streams, optionals and promises.
-- **Utility kits** — arrays, lists, sets, maps, tensors, primitive data types.
-- **Type-system kits** — inheritance, prototypes, mixins, generics, strict vs gradual typing.
-- **Optional proof layer** — let a host language declare invariants the simplifier discharges at compile time.
-
-See `proof-language-concept.md` and `simple-proof-example.txt` for an early sketch of how the proof layer could be exposed to a host language.
+JDK 25 (sealed interfaces, records, switch pattern matching).
+Maven 3.9+. GraalVM Truffle 24.1.1 pulled transitively.
 
 ## License
 
-Licensed under the Apache License, Version 2.0. A `LICENSE` file will be added with the next release; in the meantime the terms at <https://www.apache.org/licenses/LICENSE-2.0> apply.
+Licensed under the Apache License, Version 2.0. See
+<https://www.apache.org/licenses/LICENSE-2.0>.

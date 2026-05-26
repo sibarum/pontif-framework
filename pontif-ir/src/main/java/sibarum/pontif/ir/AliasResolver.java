@@ -135,6 +135,16 @@ public final class AliasResolver {
                 }
                 yield new IrSort.Trait(t.name(), resolvedMethods, t.origin());
             }
+            case IrSort.Union u -> {
+                List<IrSort> resolved = new ArrayList<>(u.branches().size());
+                for (IrSort b : u.branches()) resolved.add(resolveSort(b, aliases, path));
+                yield new IrSort.Union(resolved, u.origin());
+            }
+            case IrSort.Intersection i -> {
+                List<IrSort> resolved = new ArrayList<>(i.branches().size());
+                for (IrSort b : i.branches()) resolved.add(resolveSort(b, aliases, path));
+                yield new IrSort.Intersection(resolved, i.origin());
+            }
         };
     }
 
@@ -242,6 +252,16 @@ public final class AliasResolver {
                             (IrSort.Function) substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, t.origin());
+            }
+            case IrSort.Union u -> {
+                List<IrSort> newBranches = new ArrayList<>(u.branches().size());
+                for (IrSort b : u.branches()) newBranches.add(substituteResolved(b, resolved));
+                yield new IrSort.Union(newBranches, u.origin());
+            }
+            case IrSort.Intersection i -> {
+                List<IrSort> newBranches = new ArrayList<>(i.branches().size());
+                for (IrSort b : i.branches()) newBranches.add(substituteResolved(b, resolved));
+                yield new IrSort.Intersection(newBranches, i.origin());
             }
         };
     }

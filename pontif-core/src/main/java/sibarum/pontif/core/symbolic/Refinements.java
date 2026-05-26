@@ -69,6 +69,12 @@ public final class Refinements {
         if (sort.isFunction()) {
             return satisfiesFunction(value, sort, simplifier);
         }
+        if (sort.isUnion()) {
+            return satisfiesUnion(value, sort, simplifier);
+        }
+        if (sort.isIntersection()) {
+            return satisfiesIntersection(value, sort, simplifier);
+        }
         if (!sort.isRefined()) {
             return ProofResult.passed();
         }
@@ -81,6 +87,42 @@ public final class Refinements {
                             "Value " + value + " does not satisfy " + sort + " — predicate " + sort.predicate() + " evaluates to false");
         }
         return ProofResult.residual(simplified);
+    }
+
+    /**
+     * Union: value satisfies iff it satisfies at least one branch.
+     * Returns Passed on the first satisfying branch; falls back to
+     * Residual if any branch is residual (none Passed yet); else Failed.
+     */
+    private static ProofResult satisfiesUnion(SymExpr value, Sort sort, Simplifier simplifier) {
+        boolean anyResidual = false;
+        for (Sort branch : sort.unionBranches()) {
+            ProofResult r = satisfies(value, branch, simplifier);
+            if (r instanceof ProofResult.Passed) return r;
+            if (r instanceof ProofResult.Residual) anyResidual = true;
+        }
+        if (anyResidual) return ProofResult.residual(value);
+        return ProofResult.failed(
+                "Value " + value + " does not satisfy any branch of union " + sort);
+    }
+
+    /**
+     * Intersection: value satisfies iff it satisfies every branch. Fails
+     * fast on the first non-satisfying branch.
+     */
+    private static ProofResult satisfiesIntersection(SymExpr value, Sort sort, Simplifier simplifier) {
+        boolean anyResidual = false;
+        for (Sort branch : sort.intersectionBranches()) {
+            ProofResult r = satisfies(value, branch, simplifier);
+            if (r instanceof ProofResult.Failed f) {
+                return ProofResult.failed(
+                        "Value " + value + " fails branch " + branch
+                                + " of intersection " + sort + ": " + f.witness());
+            }
+            if (r instanceof ProofResult.Residual) anyResidual = true;
+        }
+        if (anyResidual) return ProofResult.residual(value);
+        return ProofResult.passed();
     }
 
     private static ProofResult satisfiesStructural(SymExpr value, Sort sort, Simplifier simplifier) {

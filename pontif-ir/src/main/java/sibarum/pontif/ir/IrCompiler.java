@@ -126,6 +126,12 @@ public final class IrCompiler {
                 // Method contract sorts are Function sorts; recurse into each.
                 for (IrSort.Function f : t.methods().values()) registerSort(f, map);
             }
+            case IrSort.Union u -> {
+                for (IrSort b : u.branches()) registerSort(b, map);
+            }
+            case IrSort.Intersection i -> {
+                for (IrSort b : i.branches()) registerSort(b, map);
+            }
         }
     }
 
@@ -199,6 +205,16 @@ public final class IrCompiler {
                 // method contract itself is only needed at compile time for
                 // SortChecker validation, not at runtime.
                 yield Sort.of(t.name());
+            }
+            case IrSort.Union u -> {
+                java.util.List<Sort> branches = new java.util.ArrayList<>(u.branches().size());
+                for (IrSort b : u.branches()) branches.add(compileSort(b));
+                yield Sort.union(branches);
+            }
+            case IrSort.Intersection i -> {
+                java.util.List<Sort> branches = new java.util.ArrayList<>(i.branches().size());
+                for (IrSort b : i.branches()) branches.add(compileSort(b));
+                yield Sort.intersection(branches);
             }
         };
     }

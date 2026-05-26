@@ -338,6 +338,46 @@ class AltParserIntegrationTest {
     }
 
     @Test
+    void sameBaseUnion_normalizesAndDispatches_endToEnd() throws Exception {
+        // [Int:0|1|2] uses per-disjunct @==EXPR sugar — predicate-level.
+        // [[Int:0]|[Int:1]] is sort-level same-base — normalizes to the
+        // same Refined sort. Both forms should accept 0, 1 and reject 2.
+        String src = """
+                function tag(n:[[Int:0]|[Int:1]]):Int -> n + 100
+                tag(0)
+                """;
+        assertEquals(100L, run(src));
+    }
+
+    @Test
+    void crossBaseUnion_dispatches_endToEnd() throws Exception {
+        // A function accepting Int OR Bool — both arg shapes should work.
+        // Use a body that just returns a fixed value (doesn't care about
+        // which branch).
+        String intSrc = """
+                function tag(x:[Int|Bool]):Int -> 7
+                tag(42)
+                """;
+        String boolSrc = """
+                function tag(x:[Int|Bool]):Int -> 7
+                tag(true)
+                """;
+        assertEquals(7L, run(intSrc));
+        assertEquals(7L, run(boolSrc));
+    }
+
+    @Test
+    void intersection_narrowsRange_endToEnd() throws Exception {
+        // [Int:@>0 & @<10] — both the AND form and the same-base
+        // intersection should accept 5 and reject 100 / -3.
+        String src = """
+                function smallPositive(n:[[Int:@>0] & [Int:@<10]]):Int -> n * 2
+                smallPositive(5)
+                """;
+        assertEquals(10L, run(src));
+    }
+
+    @Test
     void trait_endToEnd_fromAltSyntax() throws Exception {
         // The full Pontif trait story, top to bottom:
         //   - Declare a trait via `let Duck:Type{...}`.
