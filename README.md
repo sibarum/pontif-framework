@@ -29,35 +29,43 @@ The framework ships:
 ```pontif
 struct Point(x:Int, y:Int)
 
-method Point.+(p:Point):Point ->
-  Point(self.x + p.x, self.y + p.y)
-
-let Addable:Type{
-  +:[Function(self):self]
-}
-assign trait Point:Addable {
-  +(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+let Sized:Type{
+  magnitude:[Function():Int]
 }
 
-function double(p:Point):Point -> p + p
+assign trait Point:Sized {
+  magnitude():Int -> self.x * self.x + self.y * self.y
+}
 
-double(Point(3, 4))   # → Point(6, 8)
+function describe(d:Sized):Int -> d.magnitude()
+
+describe(Point(3, 4))   # → 25
 ```
 
-What's at work above, in roughly the order it appears:
+What's at work above:
 
 - **Structs** with field sorts.
-- **Methods** namespaced under a type, with operator-character names
-  (overloaded `+`, `==`, etc.).
 - **Traits** declared as a kind-of-sort (`Type{...}`) and assigned to
   types via `assign trait T:Tr {...}`. **Narrowing handles
-  polymorphism** — a trait-typed param accepts any value whose
-  concrete type satisfies the trait, checked through the same `:`
-  operator that does refinement narrowing everywhere else.
-- **Refinement sorts** (`[Int:@>0]`) for narrow types.
+  polymorphism** — a trait-typed param (`d:Sized`) accepts any value
+  whose concrete type satisfies the trait, checked through the same
+  `:` operator that does refinement narrowing everywhere else. Inside
+  the impl, `self` is the receiver.
+- **Methods** declared inside the impl block become regular dispatch
+  entries (`Point.magnitude`), callable as `point.magnitude()` on any
+  Point value via the parser's method-call routing.
+- **Dispatch fallback** routes `d.magnitude()` to `Point.magnitude` at
+  runtime, since `d`'s concrete type satisfies `Sized`.
+
+Other capabilities not shown above but available today:
+
+- **Refinement sorts** (`[Int:@>0]`, `[Int:0|1|2]`) for narrow types.
 - **Union and intersection sorts** at the bracket level (`[Int|Bool]`,
   `[[Int:@>0] & [Int:@<10]]`) with same-base normalization at parse
   time.
+- **Operator overloading** via method-style routing — `method Point.+
+  (p:Point):Point -> ...` makes `pointA + pointB` route through
+  dispatch (primitives keep the fast BinOp path).
 
 See `docs/alternative-syntax.ptf` for the canonical reference (and
 `docs/glossary.md` for terms).
@@ -71,7 +79,7 @@ See `docs/alternative-syntax.ptf` for the canonical reference (and
 | `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). `AliasResolver` substitutes type aliases; `SortChecker` validates sorts, calls, and trait impls; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
 | `pontif-predicates` | Predicate-arithmetic kernel — complement, intersection, satisfiability over a sort's domain. Used by the alt parser's `_`-arm desugar and (eventually) overload-overlap checks. |
 | `pontif-parser` | Two parsers sharing the same IR: a stable S-expression parser (`Parser`) for tests / reference, and the canonical alt-syntax parser (`AltParser`) for user-written Pontif code. |
-| `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic graph builder), receipt data shapes for the eventual notary / issuer story. Currently a regression-test slice; paused pending dispatch inference. |
+| `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic graph builder), receipt data shapes for the eventual notary / issuer story. Currently a regression-test slice; ready to expand now that dispatch inference (Phase D) is in place. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — wires the parser, simplifier, IR compiler, and interpreter / Truffle into a single `eval(src) → Object` flow. |
 | `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, lambdas, match. |
@@ -97,10 +105,12 @@ Capabilities that work end-to-end in alt syntax:
 - Union and intersection sorts at the bracket level (`[Int|Bool]`,
   `[[Int:@>0] & [Int:@<10]]`) with same-base normalization
 
-See `docs/TODO.md` for the active work list. The current priority is
-**dispatch inference at compile time** — overload-overlap checks and
-call-site narrowing propagation, which unblocks the paused
-receipt-graph subsystem.
+See `docs/TODO.md` for the active work list. Compile-time dispatch
+inference is in place (overload-overlap rejection, call-site
+narrowing propagation through `NarrowingInference`). The next
+priority is **expanding the receipt-graph subsystem** — extending
+the drafter beyond the non-recursive slice, then notary and default
+issuer.
 
 ## Build and test
 

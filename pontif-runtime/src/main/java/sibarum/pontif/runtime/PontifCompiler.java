@@ -5,6 +5,7 @@ import sibarum.pontif.core.symbolic.BooleanRules;
 import sibarum.pontif.core.symbolic.RefinementRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
+import sibarum.pontif.core.symbolic.StructuralRules;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
@@ -46,6 +47,11 @@ public final class PontifCompiler {
         rules.addAll(RefinementRules.all());
         rules.addAll(ArithmeticRules.all());
         rules.addAll(BooleanRules.all());
+        // StructuralRules is required for refined struct sorts
+        // (`[Point:@.x > 0]`) to actually reduce — the field-projection
+        // rule turns `Record(...).x` into the field value so the
+        // comparison can fold against a literal.
+        rules.addAll(StructuralRules.all());
         return rules;
     }
 

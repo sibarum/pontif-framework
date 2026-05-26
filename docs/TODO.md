@@ -8,51 +8,112 @@ items get removed (history is in git); this file is forward-looking.
 
 ## ⭐ Next priority — Dispatch inference at compile time
 
-Union/intersection sorts in the IR are now in place (parser, IR, Sort
-layer, Refinements satisfaction, dispatch matching all wired). The
-remaining piece of *"dispatch as the star"* is compile-time inference:
+Union/intersection sorts and traits landed during the receipt-graph
+pause, expanding the surface area dispatch inference must cover.
+Phased prerequisites for the full dispatch-inference work:
 
-`DispatchTable.resolve` today operates on argument `SymExpr`s lifted
-from runtime values (via `toSymExpr` in `IrInterpreter.evalCall`).
-Inference lifts it to argument *narrowings* — symbolic claims about
-the set of values the arg could take, sourced from the call site's
-static refinement info. Two pieces:
+### Phase A — Match-arm result narrowing ✅ landed
 
-- **Overload-registration overlap check.** Pairwise per function name
-  at module-compile time: verify no two overloads' param patterns can
-  match the same value (`pred_A ∧ pred_B` unsatisfiable). Fail loudly
-  on overlap. With this in place, runtime dispatch ambiguity becomes
-  impossible — `DispatchResult.Ambiguous` becomes unreachable in
-  practice (consider removing or making it a framework-bug-only
-  signal).
-- **Call-site dispatch resolution.** At each call site the compiler
-  asks: given the argument's narrowing, which overload(s) could match,
-  and what's the resulting return narrowing (the union of the matched
-  overloads' returns)? `DispatchResult` likely expands to a richer
-  "set of resolved overloads with combined return narrowing."
-- **Shared predicate-arithmetic kernel.** Overload-overlap, match-arm
-  `_` desugar, and match totality all reduce to the same operations:
-  predicate intersection, complement, satisfiability over a sort's
-  domain. The kernel lives in `pontif-predicates` and is partially
-  built (used by `_`-arm desugar today). Extend rather than reinvent.
+`pontif-ir/NarrowingInference` exposes `infer(expr, env, functionReturns)`
+as a pure, query-on-demand function returning the narrowest sort
+statically derivable for an expression — or `null` when nothing tighter
+than the declared sort is available. Current slice handles literals,
+var lookup, let-bindings, calls (declared-return fallback), and
+match-arm result narrowing via same-base union of arm result sorts.
+Out-of-scope expressions (BinOp, Record, FieldAccess, Apply, Lambda,
+SelfRef) return `null` and consumers fall back to declared sorts.
 
-Then: **wire compile-time dispatch into call-site narrowing.** Once
-inference works, every `IrExpr.Call` site has a statically-knowable
-return narrowing. Propagate it into the surrounding expression's type.
-The overload return-narrowing gap dissolves — the compiler simply
-knows what each call resolves to.
+### Phase B — `@.field` in struct refinements end-to-end ✅ landed
+
+Struct refinements like `[Point:@.x > 0]` now compile and reduce:
+- `AliasResolver` preserves struct `TypeAlias` statements (matching
+  what trait aliases already did) so `SortChecker` can see them.
+- `SortChecker` recognizes struct base names in `IrSort.Refined`, and
+  validates `@.field` references in the predicate against the base
+  struct's declared members. Unknown field → `CompileException` with
+  the field's origin.
+- `PontifCompiler.defaultRules()` now includes `StructuralRules` —
+  the pre-existing `FIELD_ACCESS_ON_RECORD` rule was wired into the
+  demo tests but missing from the production simplifier. With it in
+  place, `Refinements.satisfies` substitutes `@` with the record,
+  reduces field projections, and folds the resulting comparison.
+- Cross-field refinements (`[Point:@.x + @.y > 0]`) work end-to-end.
+- Field-access nesting deeper than one level on `@` is not yet
+  structurally validated — extend `validateSelfFieldAccesses` when
+  nested struct fields enter the picture.
+
+### Phase C — Struct match-arm narrowing (unifier) ✅ landed
+
+Wires A and B together. New `InferenceContext` record consolidates
+`(typeEnv, functionReturns, structDefs)` so future extensions
+(dispatch table, trait registry) don't widen `infer`'s signature
+again. New inference cases:
+- **Record literal** (`Point(3, 4)`): for each member with an
+  inferrable narrowing, substitute `@` in the member's predicate with
+  `@.fieldName` and AND the resulting predicates → `[Point:@.x==3 &
+  @.y==4]`. Anonymous records (no `typeName`) return null.
+- **Field access** (`p.x` where `p:[Point:…]`): extract conjuncts from
+  the base's narrowing that reference *only* `@.fieldName`,
+  substitute `@.fieldName → @`, return as a refinement over the
+  field's declared base sort (looked up via `ctx.structDefs`).
+  Cross-field conjuncts and bare-`@` conjuncts are skipped
+  conservatively.
+- **Struct match arm** flow-through: scrutinee `Var` narrows to the
+  arm's `Refined` pattern; `p.x` inside the arm projects out the
+  per-field narrowing automatically. Same-base union of arm results
+  yields the match's overall return narrowing.
+
+Match-arm hypothesis still *replaces* the var's prior narrowing
+rather than intersecting — Phase D refinement.
+
+### Phase D — Dispatch inference proper ✅ landed
+
+Three sub-phases delivered:
+
+- **D.1 — Overload-overlap check at registration.**
+  `pontif-ir/OverloadOverlap` runs after `SortChecker` in
+  `IrCompiler.compile`. Pairwise per function name: for each param
+  position, classifies as Disjoint / Overlapping / Unknown via base
+  comparison + `PredicateArithmetic.satisfiable(pred_A ∧ pred_B,
+  baseSort)`. Provable irreducible overlap → `CompileException`.
+  **Subsumption escape hatch:** overlap is accepted when one overload
+  strictly implies the other (the catch-all + specialization pattern),
+  since most-specific dispatch resolves at runtime. Unknown cases
+  pass silently and defer to runtime.
+
+- **D.2 — Compile-time call-site dispatch.**
+  `pontif-ir/StaticDispatch.resolve(overloads, argNarrowings)` returns
+  `Resolved(decl)` or `Unresolved(reason)`. Per-overload match status
+  is the AND of per-param `Refinements.imply(narrowing, paramSort)`
+  results; definite-matches list goes through most-specific filtering.
+  Null arg narrowings degrade to Residual.
+
+- **D.3 — Wire static dispatch into `NarrowingInference`.**
+  `InferenceContext` now carries an `overloads` map. Call narrowing
+  flows through `StaticDispatch` when overloads are populated;
+  declared-return fallback on Unresolved. `InferenceContext.fromModule`
+  builds the full context (overloads + returns + structDefs) from an
+  `IrModule` for end-to-end consumers.
+
+`DispatchResult.Ambiguous` is now unreachable in practice for
+overloads the kernel can decide — D.1 rejects irreducible overlap and
+D.2 picks most-specific. Ambiguous remains as a runtime safety net for
+the Unknown-kernel cases (struct refinements, function-typed params,
+etc.).
 
 ---
 
-## Paused — receipt-graph subsystem (pending dispatch inference)
+## Unblocked — receipt-graph subsystem (next priority candidate)
 
-These were a previous next priority; they remain valid but are gated
-on dispatch inference. They become straightforward once inference
-provides the dispatch resolution input.
+Now that dispatch inference (Phase D) lands inferred return
+narrowings on call sites, recursive call back-references in the
+receipt-graph carry meaningful inductive hypotheses — the original
+reason for the pause.
 
 1. **Drafter** — extend beyond the `double` slice (currently in
    `pontif-receipts`) to handle match arms, recursive calls, and
-   cross-function CallRefs.
+   cross-function CallRefs. Consume `InferenceContext.fromModule(…)`
+   to pull dispatched return narrowings into the graph.
 2. **Notary** — three verifications: graph exists, skeleton matches a
    fresh draft, hypothesis is supported (not refuted) by the graph.
    Refutation-only; reads `(issuer, conclusion, reference)` from
@@ -60,10 +121,10 @@ provides the dispatch resolution input.
 3. **Built-in default issuer + trust integration.** `SignAnalysis` +
    equality covers the trivial fragment; trusted by the notary by
    default, user-disablable.
-4. **Issuer plugin interface (Maven-style).** Doubly-blocked — gated
-   on dispatch inference *and* on Pontif's not-yet-designed
-   package-management / build tool. Receipt-graph data shape is
-   public; the plugin protocol on top of it is what's deferred.
+4. **Issuer plugin interface (Maven-style).** Still gated on Pontif's
+   not-yet-designed package-management / build tool. Receipt-graph
+   data shape is public; the plugin protocol on top of it is what's
+   deferred.
 
 ---
 
@@ -101,11 +162,12 @@ provides the dispatch resolution input.
   outer let (so the scrutinee IS a Var after desugar) — but if someone
   hand-builds an `IrExpr.Match` directly with a non-Var scrutinee,
   narrowing is skipped.
-- **Sort checking inside refinement predicates.** `SortChecker` doesn't
-  recurse into `IrSort.Refined.predicate()` because predicates compile
-  through `compileSymExpr`/`SymExpr`. Field accesses against `self`
-  inside a refinement currently aren't validated. Needs symbolic-layer
-  extension.
+- **Sort checking inside refinement predicates (deeper than `@.field`).**
+  `SortChecker.validateSelfFieldAccesses` now validates one-level
+  `@.field` references against the base struct in Phase B. Predicates
+  that go deeper (`@.field.subfield`, `@.method(...)`) or that involve
+  function-call shapes still aren't recursively type-checked. Extend
+  when nested struct refinements show up.
 - **`Function` sort isn't validated at runtime.** A function declared
   with return sort `[Function(Int):Int]` doesn't check that the lambda
   body produces an `Int → Int`. `Refinements.satisfiesFunction` exists;
@@ -203,6 +265,36 @@ provides the dispatch resolution input.
   - `AltLexer.peekAhead` (line 193) is private and never called — delete it.
   - `AltParser.syntheticCounter` is annotated `@SuppressWarnings("unused")`
     with a stale comment, but is used in `desugarStructuralDestructure`.
+
+- **Default-rule drift across tests.** ~28 test files build their own
+  rule lists (`defaultRules()` / `combinedRules()` / `allRules()`)
+  instead of pulling from a single canonical source. Three patterns
+  observed:
+  1. Stripped-down `defaultRules()` in ~9 pontif-ir tests (`IrTest`,
+     `TruffleExecutionTest`, `IrMatchTest`, `IrRecordTest`, `OriginTest`,
+     `IrLambdaTest`, `TruffleCoverageTest`, `TruffleLambdaTest`) —
+     local copy of `cmpLitLit`, not even `RefinementRules.all()`.
+  2. Smaller-than-production `combinedRules()` in ~5 pontif-demo tests
+     (`RefinementTest`, `M6MatchTest`, `CaseTest`, `FunctionDeclTest`,
+     `TotalExpressionTest`) — Refinement + Arithmetic only; missing
+     Boolean + Structural relative to current production defaults.
+  3. Larger-than-production `allRules()` in ~10 pontif-demo tests
+     (`DispatchTest`, `CompiledCallTest`, `CrossFieldInvariantTest`,
+     `SignAnalysisTest`, etc.) — adds `HypothesisRules` and
+     `LambdaRules`, which aren't in production defaults.
+
+  This is how the missing-`StructuralRules` bug in
+  `PontifCompiler.defaultRules()` went undetected: demo tests had it
+  via `allRules()`, IR tests didn't need it. Real fix is two-pronged:
+  (a) introduce a canonical `DefaultRules.production()` /
+  `DefaultRules.full()` in `pontif-core` so test helpers can delegate
+  rather than re-derive; (b) decide whether `HypothesisRules` and
+  `LambdaRules` should be in production defaults (group-3 tests treat
+  them as essential — that's an architectural signal worth
+  acting on). Migration carries real risk: a test passing only
+  because a rule *doesn't* fire would silently change behavior when
+  upgraded to the canonical set. Migrate one file at a time, verify
+  after each.
 
 ## Playground / dasum integration
 

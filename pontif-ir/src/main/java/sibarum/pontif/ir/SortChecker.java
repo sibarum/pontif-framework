@@ -58,21 +58,40 @@ public final class SortChecker {
     public static void check(IrModule module) throws CompileException {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
+        Map<String, IrSort.Structural> structDefs = collectStructDefs(module);
 
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 Map<String, IrSort> typeEnv = new HashMap<>();
                 for (IrParam p : fd.params()) {
-                    validateSortNames(p.sort());
+                    validateSortNames(p.sort(), structDefs);
                     typeEnv.put(p.name(), p.sort());
                 }
-                validateSortNames(fd.returnSort());
-                checkExpr(fd.body(), typeEnv, functionReturns);
+                validateSortNames(fd.returnSort(), structDefs);
+                checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs);
             }
         }
-        checkExpr(module.main(), new HashMap<>(), functionReturns);
+        checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs);
+    }
+
+    /**
+     * Collects declared struct definitions from preserved {@link IrStmt.TypeAlias}
+     * statements whose sort is an {@link IrSort.Structural}. Used by
+     * {@link #validateSortNames} to recognize {@code [StructName:…]}-form
+     * refinements and validate their {@code @.field} references against the
+     * struct's declared members.
+     */
+    private static Map<String, IrSort.Structural> collectStructDefs(IrModule module) {
+        Map<String, IrSort.Structural> map = new LinkedHashMap<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.TypeAlias ta
+                    && ta.sort() instanceof IrSort.Structural s) {
+                map.put(s.name(), s);
+            }
+        }
+        return map;
     }
 
     /**
@@ -101,7 +120,8 @@ public final class SortChecker {
     private static void validateTraitImpl(
             IrStmt.TraitImpl ti,
             Map<String, IrSort.Trait> traitContracts,
-            Map<String, IrSort> functionReturns) throws CompileException {
+            Map<String, IrSort> functionReturns,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
         IrSort.Trait contract = traitContracts.get(ti.traitName());
         if (contract == null) {
             throw new CompileException(
@@ -148,11 +168,11 @@ public final class SortChecker {
         for (IrStmt.FunctionDecl m : ti.methods()) {
             Map<String, IrSort> typeEnv = new HashMap<>();
             for (IrParam p : m.params()) {
-                validateSortNames(p.sort());
+                validateSortNames(p.sort(), structDefs);
                 typeEnv.put(p.name(), p.sort());
             }
-            validateSortNames(m.returnSort());
-            checkExpr(m.body(), typeEnv, functionReturns);
+            validateSortNames(m.returnSort(), structDefs);
+            checkExpr(m.body(), typeEnv, functionReturns, structDefs);
         }
     }
 
@@ -189,16 +209,24 @@ public final class SortChecker {
     }
 
     /**
-     * Recursively validates that every {@link IrSort.Named} / refined base
-     * is a known primitive. Compound sorts ({@code Structural},
-     * {@code Function}) recurse into their members / params.
+     * Recursively validates sort references. Compound sorts recurse into
+     * their members / params. The two relevant cases:
+     * <ul>
+     *   <li>{@link IrSort.Named}: must be a primitive — alias references
+     *       have been substituted away by {@link AliasResolver}.</li>
+     *   <li>{@link IrSort.Refined}: base must be a primitive <em>or</em> a
+     *       declared struct name (so {@code [Point:@.x > 0]} is legal).
+     *       When the base is a struct, the predicate's {@code @.field}
+     *       references are validated against the struct's declared members.</li>
+     * </ul>
      *
      * <p>{@link IrSort.Structural#name()} is intentionally NOT validated —
      * it's the sort's own identity, not a reference to another type. A
      * structural sort can be inline-defined without a preceding {@code
      * struct} declaration.
      */
-    private static void validateSortNames(IrSort sort) throws CompileException {
+    private static void validateSortNames(IrSort sort, Map<String, IrSort.Structural> structDefs)
+            throws CompileException {
         switch (sort) {
             case IrSort.Named n -> {
                 if (!PRIMITIVE_SORT_NAMES.contains(n.name())) {
@@ -210,40 +238,110 @@ public final class SortChecker {
                 }
             }
             case IrSort.Refined r -> {
-                if (!PRIMITIVE_SORT_NAMES.contains(r.name())) {
+                if (PRIMITIVE_SORT_NAMES.contains(r.name())) {
+                    // Primitive-base refinement; predicate not yet structurally
+                    // validated — refinement-predicate sort-checking is its
+                    // own future work (TODO: "Sort checking inside refinement
+                    // predicates").
+                    break;
+                }
+                IrSort.Structural baseStruct = structDefs.get(r.name());
+                if (baseStruct == null) {
                     throw new CompileException(
                             "Unknown base sort '" + r.name() + "' in refinement "
                                     + "[" + r.name() + ":...] — refinements must be "
-                                    + "over a primitive (Int, Bool).",
+                                    + "over a primitive (Int, Bool) or a declared struct.",
                             r.origin());
                 }
+                validateSelfFieldAccesses(r.predicate(), baseStruct, r.origin());
             }
             case IrSort.Structural s -> {
                 for (IrSort member : s.members().values()) {
-                    validateSortNames(member);
+                    validateSortNames(member, structDefs);
                 }
             }
             case IrSort.Function f -> {
-                for (IrSort p : f.paramSorts()) validateSortNames(p);
-                validateSortNames(f.returnSort());
+                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs);
+                validateSortNames(f.returnSort(), structDefs);
             }
             case IrSort.Trait t -> {
                 // Trait's name identifies the trait itself — not a reference
                 // to another sort. Method-contract sorts are Function sorts;
                 // recurse into them to validate param/return types.
-                for (IrSort.Function f : t.methods().values()) validateSortNames(f);
+                for (IrSort.Function f : t.methods().values()) validateSortNames(f, structDefs);
             }
             case IrSort.Union u -> {
-                for (IrSort b : u.branches()) validateSortNames(b);
+                for (IrSort b : u.branches()) validateSortNames(b, structDefs);
             }
             case IrSort.Intersection i -> {
-                for (IrSort b : i.branches()) validateSortNames(b);
+                for (IrSort b : i.branches()) validateSortNames(b, structDefs);
             }
         }
     }
 
+    /**
+     * Walks a struct-refinement's predicate looking for {@code @.field}
+     * accesses (i.e., {@link IrExpr.FieldAccess} whose base is
+     * {@link IrExpr.SelfRef}) and verifies each {@code field} exists in
+     * the struct. Nested field-access chains are not yet validated past
+     * the first level — covered when sort inference can statically
+     * project nested field sorts.
+     */
+    private static void validateSelfFieldAccesses(
+            IrExpr predicate,
+            IrSort.Structural baseStruct,
+            sibarum.pontif.core.Origin refOrigin) throws CompileException {
+        switch (predicate) {
+            case IrExpr.FieldAccess fa -> {
+                if (fa.base() instanceof IrExpr.SelfRef) {
+                    if (!baseStruct.members().containsKey(fa.fieldName())) {
+                        throw new CompileException(
+                                "Refinement [" + baseStruct.name() + ":…] references "
+                                        + "@." + fa.fieldName() + " but struct '"
+                                        + baseStruct.name() + "' has no such field; "
+                                        + "available: " + baseStruct.members().keySet(),
+                                fa.origin() != null ? fa.origin() : refOrigin);
+                    }
+                }
+                validateSelfFieldAccesses(fa.base(), baseStruct, refOrigin);
+            }
+            case IrExpr.BinOp op -> {
+                validateSelfFieldAccesses(op.left(), baseStruct, refOrigin);
+                validateSelfFieldAccesses(op.right(), baseStruct, refOrigin);
+            }
+            case IrExpr.LetIn l -> {
+                validateSelfFieldAccesses(l.value(), baseStruct, refOrigin);
+                validateSelfFieldAccesses(l.body(), baseStruct, refOrigin);
+            }
+            case IrExpr.Call c -> {
+                for (IrExpr a : c.args()) validateSelfFieldAccesses(a, baseStruct, refOrigin);
+            }
+            case IrExpr.Apply a -> {
+                validateSelfFieldAccesses(a.fn(), baseStruct, refOrigin);
+                for (IrExpr arg : a.args()) validateSelfFieldAccesses(arg, baseStruct, refOrigin);
+            }
+            case IrExpr.Lambda lam -> validateSelfFieldAccesses(lam.body(), baseStruct, refOrigin);
+            case IrExpr.Match m -> {
+                validateSelfFieldAccesses(m.scrutinee(), baseStruct, refOrigin);
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    validateSelfFieldAccesses(b.result(), baseStruct, refOrigin);
+                }
+            }
+            case IrExpr.Record r -> {
+                for (IrExpr v : r.members().values()) {
+                    validateSelfFieldAccesses(v, baseStruct, refOrigin);
+                }
+            }
+            case IrExpr.Lit ignored -> {}
+            case IrExpr.Bool ignored -> {}
+            case IrExpr.Var ignored -> {}
+            case IrExpr.SelfRef ignored -> {}
+        }
+    }
+
     private static void checkExpr(IrExpr expr, Map<String, IrSort> typeEnv,
-                                  Map<String, IrSort> functionReturns)
+                                  Map<String, IrSort> functionReturns,
+                                  Map<String, IrSort.Structural> structDefs)
             throws CompileException {
         switch (expr) {
             case IrExpr.Lit l -> {}
@@ -251,15 +349,15 @@ public final class SortChecker {
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {}
             case IrExpr.BinOp op -> {
-                checkExpr(op.left(), typeEnv, functionReturns);
-                checkExpr(op.right(), typeEnv, functionReturns);
+                checkExpr(op.left(), typeEnv, functionReturns, structDefs);
+                checkExpr(op.right(), typeEnv, functionReturns, structDefs);
             }
             case IrExpr.LetIn l -> {
-                validateSortNames(l.declaredSort());
-                checkExpr(l.value(), typeEnv, functionReturns);
+                validateSortNames(l.declaredSort(), structDefs);
+                checkExpr(l.value(), typeEnv, functionReturns, structDefs);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 extended.put(l.name(), l.declaredSort());
-                checkExpr(l.body(), extended, functionReturns);
+                checkExpr(l.body(), extended, functionReturns, structDefs);
             }
             case IrExpr.Call c -> {
                 // The name might be a top-level function/method, OR a locally
@@ -274,36 +372,36 @@ public final class SortChecker {
                                     + "of '" + c.functionName() + "' exists at all).",
                             c.origin());
                 }
-                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns);
+                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns, structDefs);
             }
             case IrExpr.Lambda lam -> {
-                for (IrParam p : lam.params()) validateSortNames(p.sort());
-                validateSortNames(lam.returnSort());
+                for (IrParam p : lam.params()) validateSortNames(p.sort(), structDefs);
+                validateSortNames(lam.returnSort(), structDefs);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 for (IrParam p : lam.params()) extended.put(p.name(), p.sort());
-                checkExpr(lam.body(), extended, functionReturns);
+                checkExpr(lam.body(), extended, functionReturns, structDefs);
             }
             case IrExpr.Apply app -> {
-                checkExpr(app.fn(), typeEnv, functionReturns);
-                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns);
+                checkExpr(app.fn(), typeEnv, functionReturns, structDefs);
+                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs);
             }
             case IrExpr.Match m -> {
-                checkExpr(m.scrutinee(), typeEnv, functionReturns);
+                checkExpr(m.scrutinee(), typeEnv, functionReturns, structDefs);
                 for (IrExpr.MatchBranch b : m.branches()) {
-                    validateSortNames(b.pattern());
+                    validateSortNames(b.pattern(), structDefs);
                     Map<String, IrSort> branchEnv = new HashMap<>(typeEnv);
                     if (m.scrutinee() instanceof IrExpr.Var v
                             && b.pattern() instanceof IrSort.Structural) {
                         branchEnv.put(v.name(), b.pattern());
                     }
-                    checkExpr(b.result(), branchEnv, functionReturns);
+                    checkExpr(b.result(), branchEnv, functionReturns, structDefs);
                 }
             }
             case IrExpr.Record r -> {
-                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns);
+                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs);
             }
             case IrExpr.FieldAccess fa -> {
-                checkExpr(fa.base(), typeEnv, functionReturns);
+                checkExpr(fa.base(), typeEnv, functionReturns, structDefs);
                 IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns);
                 if (baseSort instanceof IrSort.Structural sp) {
                     if (!sp.members().containsKey(fa.fieldName())) {

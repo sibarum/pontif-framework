@@ -1,0 +1,487 @@
+package sibarum.pontif.ir;
+
+import sibarum.pontif.core.Origin;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Computes the narrowed sort of an expression — what's known about the
+ * expression's value-set beyond its declared sort.
+ *
+ * <p>Pure function over {@code (expression, ctx)}. No compile pass, no
+ * IR mutation, no stored state — consumers call {@link #infer} when
+ * they need a narrowing; results aren't cached. If memoization becomes
+ * necessary later, it slots in without changing the signature.
+ *
+ * <p>Returns the narrowest sort the static fragment can derive, or
+ * {@code null} when no narrowing beyond the declared sort is available.
+ * Never throws. Callers fall back to the declared sort on {@code null}.
+ *
+ * <h2>Phase A + B + C coverage</h2>
+ * <ul>
+ *   <li>{@code Lit(n)} → {@code [Int:@==n]}
+ *   <li>{@code Bool(b)} → {@code [Bool:@==b]}
+ *   <li>{@code Var(x)} → env lookup (null if unbound)
+ *   <li>{@code Match} → same-base union of arm result narrowings, taken
+ *       under each arm's hypothesis (scrutinee {@code Var} narrowed by
+ *       the arm's pattern)
+ *   <li>{@code LetIn} → infer value's narrowing, extend env, infer body
+ *   <li>{@code Call} → if overloads are populated in {@code ctx},
+ *       runs {@link StaticDispatch} against the arg narrowings and
+ *       returns the resolved overload's declared return sort. Falls
+ *       back to {@code ctx.functionReturns()} on Unresolved or empty
+ *       overloads.
+ *   <li>{@code Record(TypeName, members)} → synthesizes
+ *       {@code [TypeName:@.x==v_x & @.y==v_y & …]} from member narrowings
+ *   <li>{@code FieldAccess(base, f)} → projects the field's narrowing out
+ *       of a struct-refined base by extracting conjuncts that reference
+ *       only {@code @.f} and substituting {@code @.f → @}
+ * </ul>
+ *
+ * <h2>Out of scope (returns null, fall back to declared)</h2>
+ * <ul>
+ *   <li>{@code BinOp}, {@code Apply}, {@code Lambda} — symbolic reduction
+ *       of arithmetic / function application is simplifier work; deferred
+ *   <li>{@code SelfRef} — only meaningful inside refinement predicates
+ *   <li>Match-arm hypothesis intersection with prior narrowing — currently
+ *       the arm's pattern <em>replaces</em> the var's narrowing. Phase D
+ *       refinement.
+ * </ul>
+ */
+public final class NarrowingInference {
+
+    private NarrowingInference() {}
+
+    /** Infers the narrowing of an expression under the given context. */
+    public static IrSort infer(IrExpr expr, InferenceContext ctx) {
+        return switch (expr) {
+            case IrExpr.Lit l -> intSingleton(l.value());
+            case IrExpr.Bool b -> boolSingleton(b.value());
+            case IrExpr.Var v -> ctx.typeEnv().get(v.name());
+            case IrExpr.LetIn let -> {
+                IrSort valueNarrowing = infer(let.value(), ctx);
+                IrSort bound = valueNarrowing != null ? valueNarrowing : let.declaredSort();
+                yield infer(let.body(), ctx.withVar(let.name(), bound));
+            }
+            case IrExpr.Match m -> inferMatch(m, ctx);
+            case IrExpr.Call c -> inferCall(c, ctx);
+            case IrExpr.Record r -> inferRecord(r, ctx);
+            case IrExpr.FieldAccess fa -> inferFieldAccess(fa, ctx);
+            // Deferred: see class doc.
+            case IrExpr.BinOp ignored -> null;
+            case IrExpr.Apply ignored -> null;
+            case IrExpr.Lambda ignored -> null;
+            case IrExpr.SelfRef ignored -> null;
+        };
+    }
+
+    /**
+     * Convenience: infer the return narrowing of a function declaration.
+     * Seeds {@code ctx} with each param bound to its declared sort.
+     */
+    public static IrSort inferFunctionReturn(IrStmt.FunctionDecl fd, InferenceContext ctx) {
+        InferenceContext seeded = ctx;
+        for (IrParam p : fd.params()) {
+            seeded = seeded.withVar(p.name(), p.sort());
+        }
+        return infer(fd.body(), seeded);
+    }
+
+    // --- Call (Phase D) ----------------------------------------------------
+
+    /**
+     * Call site: if the context has overloads registered for this name,
+     * use {@link StaticDispatch} to pick the matching overload and
+     * return its declared return sort. On Unresolved (kernel undecided,
+     * no matches, or multiple ambiguous), fall back to
+     * {@code ctx.functionReturns()} — the Phase A behavior.
+     *
+     * <p>Arg narrowings are inferred recursively. A null narrowing
+     * means "unknown" and StaticDispatch treats it as residual.
+     */
+    private static IrSort inferCall(IrExpr.Call c, InferenceContext ctx) {
+        List<IrStmt.FunctionDecl> overloads = ctx.overloads().get(c.functionName());
+        if (overloads == null || overloads.isEmpty()) {
+            return ctx.functionReturns().get(c.functionName());
+        }
+        List<IrSort> argNarrowings = new ArrayList<>(c.args().size());
+        for (IrExpr arg : c.args()) {
+            argNarrowings.add(infer(arg, ctx));
+        }
+        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings);
+        if (result instanceof StaticDispatch.Result.Resolved resolved) {
+            return resolved.returnSort();
+        }
+        return ctx.functionReturns().get(c.functionName());
+    }
+
+    // --- Match -------------------------------------------------------------
+
+    /**
+     * Match: for each arm, derive the local hypothesis and infer the arm's
+     * result under that hypothesis. Same-base union the arm results.
+     *
+     * <p>Hypothesis: when the scrutinee is an {@link IrExpr.Var} and the
+     * pattern is {@link IrSort.Refined} or {@link IrSort.Structural}, the
+     * var's env entry is replaced by the pattern for the arm's body
+     * (mirrors {@link SortChecker}'s narrowing scope; Phase D refines to
+     * intersect-with-prior). Non-Var scrutinees fall back to the outer
+     * env.
+     *
+     * <p>If any arm returns {@code null}, the whole match returns
+     * {@code null} — conservative: we don't widen by claiming "everything
+     * but this arm is fine," we just don't narrow.
+     */
+    private static IrSort inferMatch(IrExpr.Match m, InferenceContext ctx) {
+        List<IrSort> armResults = new ArrayList<>(m.branches().size());
+        for (IrExpr.MatchBranch branch : m.branches()) {
+            InferenceContext armCtx = ctx;
+            if (m.scrutinee() instanceof IrExpr.Var v
+                    && (branch.pattern() instanceof IrSort.Refined
+                        || branch.pattern() instanceof IrSort.Structural)) {
+                armCtx = ctx.withVar(v.name(), branch.pattern());
+            }
+            IrSort armResult = infer(branch.result(), armCtx);
+            if (armResult == null) return null;
+            armResults.add(armResult);
+        }
+        return sameBaseUnion(armResults);
+    }
+
+    // --- Record literal narrowing (Phase C) --------------------------------
+
+    /**
+     * Record literal: for each member with an inferrable narrowing,
+     * substitute {@code @} in the member's predicate with
+     * {@code @.fieldName} and AND the resulting predicates into a
+     * struct-refined sort.
+     *
+     * <p>Anonymous records (no typeName) return {@code null} — we have
+     * no nominal target to refine. If no members have inferrable
+     * narrowings, returns {@code null}.
+     */
+    private static IrSort inferRecord(IrExpr.Record r, InferenceContext ctx) {
+        if (r.typeName() == null) return null;
+        List<IrExpr> conjuncts = new ArrayList<>();
+        for (Map.Entry<String, IrExpr> entry : r.members().entrySet()) {
+            IrSort memberNarrowing = infer(entry.getValue(), ctx);
+            if (!(memberNarrowing instanceof IrSort.Refined refined)) continue;
+            conjuncts.add(substituteSelfWithFieldAccess(refined.predicate(), entry.getKey()));
+        }
+        if (conjuncts.isEmpty()) return null;
+        return new IrSort.Refined(r.typeName(), conjunctAnd(conjuncts), Origin.NONE);
+    }
+
+    // --- Field-access narrowing (Phase C) ----------------------------------
+
+    /**
+     * Field access on a narrowed record: extract conjuncts from the
+     * base's narrowing that reference only {@code @.fieldName}, substitute
+     * {@code @.fieldName → @}, and return as a refinement over the
+     * field's declared base sort.
+     *
+     * <p>Cross-field conjuncts (e.g., {@code @.x + @.y > 0}) cannot be
+     * decomposed into per-field constraints and are skipped. Bare
+     * {@code @} (referring to the whole record) likewise disqualifies a
+     * conjunct.
+     *
+     * <p>Requires the base's struct to be declared in
+     * {@code ctx.structDefs} — without it, we can't determine the
+     * field's base sort name. Returns {@code null} otherwise.
+     */
+    private static IrSort inferFieldAccess(IrExpr.FieldAccess fa, InferenceContext ctx) {
+        IrSort baseNarrowing = infer(fa.base(), ctx);
+        if (!(baseNarrowing instanceof IrSort.Refined refinedBase)) return null;
+
+        IrSort.Structural struct = ctx.structDefs().get(refinedBase.name());
+        if (struct == null) return null;
+        IrSort fieldDeclared = struct.members().get(fa.fieldName());
+        if (fieldDeclared == null) return null;
+        String fieldBase = baseName(fieldDeclared);
+        if (fieldBase == null) return null;
+
+        List<IrExpr> matched = new ArrayList<>();
+        collectFieldConjuncts(refinedBase.predicate(), fa.fieldName(), matched);
+        if (matched.isEmpty()) return null;
+
+        return new IrSort.Refined(fieldBase, conjunctAnd(matched), Origin.NONE);
+    }
+
+    /**
+     * Walks an AND-tree of conjuncts; each leaf that references only
+     * {@code @.fieldName} (and not bare {@code @} or any other
+     * {@code @.field}) is substituted ({@code @.fieldName → @}) and added
+     * to {@code out}.
+     */
+    private static void collectFieldConjuncts(
+            IrExpr predicate, String fieldName, List<IrExpr> out) {
+        if (predicate instanceof IrExpr.BinOp op && op.op() == IrExpr.Op.AND) {
+            collectFieldConjuncts(op.left(), fieldName, out);
+            collectFieldConjuncts(op.right(), fieldName, out);
+            return;
+        }
+        if (selfAccessesAreOnlyField(predicate, fieldName)) {
+            out.add(substituteFieldAccessWithSelf(predicate, fieldName));
+        }
+    }
+
+    /**
+     * True iff every {@link IrExpr.SelfRef} occurrence in {@code expr} is
+     * wrapped in {@code FieldAccess(SelfRef, targetField)}. Bare Self or
+     * a different {@code @.otherField} disqualifies. Pure leaves
+     * (literals, vars) trivially qualify.
+     */
+    private static boolean selfAccessesAreOnlyField(IrExpr expr, String targetField) {
+        return switch (expr) {
+            case IrExpr.SelfRef ignored -> false;
+            case IrExpr.FieldAccess fa -> {
+                if (fa.base() instanceof IrExpr.SelfRef) {
+                    yield fa.fieldName().equals(targetField);
+                }
+                yield selfAccessesAreOnlyField(fa.base(), targetField);
+            }
+            case IrExpr.BinOp op ->
+                    selfAccessesAreOnlyField(op.left(), targetField)
+                    && selfAccessesAreOnlyField(op.right(), targetField);
+            case IrExpr.LetIn l ->
+                    selfAccessesAreOnlyField(l.value(), targetField)
+                    && selfAccessesAreOnlyField(l.body(), targetField);
+            case IrExpr.Call c ->
+                    c.args().stream().allMatch(a -> selfAccessesAreOnlyField(a, targetField));
+            case IrExpr.Apply a ->
+                    selfAccessesAreOnlyField(a.fn(), targetField)
+                    && a.args().stream().allMatch(arg -> selfAccessesAreOnlyField(arg, targetField));
+            case IrExpr.Lambda lam -> selfAccessesAreOnlyField(lam.body(), targetField);
+            case IrExpr.Match m ->
+                    selfAccessesAreOnlyField(m.scrutinee(), targetField)
+                    && m.branches().stream()
+                            .allMatch(b -> selfAccessesAreOnlyField(b.result(), targetField));
+            case IrExpr.Record r ->
+                    r.members().values().stream()
+                            .allMatch(v -> selfAccessesAreOnlyField(v, targetField));
+            case IrExpr.Lit ignored -> true;
+            case IrExpr.Bool ignored -> true;
+            case IrExpr.Var ignored -> true;
+        };
+    }
+
+    /**
+     * Replaces {@code FieldAccess(SelfRef, targetField)} with bare
+     * {@code SelfRef} throughout {@code expr}. Used after
+     * {@link #selfAccessesAreOnlyField} confirms safety.
+     */
+    private static IrExpr substituteFieldAccessWithSelf(IrExpr expr, String targetField) {
+        return switch (expr) {
+            case IrExpr.FieldAccess fa -> {
+                if (fa.base() instanceof IrExpr.SelfRef
+                        && fa.fieldName().equals(targetField)) {
+                    yield IrExpr.self();
+                }
+                yield new IrExpr.FieldAccess(
+                        substituteFieldAccessWithSelf(fa.base(), targetField),
+                        fa.fieldName(),
+                        fa.origin());
+            }
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(),
+                    substituteFieldAccessWithSelf(op.left(), targetField),
+                    substituteFieldAccessWithSelf(op.right(), targetField),
+                    op.origin());
+            case IrExpr.LetIn l -> new IrExpr.LetIn(
+                    l.name(), l.declaredSort(),
+                    substituteFieldAccessWithSelf(l.value(), targetField),
+                    substituteFieldAccessWithSelf(l.body(), targetField),
+                    l.origin());
+            case IrExpr.Call c -> {
+                List<IrExpr> newArgs = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) {
+                    newArgs.add(substituteFieldAccessWithSelf(a, targetField));
+                }
+                yield new IrExpr.Call(c.functionName(), newArgs, c.origin());
+            }
+            case IrExpr.Apply a -> {
+                List<IrExpr> newArgs = new ArrayList<>(a.args().size());
+                for (IrExpr arg : a.args()) {
+                    newArgs.add(substituteFieldAccessWithSelf(arg, targetField));
+                }
+                yield new IrExpr.Apply(
+                        substituteFieldAccessWithSelf(a.fn(), targetField), newArgs, a.origin());
+            }
+            case IrExpr.Lambda lam -> new IrExpr.Lambda(
+                    lam.params(), lam.returnSort(),
+                    substituteFieldAccessWithSelf(lam.body(), targetField),
+                    lam.origin());
+            case IrExpr.Match m -> {
+                List<IrExpr.MatchBranch> newBranches = new ArrayList<>(m.branches().size());
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    newBranches.add(new IrExpr.MatchBranch(
+                            b.pattern(),
+                            substituteFieldAccessWithSelf(b.result(), targetField)));
+                }
+                yield new IrExpr.Match(
+                        substituteFieldAccessWithSelf(m.scrutinee(), targetField),
+                        newBranches, m.origin());
+            }
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> newMembers = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    newMembers.put(e.getKey(),
+                            substituteFieldAccessWithSelf(e.getValue(), targetField));
+                }
+                yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
+            }
+            case IrExpr.Lit l -> l;
+            case IrExpr.Bool b -> b;
+            case IrExpr.Var v -> v;
+            case IrExpr.SelfRef s -> s;
+        };
+    }
+
+    /**
+     * Replaces {@code SelfRef} with {@code FieldAccess(SelfRef, fieldName)}
+     * throughout {@code expr}. Inverse of
+     * {@link #substituteFieldAccessWithSelf}, used by record-literal
+     * narrowing to lift a member's predicate (over {@code @}) into a
+     * record-level predicate (over {@code @.fieldName}).
+     */
+    private static IrExpr substituteSelfWithFieldAccess(IrExpr expr, String fieldName) {
+        return switch (expr) {
+            case IrExpr.SelfRef ignored ->
+                    new IrExpr.FieldAccess(IrExpr.self(), fieldName, Origin.NONE);
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    substituteSelfWithFieldAccess(fa.base(), fieldName),
+                    fa.fieldName(),
+                    fa.origin());
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(),
+                    substituteSelfWithFieldAccess(op.left(), fieldName),
+                    substituteSelfWithFieldAccess(op.right(), fieldName),
+                    op.origin());
+            case IrExpr.LetIn l -> new IrExpr.LetIn(
+                    l.name(), l.declaredSort(),
+                    substituteSelfWithFieldAccess(l.value(), fieldName),
+                    substituteSelfWithFieldAccess(l.body(), fieldName),
+                    l.origin());
+            case IrExpr.Call c -> {
+                List<IrExpr> newArgs = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) {
+                    newArgs.add(substituteSelfWithFieldAccess(a, fieldName));
+                }
+                yield new IrExpr.Call(c.functionName(), newArgs, c.origin());
+            }
+            case IrExpr.Apply a -> {
+                List<IrExpr> newArgs = new ArrayList<>(a.args().size());
+                for (IrExpr arg : a.args()) {
+                    newArgs.add(substituteSelfWithFieldAccess(arg, fieldName));
+                }
+                yield new IrExpr.Apply(
+                        substituteSelfWithFieldAccess(a.fn(), fieldName), newArgs, a.origin());
+            }
+            case IrExpr.Lambda lam -> new IrExpr.Lambda(
+                    lam.params(), lam.returnSort(),
+                    substituteSelfWithFieldAccess(lam.body(), fieldName),
+                    lam.origin());
+            case IrExpr.Match m -> {
+                List<IrExpr.MatchBranch> newBranches = new ArrayList<>(m.branches().size());
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    newBranches.add(new IrExpr.MatchBranch(
+                            b.pattern(),
+                            substituteSelfWithFieldAccess(b.result(), fieldName)));
+                }
+                yield new IrExpr.Match(
+                        substituteSelfWithFieldAccess(m.scrutinee(), fieldName),
+                        newBranches, m.origin());
+            }
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> newMembers = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    newMembers.put(e.getKey(),
+                            substituteSelfWithFieldAccess(e.getValue(), fieldName));
+                }
+                yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
+            }
+            case IrExpr.Lit l -> l;
+            case IrExpr.Bool b -> b;
+            case IrExpr.Var v -> v;
+        };
+    }
+
+    // --- Sort-level union / AND helpers ------------------------------------
+
+    /**
+     * Unions sibling narrowings, normalizing same-base branches into a
+     * single {@link IrSort.Refined} with an {@code OR}-joined predicate
+     * (mirroring {@code AltParser.normalizeMultiBranch}). Cross-base or
+     * non-normalizable branches return {@code null} for this slice — the
+     * full {@link IrSort.Union} form isn't surfaced from inference yet.
+     */
+    private static IrSort sameBaseUnion(List<IrSort> sorts) {
+        if (sorts.isEmpty()) return null;
+        if (sorts.size() == 1) return sorts.get(0);
+
+        String base = null;
+        for (IrSort s : sorts) {
+            String n = baseName(s);
+            if (n == null) return null;
+            if (base == null) base = n;
+            else if (!base.equals(n)) return null;
+        }
+
+        IrExpr combined = null;
+        for (IrSort s : sorts) {
+            IrExpr pred = (s instanceof IrSort.Refined r)
+                    ? r.predicate()
+                    : new IrExpr.Bool(true, Origin.NONE);
+            combined = combined == null
+                    ? pred
+                    : new IrExpr.BinOp(IrExpr.Op.OR, combined, pred, Origin.NONE);
+        }
+        return new IrSort.Refined(base, combined, Origin.NONE);
+    }
+
+    /** Left-folds a list of predicates into an AND-chain. */
+    private static IrExpr conjunctAnd(List<IrExpr> conjuncts) {
+        IrExpr combined = conjuncts.get(0);
+        for (int i = 1; i < conjuncts.size(); i++) {
+            combined = new IrExpr.BinOp(
+                    IrExpr.Op.AND, combined, conjuncts.get(i), Origin.NONE);
+        }
+        return combined;
+    }
+
+    /** Base-name extractor for {@link #sameBaseUnion}'s same-base check. */
+    private static String baseName(IrSort s) {
+        return switch (s) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            default -> null;
+        };
+    }
+
+    /** Synthesizes {@code [Int:@==n]} for an integer literal. */
+    private static IrSort.Refined intSingleton(long n) {
+        return new IrSort.Refined(
+                "Int",
+                new IrExpr.BinOp(
+                        IrExpr.Op.EQ,
+                        new IrExpr.SelfRef(Origin.NONE),
+                        new IrExpr.Lit(n, Origin.NONE),
+                        Origin.NONE),
+                Origin.NONE);
+    }
+
+    /** Synthesizes {@code [Bool:@==b]} for a boolean literal. */
+    private static IrSort.Refined boolSingleton(boolean b) {
+        return new IrSort.Refined(
+                "Bool",
+                new IrExpr.BinOp(
+                        IrExpr.Op.EQ,
+                        new IrExpr.SelfRef(Origin.NONE),
+                        new IrExpr.Bool(b, Origin.NONE),
+                        Origin.NONE),
+                Origin.NONE);
+    }
+}

@@ -33,6 +33,11 @@ public final class IrCompiler {
         // validates fields it couldn't resolve here.
         SortChecker.check(resolved);
 
+        // Overload-overlap check: pairwise per function name, reject provable
+        // ambiguity at compile time. Unknown cases (kernel can't decide) pass
+        // through; runtime dispatch ambiguity remains the safety net for those.
+        OverloadOverlap.check(resolved);
+
         DispatchTable dispatch = new DispatchTable();
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
         List<ProofResult> diagnostics = new ArrayList<>();

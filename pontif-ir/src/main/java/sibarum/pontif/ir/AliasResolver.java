@@ -72,15 +72,15 @@ public final class AliasResolver {
                 }
                 newStatements.add(new IrStmt.TraitImpl(
                         ti.typeName(), ti.traitName(), rewrittenMethods, ti.origin()));
-            } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait) {
-                // Trait declarations are kept — SortChecker needs the contract
-                // info to validate TraitImpl statements. Struct TypeAliases are
-                // dropped (they've served their purpose: substitution).
+            } else if (stmt instanceof IrStmt.TypeAlias ta) {
+                // Type aliases are kept downstream so SortChecker can see them:
+                // trait contracts for TraitImpl validation; struct definitions
+                // for `[StructName:@.field…]` refinement validation; other
+                // aliases are inert pass-through (IrCompiler skips them).
                 newStatements.add(ta);
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
             }
-            // Struct TypeAlias statements are dropped from output.
         }
         IrExpr newMain = rewriteExpr(module.main(), resolvedAliases);
 
