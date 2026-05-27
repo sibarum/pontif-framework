@@ -47,6 +47,7 @@ import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.pontif.playground.generated.Icons;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
+import sibarum.pontif.runtime.ReceiptGraphReport;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -80,6 +81,9 @@ public final class App {
     private static final String DEFAULT_FILE_NAME = "untitled.ptf";
     private static final List<FileDialog.Filter> PTF_FILTERS = List.of(
             FileDialog.Filter.of("Pontif source", "ptf"),
+            FileDialog.Filter.of("All files", "*"));
+    private static final List<FileDialog.Filter> RECEIPTS_FILTERS = List.of(
+            FileDialog.Filter.of("Receipt-graph report", "txt"),
             FileDialog.Filter.of("All files", "*"));
 
     private static final float WHEEL_PIXELS_PER_STEP = 40f;
@@ -221,10 +225,11 @@ public final class App {
     }
 
     private static Component buildUi() {
-        Component runBtn     = Themed.button("Run",      Em.of(5f), Variant.PRIMARY,    0, App::onRunClicked);
-        Component openBtn    = Themed.button("Open",     Em.of(5f), Variant.DEFAULT,  0, App::onOpenClicked);
-        Component saveBtn    = Themed.button("Save",     Em.of(5f), Variant.DEFAULT,  0, App::onSaveClicked);
-        Component saveAsBtn  = Themed.button("Save As",  Em.of(6f), Variant.DEFAULT,  0, App::onSaveAsClicked);
+        Component runBtn      = Themed.button("Run",      Em.of(5f), Variant.PRIMARY,  0, App::onRunClicked);
+        Component receiptsBtn = Themed.button("Receipts", Em.of(7f), Variant.INFO,     0, App::onReceiptsClicked);
+        Component openBtn     = Themed.button("Open",     Em.of(5f), Variant.DEFAULT,  0, App::onOpenClicked);
+        Component saveBtn     = Themed.button("Save",     Em.of(5f), Variant.DEFAULT,  0, App::onSaveClicked);
+        Component saveAsBtn   = Themed.button("Save As",  Em.of(6f), Variant.DEFAULT,  0, App::onSaveAsClicked);
 
         filenameLabel = new Component.Text(
             UNTITLED_LABEL, FontGroups.DEFAULT, Em.of(0.9f), LABEL_FG,
@@ -235,7 +240,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
+            List.of(runBtn, receiptsBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane width.
@@ -274,6 +279,51 @@ public final class App {
         }, "pontif-runner");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Drafts the receipt-graph for the current editor source, flashes the
+     * full report into the status log (click the ribbon to read it), then
+     * offers a save dialog to write it to disk. Drafting is bounded
+     * transcription + sign-analysis discharge — fast and terminating, so
+     * (unlike Run) it's fine on the GLFW main thread, which the FileDialog
+     * requires anyway.
+     */
+    private static void onReceiptsClicked() {
+        String code = TextStates.contentOf(codeText);
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+
+        ReceiptGraphReport.Result result = ReceiptGraphReport.fromAltSource(code, sourceName);
+        if (result instanceof ReceiptGraphReport.Result.Generated generated) {
+            String report = generated.text();
+            Status.log(
+                "Receipt-graph drafted for " + sourceName + " — click to view; save dialog follows.",
+                report, Variant.SUCCESS);
+            FileDialog.save(window, RECEIPTS_FILTERS, dialogStartPath(), receiptsDefaultName(sourceName))
+                .ifPresent(path -> {
+                    try {
+                        Files.writeString(path, report, StandardCharsets.UTF_8);
+                        Status.success("Wrote receipt-graph report to " + path.getFileName());
+                    } catch (IOException e) {
+                        Status.error("Error writing " + path.getFileName() + ": " + e.getMessage(),
+                                path.toString());
+                    }
+                });
+        } else {
+            String error = ((ReceiptGraphReport.Result.Failed) result).error();
+            Status.error("Receipt-graph: " + error.split("\\R", 2)[0], error);
+        }
+    }
+
+    private static String receiptsDefaultName(String sourceName) {
+        String base = sourceName;
+        if (base.endsWith(".ptf")) {
+            base = base.substring(0, base.length() - ".ptf".length());
+        }
+        if (base.isBlank() || base.equals("<editor>")) {
+            base = "untitled";
+        }
+        return base + ".receipts.txt";
     }
 
     // --- File operations: must run on the GLFW main thread (FileDialog requirement). ---

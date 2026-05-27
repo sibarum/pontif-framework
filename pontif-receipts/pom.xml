@@ -20,6 +20,10 @@
             <artifactId>pontif-ir</artifactId>
         </dependency>
         <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-predicates</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>

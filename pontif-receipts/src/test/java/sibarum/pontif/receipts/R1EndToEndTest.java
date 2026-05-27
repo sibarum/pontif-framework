@@ -54,8 +54,10 @@ class R1EndToEndTest {
                         + "\nGraph:\n" + ReceiptGraphPrinter.print(graph));
         ClosingReceipt receipt = receipts.get(0);
         assertEquals(BuiltinIssuer.ISSUER_ID, receipt.issuer());
-        assertEquals("square", receipt.reference().functionName());
+        assertEquals(0, receipt.reference().nodeIndex());
         assertEquals(0, receipt.reference().branchIndex());
+        assertEquals("square",
+                graph.roots().get(receipt.reference().nodeIndex()).functionName());
 
         // 4. Notary verifies the closing receipt: not refuted → accepted.
         Notary.Verdict verdict = Notary.hypothesisSupported(graph, receipt);
@@ -71,7 +73,7 @@ class R1EndToEndTest {
         SymExpr falseConclusion = SymExpr.cmp(SymExpr.var("r_0"), SymExpr.CmpOp.LT, SymExpr.lit(0));
         ClosingReceipt bogus = new ClosingReceipt(
                 "<malicious>", falseConclusion,
-                new GraphReference("square", 0), Map.of());
+                new GraphReference(0, 0), Map.of());
 
         Notary.Verdict verdict = Notary.hypothesisSupported(graph, bogus);
         assertFalse(verdict.accepted(),
@@ -87,7 +89,7 @@ class R1EndToEndTest {
         SymExpr snakeOil = SymExpr.cmp(SymExpr.var("r_0"), SymExpr.CmpOp.EQ, SymExpr.lit(0));
         ClosingReceipt receipt = new ClosingReceipt(
                 "<somebody>", snakeOil,
-                new GraphReference("square", 0), Map.of());
+                new GraphReference(0, 0), Map.of());
 
         Notary.Verdict verdict = Notary.hypothesisSupported(graph, receipt);
         assertTrue(verdict.accepted(),

@@ -69,10 +69,12 @@ public final class Drafter {
         // Module-wide inference context: overloads + declared returns + struct
         // defs, used to resolve each hoisted call's return narrowing.
         InferenceContext baseCtx = InferenceContext.fromModule(module);
-        Map<String, Node> roots = new LinkedHashMap<>();
+        // One node per function declaration, in source order — overloads
+        // (same name, distinct param sorts) each get their own node.
+        List<Node> roots = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                roots.put(fd.name(), draftFunction(fd, baseCtx));
+                roots.add(draftFunction(fd, baseCtx));
             }
         }
         return new ReceiptGraph(roots);
@@ -103,9 +105,14 @@ public final class Drafter {
             ctx = ctx.withVar(p.name(), p.sort());
         }
 
+        // The return refinement may reference parameters (e.g. a spec-only
+        // [Int:@==y+1] synthesizes body y+1). Rename those param refs to
+        // call-instance form (y → y_0) so the obligation reads in the same
+        // variables as the body equation — otherwise r_0 == y+1 (raw) can't
+        // be discharged against the body r_0 == y_0+1 (renamed).
         Var resultVar = new Var(
                 "r_" + callIndex,
-                IrCompiler.compileSort(fd.returnSort()));
+                renameSortPredicate(IrCompiler.compileSort(fd.returnSort()), renameBindings));
 
         // Sub-call result vars start at r_1 (r_0 is the function result).
         int[] callCounter = {1};
@@ -115,6 +122,19 @@ public final class Drafter {
                 : List.of(draftUnconditionalBranch(fd.body(), resultVar, renameBindings, ctx, callCounter));
 
         return new Node(fd.name(), params, resultVar, branches);
+    }
+
+    /**
+     * Renames parameter references inside a refined sort's predicate to
+     * their call-instance form ({@code y} → {@code y_0}), leaving the base
+     * and non-refined sorts untouched. Applied to a function's return sort
+     * so its obligation reads in the same variables as the body.
+     */
+    private static Sort renameSortPredicate(Sort sort, Map<String, SymExpr> renameBindings) {
+        if (sort.isRefined()) {
+            return Sort.refined(sort.name(), Substitute.apply(sort.predicate(), renameBindings));
+        }
+        return sort;
     }
 
     /**

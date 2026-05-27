@@ -46,29 +46,53 @@ public final class BuiltinIssuer {
     private BuiltinIssuer() {}
 
     /**
-     * Eager-close: returns every closing receipt the issuer can derive
-     * from {@code graph}. Each receipt's conclusion is the discharged
-     * obligation; its reference points at the branch that discharged it.
+     * One per-branch obligation the issuer considered, with its outcome.
+     * {@code discharged} is whether {@link IntegerDischarge} proved the
+     * obligation on that branch. Nodes with no refined return contribute
+     * no attempts (there's no obligation). Surfacing failures — not just
+     * successes — is what lets a report say "tried {@code r_0 >= 2} on
+     * branch 0, couldn't" instead of going silent.
      */
-    public static List<ClosingReceipt> close(ReceiptGraph graph) {
-        List<ClosingReceipt> receipts = new ArrayList<>();
-        for (Node node : graph.roots().values()) {
+    public record Attempt(int nodeIndex, int branchIndex, SymExpr obligation, boolean discharged) {}
+
+    /**
+     * Every per-branch obligation attempt across the graph, discharged or
+     * not. The obligation is the result var's refinement with {@code @}
+     * bound to the result var. Order: node, then branch.
+     */
+    public static List<Attempt> attemptAll(ReceiptGraph graph) {
+        List<Attempt> attempts = new ArrayList<>();
+        List<Node> nodes = graph.roots();
+        for (int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++) {
+            Node node = nodes.get(nodeIndex);
             Sort resultSort = node.resultVar().sort();
             if (!resultSort.isRefined()) {
                 continue;  // no obligation to discharge
             }
             SymExpr obligation = Substitute.applySelf(
                     resultSort.predicate(), SymExpr.var(node.resultVar().name()));
+            for (int branchIndex = 0; branchIndex < node.branches().size(); branchIndex++) {
+                boolean ok = dischargeable(node, node.branches().get(branchIndex), obligation);
+                attempts.add(new Attempt(nodeIndex, branchIndex, obligation, ok));
+            }
+        }
+        return attempts;
+    }
 
-            for (int i = 0; i < node.branches().size(); i++) {
-                Branch branch = node.branches().get(i);
-                if (dischargeable(node, branch, obligation)) {
-                    receipts.add(new ClosingReceipt(
-                            ISSUER_ID,
-                            obligation,
-                            new GraphReference(node.functionName(), i),
-                            Map.of()));
-                }
+    /**
+     * Eager-close: the discharged subset of {@link #attemptAll}, as
+     * closing receipts. Each receipt's conclusion is the discharged
+     * obligation; its reference points at the branch that discharged it.
+     */
+    public static List<ClosingReceipt> close(ReceiptGraph graph) {
+        List<ClosingReceipt> receipts = new ArrayList<>();
+        for (Attempt a : attemptAll(graph)) {
+            if (a.discharged()) {
+                receipts.add(new ClosingReceipt(
+                        ISSUER_ID,
+                        a.obligation(),
+                        new GraphReference(a.nodeIndex(), a.branchIndex()),
+                        Map.of()));
             }
         }
         return receipts;

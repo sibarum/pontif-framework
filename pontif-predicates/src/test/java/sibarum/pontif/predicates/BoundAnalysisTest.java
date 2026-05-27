@@ -1,0 +1,156 @@
+package sibarum.pontif.predicates;
+
+import org.junit.jupiter.api.Test;
+import sibarum.pontif.core.symbolic.SymExpr;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The hybrid linear-bound + sign engine. The headline it adds over
+ * {@link sibarum.pontif.core.symbolic.SignAnalysis} is integer
+ * <em>thresholds</em> — {@code [Int:@>1]} and friends — which sign
+ * analysis can't express. Every discharge must be sound: the negatives
+ * assert the engine refuses the cases it genuinely can't prove.
+ */
+class BoundAnalysisTest {
+
+    private static SymExpr v(String name) { return SymExpr.var(name); }
+    private static SymExpr lit(long n) { return SymExpr.lit(n); }
+    private static SymExpr add(SymExpr a, SymExpr b) { return SymExpr.add(a, b); }
+    private static SymExpr mul(SymExpr a, SymExpr b) { return SymExpr.mul(a, b); }
+    private static SymExpr cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) {
+        return SymExpr.cmp(l, op, r);
+    }
+    private static SymExpr ge(SymExpr l, long n) { return cmp(l, SymExpr.CmpOp.GE, lit(n)); }
+    private static SymExpr gt(SymExpr l, long n) { return cmp(l, SymExpr.CmpOp.GT, lit(n)); }
+
+    // --- bound() ------------------------------------------------------------
+
+    @Test
+    void boundOfLiteralIsAPoint() {
+        assertEquals(Interval.point(7), BoundAnalysis.bound(lit(7), List.of()));
+    }
+
+    @Test
+    void boundOfUnconstrainedVarIsAll() {
+        assertEquals(Interval.all(), BoundAnalysis.bound(v("x"), List.of()));
+    }
+
+    @Test
+    void boundOfVarUnderLowerBoundHyp() {
+        // x with x >= 1  →  [1, ∞)
+        assertEquals(Interval.atLeast(1), BoundAnalysis.bound(v("x"), List.of(ge(v("x"), 1))));
+    }
+
+    @Test
+    void boundOfSumShiftsTheLowerBound() {
+        // x + 1 with x >= 1  →  [2, ∞)
+        Interval iv = BoundAnalysis.bound(add(v("x"), lit(1)), List.of(ge(v("x"), 1)));
+        assertEquals(Interval.atLeast(2), iv);
+    }
+
+    @Test
+    void boundOfScaledVar() {
+        // 2x with x >= 1  →  [2, ∞)
+        Interval iv = BoundAnalysis.bound(mul(lit(2), v("x")), List.of(ge(v("x"), 1)));
+        assertEquals(Interval.atLeast(2), iv);
+    }
+
+    @Test
+    void boundOfProductFromSign() {
+        // n * r with n > 0, r >= 1  → sign POSITIVE → [1, ∞)
+        Interval iv = BoundAnalysis.bound(
+                mul(v("n"), v("r")), List.of(gt(v("n"), 0), ge(v("r"), 1)));
+        assertEquals(Interval.atLeast(1), iv);
+    }
+
+    @Test
+    void boundOfSquareIsNonNegative() {
+        // x * x with no hypotheses → NON_NEGATIVE → [0, ∞)
+        Interval iv = BoundAnalysis.bound(mul(v("x"), v("x")), List.of());
+        assertEquals(Interval.atLeast(0), iv);
+    }
+
+    // --- discharge(): the threshold headline --------------------------------
+
+    @Test
+    void dischargesThresholdSignAnalysisCannot() {
+        // x + 1 > 1  from  x >= 1   (the [Int:@>1] case sign analysis misses)
+        assertTrue(BoundAnalysis.discharge(
+                List.of(ge(v("x"), 1)), gt(add(v("x"), lit(1)), 1)));
+    }
+
+    @Test
+    void dischargesLinearCombination() {
+        // 2x + 3 >= 5  from  x >= 1
+        SymExpr goal = cmp(add(mul(lit(2), v("x")), lit(3)), SymExpr.CmpOp.GE, lit(5));
+        assertTrue(BoundAnalysis.discharge(List.of(ge(v("x"), 1)), goal));
+    }
+
+    @Test
+    void dischargesFactorialRecursiveStep() {
+        // n * r >= 1  from  n > 0, r >= 1  (the recursive arm's obligation)
+        SymExpr goal = cmp(mul(v("n"), v("r")), SymExpr.CmpOp.GE, lit(1));
+        assertTrue(BoundAnalysis.discharge(List.of(gt(v("n"), 0), ge(v("r"), 1)), goal));
+    }
+
+    @Test
+    void dischargesSquareIsNonNegative() {
+        // x * x >= 0  with no hypotheses
+        SymExpr goal = cmp(mul(v("x"), v("x")), SymExpr.CmpOp.GE, lit(0));
+        assertTrue(BoundAnalysis.discharge(List.of(), goal));
+    }
+
+    @Test
+    void dischargesReflexiveEqualityViaCancellation() {
+        // y + 1 == y + 1  → atoms cancel → [0, 0] → EQ
+        SymExpr e = add(v("y"), lit(1));
+        assertTrue(BoundAnalysis.discharge(List.of(), cmp(e, SymExpr.CmpOp.EQ, e)));
+    }
+
+    @Test
+    void contradictoryHypothesesDischargeAnything() {
+        // x >= 5 ∧ x <= 0 is empty → any goal about x discharges vacuously
+        List<SymExpr> contradictory =
+                List.of(ge(v("x"), 5), cmp(v("x"), SymExpr.CmpOp.LE, lit(0)));
+        assertTrue(BoundAnalysis.discharge(contradictory, gt(v("x"), 1000)));
+    }
+
+    // --- discharge(): soundness (must refuse) -------------------------------
+
+    @Test
+    void refusesThresholdWithoutSupportingHypothesis() {
+        // y + 1 > 1 with nothing known about y — y could be -5
+        assertFalse(BoundAnalysis.discharge(List.of(), gt(add(v("y"), lit(1)), 1)));
+    }
+
+    @Test
+    void refusesStrictPositivityOfSquareFromNonNegative() {
+        // x * x > 0 from x >= 0 — x could be 0
+        SymExpr goal = cmp(mul(v("x"), v("x")), SymExpr.CmpOp.GT, lit(0));
+        assertFalse(BoundAnalysis.discharge(List.of(ge(v("x"), 0)), goal));
+    }
+
+    @Test
+    void refusesSquareThreshold() {
+        // x * x >= 1 with no hypotheses — x could be 0 (the doc's false-ish case)
+        SymExpr goal = cmp(mul(v("x"), v("x")), SymExpr.CmpOp.GE, lit(1));
+        assertFalse(BoundAnalysis.discharge(List.of(), goal));
+    }
+
+    @Test
+    void refusesMultiAtomHypothesisConstraint() {
+        // x + y > 0 bounds neither x nor y alone; x > 0 isn't derivable
+        assertFalse(BoundAnalysis.discharge(
+                List.of(gt(add(v("x"), v("y")), 0)), gt(v("x"), 0)));
+    }
+
+    @Test
+    void nonComparisonGoalIsNotDecided() {
+        assertFalse(BoundAnalysis.discharge(List.of(), SymExpr.bool(true)));
+    }
+}

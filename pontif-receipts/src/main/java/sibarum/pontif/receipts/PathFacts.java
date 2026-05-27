@@ -17,6 +17,9 @@ import java.util.Map;
  *
  * <p>Gathered facts:
  * <ul>
+ *   <li>each refined parameter's predicate, bound to the param var
+ *       (e.g. {@code n_0 > 0} from {@code n:[Int:@>0]}) — a function may
+ *       assume its parameter refinements throughout its body;</li>
  *   <li>the branch guard (if any);</li>
  *   <li>each sub-call's inductive hypothesis — the call result var's
  *       refinement bound to that var (e.g. {@code r_1 >= 1}), which is
@@ -46,6 +49,18 @@ final class PathFacts {
         String resultVarName = node.resultVar().name();
         SymExpr definitionRhs = null;
         List<SymExpr> hyps = new ArrayList<>();
+
+        // Parameter refinements hold throughout the body — a function may
+        // assume them (the dispatcher guarantees args satisfy them). So a
+        // param n_0:[Int:@>0] contributes the hypothesis n_0 > 0 on every
+        // branch. Without this, functions that constrain via parameter sorts
+        // (rather than match-arm guards) can't discharge anything that
+        // depends on the parameter's sign/bound.
+        for (Param p : node.params()) {
+            if (p.sort().isRefined()) {
+                hyps.add(Substitute.applySelf(p.sort().predicate(), SymExpr.var(p.name())));
+            }
+        }
 
         branch.guard().ifPresent(hyps::add);
 

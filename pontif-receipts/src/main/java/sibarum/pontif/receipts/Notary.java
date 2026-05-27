@@ -58,15 +58,16 @@ public final class Notary {
      */
     public static Verdict hypothesisSupported(ReceiptGraph graph, ClosingReceipt receipt) {
         GraphReference ref = receipt.reference();
-        Node node = graph.roots().get(ref.functionName());
-        if (node == null) {
+        if (ref.nodeIndex() < 0 || ref.nodeIndex() >= graph.roots().size()) {
             return Verdict.rejected(
-                    "no node '" + ref.functionName() + "' in graph for the receipt's reference");
+                    "node index " + ref.nodeIndex() + " out of range ("
+                            + graph.roots().size() + " nodes)");
         }
+        Node node = graph.roots().get(ref.nodeIndex());
         if (ref.branchIndex() < 0 || ref.branchIndex() >= node.branches().size()) {
             return Verdict.rejected(
                     "branch index " + ref.branchIndex() + " out of range for node '"
-                            + ref.functionName() + "' (" + node.branches().size() + " branches)");
+                            + node.functionName() + "' (" + node.branches().size() + " branches)");
         }
         Branch branch = node.branches().get(ref.branchIndex());
 

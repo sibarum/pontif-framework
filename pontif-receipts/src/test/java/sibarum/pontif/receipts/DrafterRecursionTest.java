@@ -58,7 +58,7 @@ class DrafterRecursionTest {
     @Test
     void factorial_producesWorkedExampleGraph() throws Exception {
         ReceiptGraph graph = Drafter.draft(factorialModule());
-        Node root = graph.roots().get("factorial");
+        Node root = graph.nodesNamed("factorial").get(0);
 
         assertEquals(2, root.branches().size());
 
@@ -143,7 +143,7 @@ class DrafterRecursionTest {
                 IrExpr.lit(0));
 
         ReceiptGraph graph = Drafter.draft(module);
-        Node use = graph.roots().get("use");
+        Node use = graph.nodesNamed("use").get(0);
         Branch only = use.branches().get(0);
 
         assertEquals(1, only.calls().size());
@@ -178,7 +178,7 @@ class DrafterRecursionTest {
                                         List.of(IrExpr.call("inc", List.of(IrExpr.var("n"))))))),
                 IrExpr.lit(0));
 
-        Node h = Drafter.draft(module).roots().get("h");
+        Node h = Drafter.draft(module).nodesNamed("h").get(0);
         Branch only = h.branches().get(0);
 
         assertEquals(2, only.calls().size(), "two CallRefs: inner then outer");

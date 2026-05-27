@@ -27,13 +27,13 @@ public final class ReceiptGraphPrinter {
 
     private ReceiptGraphPrinter() {}
 
-    /** Renders an entire graph; roots in insertion order, blank-line separated. */
+    /** Renders an entire graph; nodes in declaration order, blank-line separated. */
     public static String print(ReceiptGraph graph) {
         StringBuilder sb = new StringBuilder();
         boolean first = true;
-        for (Map.Entry<String, Node> entry : graph.roots().entrySet()) {
+        for (Node node : graph.roots()) {
             if (!first) sb.append('\n');
-            sb.append(printNode(entry.getValue()));
+            sb.append(printNode(node));
             first = false;
         }
         return sb.toString();

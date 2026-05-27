@@ -188,12 +188,82 @@ both while still refuting a bogus `r_0 <= 0`.
 domain is integer-only; documented in `IntegerDischarge` as the
 integer counterpart of why float refinements were deferred.
 
-### R5 — Build-artifact emission
+### R5 — Build-artifact emission ✅ landed
 
-Wire the drafter + formatter into the compile path so compiling a
-program emits its receipt-graph(s) to text files (e.g.
-`target/receipt-graphs/`) for review. Drafter stays standalone (per
-doc "invokable standalone"); don't bloat `CompiledModule`.
+`pontif-runtime/ReceiptGraphReport` turns alt-syntax source into a
+reviewable text report: parse → `AliasResolver` → `Drafter` →
+`ReceiptGraphPrinter`, with `BuiltinIssuer` + `Notary` layered on for a
+"## Obligations" section. The section shows <em>every</em> per-branch
+obligation with its outcome — `discharged [notary: accepted]`,
+`NOT DISCHARGED`, or `(no return refinement — nothing to prove)` —
+not just successes, so a tightened return refinement that the issuer
+can't prove is visible instead of silent. Backed by
+`BuiltinIssuer.attemptAll` (close() is now its discharged subset). `fromAltSource` returns
+`Generated(text)` / `Failed(error)` (never throws); `writeReport`
+emits to `target/receipt-graphs/<name>.receipts.txt` (failures written
+as the body so the artifact always exists). ASCII-clean output
+(`|-` not `⊢`) for portability. Drafter stays standalone; nothing
+added to `CompiledModule`. `pontif-runtime` gains a `pontif-receipts`
+dep (no cycle). Verified end-to-end on square / sign / factorial.
+
+### Numeric discharge — linear integer bounds ✅ landed (slice 1)
+
+`pontif-predicates/BoundAnalysis` — a hybrid linear-bound + sign engine
+(sibling to `SignAnalysis`). Normalizes an integer `SymExpr` to a linear
+form (`c₀ + Σ cᵢ·atom`), bounds each atom to an integer interval (from
+single-atom hypotheses, integer-strict, intersected with the atom's
+`SignAnalysis` sign for opaque products/squares), and interval-evaluates
+the goal `(subject − bound) OP 0`. Sound by whole-interval over-approx;
+never a false discharge. Public API `discharge(hyps, goal) → boolean` and
+`bound(expr, hyps) → Interval`. New public `pontif-predicates/Interval`
+(single range, saturating `scale`/`add`). Wired into
+`IntegerDischarge.discharge` (first, ahead of the sign / `Refinements` /
+integer-strictness backstops — all sound, OR-ing can't regress). Headline:
+`inc(x:[Int:@>=1]):[Int:@>1] -> x+1` now discharges (the `>0`-vs-`>1`
+cliff is gone); factorial / square / sign suites unchanged. See
+`docs/numeric-discharge.md`.
+
+Follow-ups (deferred, in priority order):
+- **Wire `BoundAnalysis.bound` into `NarrowingInference`.** `infer` returns
+  `null` for every `IrExpr.BinOp` today; the `bound()` entry point is the
+  arithmetic-narrowing engine it lacks (e.g. `x+1` → `[Int:@>=2]` from
+  `x:[Int:@>=1]`). The intended second consumer — the reason `bound()` is
+  public.
+- **Strengthen `Refinements.imply` (dispatch / overload-overlap) via
+  bounds.** Currently ad-hoc single-atom threshold compare
+  (`checkImpliesOnLongs`); a bound check generalizes it to linear shapes
+  (`2x+3 ≥ 5`). Lives in `pontif-core`, *below* predicates — so this needs
+  either the engine reachable from core or a thin core-level port. Design
+  call when an obligation needs it.
+- **Unify `BoundAnalysis`'s `Interval` with `PredicateArithmetic`'s private
+  `Interval`/`IntervalSet`.** Two same-named types in one package: one
+  models a single range with arithmetic (`scale`/`add`), the other models
+  integer *sets* (`union`/`complement`) for satisfiability. Merge into one
+  type carrying both, carefully — `PredicateArithmetic` is tested and the
+  set-vs-range arithmetic semantics differ.
+- **Trim `IntegerDischarge` backstops.** Once `BoundAnalysis` is shown to
+  subsume `SignAnalysis.canDischarge` + `Refinements.discharge` +
+  `integerStrictness` + the reflexive-equality special case across the
+  suite, drop them. (`bound()` already covers all four conceptually; trim
+  is gated on empirical confirmation, per the "verify before trimming"
+  note in `numeric-discharge.md`.)
+
+### Receipt-graph: back-reference overload disambiguation (deferred)
+
+The overload <em>collision</em> is fixed: `ReceiptGraph.roots` is now a
+`List<Node>` (one node per declaration, source order), `GraphReference`
+is `(nodeIndex, branchIndex)`, and the printer/issuer/notary all work
+per-node. Ackermann's three overloads each render with their distinct
+param sorts. (This also fixed the `Map.copyOf` order-scramble bug.)
+
+What remains: a `CallRef` still targets by bare `targetFunctionName`, so
+a recursive/cross call to an overloaded name doesn't pin *which* overload
+it dispatches to — fine for display (the recursive structure is visible),
+but for the issuer to carry overload-specific inductive hypotheses across
+a back-reference it should resolve the target via `StaticDispatch` and
+record the specific node index. Real slice, tied to dispatch resolution;
+deferred until an obligation actually needs it (Ackermann's returns are
+bare `Int`, so nothing to discharge there anyway).
 
 ### Deferred — issuer plugin interface (Maven-style)
 
@@ -302,6 +372,18 @@ of it is what's deferred.
   `instanceof` chains, not sealed switches, so adding the variants
   didn't break it — but it also can't infer bounds from `(x > 0) &&
   (x < 10)`.
+- **Sign/linear discharge is inactive in the production `Simplifier`.**
+  `HypothesisRules.HYPOTHESIS_DISCHARGE` (the rule that folds a `Cmp`
+  goal to `true` via `Refinements.discharge` → `SignAnalysis`) is NOT in
+  `PontifCompiler.defaultRules()` — only `Refinement+Arithmetic+Boolean+
+  Structural` are. So the in-`Simplifier` function-verification path
+  (`FunctionCheck.verifyDefinition`, "proven return sort") gets no
+  sign/linear reasoning in production; only the receipt-graph path
+  (`IntegerDischarge`, now with `BoundAnalysis`) does. The "default-rule
+  drift" item below is the broader cleanup; this is the specific
+  consequence worth deciding deliberately — if proven-return-sort should
+  benefit at compile time outside the receipt graph, `HypothesisRules`
+  (and a `BoundAnalysis`-backed rule) need to join the production set.
 
 ## Exception handling
 
@@ -395,8 +477,14 @@ of it is what's deferred.
   from the sort. Still NoOp pending the proof engine.
 - **Under-specified return-type proof.** Spec-only declarations like
   `function f():[Int>=0]` (no body, return doesn't pin a single value)
-  still emit `NoOp`. Pick: synthesis from body (needs proof engine) or
-  hard error.
+  still emit `NoOp` — so the function isn't callable ("Unknown function").
+  Pick: real synthesis from the spec (needs a proof/search engine — this
+  is genuine program synthesis, not desugar) or a hard error. NB: the
+  *value-pinning* case (`[Int:@==EXPR]`, e.g. `:[Int:y+1]`) already
+  synthesizes the body `EXPR` at parse time and now drafts + discharges
+  its (reflexive) return obligation correctly, including param-referencing
+  and multi-param forms — see `SpecOnlySynthesisTest`. Only the
+  *non-pinning* (range) case remains NoOp.
 - **`requires`, `exports`.** No semantics until the module system
   lands.
 
@@ -444,15 +532,18 @@ can't refute today, where a richer issuer or external solver would
 earn its keep.
 
 - **Inductive postconditions beyond sign reasoning.** The trivial
-  issuer handles more than first assumed: `x*x >= 0`, and — since R4's
-  integer-strictness bridge — `factorial(n) >= 1` (the induction is
-  carried by the graph's back-reference; the bridge supplies the
-  `POSITIVE ⟹ >= 1` leaf step). What's still out of reach is anything
-  needing genuine linear/non-linear arithmetic the sign lattice can't
-  express — e.g. `sum(n) == n*(n+1)/2`, or bounds that depend on the
-  *magnitude* of a recursive result rather than just its sign. Z3-style
-  arithmetic, an inductive prover, or a hand-written issuer module fit
-  there.
+  issuer handles more than first assumed: `x*x >= 0`, `factorial(n) >= 1`
+  (induction carried by the back-reference), and — since the
+  `BoundAnalysis` slice — **linear integer arithmetic**: any `[Int op n]`
+  threshold, linear combinations (`2x+3 >= 5`), and products/squares via
+  opaque-atom sign bounds. The oracle boundary moved: **linear integer
+  arithmetic is built-in; oracles start at general nonlinear / quantified /
+  multi-atom-linear.** Still out of reach — `sum(n) == n*(n+1)/2`
+  (nonlinear closed form), product *magnitude* (`x*y >= 6` from
+  `x>=2,y>=3` gets only the sign), and multi-atom hypothesis constraints
+  (`x+y>0` bounds neither alone — needs Fourier–Motzkin / Presburger).
+  Z3-style arithmetic, an inductive prover, or a hand-written issuer
+  module fit there.
 - **Proof Authority (PA) trust model — roadmap goal, low priority.**
   Borrow from how Certificate Authorities work: designate certain
   issuers / oracle modules as trusted *Proof Authorities*, and

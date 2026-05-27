@@ -39,7 +39,7 @@ class DrafterTest {
 
         // One root, keyed by function name.
         assertEquals(1, graph.roots().size());
-        Node root = graph.roots().get("double");
+        Node root = graph.nodesNamed("double").get(0);
         assertNotNull(root);
         assertEquals("double", root.functionName());
 
@@ -111,14 +111,14 @@ class DrafterTest {
         ReceiptGraph graph = Drafter.draft(module);
 
         assertEquals(2, graph.roots().size());
-        assertNotNull(graph.roots().get("double"));
-        assertNotNull(graph.roots().get("triple"));
+        assertNotNull(graph.nodesNamed("double").get(0));
+        assertNotNull(graph.nodesNamed("triple").get(0));
 
         // Each function has its own call-instance-0 variables — both use n_0
         // and r_0 *independently*. There's no cross-function name collision
         // because each root is keyed by function name.
-        Node doubleRoot = graph.roots().get("double");
-        Node tripleRoot = graph.roots().get("triple");
+        Node doubleRoot = graph.nodesNamed("double").get(0);
+        Node tripleRoot = graph.nodesNamed("triple").get(0);
         assertEquals("n_0", doubleRoot.params().get(0).name());
         assertEquals("n_0", tripleRoot.params().get(0).name());
         assertEquals("r_0", doubleRoot.resultVar().name());

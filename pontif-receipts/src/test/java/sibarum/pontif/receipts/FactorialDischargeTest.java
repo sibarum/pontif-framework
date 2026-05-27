@@ -55,7 +55,8 @@ class FactorialDischargeTest {
 
         // Every receipt references factorial and concludes r_0 >= 1.
         for (ClosingReceipt r : receipts) {
-            assertEquals("factorial", r.reference().functionName());
+            assertEquals("factorial",
+                    graph.roots().get(r.reference().nodeIndex()).functionName());
             assertEquals(
                     "r_0 >= 1",
                     ReceiptGraphPrinter.renderSym(r.conclusion()),
@@ -90,8 +91,9 @@ class FactorialDischargeTest {
                 sibarum.pontif.core.symbolic.SymExpr.var("r_0"),
                 sibarum.pontif.core.symbolic.SymExpr.CmpOp.LE,
                 sibarum.pontif.core.symbolic.SymExpr.lit(0));
+        // factorial is the single (node 0); branch 1 is the recursive arm.
         ClosingReceipt fake = new ClosingReceipt(
-                "<malicious>", bogus, new GraphReference("factorial", 1), java.util.Map.of());
+                "<malicious>", bogus, new GraphReference(0, 1), java.util.Map.of());
 
         Notary.Verdict v = Notary.hypothesisSupported(graph, fake);
         assertTrue(!v.accepted(),

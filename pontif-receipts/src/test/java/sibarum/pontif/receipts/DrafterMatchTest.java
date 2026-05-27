@@ -45,7 +45,7 @@ class DrafterMatchTest {
     @Test
     void draftsOneBranchPerArm_withGuardsBoundToScrutinee() throws Exception {
         ReceiptGraph graph = Drafter.draft(signModule());
-        Node root = graph.roots().get("sign");
+        Node root = graph.nodesNamed("sign").get(0);
 
         assertEquals(3, root.branches().size(), "one branch per arm");
 
@@ -116,7 +116,7 @@ class DrafterMatchTest {
                 IrExpr.lit(0));
 
         ReceiptGraph graph = Drafter.draft(module);
-        Branch arm0 = graph.roots().get("f").branches().get(0);
+        Branch arm0 = graph.nodesNamed("f").get(0).branches().get(0);
 
         // guard: (n_0 + 1) > 0  — represented as Cmp(Add(n_0, 1), GT, 0)
         SymExpr expectedGuard = SymExpr.cmp(
@@ -136,7 +136,7 @@ class DrafterMatchTest {
                         IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("n"), IrExpr.var("n")))),
                 IrExpr.lit(0));
 
-        Node root = Drafter.draft(module).roots().get("double");
+        Node root = Drafter.draft(module).nodesNamed("double").get(0);
         assertEquals(1, root.branches().size());
         assertFalse(root.branches().get(0).guard().isPresent());
     }

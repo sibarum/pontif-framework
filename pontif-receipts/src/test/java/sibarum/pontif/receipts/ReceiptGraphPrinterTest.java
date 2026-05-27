@@ -74,7 +74,7 @@ class ReceiptGraphPrinterTest {
                 List.of(new Param("n_0", nonNeg)),
                 new Var("r_0", atLeastOne),
                 List.of(base, recursive));
-        ReceiptGraph graph = new ReceiptGraph(java.util.Map.of("factorial", root));
+        ReceiptGraph graph = new ReceiptGraph(List.of(root));
 
         String text = ReceiptGraphPrinter.print(graph);
         System.out.println(text);
