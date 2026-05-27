@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -126,6 +127,43 @@ class ReceiptGraphReportTest {
         assertTrue(text.contains("factorial  :  r_0 >= 1"), () -> text);
         assertTrue(text.contains("branch 0 [n_0 == 0]  -> discharged [notary: accepted]"), () -> text);
         assertTrue(text.contains("branch 1 [n_0 > 0]  -> discharged [notary: accepted]"), () -> text);
+    }
+
+    @Test
+    void ackermann_dischargesGreaterThanOneOnAllThreeOverloads() throws Exception {
+        // The headline payoff: Ackermann with a [Int:@>1] postcondition on
+        // every overload closes cleanly. Branch 0 (y_0 + 1 > 1 from y_0 > 0)
+        // is the BoundAnalysis win sign analysis couldn't do; the recursive
+        // branches close because each CallRef's result sort [Int:@>1] is the
+        // inductive hypothesis the back-reference carries into scope.
+        String src = """
+                module ackermann
+                function ackermann(x:[Int:@==0], y:[Int:@>0]):[Int:@>1] -> y + 1
+                function ackermann(x:[Int:@>0], y:[Int:@==0]):[Int:@>1] -> ackermann(x - 1, 1)
+                function ackermann(x:[Int:@>0], y:[Int:@>0]):[Int:@>1] -> ackermann(x - 1, ackermann(x, y - 1))
+                ackermann(2, 2)
+                """;
+        Path path = ReceiptGraphReport.writeReport(OUT, "ackermann", src, "ackermann.ptf");
+        String text = Files.readString(path);
+        System.out.println(text);
+
+        // Branch 0's obligation is the threshold sign analysis couldn't clear.
+        assertTrue(text.contains("ackermann(x_0: [Int: @ == 0], y_0: [Int: @ > 0]) : r_0: [Int: @ > 1]"),
+                () -> text);
+        // The recursive call result sorts carry the [Int:@>1] inductive hypothesis.
+        assertTrue(text.contains("call: ackermann(x_0 - 1, r_1) -> r_2: [Int: @ > 1]"), () -> text);
+        // All three overloads discharge; nothing left NOT DISCHARGED.
+        assertEquals(3, countOccurrences(text, "-> discharged [notary: accepted]"),
+                () -> "Expected all three overloads to discharge:\n" + text);
+        assertTrue(!text.contains("NOT DISCHARGED"), () -> text);
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int count = 0;
+        for (int i = haystack.indexOf(needle); i >= 0; i = haystack.indexOf(needle, i + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     @Test

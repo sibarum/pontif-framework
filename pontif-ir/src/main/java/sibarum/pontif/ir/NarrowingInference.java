@@ -1,6 +1,10 @@
 package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.symbolic.Substitute;
+import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.predicates.Interval;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -39,12 +43,19 @@ import java.util.Map;
  *   <li>{@code FieldAccess(base, f)} → projects the field's narrowing out
  *       of a struct-refined base by extracting conjuncts that reference
  *       only {@code @.f} and substituting {@code @.f → @}
+ *   <li>{@code BinOp} arithmetic ({@code + - *}) → bounds the expression
+ *       with {@link BoundAnalysis} under the env's refinements and lifts
+ *       the resulting {@link Interval} to an {@code [Int:…]} refinement
+ *       (e.g. {@code x + 1} with {@code x:[Int:@>=1]} → {@code [Int:@>=2]})
  * </ul>
  *
  * <h2>Out of scope (returns null, fall back to declared)</h2>
  * <ul>
- *   <li>{@code BinOp}, {@code Apply}, {@code Lambda} — symbolic reduction
- *       of arithmetic / function application is simplifier work; deferred
+ *   <li>{@code BinOp} comparisons / boolean ops — they yield {@code Bool},
+ *       not a bounded {@code Int}; narrowing a decidable predicate to a
+ *       {@code Bool} singleton is discharge work, not bound analysis
+ *   <li>{@code Apply}, {@code Lambda} — symbolic reduction of function
+ *       application is simplifier work; deferred
  *   <li>{@code SelfRef} — only meaningful inside refinement predicates
  *   <li>Match-arm hypothesis intersection with prior narrowing — currently
  *       the arm's pattern <em>replaces</em> the var's narrowing. Phase D
@@ -70,8 +81,8 @@ public final class NarrowingInference {
             case IrExpr.Call c -> inferCall(c, ctx);
             case IrExpr.Record r -> inferRecord(r, ctx);
             case IrExpr.FieldAccess fa -> inferFieldAccess(fa, ctx);
+            case IrExpr.BinOp op -> inferBinOp(op, ctx);
             // Deferred: see class doc.
-            case IrExpr.BinOp ignored -> null;
             case IrExpr.Apply ignored -> null;
             case IrExpr.Lambda ignored -> null;
             case IrExpr.SelfRef ignored -> null;
@@ -407,6 +418,84 @@ public final class NarrowingInference {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
         };
+    }
+
+    // --- Arithmetic narrowing (linear bounds) ------------------------------
+
+    /**
+     * Integer-arithmetic BinOp ({@code + - *}): bound the expression with
+     * {@link BoundAnalysis} under the env's refinements, then lift the
+     * resulting {@link Interval} to an {@code [Int:…]} refinement. Non-
+     * arithmetic ops (comparisons, boolean) yield {@code Bool}, not a
+     * bounded {@code Int}, so they fall back to the declared sort.
+     *
+     * <p>{@code infer} never throws — a {@link CompileException} while
+     * lowering to {@link SymExpr} degrades to {@code null} (declared sort).
+     */
+    private static IrSort inferBinOp(IrExpr.BinOp op, InferenceContext ctx) {
+        if (!isArithmetic(op.op())) return null;
+        SymExpr expr;
+        List<SymExpr> hypotheses;
+        try {
+            expr = IrCompiler.compileSymExpr(op);
+            hypotheses = hypothesesFromEnv(ctx);
+        } catch (CompileException unused) {
+            return null;
+        }
+        return intervalToIntSort(BoundAnalysis.bound(expr, hypotheses));
+    }
+
+    private static boolean isArithmetic(IrExpr.Op op) {
+        return op == IrExpr.Op.ADD || op == IrExpr.Op.SUB || op == IrExpr.Op.MUL;
+    }
+
+    /**
+     * Turns the env's refined bindings into {@link BoundAnalysis}
+     * hypotheses: a binding {@code x → [Int:@>=1]} becomes the fact
+     * {@code x >= 1} (the refinement predicate with {@code @} bound to the
+     * var). Non-refined bindings contribute nothing.
+     */
+    private static List<SymExpr> hypothesesFromEnv(InferenceContext ctx) throws CompileException {
+        List<SymExpr> hypotheses = new ArrayList<>();
+        for (Map.Entry<String, IrSort> binding : ctx.typeEnv().entrySet()) {
+            if (binding.getValue() instanceof IrSort.Refined refined) {
+                SymExpr predicate = IrCompiler.compileSymExpr(refined.predicate());
+                hypotheses.add(Substitute.applySelf(predicate, SymExpr.var(binding.getKey())));
+            }
+        }
+        return hypotheses;
+    }
+
+    /**
+     * Lifts a bounded {@link Interval} to an {@code [Int:…]} refinement:
+     * a point {@code [k,k]} → {@code @==k}, a half-line → {@code @>=lo} or
+     * {@code @<=hi}, a finite range → {@code @>=lo & @<=hi}. The unbounded
+     * interval (and the empty one — contradictory env) yield {@code null},
+     * meaning "no narrowing beyond the declared sort."
+     */
+    private static IrSort intervalToIntSort(Interval iv) {
+        if (iv.isEmpty()) return null;
+        boolean loInf = iv.lo() == Interval.NEG_INF;
+        boolean hiInf = iv.hi() == Interval.POS_INF;
+        if (loInf && hiInf) return null;
+        if (iv.lo() == iv.hi()) return intRefined(cmpSelf(IrExpr.Op.EQ, iv.lo()));
+        if (loInf) return intRefined(cmpSelf(IrExpr.Op.LE, iv.hi()));
+        if (hiInf) return intRefined(cmpSelf(IrExpr.Op.GE, iv.lo()));
+        return intRefined(new IrExpr.BinOp(
+                IrExpr.Op.AND,
+                cmpSelf(IrExpr.Op.GE, iv.lo()),
+                cmpSelf(IrExpr.Op.LE, iv.hi()),
+                Origin.NONE));
+    }
+
+    /** {@code @ op n} as a refinement predicate. */
+    private static IrExpr cmpSelf(IrExpr.Op op, long n) {
+        return new IrExpr.BinOp(
+                op, new IrExpr.SelfRef(Origin.NONE), new IrExpr.Lit(n, Origin.NONE), Origin.NONE);
+    }
+
+    private static IrSort.Refined intRefined(IrExpr predicate) {
+        return new IrSort.Refined("Int", predicate, Origin.NONE);
     }
 
     // --- Sort-level union / AND helpers ------------------------------------

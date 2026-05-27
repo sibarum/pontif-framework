@@ -243,14 +243,91 @@ class NarrowingInferenceTest {
         assertEquals("Int", r.name());
     }
 
-    // --- Out-of-scope expressions return null (Phase A contract) -------------
+    // --- Arithmetic narrowing (linear bounds) --------------------------------
 
     @Test
-    void binOp_returnsNullForNow() {
-        assertNull(NarrowingInference.infer(
+    void binOp_constantFolds() {
+        // 1 + 2 → [Int:@==3]
+        IrSort result = NarrowingInference.infer(
                 IrExpr.binOp(IrExpr.Op.ADD, IrExpr.lit(1), IrExpr.lit(2)),
+                InferenceContext.empty());
+        assertEquals(intEq(3), result);
+    }
+
+    @Test
+    void binOp_narrowsSumUnderLowerBound() {
+        // x + 1 with x:[Int:@>=1] → [Int:@>=2]
+        IrSort result = NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)),
+                InferenceContext.of(Map.of("x", intGe(1))));
+        assertEquals(intGe(2), result);
+    }
+
+    @Test
+    void binOp_narrowsScaledVar() {
+        // 2 * x with x:[Int:@>=1] → [Int:@>=2]
+        IrSort result = NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.lit(2), IrExpr.var("x")),
+                InferenceContext.of(Map.of("x", intGe(1))));
+        assertEquals(intGe(2), result);
+    }
+
+    @Test
+    void binOp_narrowsSubtraction() {
+        // x - 1 with x:[Int:@>=1] → [Int:@>=0]
+        IrSort result = NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.SUB, IrExpr.var("x"), IrExpr.lit(1)),
+                InferenceContext.of(Map.of("x", intGe(1))));
+        assertEquals(intGe(0), result);
+    }
+
+    @Test
+    void binOp_narrowsSquareViaSign() {
+        // x * x with no constraint on x → [Int:@>=0] (square is non-negative)
+        IrSort result = NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.var("x")),
+                InferenceContext.empty());
+        assertEquals(intGe(0), result);
+    }
+
+    @Test
+    void binOp_narrowsFiniteRange() {
+        // x + 1 with x:[Int:@>=1 & @<=4] → [Int:@>=2 & @<=5]
+        IrSort result = NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)),
+                InferenceContext.of(Map.of("x", intRange(1, 4))));
+        assertEquals(intRange(2, 5), result);
+    }
+
+    @Test
+    void inferFunctionReturn_narrowsArithmeticBody() {
+        // function f(x:[Int:@>=1]):Int -> x + 1   infers return [Int:@>=2]
+        IrStmt.FunctionDecl fd = IrStmt.functionDecl(
+                "f", List.of(new IrParam("x", intGe(1))), IrSort.named("Int"),
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)));
+        IrSort inferred = NarrowingInference.inferFunctionReturn(fd, InferenceContext.empty());
+        assertEquals(intGe(2), inferred);
+    }
+
+    // --- Arithmetic narrowing: cases that stay null --------------------------
+
+    @Test
+    void binOp_unconstrainedVar_returnsNull() {
+        // x + 1 with nothing known about x → no narrowing
+        assertNull(NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)),
                 InferenceContext.empty()));
     }
+
+    @Test
+    void binOp_comparisonOp_returnsNull() {
+        // x > 0 yields a Bool, not a bounded Int — not bound-analysis territory
+        assertNull(NarrowingInference.infer(
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.var("x"), IrExpr.lit(0)),
+                InferenceContext.of(Map.of("x", intGe(1)))));
+    }
+
+    // --- Out-of-scope expressions return null (Phase A contract) -------------
 
     @Test
     void anonymousRecord_returnsNull() {
@@ -280,6 +357,19 @@ class NarrowingInferenceTest {
     /** {@code [Bool:@==b]} */
     private static IrSort boolEq(boolean b) {
         return IrSort.refined("Bool", eqSelf(IrExpr.bool(b)));
+    }
+
+    /** {@code [Int:@>=n]} */
+    private static IrSort intGe(long n) {
+        return IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(n)));
+    }
+
+    /** {@code [Int:@>=lo & @<=hi]} */
+    private static IrSort intRange(long lo, long hi) {
+        return IrSort.refined("Int", IrExpr.binOp(
+                IrExpr.Op.AND,
+                IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(lo)),
+                IrExpr.binOp(IrExpr.Op.LE, IrExpr.self(), IrExpr.lit(hi))));
     }
 
     /** {@code @ == value} as an {@link IrExpr}. */

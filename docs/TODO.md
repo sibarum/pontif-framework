@@ -220,15 +220,35 @@ never a false discharge. Public API `discharge(hyps, goal) → boolean` and
 `IntegerDischarge.discharge` (first, ahead of the sign / `Refinements` /
 integer-strictness backstops — all sound, OR-ing can't regress). Headline:
 `inc(x:[Int:@>=1]):[Int:@>1] -> x+1` now discharges (the `>0`-vs-`>1`
-cliff is gone); factorial / square / sign suites unchanged. See
-`docs/numeric-discharge.md`.
+cliff is gone); factorial / square / sign suites unchanged. Flagship:
+**Ackermann with a `[Int:@>1]` postcondition closes on all three
+overloads** — branch 0 (`y_0+1 > 1` from `y_0 > 0`) is the BoundAnalysis
+win; the recursive branches close because each `CallRef`'s `[Int:@>1]`
+result sort is the inductive hypothesis the back-reference carries in.
+Pinned by `ReceiptGraphReportTest.ackermann_dischargesGreaterThanOneOnAllThreeOverloads`.
+See `docs/numeric-discharge.md`.
+
+Slice 2 (arithmetic narrowing in `NarrowingInference`) ✅ landed:
+`infer` now narrows `IrExpr.BinOp` arithmetic (`+ - *`) via
+`BoundAnalysis.bound` under the env's refinements, lifting the resulting
+`Interval` to an `[Int:…]` refinement (`x+1` with `x:[Int:@>=1]` →
+`[Int:@>=2]`; `2x`, `x-1`, `x*x`→`@>=0`, finite ranges). Comparison /
+boolean ops stay null (they yield `Bool`). `BoundAnalysis` also gained
+**`And`-hypothesis flattening**, so a range refinement
+(`[Int:@>=1 & @<=4]`) now constrains its atom — benefits the issuer too
+(range-typed params become usable hypotheses). Unit-tested in
+`NarrowingInferenceTest` / `BoundAnalysisTest`.
 
 Follow-ups (deferred, in priority order):
-- **Wire `BoundAnalysis.bound` into `NarrowingInference`.** `infer` returns
-  `null` for every `IrExpr.BinOp` today; the `bound()` entry point is the
-  arithmetic-narrowing engine it lacks (e.g. `x+1` → `[Int:@>=2]` from
-  `x:[Int:@>=1]`). The intended second consumer — the reason `bound()` is
-  public.
+- **Make arithmetic narrowing observable in a real consumer.** Slice 2 is
+  a capability on `infer`, but `infer`'s only production caller
+  (`Drafter.resolveCallReturnSort`) resolves a *call's* return by
+  declared/dispatched sort — it doesn't infer a callee's arithmetic body.
+  So the narrowing isn't yet visible in the receipt graph. Options:
+  (a) drafter falls back to `inferFunctionReturn` for unrefined-return
+  callees (richer IHs in the graph — watch Ackermann's bare-Int graph
+  tests); (b) the alt parser's `let q = expr` inferred-sort path consumes
+  it (see "Per-call dispatch return narrowing for inferred let sorts").
 - **Strengthen `Refinements.imply` (dispatch / overload-overlap) via
   bounds.** Currently ad-hoc single-atom threshold compare
   (`checkImpliesOnLongs`); a bound check generalizes it to linear shapes

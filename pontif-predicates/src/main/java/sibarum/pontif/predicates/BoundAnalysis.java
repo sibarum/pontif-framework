@@ -4,6 +4,7 @@ import sibarum.pontif.core.symbolic.Sign;
 import sibarum.pontif.core.symbolic.SignAnalysis;
 import sibarum.pontif.core.symbolic.SymExpr;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,7 +48,7 @@ public final class BoundAnalysis {
      * inference consumer wants).
      */
     public static Interval bound(SymExpr expr, List<SymExpr> hypotheses) {
-        return evaluate(LinearForm.normalize(expr), hypotheses);
+        return evaluate(LinearForm.normalize(expr), flatten(hypotheses));
     }
 
     /**
@@ -62,7 +63,7 @@ public final class BoundAnalysis {
             return false;
         }
         LinearForm diff = LinearForm.normalize(subject).subtract(LinearForm.normalize(bound));
-        Interval iv = evaluate(diff, hypotheses);
+        Interval iv = evaluate(diff, flatten(hypotheses));
         // Contradictory hypotheses (empty range) entail anything.
         if (iv.isEmpty()) return true;
         return switch (op) {
@@ -73,6 +74,27 @@ public final class BoundAnalysis {
             case EQ -> iv.lo() == 0 && iv.hi() == 0;
             case NE -> iv.lo() > 0 || iv.hi() < 0;
         };
+    }
+
+    /**
+     * Expands top-level conjunctions so each conjunct is a separate fact.
+     * A range refinement like {@code [Int:@>=1 & @<=4]} reaches the engine
+     * as a single {@code And} hypothesis; flattening lets each bound
+     * constrain its atom (and lets {@link SignAnalysis} see the parts too).
+     */
+    private static List<SymExpr> flatten(List<SymExpr> hypotheses) {
+        List<SymExpr> flat = new ArrayList<>(hypotheses.size());
+        for (SymExpr h : hypotheses) collectConjuncts(h, flat);
+        return flat;
+    }
+
+    private static void collectConjuncts(SymExpr e, List<SymExpr> out) {
+        if (e instanceof SymExpr.And(SymExpr l, SymExpr r)) {
+            collectConjuncts(l, out);
+            collectConjuncts(r, out);
+        } else {
+            out.add(e);
+        }
     }
 
     // --- Interval evaluation of a linear form -------------------------------

@@ -75,6 +75,21 @@ class BoundAnalysisTest {
         assertEquals(Interval.atLeast(0), iv);
     }
 
+    @Test
+    void boundFromRangeHypothesisFlattensConjunction() {
+        // x with (x >= 1 ∧ x <= 4) — one And hypothesis → [1, 4]
+        SymExpr range = SymExpr.and(ge(v("x"), 1), cmp(v("x"), SymExpr.CmpOp.LE, lit(4)));
+        assertEquals(new Interval(1, 4), BoundAnalysis.bound(v("x"), List.of(range)));
+    }
+
+    @Test
+    void dischargesUpperBoundFromRangeHypothesis() {
+        // x + 1 <= 5  from  (x >= 1 ∧ x <= 4)
+        SymExpr range = SymExpr.and(ge(v("x"), 1), cmp(v("x"), SymExpr.CmpOp.LE, lit(4)));
+        SymExpr goal = cmp(add(v("x"), lit(1)), SymExpr.CmpOp.LE, lit(5));
+        assertTrue(BoundAnalysis.discharge(List.of(range), goal));
+    }
+
     // --- discharge(): the threshold headline --------------------------------
 
     @Test
