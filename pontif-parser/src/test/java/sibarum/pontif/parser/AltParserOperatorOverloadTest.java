@@ -7,6 +7,8 @@ import sibarum.pontif.ir.IrStmt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for operator-overload routing in {@link AltParser}.
@@ -53,6 +55,52 @@ class AltParserOperatorOverloadTest {
                 """);
         IrStmt.FunctionDecl fn = (IrStmt.FunctionDecl) m.statements().get(1);
         assertEquals("Point.+", fn.name());
+    }
+
+    // --- Bare operator names ------------------------------------------------
+
+    @Test
+    void bareOperatorFunction_parsesUnderBareName() throws Exception {
+        IrModule m = parse("""
+                struct Point(x:Int, y:Int)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
+                """);
+        IrStmt.FunctionDecl fn = (IrStmt.FunctionDecl) m.statements().get(1);
+        assertEquals("+", fn.name());
+        assertEquals(2, fn.params().size());
+    }
+
+    @Test
+    void bareOperator_routesToBareName() throws Exception {
+        IrModule m = parse("""
+                struct Point(x:Int, y:Int)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
+                function add(a:Point, b:Point):Point -> a + b
+                """);
+        IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, lastFnBody(m));
+        assertEquals("+", call.functionName());
+        assertEquals(2, call.args().size());
+    }
+
+    @Test
+    void nonOverloadableBareOperator_rejected() {
+        // `&` is a valid operator token but excluded from OVERLOADABLE_OPS.
+        ParseException ex = assertThrows(ParseException.class, () -> parse("""
+                struct Point(x:Int, y:Int)
+                function &(a:Point, b:Point):Point -> a
+                """));
+        assertTrue(ex.getMessage().contains("overloadable"),
+                () -> "Unexpected: " + ex.getMessage());
+    }
+
+    @Test
+    void bareOperatorWrongArity_rejected() {
+        ParseException ex = assertThrows(ParseException.class, () -> parse("""
+                struct Point(x:Int, y:Int)
+                function +(a:Point):Point -> a
+                """));
+        assertTrue(ex.getMessage().contains("2 parameters"),
+                () -> "Unexpected: " + ex.getMessage());
     }
 
     // --- Routing: struct operand → Call -------------------------------------

@@ -206,14 +206,29 @@ class AltParserIntegrationTest {
     }
 
     @Test
-    void spec_only_function_with_underspecified_return_stays_noop() throws Exception {
-        // [Int:@>=0] → Refined(Int, @>=0) — no single value to project. Stays
-        // NoOp until a real proof engine can either pick a witness or flag it
-        // as needing one.
-        IrModule m = AltParser.parseModule(
-                "module m\nfunction f():[Int:@>=0]",
-                "t.ptf");
-        assertTrue(m.statements().get(0) instanceof sibarum.pontif.ir.IrStmt.NoOp);
+    void bare_operator_function_runs_end_to_end() throws Exception {
+        // `function +(l:Rational, r:Rational)` — bare-name operator generic.
+        // a + b inside sum routes to Call("+", [a, b]); n = 1*4 + 3*2 = 10.
+        String src = """
+                module m
+                struct Rational(n:Int, d:Int)
+                function +(l:Rational, r:Rational):Rational -> Rational(l.n*r.d + r.n*l.d, l.d*r.d)
+                function sum(a:Rational, b:Rational):Rational -> a + b
+                sum(Rational(1,2), Rational(3,4)).n
+                """;
+        assertEquals(10L, run(src));
+    }
+
+    @Test
+    void spec_only_function_with_underspecified_return_is_hard_error() {
+        // [Int:@>=0] → Refined(Int, @>=0) — no single value to synthesize a
+        // body from. A body-less function with a non-pinning return is a hard
+        // error now, rather than a silently-dropped NoOp that looked defined
+        // but failed later with "Unknown function".
+        ParseException ex = assertThrows(ParseException.class, () ->
+                AltParser.parseModule("module m\nfunction f():[Int:@>=0]", "t.ptf"));
+        assertTrue(ex.getMessage().contains("has no body"),
+                () -> "Unexpected message: " + ex.getMessage());
     }
 
     @Test
@@ -731,23 +746,20 @@ class AltParserIntegrationTest {
                 requires math.{min, max}
                 exports @.{foo, bar}
 
-                method Point.add(p:Point):Point
                 let Point.origin:Point
-
-                function f():[Int:@>=0]
 
                 42
                 """;
         IrModule m = AltParser.parseModule(src, "t.ptf");
-        // requires, exports, spec-only method (named return — not synthesizable),
-        // let, spec-only function with under-specified return = 5 NoOps.
-        // (Synthesizable spec-only decls — `[Bool:true]`, `[Int:42]`, `[Int:0]`
-        // — become FunctionDecls at parse time; see spec_only_* tests above.
-        // Methods WITH a body desugar to FunctionDecls too.)
+        // requires, exports, spec-only let = 3 NoOps. (Spec-only functions /
+        // methods with non-synthesizable returns are now hard errors, not
+        // NoOps — see spec_only_*_is_hard_error. Synthesizable spec-only decls
+        // — `[Bool:true]`, `[Int:42]`, `[Int:0]` — become FunctionDecls at
+        // parse time; methods WITH a body desugar to FunctionDecls too.)
         long noOpCount = m.statements().stream()
                 .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.NoOp)
                 .count();
-        assertEquals(5, noOpCount);
+        assertEquals(3, noOpCount);
         // Main is 42.
         assertEquals(42L, run("module m\n42"));
     }
@@ -818,14 +830,15 @@ class AltParserIntegrationTest {
     }
 
     @Test
-    void spec_only_method_with_named_return_stays_noop() throws Exception {
-        // Return sort `Point` is a plain named sort (not Refined), so the
-        // synthesis pass has nothing to project. NoOp until value synthesis
-        // for nominal types lands (same problem as `let Point.origin:Point`).
-        IrModule m = AltParser.parseModule(
-                "module m\nmethod Point.add(p:Point):Point",
-                "t.ptf");
-        assertTrue(m.statements().get(0) instanceof sibarum.pontif.ir.IrStmt.NoOp);
+    void spec_only_method_with_named_return_is_hard_error() {
+        // Return sort `Point` is a plain named sort (not Refined), so there's
+        // nothing to synthesize a body from — a hard error now, like the
+        // function form (and unlike `let Point.origin:Point`, which stays NoOp
+        // on the separate let path).
+        ParseException ex = assertThrows(ParseException.class, () ->
+                AltParser.parseModule("module m\nmethod Point.add(p:Point):Point", "t.ptf"));
+        assertTrue(ex.getMessage().contains("has no body"),
+                () -> "Unexpected message: " + ex.getMessage());
     }
 
     @Test

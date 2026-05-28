@@ -1,5 +1,10 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.predicates.ComplementResult;
+import sibarum.pontif.predicates.PredicateArithmetic;
+
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -396,6 +401,7 @@ public final class SortChecker {
                     }
                     checkExpr(b.result(), branchEnv, functionReturns, structDefs);
                 }
+                checkMatchTotality(m, typeEnv, functionReturns, structDefs);
             }
             case IrExpr.Record r -> {
                 for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs);
@@ -414,6 +420,244 @@ public final class SortChecker {
                 }
             }
         }
+    }
+
+    /**
+     * Match totality (alt-syntax principle 8): every value of the scrutinee's
+     * sort must be covered by some arm, proven at compile time rather than
+     * trusted to a runtime check.
+     *
+     * <p>This enforces it for the <b>decidable fragment</b> — all arms are
+     * {@link IrSort.Refined} over a known scrutinee sort the kernel reasons
+     * about (the integer-comparison fragment of {@link PredicateArithmetic}).
+     * Everywhere else it <b>defers</b>, leaving the interpreter's runtime
+     * no-match check as the safety net: a non-{@code Refined} arm
+     * (struct/structural destructuring), an un-inferrable scrutinee sort, a
+     * non-{@code Int} domain, or a kernel {@code Unknown}. A {@code _} arm is
+     * already desugared to the explicit complement by the parser, so those
+     * matches are total by construction and pass here trivially.
+     *
+     * <p>Sound by construction: an error is raised <em>only</em> when the
+     * kernel proves there are uncovered values, so the check never rejects a
+     * match it can't decide.
+     */
+    private static void checkMatchTotality(
+            IrExpr.Match m,
+            Map<String, IrSort> typeEnv,
+            Map<String, IrSort> functionReturns,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        IrSort scrutineeIr = inferSort(m.scrutinee(), typeEnv, functionReturns);
+        if (scrutineeIr == null) return;  // unknown domain → defer
+
+        // Struct totality (Tier A): a bare structural arm (no refined fields)
+        // whose field set is a subset of the scrutinee's fields matches every
+        // value of that struct shape — per Pontif's subset-semantics structural
+        // matching — so the match is trivially total. Richer struct totality
+        // (per-field coverage across refined-field arms, struct unions) is
+        // deferred — that's a multi-arm cross-product problem.
+        Set<String> scrutineeFields = scrutineeFieldSet(scrutineeIr, structDefs);
+        if (scrutineeFields != null) {
+            for (IrExpr.MatchBranch b : m.branches()) {
+                if (isBareStructuralCovering(b.pattern(), scrutineeFields)) {
+                    return;  // trivially total
+                }
+            }
+        }
+
+        // Tier B: single-varying-field struct totality. If every arm is a
+        // structural pattern refining the SAME single field (with all others
+        // bare), totality reduces to "does the union of arms' refinements on
+        // that field cover the field's domain?" — a single-field problem the
+        // existing kernel decides. Multi-varying-field cross-product is harder
+        // and deferred.
+        if (tryTierBSingleField(m, scrutineeIr, structDefs)) {
+            return;  // total (or threw on non-exhaustive)
+        }
+
+        SymExpr union = null;
+        for (IrExpr.MatchBranch b : m.branches()) {
+            if (!(b.pattern() instanceof IrSort.Refined refined)) return;  // non-refined arm → defer
+            SymExpr armPred;
+            try {
+                armPred = IrCompiler.compileSymExpr(refined.predicate());
+            } catch (CompileException e) {
+                return;  // arm predicate outside what we can lower → defer
+            }
+            union = (union == null) ? armPred : SymExpr.or(union, armPred);
+        }
+        if (union == null) return;  // no arms (the parser rejects empty matches anyway)
+
+        Sort domain;
+        try {
+            domain = IrCompiler.compileSort(scrutineeIr);
+        } catch (CompileException e) {
+            return;
+        }
+
+        // Uncovered = domain ∧ ¬(union of arms). The kernel returns Unknown for
+        // anything outside the Int-comparison fragment → defer on Unknown.
+        ComplementResult cr = PredicateArithmetic.complement(union, domain);
+        if (!(cr instanceof ComplementResult.Computed computed)) return;
+        SymExpr uncovered = computed.predicate();
+        if (PredicateArithmetic.satisfiable(uncovered, domain).isYes()) {
+            throw new CompileException(
+                    "match over " + describeDomain(scrutineeIr) + " is not exhaustive — no arm covers "
+                            + renderPredicate(uncovered)
+                            + " (every match must be total; add the missing arm or a '_' default)",
+                    m.origin());
+        }
+    }
+
+    /**
+     * Tier B struct totality: when every arm is a structural pattern refining
+     * the same single field (others bare), reduce to that field's domain-
+     * coverage problem (which the kernel decides). Returns:
+     * <ul>
+     *   <li>{@code true} if the case applies and the union of arms' field
+     *       refinements provably covers the field's domain — total;</li>
+     *   <li>throws {@link CompileException} when the case applies but the
+     *       union provably leaves the field's domain uncovered;</li>
+     *   <li>{@code false} when this isn't the single-varying-field shape, or
+     *       the kernel can't decide — defer to the outer check / runtime.</li>
+     * </ul>
+     */
+    private static boolean tryTierBSingleField(
+            IrExpr.Match m, IrSort scrutineeIr,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        IrSort.Structural scrutineeStruct = scrutineeStructDef(scrutineeIr, structDefs);
+        if (scrutineeStruct == null) return false;
+
+        String varyingField = null;
+        SymExpr union = null;
+        for (IrExpr.MatchBranch b : m.branches()) {
+            if (!(b.pattern() instanceof IrSort.Structural sp)) return false;
+            // Find the arm's single refined field; reject 2+ refined fields or
+            // nested-structural fields.
+            String armVarying = null;
+            IrSort.Refined armRefined = null;
+            for (Map.Entry<String, IrSort> entry : sp.members().entrySet()) {
+                IrSort fs = entry.getValue();
+                if (fs instanceof IrSort.Refined r) {
+                    if (armVarying != null) return false;  // 2+ refined fields
+                    armVarying = entry.getKey();
+                    armRefined = r;
+                } else if (fs instanceof IrSort.Structural) {
+                    return false;  // nested structural → defer
+                }
+            }
+            if (armVarying == null) return false;  // bare arm — Tier A's territory
+            if (varyingField == null) {
+                varyingField = armVarying;
+            } else if (!varyingField.equals(armVarying)) {
+                return false;  // different varying field across arms
+            }
+            SymExpr armPred;
+            try {
+                armPred = IrCompiler.compileSymExpr(armRefined.predicate());
+            } catch (CompileException e) {
+                return false;
+            }
+            union = (union == null) ? armPred : SymExpr.or(union, armPred);
+        }
+        if (varyingField == null || union == null) return false;
+
+        // The field's domain — the declared field sort on the scrutinee struct.
+        IrSort fieldDeclaredIr = scrutineeStruct.members().get(varyingField);
+        if (fieldDeclaredIr == null) return false;  // arm refines a field the struct lacks
+        Sort fieldDomain;
+        try {
+            fieldDomain = IrCompiler.compileSort(fieldDeclaredIr);
+        } catch (CompileException e) {
+            return false;
+        }
+
+        ComplementResult cr = PredicateArithmetic.complement(union, fieldDomain);
+        if (!(cr instanceof ComplementResult.Computed computed)) return false;
+        SymExpr uncovered = computed.predicate();
+        if (PredicateArithmetic.satisfiable(uncovered, fieldDomain).isYes()) {
+            throw new CompileException(
+                    "match over " + describeDomain(scrutineeIr)
+                            + " is not exhaustive — no arm covers field '"
+                            + varyingField + "' where " + renderPredicate(uncovered)
+                            + " (every match must be total)",
+                    m.origin());
+        }
+        return true;  // total
+    }
+
+    /**
+     * The declared struct definition for a scrutinee — directly when it's
+     * {@link IrSort.Structural}, via {@code structDefs} for a
+     * {@link IrSort.Named}/{@link IrSort.Refined} pointing at a declared
+     * struct. {@code null} when the scrutinee isn't a struct.
+     */
+    private static IrSort.Structural scrutineeStructDef(
+            IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
+        return switch (scrutineeIr) {
+            case IrSort.Structural s -> s;
+            case IrSort.Named n -> structDefs.get(n.name());
+            case IrSort.Refined r -> structDefs.get(r.name());
+            default -> null;
+        };
+    }
+
+    /** Field set of a struct scrutinee, or {@code null} for non-structs. */
+    private static Set<String> scrutineeFieldSet(
+            IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
+        IrSort.Structural def = scrutineeStructDef(scrutineeIr, structDefs);
+        return def != null ? def.members().keySet() : null;
+    }
+
+    /**
+     * An arm "covers" a struct scrutinee iff it's a {@link IrSort.Structural}
+     * with <em>no refined fields</em> (and no nested structural fields, which
+     * could themselves be partial) and whose field set is a subset of the
+     * scrutinee's. By Pontif's subset-match semantics that arm matches every
+     * value of that struct shape — sufficient for trivial totality.
+     */
+    private static boolean isBareStructuralCovering(
+            IrSort armPattern, Set<String> scrutineeFields) {
+        if (!(armPattern instanceof IrSort.Structural arm)) return false;
+        for (IrSort fieldSort : arm.members().values()) {
+            if (fieldSort instanceof IrSort.Refined
+                    || fieldSort instanceof IrSort.Structural) return false;
+        }
+        return scrutineeFields.containsAll(arm.members().keySet());
+    }
+
+    private static String describeDomain(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            default -> sort.toString();
+        };
+    }
+
+    /** Renders a predicate from the integer-comparison fragment over {@code @}. */
+    private static String renderPredicate(SymExpr e) {
+        return switch (e) {
+            case SymExpr.Bool b -> Boolean.toString(b.value());
+            case SymExpr.Self ignored -> "@";
+            case SymExpr.Lit l -> Long.toString(l.value());
+            case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) ->
+                    renderPredicate(l) + " " + renderCmpOp(op) + " " + renderPredicate(r);
+            case SymExpr.And(SymExpr l, SymExpr r) ->
+                    renderPredicate(l) + " & " + renderPredicate(r);
+            case SymExpr.Or(SymExpr l, SymExpr r) ->
+                    "(" + renderPredicate(l) + " | " + renderPredicate(r) + ")";
+            default -> e.toString();
+        };
+    }
+
+    private static String renderCmpOp(SymExpr.CmpOp op) {
+        return switch (op) {
+            case LT -> "<";
+            case LE -> "<=";
+            case GT -> ">";
+            case GE -> ">=";
+            case EQ -> "==";
+            case NE -> "!=";
+        };
     }
 
     /**

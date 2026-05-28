@@ -29,7 +29,7 @@ class PontifRunnerTest {
     void factorialModule_runsToOneHundredTwenty() throws Exception {
         String src = """
                 (module factorial
-                  ((defn factorial ((n Int)) Int
+                  ((defn factorial ((n (refined Int (>= self 0)))) Int
                      (match n
                        ((refined Int (== self 0)) 1)
                        ((refined Int (> self 0)) (* n (call factorial (- n 1)))))))

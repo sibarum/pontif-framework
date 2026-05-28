@@ -33,7 +33,7 @@ class LanguageDefIntegrationTest {
 
         String src = """
                 (program factorial
-                  ((fn factorial ((n Int)) Int
+                  ((fn factorial ((n (where Int (>= self 0)))) Int
                      (switch n
                        ((where Int (== self 0)) 1)
                        ((where Int (> self 0)) (* n (invoke factorial (- n 1)))))))

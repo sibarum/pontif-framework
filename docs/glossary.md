@@ -126,6 +126,8 @@ declares a named trait. *Reserved keyword in the alt parser.*
 **spec-only function** — A function declaration with no body, where the
 return refinement pins a single value (e.g.,
 `function timesTwo(n:Int):[Int:n*2]`). The body is synthesized from the
-return refinement's `@==EXPR` form. Returns that don't pin a value (e.g.,
-`function f():[Int:@>0]`) currently emit `NoOp` — see TODO under "Alt
-syntax — surface forms that parse but produce `IrStmt.NoOp`."
+return refinement's `@==EXPR` form. A return that *doesn't* pin a value
+(a plain base/struct sort like `:Vec2`, or a range like `[Int:@>0]`) has
+no body to synthesize and is a **hard error** at the declaration — real
+synthesis from such a spec is deferred program-search work. See TODO
+under "Alt syntax — surface forms that parse but produce `IrStmt.NoOp`."

@@ -242,13 +242,29 @@ public final class AltParser {
     }
 
     /**
-     * Like {@link #parseDottedName} but also accepts a trailing {@code .OP}
-     * segment so function/method declarations can use operator-character
-     * names — e.g., {@code method Point.+(p:Point):Point -> ...} registers
-     * under the dispatch key {@code Point.+}. The trailing operator can only
-     * be the final segment (operator-named modules don't exist).
+     * Parses a declaration name. Three shapes:
+     * <ul>
+     *   <li>dotted identifier — {@code factorial}, {@code Point.zero};</li>
+     *   <li>a <b>bare operator</b> — {@code function +(l, r)} registers the
+     *       operator as a free generic under the bare key {@code +}. Only
+     *       {@link #OVERLOADABLE_OPS overloadable operators} are valid as
+     *       names ({@code &}/{@code |} and unknown ops are rejected here);</li>
+     *   <li>a trailing {@code .OP} segment — {@code Point.+} registers under
+     *       the dispatch key {@code Point.+} (the legacy method-style form,
+     *       kept as a routing fallback).</li>
+     * </ul>
      */
     private String parseDeclarationName() throws ParseException {
+        if (peek().kind() == AltToken.Kind.OP) {
+            AltToken opTok = consume();
+            if (!OVERLOADABLE_OPS.contains(opTok.text())) {
+                throw new ParseException(
+                        "'" + opTok.text() + "' is not an overloadable operator "
+                                + "(overloadable: + - * < <= > >= == !=)",
+                        opTok.origin());
+            }
+            return opTok.text();
+        }
         String name = parseDottedName();
         if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.OP) {
             consume();  // DOT
@@ -338,9 +354,10 @@ public final class AltParser {
     //   - If `-> BODY` is present, BODY is used directly.
     //   - If absent, body synthesis is attempted from the return sort: a return
     //     of shape `[Sort:@==EXPR]` (which is what the implicit @==EXPR sugar
-    //     produces) yields BODY = EXPR. Sorts where the projected RHS contains
-    //     SelfRef would be self-referential (recursive equation, not a
-    //     definition) and are rejected — those stay NoOp.
+    //     produces) yields BODY = EXPR. A return that doesn't pin a value
+    //     (a plain base/struct sort, a range like `[Int:@>=0]`, or a
+    //     self-referential `@==EXPR(@)`) can't synthesize a body and is a
+    //     hard error at the declaration — see specOnlyWithoutSynthesis.
 
     private IrStmt parseFunction() throws ParseException {
         AltToken start = expectKeyword("function");
@@ -348,6 +365,15 @@ public final class AltParser {
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
+        // A bare-operator function is a binary operator — exactly two operands
+        // (left, right). The legacy `Type.op` form is naturally binary too
+        // (receiver + one param), so this only guards the new bare form.
+        if (OVERLOADABLE_OPS.contains(name) && params.size() != 2) {
+            throw new ParseException(
+                    "operator '" + name + "' must take exactly 2 parameters (left, right); got "
+                            + params.size(),
+                    start.origin());
+        }
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
 
@@ -375,9 +401,34 @@ public final class AltParser {
             if (params.isEmpty()) declaredZeroArgFunctions.add(name);
             return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
         }
-        return new IrStmt.NoOp(
-                "spec-only function " + name + "(" + paramSig(params) + "):" + returnSort,
-                start.origin());
+        throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
+    }
+
+    /**
+     * A body-less {@code function}/{@code method} whose return sort doesn't
+     * pin a single value can't have its body synthesized (that would be
+     * genuine program search, not desugar — deferred). Rather than silently
+     * dropping the declaration (which made it look defined, skipped
+     * sort-checking of its signature, and surfaced later as a misleading
+     * "Unknown function"), reject it at the declaration site.
+     */
+    private static ParseException specOnlyWithoutSynthesis(
+            String kind, String name, IrSort returnSort, Origin origin) {
+        return new ParseException(
+                kind + " '" + name + "' has no body, and its return type "
+                        + describeSort(returnSort)
+                        + " doesn't pin a value to synthesize one. Add a '-> body', or give a "
+                        + "value-pinning return like [Int:@==EXPR].",
+                origin);
+    }
+
+    /** A short, user-facing rendering of a sort for diagnostics. */
+    private static String describeSort(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> "[" + r.name() + ":...]";
+            default -> sort.getClass().getSimpleName();
+        };
     }
 
     /**
@@ -432,9 +483,7 @@ public final class AltParser {
                 return new IrStmt.FunctionDecl(
                         name, desugaredParams, returnSort, derived, start.origin());
             }
-            return new IrStmt.NoOp(
-                    "spec-only method " + name + "(" + paramSig(params) + "):" + returnSort,
-                    start.origin());
+            throw specOnlyWithoutSynthesis("method", name, returnSort, start.origin());
         }
         consume();  // ARROW
 
@@ -1163,25 +1212,29 @@ public final class AltParser {
     }
 
     /**
-     * Set of operators that can be overloaded via {@code method Type.OP(...)}.
+     * Operators that can be overloaded — via a bare generic
+     * {@code function <op>(l, r)} or the legacy {@code method Type.<op>(...)}.
      * Arithmetic and comparison. Logical {@code &} and {@code |} are excluded
-     * — they always go through BinOp regardless of any method named
-     * {@code Type.&}.
+     * — they always go through BinOp regardless of any declaration named
+     * {@code &}.
      */
     private static final Set<String> OVERLOADABLE_OPS = Set.of(
             "+", "-", "*",
             "<", "<=", ">", ">=", "==", "!=");
 
     /**
-     * Returns the dispatch name {@code "<TypeName>.<op>"} when {@code left}'s
-     * inferred sort has that method declared; null otherwise (BinOp stays).
-     * Skipped when:
-     * <ul>
-     *   <li>The op is not in {@link #OVERLOADABLE_OPS}.</li>
-     *   <li>Left's base sort is a primitive ({@code Int}, {@code Bool},
-     *       {@code Function}) or a sentinel ({@code _}, {@code _record}).</li>
-     *   <li>No such method is registered in {@link #declaredFunctionReturns}.</li>
-     * </ul>
+     * Returns the dispatch name to route {@code left <op> right} to, or
+     * {@code null} to keep the primitive {@code BinOp} path. Resolution:
+     * <ol>
+     *   <li>the bare operator generic {@code "<op>"} (a {@code function +(l,r)}
+     *       declaration) — preferred;</li>
+     *   <li>the legacy {@code "<TypeName>.<op>"} method form — fallback.</li>
+     * </ol>
+     * Skipped (BinOp stays) when the op isn't overloadable, or {@code left}'s
+     * base sort is a primitive ({@code Int}, {@code Bool}, {@code Function})
+     * or a sentinel ({@code _}, {@code _record}), or neither name is
+     * registered. (Routing on a primitive <em>left</em> with a non-primitive
+     * right — {@code Int * Point} — is a separate, later slice.)
      */
     private String tryOperatorOverloadRoute(IrExpr left, String opText) {
         if (!OVERLOADABLE_OPS.contains(opText)) return null;
@@ -1195,6 +1248,10 @@ public final class AltParser {
                 || typeName.equals("Function")) {
             return null;
         }
+        // Bare-name operator generic (`function +(l, r)`) wins; the legacy
+        // `Type.op` method form stays as a fallback so existing
+        // `method Type.+` declarations keep routing.
+        if (declaredFunctionReturns.containsKey(opText)) return opText;
         String methodName = typeName + "." + opText;
         return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
     }

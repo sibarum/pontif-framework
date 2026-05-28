@@ -237,10 +237,40 @@ class PredicateArithmeticTest {
 
     @Test
     void non_int_domain_returns_unknown() {
-        // Bool base not in current slice.
+        // `@ == 0` compares Self to an Int literal — outside the Bool fragment,
+        // so even over the (now supported) Bool domain it stays Unknown.
         SatResult result = PredicateArithmetic.satisfiable(
                 cmp(SymExpr.CmpOp.EQ, 0), Sort.of("Bool"));
-        assertTrue(result.isUnknown(), () -> "expected Unknown for non-Int base, got " + result);
+        assertTrue(result.isUnknown(), () -> "expected Unknown for a non-Bool predicate, got " + result);
+    }
+
+    // --- Bool domain --------------------------------------------------------
+
+    @Test
+    void bool_eqTrue_isSatisfiable() {
+        SatResult r = PredicateArithmetic.satisfiable(
+                SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(true)), Sort.of("Bool"));
+        assertTrue(r.isYes(), () -> "expected Yes, got " + r);
+    }
+
+    @Test
+    void bool_trueAndFalse_isUnsatisfiable() {
+        SatResult r = PredicateArithmetic.satisfiable(
+                SymExpr.and(
+                        SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(true)),
+                        SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(false))),
+                Sort.of("Bool"));
+        assertTrue(r.isNo(), () -> "expected No (no value is both true and false), got " + r);
+    }
+
+    @Test
+    void bool_complementOfTrue_isFalse() {
+        ComplementResult r = PredicateArithmetic.complement(
+                SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(true)), Sort.of("Bool"));
+        assertEquals(
+                SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(false)),
+                ((ComplementResult.Computed) r).predicate(),
+                () -> "complement of @==true over Bool should be @==false; got " + r);
     }
 
     // --- Complement ---------------------------------------------------------

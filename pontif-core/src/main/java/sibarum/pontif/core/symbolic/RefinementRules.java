@@ -22,7 +22,26 @@ public final class RefinementRules {
         return Optional.empty();
     };
 
+    /**
+     * Bool counterpart to {@link #CMP_LIT_LIT}: folds {@code Bool(a) == Bool(b)}
+     * and {@code Bool(a) != Bool(b)} to a Bool literal so {@code Bool} match
+     * arms (e.g. {@code [@==true]}) can be decided at runtime after substituting
+     * {@code Self} with the scrutinee value. Ordering ops on Bool aren't part of
+     * Pontif's surface semantics — leave them residual rather than impose an
+     * arbitrary boolean ordering.
+     */
+    public static final RewriteRule CMP_BOOL_BOOL = (expr, simp) -> {
+        if (expr instanceof SymExpr.Cmp(SymExpr.Bool l, SymExpr.CmpOp op, SymExpr.Bool r)) {
+            return switch (op) {
+                case EQ -> Optional.of(SymExpr.bool(l.value() == r.value()));
+                case NE -> Optional.of(SymExpr.bool(l.value() != r.value()));
+                case LT, LE, GT, GE -> Optional.empty();
+            };
+        }
+        return Optional.empty();
+    };
+
     public static List<RewriteRule> all() {
-        return List.of(CMP_LIT_LIT);
+        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL);
     }
 }

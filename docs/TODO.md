@@ -352,12 +352,44 @@ of it is what's deferred.
 
 ## Match / patterns
 
-- **Compile-time totality proof + `_` default desugar.** The alt parser
-  accepts any non-empty set of match arms; if no arm matches at runtime,
-  `IrInterpreter.evalMatch` throws `RuntimeCheckException`. Per doc
-  principle 8, match must be total — the compiler proves the union of
-  arm predicates equals the scrutinee's sort. Same predicate-arithmetic
-  kernel as dispatch inference; do the design once.
+- **Compile-time totality proof ✅ landed (decidable fragment); `_` desugar
+  already done.** `SortChecker.checkMatchTotality` proves principle 8 at
+  compile time for the decidable fragment — all arms `IrSort.Refined` over a
+  known scrutinee sort the `PredicateArithmetic` kernel decides (**`Int` and
+  `Bool`**): it unions the arm predicates, complements over the scrutinee
+  domain, and rejects with the uncovered region as the witness (e.g.
+  `no arm covers @ == 0`, `no arm covers @ == false`). **Sound by
+  construction** — errors only when the kernel *proves* uncovered values
+  exist; otherwise it **defers** (non-`Refined`/struct arms, un-inferrable
+  scrutinee sort, neither-`Int`-nor-`Bool` domain, literal scrutinees, kernel
+  `Unknown`), leaving `IrInterpreter.evalMatch`'s runtime no-match check as
+  the safety net. The `_` arm was already desugared to the explicit
+  complement by the parser (`computeDefaultArmPattern`) — and now works over
+  `Bool` scrutinees too, since `PredicateArithmetic.complement` handles the
+  Bool domain. Covered by `MatchTotalityTest`.
+  - **Bool match evaluation ✅ landed.** `RefinementRules.CMP_BOOL_BOOL`
+    folds `Bool(a) == Bool(b)` (and `!=`) to a Bool literal alongside the Int
+    `CMP_LIT_LIT`, so after substituting `Self` with the scrutinee value the
+    arm is decided at runtime — Bool matches compile-check *and* run.
+  - **Struct totality — Tier A ✅ landed.** A bare `IrSort.Structural` arm
+    (no refined or nested-structural fields) whose field set is a subset of
+    the scrutinee's fields covers every value of that struct shape — per
+    Pontif's subset-match semantics — so the match is trivially total. The
+    common case (`match p { [Point(x, y)] -> … }`) is now compile-time
+    verified. Helpers `scrutineeFieldSet`/`isBareStructuralCovering`.
+  - **Struct totality — Tier B (single-varying-field) ✅ landed.**
+    `tryTierBSingleField` recognizes matches where every arm is structural
+    and refines the *same one* field (others bare), then reduces to that
+    field's domain-coverage problem and reuses the existing kernel: union of
+    arms' field refinements vs. the field's declared sort. Rejects with a
+    field-anchored witness (e.g. *"no arm covers field 'x' where @ == 0"*).
+    Catches the classic `[x>0] | [x<0]` missing `x==0` bug.
+  - **Still deferred** (extend the kernel): **multi-varying-field struct
+    totality** (genuine cross-product over field domains — e.g.
+    `[Point(x>0,y>0)] | [Point(x<=0,y<=0)]` is non-exhaustive but the gap
+    is two-dimensional); struct *unions* in the scrutinee; and **literal
+    scrutinees** (`inferSort` returns null for `Lit`, so their singleton
+    domain isn't checked — `match -3 {…}` style).
 - **Explicit-binding / rename syntax.** E.g., `(struct Point ((x Int) as a)
   (y Int))` to rebind `x` as `a`. Not pressing while implicit binding
   covers the common case.
@@ -495,16 +527,18 @@ of it is what's deferred.
   specific sort *and no `= value`*. The "synthesize body from sort"
   form: `let Point.origin:Point[x:0, y:0]` should derive `Point(0, 0)`
   from the sort. Still NoOp pending the proof engine.
-- **Under-specified return-type proof.** Spec-only declarations like
-  `function f():[Int>=0]` (no body, return doesn't pin a single value)
-  still emit `NoOp` — so the function isn't callable ("Unknown function").
-  Pick: real synthesis from the spec (needs a proof/search engine — this
-  is genuine program synthesis, not desugar) or a hard error. NB: the
-  *value-pinning* case (`[Int:@==EXPR]`, e.g. `:[Int:y+1]`) already
-  synthesizes the body `EXPR` at parse time and now drafts + discharges
-  its (reflexive) return obligation correctly, including param-referencing
-  and multi-param forms — see `SpecOnlySynthesisTest`. Only the
-  *non-pinning* (range) case remains NoOp.
+- **Under-specified return-type proof → hard error (resolved).** A
+  body-less `function f():[Int:@>=0]` or `method Point.add(p:Point):Point`
+  used to emit a silent `NoOp` — it looked defined, *skipped sort-checking
+  of its signature* (so even an undeclared return type sailed through),
+  and failed later as a misleading "Unknown function". It's now a
+  `ParseException` at the declaration (`AltParser.specOnlyWithoutSynthesis`,
+  covered by `AltParserIntegrationTest`). The *value-pinning* case
+  (`[Int:@==EXPR]`, e.g. `:[Int:y+1]`) still synthesizes the body `EXPR`
+  at parse time and drafts + discharges its reflexive obligation
+  (`SpecOnlySynthesisTest`). **Still open:** *real* synthesis from a
+  non-pinning spec (a range / struct return) — genuine program search,
+  not desugar; deferred, with the hard error as the interim.
 - **`requires`, `exports`.** No semantics until the module system
   lands.
 

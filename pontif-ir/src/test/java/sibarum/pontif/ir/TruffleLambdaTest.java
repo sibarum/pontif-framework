@@ -228,13 +228,17 @@ class TruffleLambdaTest {
                 IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
         IrSort zero = IrSort.refined("Int",
                 IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(0)));
+        IrSort negative = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.LT, IrExpr.self(), IrExpr.lit(0)));
         IrExpr lambda = IrExpr.lambda(
                 List.of(new IrParam("x", INT)),
                 INT,
                 IrExpr.match(IrExpr.var("x"), List.of(
                         IrExpr.matchBranch(zero, IrExpr.lit(100)),
                         IrExpr.matchBranch(positive,
-                                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.lit(2))))));
+                                IrExpr.binOp(IrExpr.Op.MUL, IrExpr.var("x"), IrExpr.lit(2))),
+                        // negative arm completes the cover (x is 5 → never taken).
+                        IrExpr.matchBranch(negative, IrExpr.lit(0)))));
         IrExpr app = IrExpr.apply(lambda, List.of(IrExpr.lit(5)));
         assertEquals(10L, runTruffle(new IrModule("lamMatch", List.of(), app)));
     }

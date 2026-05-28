@@ -69,12 +69,12 @@ public final class PredicateArithmetic {
                 ? SymExpr.and(domain.predicate(), predicate)
                 : predicate;
 
-        if (!"Int".equals(domain.name())) {
-            return SatResult.unknown(
-                    "Current slice supports Int domain only; got base '" + domain.name() + "'");
-        }
-
-        return satisfiableOverInt(effective);
+        return switch (domain.name()) {
+            case "Int" -> satisfiableOverInt(effective);
+            case "Bool" -> satisfiableOverBool(effective);
+            default -> SatResult.unknown(
+                    "supported domains are Int and Bool; got base '" + domain.name() + "'");
+        };
     }
 
     /**
@@ -105,9 +105,12 @@ public final class PredicateArithmetic {
             throw new IllegalArgumentException("domain must be non-null");
         }
 
+        if ("Bool".equals(domain.name())) {
+            return complementOverBool(predicate, domain);
+        }
         if (!"Int".equals(domain.name())) {
             return ComplementResult.unknown(
-                    "Current slice supports Int domain only; got base '" + domain.name() + "'");
+                    "supported domains are Int and Bool; got base '" + domain.name() + "'");
         }
 
         IntervalSet predSet = toIntervalSet(predicate);
@@ -260,6 +263,115 @@ public final class PredicateArithmetic {
             case EQ -> SymExpr.CmpOp.EQ;
             case NE -> SymExpr.CmpOp.NE;
         };
+    }
+
+    // --- Internal: Bool-domain satisfiability via the two-element value set --
+
+    private static SatResult satisfiableOverBool(SymExpr predicate) {
+        BoolSet set = toBoolSet(predicate);
+        if (set == null) {
+            return SatResult.unknown("Predicate outside the boolean fragment: " + predicate);
+        }
+        return set.isEmpty() ? SatResult.no() : SatResult.yes();
+    }
+
+    private static ComplementResult complementOverBool(SymExpr predicate, Sort domain) {
+        BoolSet predSet = toBoolSet(predicate);
+        if (predSet == null) {
+            return ComplementResult.unknown("Predicate outside the boolean fragment: " + predicate);
+        }
+        BoolSet result = predSet.complement();
+        if (domain.isRefined()) {
+            BoolSet domainSet = toBoolSet(domain.predicate());
+            if (domainSet == null) {
+                return ComplementResult.unknown(
+                        "Domain refinement outside the boolean fragment: " + domain.predicate());
+            }
+            result = result.intersect(domainSet);
+        }
+        return ComplementResult.computed(boolSetToSymExpr(result));
+    }
+
+    /**
+     * Interprets {@code expr} as the set of {@code Bool} values (with {@code @}
+     * the subject) satisfying it. Bool has exactly two inhabitants, so the
+     * "set" is one of four states. Returns {@code null} for shapes outside the
+     * fragment — supported: {@code @ == true/false}, their {@code !=} forms,
+     * {@code &}/{@code |} of those, and bare Bool literals.
+     */
+    private static BoolSet toBoolSet(SymExpr expr) {
+        if (expr instanceof SymExpr.Bool b) {
+            // A bare Bool literal is a constant predicate: `true` holds for
+            // every value of @, `false` for none.
+            return b.value() ? BoolSet.ALL : BoolSet.EMPTY;
+        }
+        if (expr instanceof SymExpr.Cmp(SymExpr left, SymExpr.CmpOp op, SymExpr right)) {
+            return cmpToBoolSet(left, op, right);
+        }
+        if (expr instanceof SymExpr.And(SymExpr l, SymExpr r)) {
+            BoolSet ls = toBoolSet(l);
+            if (ls == null) return null;
+            BoolSet rs = toBoolSet(r);
+            if (rs == null) return null;
+            return ls.intersect(rs);
+        }
+        if (expr instanceof SymExpr.Or(SymExpr l, SymExpr r)) {
+            BoolSet ls = toBoolSet(l);
+            if (ls == null) return null;
+            BoolSet rs = toBoolSet(r);
+            if (rs == null) return null;
+            return ls.union(rs);
+        }
+        return null;
+    }
+
+    /** {@code @ == b} / {@code @ != b} against a Bool literal (either side). */
+    private static BoolSet cmpToBoolSet(SymExpr left, SymExpr.CmpOp op, SymExpr right) {
+        boolean val;
+        if (left instanceof SymExpr.Self && right instanceof SymExpr.Bool(boolean b)) {
+            val = b;
+        } else if (right instanceof SymExpr.Self && left instanceof SymExpr.Bool(boolean b)) {
+            val = b;
+        } else {
+            return null;
+        }
+        return switch (op) {
+            case EQ -> val ? BoolSet.TRUE : BoolSet.FALSE;
+            case NE -> val ? BoolSet.FALSE : BoolSet.TRUE;
+            default -> null;  // ordering comparisons aren't meaningful on Bool
+        };
+    }
+
+    /** Inverse of {@link #toBoolSet} for the canonical Bool-set shapes. */
+    private static SymExpr boolSetToSymExpr(BoolSet set) {
+        if (set.isEmpty()) return SymExpr.bool(false);
+        if (set.hasTrue() && set.hasFalse()) return SymExpr.bool(true);
+        return SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.bool(set.hasTrue()));
+    }
+
+    /**
+     * The satisfying set over {@code Bool}'s two inhabitants — the boolean
+     * counterpart of {@link IntervalSet} for the two-element domain.
+     */
+    private record BoolSet(boolean hasTrue, boolean hasFalse) {
+        static final BoolSet EMPTY = new BoolSet(false, false);
+        static final BoolSet ALL = new BoolSet(true, true);
+        static final BoolSet TRUE = new BoolSet(true, false);
+        static final BoolSet FALSE = new BoolSet(false, true);
+
+        boolean isEmpty() { return !hasTrue && !hasFalse; }
+
+        BoolSet intersect(BoolSet o) {
+            return new BoolSet(hasTrue && o.hasTrue, hasFalse && o.hasFalse);
+        }
+
+        BoolSet union(BoolSet o) {
+            return new BoolSet(hasTrue || o.hasTrue, hasFalse || o.hasFalse);
+        }
+
+        BoolSet complement() {
+            return new BoolSet(!hasTrue, !hasFalse);
+        }
     }
 
     // --- Interval and IntervalSet -------------------------------------------

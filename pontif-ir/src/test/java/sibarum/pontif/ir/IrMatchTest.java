@@ -141,7 +141,10 @@ class IrMatchTest {
         IrExpr match = IrExpr.match(IrExpr.var("x"), List.of(
                 IrExpr.matchBranch(zero(), IrExpr.lit(0)),
                 IrExpr.matchBranch(positive(),
-                        IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)))));
+                        IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1))),
+                // negative arm completes the cover (x is 6 → never taken); the
+                // match must be total now that SortChecker enforces principle 8.
+                IrExpr.matchBranch(negative(), IrExpr.lit(0))));
         IrExpr program = IrExpr.letIn("x", anyInt(), IrExpr.lit(6), match);
         IrModule module = new IrModule("m", List.of(), program);
         assertEquals(7L, runTruffle(module));
