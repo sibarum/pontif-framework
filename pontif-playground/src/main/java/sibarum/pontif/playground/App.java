@@ -90,25 +90,35 @@ public final class App {
 
     private static final String DEFAULT_CODE = """
             # Pontif quick tour — click Run to parse, compile, and evaluate
-            # this module on a background thread.  Edit freely; the whole
-            # pane is one editable Text component.  Comments start with #.
+            # this module on a background thread.  Click Receipts to draft
+            # the receipt-graph and see each function's return refinement
+            # discharged (or honestly NOT DISCHARGED).  Comments start with #.
 
             module tour
 
-            # Multi-method dispatch.  Each overload's parameter is refined to
-            # a distinct value range; the runtime picks the matching one.
-            function factorial(n:[Int:0])  :Int -> 1
-            function factorial(n:[Int:@>0]):Int -> n * factorial(n-1)
+            # Multi-method dispatch + inductive proof.  Both overloads return
+            # [Int:@>=1]: the base branch closes via 1>=1, and the recursive
+            # branch closes because the back-reference carries r_1>=1 as the
+            # inductive hypothesis — POSITIVE * POSITIVE = POSITIVE.
+            function factorial(n:[Int:@==0]) :[Int:@>=1] -> 1
+            function factorial(n:[Int:@>0])  :[Int:@>=1] -> n * factorial(n-1)
+
+            # Linear-bound discharge.  Sign analysis only knows >0 / >=0; it
+            # can't clear the >1 bar.  BoundAnalysis normalizes (x+1)-1 to
+            # x in [1, infty) and discharges directly.  The >0-vs->1 cliff is
+            # gone — any [Int op n] threshold is now built-in.
+            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
             # Mutual recursion across overloaded functions — no forward
             # declaration needed; dispatch resolves names at call time.
-            function isEven(n:[Int:0])  :[Int:0|1] -> 1
-            function isEven(n:[Int:@>0]):[Int:0|1] -> isOdd(n-1)
-            function isOdd (n:[Int:0])  :[Int:0|1] -> 0
-            function isOdd (n:[Int:@>0]):[Int:0|1] -> isEven(n-1)
+            function isEven(n:[Int:@==0]) :[Int:0|1] -> 1
+            function isEven(n:[Int:@>0])  :[Int:0|1] -> isOdd(n-1)
+            function isOdd (n:[Int:@==0]) :[Int:0|1] -> 0
+            function isOdd (n:[Int:@>0])  :[Int:0|1] -> isEven(n-1)
 
             # Pattern matching on refinement predicates.  `@` is the scrutinee
-            # value; the base sort (Int) is inferred from `n`.
+            # value; the base sort (Int) is inferred from `n`.  The compiler
+            # checks the three arms are exhaustive over Int at compile time.
             function sign(n:Int):Int -> match n
               [@<0 ] -> -1
               [@==0] ->  0
@@ -120,9 +130,9 @@ public final class App {
             function timesTwo(n:Int):[Int:n*2]
 
             # Main expression — runs when you click Run.
-            # factorial(5)=120, isEven(8)=1, sign(-3)=-1, timesTwo(7)=14
-            # Sum: 134.
-            factorial(5) + isEven(8) + sign(-3) + timesTwo(7)
+            # factorial(5)=120, inc(4)=5, isEven(8)=1, sign(-3)=-1, timesTwo(7)=14
+            # Sum: 139.
+            factorial(5) + inc(4) + isEven(8) + sign(-3) + timesTwo(7)
             """;
 
     // Component references held in static fields so the toolbar's click

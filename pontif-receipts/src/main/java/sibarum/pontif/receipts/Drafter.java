@@ -264,13 +264,21 @@ public final class Drafter {
      * The {@link Sort} for a hoisted call's result var: the callee's return
      * narrowing, resolved through {@link NarrowingInference} (which picks the
      * dispatched overload for overloaded callees, falling back to the
-     * declared return). Falls back to bare {@code Int} when inference yields
-     * nothing — that simply means the call contributes no inductive
-     * hypothesis.
+     * declared return). When the declared return is unrefined (bare
+     * {@code Int}), falls back to inferring the callee's body via
+     * {@link NarrowingInference#inferCallReturnFromBody} — this turns an
+     * arithmetic body like {@code x + 5} over a refined param into a
+     * refined CallRef result sort, which then carries an inductive
+     * hypothesis into the issuer's path facts. Falls back to bare
+     * {@code Int} when neither path yields a narrowing.
      */
     private static Sort resolveCallReturnSort(IrExpr.Call call, InferenceContext ctx)
             throws CompileException {
         IrSort narrowing = NarrowingInference.infer(call, ctx);
+        if (!(narrowing instanceof IrSort.Refined)) {
+            IrSort.Refined fromBody = NarrowingInference.inferCallReturnFromBody(call, ctx);
+            if (fromBody != null) narrowing = fromBody;
+        }
         return narrowing != null ? IrCompiler.compileSort(narrowing) : Sort.of("Int");
     }
 }

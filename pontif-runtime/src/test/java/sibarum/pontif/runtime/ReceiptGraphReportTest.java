@@ -85,6 +85,51 @@ class ReceiptGraphReportTest {
     }
 
     @Test
+    void bareIntCallee_callRefSortShowsBodyInferredNarrowing() throws Exception {
+        // add5's declared return is bare :Int, but the body x+5 over x:[Int:@>=0]
+        // bounds to [Int:@>=5]. The drafter's body-inference fallback (calling
+        // NarrowingInference.inferCallReturnFromBody) lifts that into the CallRef
+        // result var's sort, so caller's graph reads r_1: [Int: @ >= 5] instead
+        // of the bare Int it would have shown before this slice.
+        String src = """
+                module bareInt
+                function add5(x:[Int:@>=0]):Int -> x + 5
+                function caller(x:[Int:@>=0]):Int -> add5(x)
+                caller(7)
+                """;
+        Path path = ReceiptGraphReport.writeReport(OUT, "bareIntCallee", src, "bareIntCallee.ptf");
+        String text = Files.readString(path);
+        System.out.println(text);
+
+        assertTrue(text.contains("call: add5(x_0) -> r_1: [Int: @ >= 5]"),
+                () -> "Expected CallRef result sort to reflect body-inferred [Int:@>=5]:\n" + text);
+    }
+
+    @Test
+    void chainArithmetic_dischargesViaBodyInferredCalleeReturn() throws Exception {
+        // The headline payoff: chain's [Int:@>=10] return obligation can only
+        // close if add5's CallRef result sort carries r_1 >= 5 into PathFacts.
+        // Before this slice, add5's bare :Int return left r_1 unbounded and
+        // BoundAnalysis could only show r_0 = r_1 + 5 with r_1 ∈ (-∞, ∞).
+        String src = """
+                module chain
+                function add5(x:[Int:@>=0]):Int -> x + 5
+                function chain(x:[Int:@>=0]):[Int:@>=10] -> add5(x) + 5
+                chain(5)
+                """;
+        Path path = ReceiptGraphReport.writeReport(OUT, "chainArithmetic", src, "chainArithmetic.ptf");
+        String text = Files.readString(path);
+        System.out.println(text);
+
+        assertTrue(text.contains("call: add5(x_0) -> r_1: [Int: @ >= 5]"), () -> text);
+        assertTrue(text.contains("receipt: r_0 == r_1 + 5"), () -> text);
+        assertTrue(text.contains("chain  :  r_0 >= 10"), () -> text);
+        assertTrue(text.contains("-> discharged [notary: accepted]"), () -> text);
+        assertTrue(!text.contains("NOT DISCHARGED"),
+                () -> "chain's obligation should discharge via body-inferred callee return:\n" + text);
+    }
+
+    @Test
     void sign_emitsThreeBranches() throws Exception {
         String src = """
                 module sign

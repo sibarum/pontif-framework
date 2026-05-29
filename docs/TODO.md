@@ -239,16 +239,26 @@ boolean ops stay null (they yield `Bool`). `BoundAnalysis` also gained
 (range-typed params become usable hypotheses). Unit-tested in
 `NarrowingInferenceTest` / `BoundAnalysisTest`.
 
+Slice 3 (drafter body-inference fallback) ✅ landed:
+`Drafter.resolveCallReturnSort` now falls back to a new
+`NarrowingInference.inferCallReturnFromBody` when the call's
+declared/dispatched return is unrefined. The helper runs
+`StaticDispatch.resolve` against arg narrowings, then
+`inferFunctionReturn` on the resolved overload — turning a callee like
+`function add5(x:[Int:@>=0]):Int -> x + 5` into a CallRef result sort
+`r_N: [Int:@>=5]` in the caller's graph. Carries the inferred narrowing
+into `PathFacts` as an inductive hypothesis the issuer can use.
+**Headline:** `chain(x:[Int:@>=0]):[Int:@>=10] -> add5(x) + 5`
+discharges its `r_0 >= 10` obligation, which it couldn't before this
+slice (no bound on `r_1`). Termination safe by construction:
+`NarrowingInference.inferCall` never recurses into bodies, so
+self/mutual recursion in the callee terminates at the declared-return
+fallback. Pinned by `ReceiptGraphReportTest.bareIntCallee_…` and
+`chainArithmetic_…`. Option (b) — alt-parser inferred-let sort —
+remains open under "Per-call dispatch return narrowing for inferred let
+sorts" below.
+
 Follow-ups (deferred, in priority order):
-- **Make arithmetic narrowing observable in a real consumer.** Slice 2 is
-  a capability on `infer`, but `infer`'s only production caller
-  (`Drafter.resolveCallReturnSort`) resolves a *call's* return by
-  declared/dispatched sort — it doesn't infer a callee's arithmetic body.
-  So the narrowing isn't yet visible in the receipt graph. Options:
-  (a) drafter falls back to `inferFunctionReturn` for unrefined-return
-  callees (richer IHs in the graph — watch Ackermann's bare-Int graph
-  tests); (b) the alt parser's `let q = expr` inferred-sort path consumes
-  it (see "Per-call dispatch return narrowing for inferred let sorts").
 - **Strengthen `Refinements.imply` (dispatch / overload-overlap) via
   bounds.** Currently ad-hoc single-atom threshold compare
   (`checkImpliesOnLongs`); a bound check generalizes it to linear shapes

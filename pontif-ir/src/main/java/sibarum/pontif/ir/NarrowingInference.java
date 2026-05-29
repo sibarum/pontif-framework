@@ -101,6 +101,37 @@ public final class NarrowingInference {
         return infer(fd.body(), seeded);
     }
 
+    /**
+     * Resolves a call's overload via {@link StaticDispatch} and infers the
+     * callee's return narrowing from its <em>body</em> — the body-inference
+     * fallback consumers reach for when {@link #infer}'s declared-return
+     * answer is unrefined and a tighter narrowing would carry useful
+     * inductive hypotheses (e.g. into a receipt-graph CallRef result sort).
+     *
+     * <p>Returns {@code null} when the call has no registered overloads,
+     * static dispatch is unresolved, or the body's inferred sort isn't a
+     * refinement.
+     *
+     * <p>Termination is safe by construction: {@link #infer}'s call case
+     * never recurses into bodies — so the seeded body walk terminates at
+     * recursive / mutually-recursive callees via the declared-return
+     * fallback in {@link #inferCall}.
+     */
+    public static IrSort.Refined inferCallReturnFromBody(IrExpr.Call call, InferenceContext ctx) {
+        List<IrStmt.FunctionDecl> overloads = ctx.overloads().get(call.functionName());
+        if (overloads == null || overloads.isEmpty()) return null;
+        List<IrSort> argNarrowings = new ArrayList<>(call.args().size());
+        for (IrExpr arg : call.args()) {
+            argNarrowings.add(infer(arg, ctx));
+        }
+        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings);
+        if (!(result instanceof StaticDispatch.Result.Resolved resolved)) {
+            return null;
+        }
+        IrSort inferred = inferFunctionReturn(resolved.decl(), ctx);
+        return inferred instanceof IrSort.Refined refined ? refined : null;
+    }
+
     // --- Call (Phase D) ----------------------------------------------------
 
     /**
