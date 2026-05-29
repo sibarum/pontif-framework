@@ -1,12 +1,12 @@
 # Numeric discharge — the built-in issuer's integer reasoning
 
-**Status: slice 1 built.** The engine (`pontif-predicates/BoundAnalysis`)
-ships and is wired into the receipt-graph issuer + notary
-(`IntegerDischarge`). The remaining consumers — IR-level call-site
-narrowing (`NarrowingInference`) and dispatch implication
-(`Refinements.imply`) — are designed for but not yet wired (see
-"Reusability" and `docs/TODO.md`). This document doubles as the design
-record and the as-built description.
+**Status: slices 1–3 built.** `BoundAnalysis` ships in
+`pontif-predicates`, is the sole engine inside `IntegerDischarge`
+(receipt-graph issuer + notary), and powers `NarrowingInference`'s
+arithmetic narrowing + the Drafter's body-inference fallback for
+unrefined-return callees. Dispatch-implication consumer
+(`Refinements.imply`) remains designed-but-not-wired (see TODO). This
+document doubles as the design record and the as-built description.
 
 How Pontif's built-in default issuer decides integer obligations like
 `r_0 >= 1`, `y_0 + 1 > 1`, `n_0 * r_1 >= 1`, `x_0 * x_0 >= 0`. It replaces
@@ -163,13 +163,14 @@ is built-in; oracles start at general nonlinear / quantified.**
     overflow under arithmetic. `BoundAnalysis` ships its own public
     `Interval` (a single range with saturating `scale`/`add`). Merging the
     two is a deferred follow-up — see `docs/TODO.md`.
-- **Integration:** `pontif-receipts/IntegerDischarge.discharge` calls the
-  engine first; the existing sign / `Refinements` / integer-strictness
-  checks stay as sound backstops (OR-ing can't regress). Verified against
-  the full suite — factorial closes both branches, `square` stays at
-  `>=0`, and `inc(x:[Int:@>=1]):[Int:@>1]` now discharges (it didn't
-  before). Trimming the backstops is a later cleanup once they're proven
-  redundant.
+- **Integration:** `pontif-receipts/IntegerDischarge.discharge` is now a
+  thin one-line wrapper that delegates to `BoundAnalysis.discharge`. The
+  earlier OR-chain backstops (sign / `Refinements` / integer-strictness /
+  reflexive-equality) were empirically confirmed subsumed across the full
+  test suite (~920 tests, all green with each backstop removed in turn)
+  and dropped. The wrapper still earns its keep as a soundness gate —
+  it marks the call site as "integer-domain only," important for future
+  Float-refinement work.
 - **Naming (chosen):** `BoundAnalysis`, parallel to `SignAnalysis`. Public
   API: `discharge(List<SymExpr> hypotheses, SymExpr goal) → boolean` and
   `bound(SymExpr, hypotheses) → Interval` (exposed now for the call-site
@@ -188,7 +189,7 @@ is built-in; oracles start at general nonlinear / quantified.**
 3. **Reusability** — the same `bound(expr, hyps)` is exactly what
    call-site dispatch narrowing (Phase D) could use to tighten inferred
    sorts. Worth designing the signature with that second consumer in mind.
-4. **Does it fully subsume sign analysis at the goal level?** For a bare
-   `subject OP 0` goal it should match sign analysis (the subject's
-   interval gives the same side-of-zero). Verify against the existing
-   `SignAnalysisTest` / demo suite before trimming the backstop.
+4. **Does it fully subsume sign analysis at the goal level?** ✅ Confirmed
+   empirically: the receipt-graph path's full test suite (~920 tests)
+   passes with `BoundAnalysis.discharge` as the *sole* engine, all four
+   prior backstops removed. The wrapper survives only as a soundness gate.

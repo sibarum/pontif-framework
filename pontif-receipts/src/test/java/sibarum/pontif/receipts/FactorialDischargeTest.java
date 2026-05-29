@@ -13,12 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * R4: with the integer-strictness bridge in {@link IntegerDischarge}, the
- * trivial issuer discharges {@code factorial(n) >= 1} on <em>both</em>
- * branches — base ({@code 1 >= 1}) and recursive ({@code n_0 * r_1 >= 1}
- * under the back-reference IH {@code r_1 >= 1}). The induction was always
- * handled by the graph; the bridge supplies the missing leaf step
- * "for integers, positive means {@code >= 1}".
+ * R4: the trivial issuer ({@link IntegerDischarge} → {@code BoundAnalysis})
+ * discharges {@code factorial(n) >= 1} on <em>both</em> branches — base
+ * ({@code 1 >= 1}) and recursive ({@code n_0 * r_1 >= 1} under the
+ * back-reference IH {@code r_1 >= 1}). The induction was always handled
+ * by the graph; the integer-strictness step in BoundAnalysis's atom-bound
+ * extraction supplies the missing leaf "for integers, positive means
+ * {@code >= 1}".
  */
 class FactorialDischargeTest {
 

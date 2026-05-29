@@ -11,8 +11,8 @@ import java.util.Map;
 /**
  * Pontif's built-in default issuer. Walks a {@link ReceiptGraph} and
  * emits {@link ClosingReceipt}s for the obligations it can discharge via
- * {@link IntegerDischarge} (sign analysis + simple equational closings +
- * the integer-strictness bridge) — the trivial fragment.
+ * {@link IntegerDischarge} — a thin wrapper over the {@code BoundAnalysis}
+ * linear-bound + sign engine, the trivial fragment over the integer domain.
  *
  * <p>Trusted by the notary by default. For obligations beyond this
  * fragment, no receipt is produced and the runtime check remains the

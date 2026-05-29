@@ -271,12 +271,14 @@ Follow-ups (deferred, in priority order):
   integer *sets* (`union`/`complement`) for satisfiability. Merge into one
   type carrying both, carefully — `PredicateArithmetic` is tested and the
   set-vs-range arithmetic semantics differ.
-- **Trim `IntegerDischarge` backstops.** Once `BoundAnalysis` is shown to
-  subsume `SignAnalysis.canDischarge` + `Refinements.discharge` +
-  `integerStrictness` + the reflexive-equality special case across the
-  suite, drop them. (`bound()` already covers all four conceptually; trim
-  is gated on empirical confirmation, per the "verify before trimming"
-  note in `numeric-discharge.md`.)
+- **Trim `IntegerDischarge` backstops ✅ landed.** Empirically confirmed:
+  `BoundAnalysis.discharge` subsumes all four prior layers across the
+  full test suite (~920 tests, all green with each backstop removed in
+  turn). `IntegerDischarge` is now a thin one-line wrapper that still
+  earns its keep as a soundness gate (integer-domain only) marking the
+  call site for future Float-refinement work, but the OR-chain itself is
+  gone. Dead methods (`isReflexiveEquality`, `integerStrictness`,
+  `asLong`) and imports (`Refinements`, `Sign`, `SignAnalysis`) removed.
 
 ### Receipt-graph: back-reference overload disambiguation (deferred)
 
