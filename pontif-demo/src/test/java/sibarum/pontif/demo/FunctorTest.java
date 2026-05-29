@@ -9,11 +9,10 @@ import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.symbolic.categorical.Functor;
 import sibarum.pontif.core.symbolic.categorical.FunctorLaws;
 import sibarum.pontif.core.symbolic.categorical.Functors;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.LambdaRules;
 import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,10 +24,9 @@ class FunctorTest {
     private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
 
     private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = new ArrayList<>();
+        List<RewriteRule> all = DefaultRules.production();
         all.addAll(LambdaRules.all());
         all.addAll(TotalExpressionRules.all());
-        all.addAll(ArithmeticRules.all());
         return all;
     }
 

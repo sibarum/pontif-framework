@@ -1,49 +1,19 @@
 package sibarum.pontif.ir;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.RewriteRule;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class IrTest {
 
-    private static List<RewriteRule> defaultRules() {
-        List<RewriteRule> rules = new ArrayList<>();
-        // Minimal in-IR rule set: constant comparison folding, since refinement predicates
-        // are compiled to SymExpr and need to fold constants for satisfaction checks.
-        rules.add(cmpLitLit());
-        return rules;
-    }
-
-    private static RewriteRule cmpLitLit() {
-        return (expr, simp) -> {
-            if (expr instanceof sibarum.pontif.core.symbolic.SymExpr.Cmp(
-                    sibarum.pontif.core.symbolic.SymExpr.Lit l,
-                    sibarum.pontif.core.symbolic.SymExpr.CmpOp op,
-                    sibarum.pontif.core.symbolic.SymExpr.Lit r)) {
-                boolean truth = switch (op) {
-                    case LT -> l.value() < r.value();
-                    case LE -> l.value() <= r.value();
-                    case GT -> l.value() > r.value();
-                    case GE -> l.value() >= r.value();
-                    case EQ -> l.value() == r.value();
-                    case NE -> l.value() != r.value();
-                };
-                return Optional.of(sibarum.pontif.core.symbolic.SymExpr.bool(truth));
-            }
-            return Optional.empty();
-        };
-    }
-
     private static Simplifier defaultSimplifier() throws Exception {
-        return new Simplifier(defaultRules());
+        return new Simplifier(DefaultRules.production());
     }
 
     // --- Trivial: literals and arithmetic ---

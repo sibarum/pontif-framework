@@ -10,9 +10,8 @@ import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.HypothesisRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,10 +27,8 @@ class DispatchTest {
     private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
 
     private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = new ArrayList<>();
+        List<RewriteRule> all = DefaultRules.production();
         all.addAll(HypothesisRules.all());
-        all.addAll(RefinementRules.all());
-        all.addAll(ArithmeticRules.all());
         return all;
     }
 

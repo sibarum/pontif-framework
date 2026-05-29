@@ -1,12 +1,11 @@
 package sibarum.pontif.demo;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.HypothesisRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
 import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
@@ -37,10 +36,8 @@ class UnionIntersectionDispatchTest {
     private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
 
     private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = new ArrayList<>();
+        List<RewriteRule> all = DefaultRules.production();
         all.addAll(HypothesisRules.all());
-        all.addAll(RefinementRules.all());
-        all.addAll(ArithmeticRules.all());
         return all;
     }
 

@@ -9,15 +9,12 @@ import sibarum.pontif.ast.literal.IntLiteral;
 import sibarum.pontif.ast.match.MatchNode;
 import sibarum.pontif.ast.match.MatchNode.Branch;
 import sibarum.pontif.core.Pontif;
-import sibarum.pontif.core.symbolic.RewriteRule;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,14 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class M6MatchTest {
 
-    private static final Simplifier SIMPLIFIER = new Simplifier(combinedRules());
-
-    private static List<RewriteRule> combinedRules() {
-        List<RewriteRule> all = new ArrayList<>();
-        all.addAll(RefinementRules.all());
-        all.addAll(ArithmeticRules.all());
-        return all;
-    }
+    private static final Simplifier SIMPLIFIER = new Simplifier(DefaultRules.production());
 
     private static final Sort POSITIVE = Sort.refined("Int",
             SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));

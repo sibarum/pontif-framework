@@ -4,10 +4,9 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.TotalExpressionRules;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,9 +18,8 @@ class TotalExpressionTest {
     private static final Simplifier TOTAL = new Simplifier(combinedRules());
 
     private static List<RewriteRule> combinedRules() {
-        List<RewriteRule> all = new ArrayList<>();
+        List<RewriteRule> all = DefaultRules.production();
         all.addAll(TotalExpressionRules.all());
-        all.addAll(ArithmeticRules.all());
         return all;
     }
 

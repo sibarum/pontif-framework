@@ -1,11 +1,8 @@
 package sibarum.pontif.runtime;
 
-import sibarum.pontif.core.symbolic.ArithmeticRules;
-import sibarum.pontif.core.symbolic.BooleanRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
-import sibarum.pontif.core.symbolic.StructuralRules;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
@@ -16,7 +13,6 @@ import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.parser.Parser;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,17 +38,15 @@ public final class PontifCompiler {
         this.simplifierRules = List.copyOf(simplifierRules);
     }
 
+    /**
+     * The production rule set. Delegates to {@link DefaultRules#production()} —
+     * the canonical source. Callers (production code and tests that want
+     * to track production behavior) should prefer
+     * {@code DefaultRules.production()} directly when in pontif-core's
+     * dependency reach; this method remains as the runtime entry point.
+     */
     public static List<RewriteRule> defaultRules() {
-        List<RewriteRule> rules = new ArrayList<>();
-        rules.addAll(RefinementRules.all());
-        rules.addAll(ArithmeticRules.all());
-        rules.addAll(BooleanRules.all());
-        // StructuralRules is required for refined struct sorts
-        // (`[Point:@.x > 0]`) to actually reduce — the field-projection
-        // rule turns `Record(...).x` into the field value so the
-        // comparison can fold against a literal.
-        rules.addAll(StructuralRules.all());
-        return rules;
+        return DefaultRules.production();
     }
 
     public LanguageDef language() {

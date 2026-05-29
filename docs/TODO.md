@@ -487,35 +487,19 @@ of it is what's deferred.
   - `AltParser.syntheticCounter` is annotated `@SuppressWarnings("unused")`
     with a stale comment, but is used in `desugarStructuralDestructure`.
 
-- **Default-rule drift across tests.** ~28 test files build their own
-  rule lists (`defaultRules()` / `combinedRules()` / `allRules()`)
-  instead of pulling from a single canonical source. Three patterns
-  observed:
-  1. Stripped-down `defaultRules()` in ~9 pontif-ir tests (`IrTest`,
-     `TruffleExecutionTest`, `IrMatchTest`, `IrRecordTest`, `OriginTest`,
-     `IrLambdaTest`, `TruffleCoverageTest`, `TruffleLambdaTest`) —
-     local copy of `cmpLitLit`, not even `RefinementRules.all()`.
-  2. Smaller-than-production `combinedRules()` in ~5 pontif-demo tests
-     (`RefinementTest`, `M6MatchTest`, `CaseTest`, `FunctionDeclTest`,
-     `TotalExpressionTest`) — Refinement + Arithmetic only; missing
-     Boolean + Structural relative to current production defaults.
-  3. Larger-than-production `allRules()` in ~10 pontif-demo tests
-     (`DispatchTest`, `CompiledCallTest`, `CrossFieldInvariantTest`,
-     `SignAnalysisTest`, etc.) — adds `HypothesisRules` and
-     `LambdaRules`, which aren't in production defaults.
-
-  This is how the missing-`StructuralRules` bug in
-  `PontifCompiler.defaultRules()` went undetected: demo tests had it
-  via `allRules()`, IR tests didn't need it. Real fix is two-pronged:
-  (a) introduce a canonical `DefaultRules.production()` /
-  `DefaultRules.full()` in `pontif-core` so test helpers can delegate
-  rather than re-derive; (b) decide whether `HypothesisRules` and
-  `LambdaRules` should be in production defaults (group-3 tests treat
-  them as essential — that's an architectural signal worth
-  acting on). Migration carries real risk: a test passing only
-  because a rule *doesn't* fire would silently change behavior when
-  upgraded to the canonical set. Migrate one file at a time, verify
-  after each.
+- **Default-rule drift across tests ✅ landed.** Introduced
+  `pontif-core/symbolic/DefaultRules` with two canonical factories —
+  `production()` (Refinement + Arithmetic + Boolean + Structural; matches
+  `PontifCompiler.defaultRules()`, which now delegates) and `full()`
+  (production + Hypothesis + Lambda). Migrated 20 test files across
+  `pontif-ir`, `pontif-runtime`, and `pontif-demo` to delegate to these
+  factories rather than re-deriving locally. Full suite (~980 tests) green
+  after each migration — the widening hazard the original entry warned
+  about did not surface; the tests were robust to the added reductions
+  in the canonical set. Part (b) — whether `HypothesisRules` and
+  `LambdaRules` should join production defaults — is open as the next
+  slice ("Sign/linear discharge inactive in the production `Simplifier`"
+  under Boolean/predicates).
 
 ## Playground / dasum integration
 

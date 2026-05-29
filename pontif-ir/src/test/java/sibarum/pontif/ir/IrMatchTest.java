@@ -2,6 +2,7 @@ package sibarum.pontif.ir;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
@@ -18,31 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class IrMatchTest {
 
-    private static List<RewriteRule> defaultRules() {
-        List<RewriteRule> rules = new ArrayList<>();
-        rules.add(cmpLitLit());
-        return rules;
-    }
-
-    private static RewriteRule cmpLitLit() {
-        return (expr, simp) -> {
-            if (expr instanceof SymExpr.Cmp(SymExpr.Lit l, SymExpr.CmpOp op, SymExpr.Lit r)) {
-                boolean truth = switch (op) {
-                    case LT -> l.value() < r.value();
-                    case LE -> l.value() <= r.value();
-                    case GT -> l.value() > r.value();
-                    case GE -> l.value() >= r.value();
-                    case EQ -> l.value() == r.value();
-                    case NE -> l.value() != r.value();
-                };
-                return Optional.of(SymExpr.bool(truth));
-            }
-            return Optional.empty();
-        };
-    }
-
     private static Simplifier simplifier() throws Exception {
-        return new Simplifier(defaultRules());
+        return new Simplifier(DefaultRules.production());
     }
 
     private static Object runInterpreter(IrModule module) throws Exception {

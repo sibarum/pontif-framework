@@ -1,10 +1,8 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.RewriteRule;
+import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.Simplifier;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
@@ -13,18 +11,12 @@ import sibarum.pontif.ir.TruffleLowering;
 import sibarum.pontif.ir.TruffleProgram;
 import sibarum.pontif.parser.Parser;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ParserFactorialTest {
 
     private static Simplifier simplifier() throws Exception {
-        List<RewriteRule> rules = new ArrayList<>();
-        rules.addAll(RefinementRules.all());
-        rules.addAll(ArithmeticRules.all());
-        return new Simplifier(rules);
+        return new Simplifier(DefaultRules.production());
     }
 
     private static Object runInterpreter(String src) throws Exception {

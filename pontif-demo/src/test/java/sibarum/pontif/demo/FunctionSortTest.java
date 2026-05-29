@@ -7,13 +7,8 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.core.symbolic.ArithmeticRules;
-import sibarum.pontif.core.symbolic.HypothesisRules;
-import sibarum.pontif.core.symbolic.LambdaRules;
-import sibarum.pontif.core.symbolic.RefinementRules;
-import sibarum.pontif.core.symbolic.StructuralRules;
+import sibarum.pontif.core.symbolic.DefaultRules;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -27,13 +22,7 @@ class FunctionSortTest {
     private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
 
     private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = new ArrayList<>();
-        all.addAll(StructuralRules.all());
-        all.addAll(LambdaRules.all());
-        all.addAll(HypothesisRules.all());
-        all.addAll(RefinementRules.all());
-        all.addAll(ArithmeticRules.all());
-        return all;
+        return DefaultRules.full();
     }
 
     private static final Sort INT_GE_0 = Sort.refined("Int",
