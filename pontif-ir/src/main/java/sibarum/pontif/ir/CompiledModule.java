@@ -2,7 +2,6 @@ package sibarum.pontif.ir;
 
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
-import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
 import java.util.IdentityHashMap;
@@ -14,12 +13,10 @@ public record CompiledModule(
         DispatchTable dispatch,
         Map<FunctionDecl, CompiledFunction> functions,
         IrExpr main,
-        Map<IrSort, Sort> compiledSorts,
-        List<ProofResult> diagnostics) {
+        Map<IrSort, Sort> compiledSorts) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
-        diagnostics = List.copyOf(diagnostics);
         // IdentityHashMap semantics preserved — sorts are keyed by instance, not
         // by record-equality, so two structurally-equal IrSorts at different
         // origins remain distinct entries. Defensive copy keeps the map opaque.
@@ -45,6 +42,5 @@ public record CompiledModule(
     public record CompiledFunction(
             FunctionDecl decl,
             IrExpr body,
-            List<IrParam> params,
-            ProofResult verification) {}
+            List<IrParam> params) {}
 }

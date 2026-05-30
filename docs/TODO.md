@@ -478,9 +478,11 @@ of it is what's deferred.
   (`Environment` vs `CallTarget + captures[]`). Not a bug, but two
   places to keep in sync if closure semantics ever change.
 - **`CompiledFunction.verification` and `CompiledModule.diagnostics`
-  are write-only stubs.** Hardcoded `ProofResult.passed()`, never
-  read. Either inline the no-op default or, when the proof engine
-  lands, wire them up.
+  write-only stubs ✅ removed.** Both fields were always set to
+  `ProofResult.passed()` and never read; the receipt-graph subsystem is
+  the actual proof engine now and uses its own artifact
+  (`ClosingReceipt`) plus reporting (`ReceiptGraphReport`). Fields and
+  the corresponding `ProofResult` plumbing in `IrCompiler` removed.
 - **`extractDottedName` builds a `Call` from any Var-rooted FieldAccess
   chain, without checking it's a declared function.** Treats
   `random.x.y(1, 2)` as `Call("random.x.y", [1, 2])` even when

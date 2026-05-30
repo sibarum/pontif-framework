@@ -4,7 +4,6 @@ import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
 import java.util.ArrayList;
@@ -40,7 +39,6 @@ public final class IrCompiler {
 
         DispatchTable dispatch = new DispatchTable();
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
-        List<ProofResult> diagnostics = new ArrayList<>();
         // Eager pre-compilation: every IrSort reachable from the module gets
         // compiled to a Sort here. Match-branch patterns and other runtime sort
         // lookups read from this map via CompiledModule.sortFor, so the runtime
@@ -53,7 +51,7 @@ public final class IrCompiler {
                     for (IrParam p : fd.params()) registerSort(p.sort(), compiledSorts);
                     registerSort(fd.returnSort(), compiledSorts);
                     registerSortsInExpr(fd.body(), compiledSorts);
-                    compileFunctionDecl(fd, dispatch, functions, diagnostics, compiledSorts);
+                    compileFunctionDecl(fd, dispatch, functions, compiledSorts);
                 }
                 case IrStmt.TraitImpl ti -> {
                     // Register methods as regular FunctionDecls in the
@@ -64,7 +62,7 @@ public final class IrCompiler {
                         for (IrParam p : m.params()) registerSort(p.sort(), compiledSorts);
                         registerSort(m.returnSort(), compiledSorts);
                         registerSortsInExpr(m.body(), compiledSorts);
-                        compileFunctionDecl(m, dispatch, functions, diagnostics, compiledSorts);
+                        compileFunctionDecl(m, dispatch, functions, compiledSorts);
                     }
                     dispatch.traitRegistry().register(ti.traitName(), ti.typeName());
                 }
@@ -84,14 +82,13 @@ public final class IrCompiler {
         registerSortsInExpr(resolved.main(), compiledSorts);
 
         return new CompiledModule(
-                resolved.name(), dispatch, functions, resolved.main(), compiledSorts, diagnostics);
+                resolved.name(), dispatch, functions, resolved.main(), compiledSorts);
     }
 
     private void compileFunctionDecl(
             IrStmt.FunctionDecl fd,
             DispatchTable dispatch,
             Map<FunctionDecl, CompiledModule.CompiledFunction> functions,
-            List<ProofResult> diagnostics,
             Map<IrSort, Sort> compiledSorts) throws CompileException {
         List<FunctionDecl.Param> params = new ArrayList<>();
         for (IrParam p : fd.params()) {
@@ -103,8 +100,7 @@ public final class IrCompiler {
 
         functions.put(
                 decl,
-                new CompiledModule.CompiledFunction(decl, fd.body(), fd.params(), ProofResult.passed()));
-        diagnostics.add(ProofResult.passed());
+                new CompiledModule.CompiledFunction(decl, fd.body(), fd.params()));
     }
 
     /**
