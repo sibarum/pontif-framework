@@ -1807,7 +1807,13 @@ public final class AltParser {
         }
         IrExpr match = new IrExpr.Match(scrutineeRef, wrapped, matchOrigin);
         if (!needsOuterLet) return match;
-        return new IrExpr.LetIn(outerLetName, IrSort.named("_"), scrutinee, match, matchOrigin);
+        // Thread the scrutinee's inferred sort through the outer let so the
+        // placeholder "_" sentinel doesn't leak into the compiled module's
+        // sort table. Falls back to "_" only when nothing tighter is known
+        // (record-literal scrutinees give Structural, calls give the
+        // callee's return, etc.).
+        IrSort scrutineeSort = inferMaximalSort(scrutinee);
+        return new IrExpr.LetIn(outerLetName, scrutineeSort, scrutinee, match, matchOrigin);
     }
 
     /**

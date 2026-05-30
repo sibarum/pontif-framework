@@ -491,10 +491,14 @@ of it is what's deferred.
 - **`inferBaseSortName` only recognizes scrutinees that are `IrExpr.Var`.**
   A struct-literal scrutinee or a Call returning a struct returns
   `null`, so contextual `[pred]` arms aren't usable.
-- **Match-destructure desugar uses `IrSort.named("_")` as a placeholder
-  declared sort.** Leaks into the compiled module's sort table. Either
-  thread the real scrutinee sort through the desugar or carve out a
-  proper "unknown" sort form.
+- **Match-destructure desugar `IrSort.named("_")` leak ✅ landed for
+  alt syntax.** `AltParser.desugarStructuralDestructure` now threads
+  `inferMaximalSort(scrutinee)` through the outer let, so record-literal
+  scrutinees give `Structural`, call scrutinees give the callee's
+  return, etc. The `"_"` sentinel still appears only as a genuine
+  don't-know fallback. S-expr `Parser.java` left as-is — it's the
+  stable test parser with no sort-env tracking; revisit if a test
+  surfaces a real leak.
 - **Dead code / stale annotations ✅ landed.** Removed unused
   `AltLexer.peekAhead`; dropped the stale `@SuppressWarnings("unused")`
   on `AltParser.syntheticCounter` (it's used by the
