@@ -90,8 +90,7 @@ public final class AltParser {
 
     private final List<AltToken> tokens;
     private int pos;
-    /** Counter for synthesizing fresh names (currently unused; reserved for slice 5+). */
-    @SuppressWarnings("unused")
+    /** Counter for synthesizing fresh names — used by the structural-destructure desugar. */
     private int syntheticCounter = 0;
 
     /**

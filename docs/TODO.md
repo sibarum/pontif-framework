@@ -493,10 +493,10 @@ of it is what's deferred.
   declared sort.** Leaks into the compiled module's sort table. Either
   thread the real scrutinee sort through the desugar or carve out a
   proper "unknown" sort form.
-- **Dead code / stale annotations:**
-  - `AltLexer.peekAhead` (line 193) is private and never called — delete it.
-  - `AltParser.syntheticCounter` is annotated `@SuppressWarnings("unused")`
-    with a stale comment, but is used in `desugarStructuralDestructure`.
+- **Dead code / stale annotations ✅ landed.** Removed unused
+  `AltLexer.peekAhead`; dropped the stale `@SuppressWarnings("unused")`
+  on `AltParser.syntheticCounter` (it's used by the
+  structural-destructure desugar) and corrected the doc comment.
 
 - **Default-rule drift across tests ✅ landed.** Introduced
   `pontif-core/symbolic/DefaultRules` with two canonical factories —
@@ -571,18 +571,6 @@ of it is what's deferred.
 - **Action classes / mutable semantics.** Pure functions stay pure;
   actions are the controlled escape hatch. Likely as a side-by-side IR
   family (`IrAction`, `IrActionStmt`) rather than a tag on `IrExpr`.
-
-## Repo hygiene
-
-- **Root-level `proof-language-concept.md` and `simple-proof-example.txt`
-  describe an older project named "SPN" (Symbols + Numbers).** The
-  concept doc opens with `# Symbols + Numbers (SPN)` followed by a
-  self-contradictory line "All references to SPN in this document
-  should be ignored." Either reconcile (rewrite under the Pontif
-  name, or move to `docs/archive/` with a header noting they predate
-  the current design), or drop entirely.
-- **No `LICENSE` file at the repo root.** README references
-  Apache 2.0; just add the file.
 
 ## Deep work — oracle territory
 

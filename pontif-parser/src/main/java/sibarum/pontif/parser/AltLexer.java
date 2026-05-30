@@ -190,12 +190,6 @@ public final class AltLexer {
         column++;
     }
 
-    private char peekAhead(int offset) {
-        int idx = pos + offset;
-        if (idx >= src.length()) return '\0';
-        return src.charAt(idx);
-    }
-
     private static boolean isIdentStart(char c) {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
     }
