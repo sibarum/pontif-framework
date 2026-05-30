@@ -169,9 +169,16 @@ class ReceiptGraphReportTest {
         assertTrue(text.contains("receipt: r_0 == n_0 * r_1"), () -> text);
 
         // Both branches discharge r_0 >= 1, both accepted by the notary.
+        // The hypotheses + goal lines surface the actual reasoning: branch 1
+        // closes because the back-reference brings r_1 >= 1 into scope, and
+        // the substituted goal n_0 * r_1 >= 1 closes via POSITIVE × POSITIVE.
         assertTrue(text.contains("factorial  :  r_0 >= 1"), () -> text);
-        assertTrue(text.contains("branch 0 [n_0 == 0]  -> discharged [notary: accepted]"), () -> text);
-        assertTrue(text.contains("branch 1 [n_0 > 0]  -> discharged [notary: accepted]"), () -> text);
+        assertTrue(text.contains("branch 0 [n_0 == 0]\n"), () -> text);
+        assertTrue(text.contains("hypotheses: n_0 >= 0, n_0 == 0"), () -> text);
+        assertTrue(text.contains("goal: 1 >= 1"), () -> text);
+        assertTrue(text.contains("branch 1 [n_0 > 0]\n"), () -> text);
+        assertTrue(text.contains("hypotheses: n_0 >= 0, n_0 > 0, r_1 >= 1"), () -> text);
+        assertTrue(text.contains("goal: n_0 * r_1 >= 1"), () -> text);
     }
 
     @Test

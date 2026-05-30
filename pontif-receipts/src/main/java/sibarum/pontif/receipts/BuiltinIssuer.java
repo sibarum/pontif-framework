@@ -46,14 +46,28 @@ public final class BuiltinIssuer {
     private BuiltinIssuer() {}
 
     /**
-     * One per-branch obligation the issuer considered, with its outcome.
-     * {@code discharged} is whether {@link IntegerDischarge} proved the
-     * obligation on that branch. Nodes with no refined return contribute
-     * no attempts (there's no obligation). Surfacing failures — not just
-     * successes — is what lets a report say "tried {@code r_0 >= 2} on
-     * branch 0, couldn't" instead of going silent.
+     * One per-branch obligation the issuer considered, with its outcome and
+     * the reasoning context the issuer worked with: the path facts in scope
+     * (param refinements, branch guard, back-reference IHs, non-defining
+     * receipts) and the substituted goal (the obligation after the result
+     * var's body definition is inlined — what the engine actually tried to
+     * prove). {@code discharged} is whether {@link IntegerDischarge} proved
+     * the goal under those hypotheses. Surfacing failures alongside the
+     * goal/hypotheses is what lets a report say "tried {@code r_1 + 5 >= 10}
+     * with {@code r_1 >= 5}, discharged" — readers see *why* the proof works
+     * (or doesn't).
      */
-    public record Attempt(int nodeIndex, int branchIndex, SymExpr obligation, boolean discharged) {}
+    public record Attempt(
+            int nodeIndex,
+            int branchIndex,
+            SymExpr obligation,
+            List<SymExpr> hypotheses,
+            SymExpr substitutedGoal,
+            boolean discharged) {
+        public Attempt {
+            hypotheses = List.copyOf(hypotheses);
+        }
+    }
 
     /**
      * Every per-branch obligation attempt across the graph, discharged or
@@ -72,8 +86,13 @@ public final class BuiltinIssuer {
             SymExpr obligation = Substitute.applySelf(
                     resultSort.predicate(), SymExpr.var(node.resultVar().name()));
             for (int branchIndex = 0; branchIndex < node.branches().size(); branchIndex++) {
-                boolean ok = dischargeable(node, node.branches().get(branchIndex), obligation);
-                attempts.add(new Attempt(nodeIndex, branchIndex, obligation, ok));
+                Branch branch = node.branches().get(branchIndex);
+                PathFacts facts = PathFacts.of(node, branch);
+                SymExpr goal = facts.substituteDefinition(obligation);
+                boolean ok = IntegerDischarge.discharge(facts.hypotheses(), goal);
+                attempts.add(new Attempt(
+                        nodeIndex, branchIndex, obligation,
+                        facts.hypotheses(), goal, ok));
             }
         }
         return attempts;
@@ -98,11 +117,4 @@ public final class BuiltinIssuer {
         return receipts;
     }
 
-    // --- Discharge logic ---------------------------------------------------
-
-    private static boolean dischargeable(Node node, Branch branch, SymExpr obligation) {
-        PathFacts facts = PathFacts.of(node, branch);
-        SymExpr goal = facts.substituteDefinition(obligation);
-        return IntegerDischarge.discharge(facts.hypotheses(), goal);
-    }
 }

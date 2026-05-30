@@ -5,7 +5,7 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
-import sibarum.pontif.receipts.Branch;
+import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.ClosingReceipt;
 import sibarum.pontif.receipts.Drafter;
@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Produces a reviewable text artifact for a program's receipt-graph: the
@@ -113,22 +114,52 @@ public final class ReceiptGraphReport {
                     .append(ReceiptGraphPrinter.renderSym(nodeAttempts.get(0).obligation()))
                     .append("\n");
             for (BuiltinIssuer.Attempt a : nodeAttempts) {
-                Branch branch = node.branches().get(a.branchIndex());
-                sb.append("      branch ").append(a.branchIndex());
-                branch.guard().ifPresent(g ->
-                        sb.append(" [").append(ReceiptGraphPrinter.renderSym(g)).append("]"));
-                if (a.discharged()) {
-                    ClosingReceipt cr = new ClosingReceipt(
-                            BuiltinIssuer.ISSUER_ID, a.obligation(),
-                            new GraphReference(a.nodeIndex(), a.branchIndex()), java.util.Map.of());
-                    Notary.Verdict v = Notary.hypothesisSupported(graph, cr);
-                    sb.append("  -> discharged [notary: ")
-                            .append(v.accepted() ? "accepted" : "REJECTED").append("]\n");
-                } else {
-                    sb.append("  -> NOT DISCHARGED (beyond the default issuer; runtime check remains)\n");
-                }
+                renderAttempt(sb, graph, node, a);
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Renders one branch's attempt: the branch header (with guard, if any),
+     * the hypotheses in scope, the substituted goal the engine actually
+     * tried to prove, and the outcome (discharged + notary verdict, or
+     * honest NOT DISCHARGED). Multi-line indented form — vertical space
+     * costs less than scannability.
+     */
+    private static void renderAttempt(
+            StringBuilder sb, ReceiptGraph graph, Node node, BuiltinIssuer.Attempt a) {
+        sb.append("      branch ").append(a.branchIndex());
+        node.branches().get(a.branchIndex()).guard().ifPresent(g ->
+                sb.append(" [").append(ReceiptGraphPrinter.renderSym(g)).append("]"));
+        sb.append("\n");
+
+        if (a.hypotheses().isEmpty()) {
+            sb.append("        hypotheses: (none)\n");
+        } else {
+            sb.append("        hypotheses: ")
+                    .append(a.hypotheses().stream()
+                            .map(ReceiptGraphPrinter::renderSym)
+                            .collect(Collectors.joining(", ")))
+                    .append("\n");
+        }
+        // Only show the goal line when substitution actually changed something —
+        // otherwise it's just a restatement of the obligation header above.
+        SymExpr goalRendered = a.substitutedGoal();
+        if (!goalRendered.equals(a.obligation())) {
+            sb.append("        goal: ")
+                    .append(ReceiptGraphPrinter.renderSym(goalRendered))
+                    .append("\n");
+        }
+        if (a.discharged()) {
+            ClosingReceipt cr = new ClosingReceipt(
+                    BuiltinIssuer.ISSUER_ID, a.obligation(),
+                    new GraphReference(a.nodeIndex(), a.branchIndex()), java.util.Map.of());
+            Notary.Verdict v = Notary.hypothesisSupported(graph, cr);
+            sb.append("        -> discharged [notary: ")
+                    .append(v.accepted() ? "accepted" : "REJECTED").append("]\n");
+        } else {
+            sb.append("        -> NOT DISCHARGED (beyond the default issuer; runtime check remains)\n");
+        }
     }
 }
