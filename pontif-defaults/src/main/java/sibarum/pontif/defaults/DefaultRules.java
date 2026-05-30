@@ -1,4 +1,15 @@
-package sibarum.pontif.core.symbolic;
+package sibarum.pontif.defaults;
+
+import sibarum.pontif.core.symbolic.ArithmeticRules;
+import sibarum.pontif.core.symbolic.BooleanRules;
+import sibarum.pontif.core.symbolic.CaseRules;
+import sibarum.pontif.core.symbolic.HypothesisRules;
+import sibarum.pontif.core.symbolic.LambdaRules;
+import sibarum.pontif.core.symbolic.RefinementRules;
+import sibarum.pontif.core.symbolic.RewriteRule;
+import sibarum.pontif.core.symbolic.StructuralRules;
+import sibarum.pontif.core.symbolic.TotalExpressionRules;
+import sibarum.pontif.core.symbolic.FunctionCheck;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,13 +18,22 @@ import java.util.List;
  * Canonical rule-set factories — the single source of truth for which
  * {@link RewriteRule}s the simplifier runs.
  *
+ * <p>Lives in {@code pontif-defaults}, layered above both
+ * {@code pontif-core} (rule definitions) and {@code pontif-predicates}
+ * (decidability engines), so the canonical "production rule set" can
+ * include rules backed by either. Putting it lower (in {@code pontif-core})
+ * would gate it from the predicate-layer engines; putting it higher (in
+ * {@code pontif-runtime}) would make it unreachable from {@code pontif-ir}
+ * and {@code pontif-predicates} tests. This module is exactly the
+ * crossroads.
+ *
  * <p>Historically, ~28 test files each derived their own
  * {@code defaultRules()} / {@code combinedRules()} / {@code allRules()}
  * helpers. The drift hid a real bug: {@code StructuralRules} was missing
- * from {@code PontifCompiler.defaultRules()} for a stretch, undetected
- * because every demo test that needed it pulled it in via its own local
- * {@code allRules()}. Centralizing the canonical sets here so test
- * helpers and production callers both delegate eliminates the drift.
+ * from the production set for a stretch, undetected because every demo
+ * test that needed it pulled it in via its own local {@code allRules()}.
+ * Centralizing the canonical sets here so test helpers and production
+ * callers both delegate eliminates the drift.
  *
  * <h2>Sets</h2>
  * <ul>
@@ -22,7 +42,7 @@ import java.util.List;
  *       configuration. Currently:
  *       {@link RefinementRules} + {@link ArithmeticRules} +
  *       {@link BooleanRules} + {@link StructuralRules} +
- *       {@link HypothesisRules}.</li>
+ *       {@link HypothesisRules} + {@link BoundAnalysisRules}.</li>
  *   <li>{@link #full()} — {@code production()} plus {@link LambdaRules}
  *       (for beta-reduction). Lambda evaluation isn't on the production
  *       path because lambda values are evaluated by the IR interpreter /
@@ -46,11 +66,11 @@ public final class DefaultRules {
      * comparison can fold against a literal.
      *
      * <p>{@code HypothesisRules} gives the compile-time function-check
-     * path ({@link FunctionCheck#verifyDefinition}) the same sign / linear
+     * path ({@link FunctionCheck#verifyDefinition}) the same sign
      * reasoning the receipt-graph path has via {@code IntegerDischarge}.
-     * Without it, a body like {@code x + 1} under hypothesis {@code x > 0}
-     * stays symbolic and {@code Refinements.satisfies(body, [Int:@>0])}
-     * reports Residual instead of Passed.
+     * {@code BoundAnalysisRules} layers linear-bound reasoning on top —
+     * the threshold cases sign analysis alone can't decide
+     * (e.g. {@code [Int:@>1]} from a hypothesis {@code @>=1}).
      */
     public static List<RewriteRule> production() {
         List<RewriteRule> rules = new ArrayList<>();
@@ -59,6 +79,7 @@ public final class DefaultRules {
         rules.addAll(BooleanRules.all());
         rules.addAll(StructuralRules.all());
         rules.addAll(HypothesisRules.all());
+        rules.addAll(BoundAnalysisRules.all());
         return rules;
     }
 

@@ -436,28 +436,29 @@ of it is what's deferred.
   `instanceof` chains, not sealed switches, so adding the variants
   didn't break it — but it also can't infer bounds from `(x > 0) &&
   (x < 10)`.
-- **Sign discharge in the production `Simplifier` ✅ landed.**
-  `HypothesisRules` (the rule that folds a `Cmp` goal to `true` via
-  `Refinements.discharge` → `SignAnalysis`) is now part of
+- **Sign + linear-bound discharge in the production `Simplifier` ✅ landed.**
+  Both `HypothesisRules` (sign-analysis-backed) and
+  `BoundAnalysisRules` (linear-bound + sign engine) are now part of
   `DefaultRules.production()`. The compile-time function-verification
-  path (`FunctionCheck.verifyDefinition`, "proven return sort") now gets
-  the same sign reasoning the receipt-graph path has — e.g.,
-  `square(x:[Int:@>=0]):[Int:@>=0] -> x*x` Passes at compile time
-  instead of going Residual (pinned by
-  `FunctionDeclTest.bodyUsingParameters_dischargesAtCompileTime`).
+  path (`FunctionCheck.verifyDefinition`, "proven return sort") gets the
+  same reasoning the receipt-graph path has via `IntegerDischarge`.
+  - `square(x:[Int:@>=0]):[Int:@>=0] -> x*x` Passes at compile time via
+    the sign rule. (Pinned by
+    `FunctionDeclTest.bodyUsingParameters_dischargesAtCompileTime`.)
+  - `inc(x:[Int:@>=1]):[Int:@>1] -> x+1` Passes at compile time via
+    `BoundAnalysisRules` — the `>0`-vs-`>1` cliff is gone here too, not
+    just in the receipt-graph path. (Pinned by
+    `FunctionDeclTest.linearBoundReturnSort_dischargesAtCompileTime`.)
 
-  **Still open:** a `BoundAnalysis`-backed rule in production for the
-  linear-bound cases sign analysis can't handle (e.g.
-  `inc(x:[Int:@>=1]):[Int:@>1] -> x+1`). Blocked on a layering
-  question: `BoundAnalysis` lives in `pontif-predicates`, but
-  `DefaultRules` lives in `pontif-core` (one layer below). Options:
-  (a) move `DefaultRules.production()` up to `pontif-predicates` and
-  have `pontif-core` consumers reach the smaller `core-only` subset;
-  (b) split — have `pontif-predicates` ship a `BoundAnalysisRules`
-  module and let `PontifCompiler.defaultRules()` compose
-  `DefaultRules.production() + BoundAnalysisRules.all()`. (b) re-creates
-  the drift hazard the canonical-DefaultRules slice just fixed unless
-  the composition itself becomes the canonical source. Design call.
+  Layering resolved by adding a new `pontif-defaults` module between
+  `pontif-predicates` and `pontif-ir`. It owns `DefaultRules` (moved
+  from `pontif-core`) and the new `BoundAnalysisRules` wrapper. Single
+  canonical source for "what production runs," reachable by every
+  downstream module. `BoundAnalysisRules.BOUND_DISCHARGE` is guarded
+  against {@code SymExpr.Frac} appearing in the goal or hypotheses —
+  the integer-strictness step inside `BoundAnalysis` is sound only on
+  the integer domain, and the algebra layer's rational tests stay
+  unaffected.
 
 ## Exception handling
 

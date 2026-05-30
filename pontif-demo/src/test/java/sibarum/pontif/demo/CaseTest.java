@@ -6,7 +6,7 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.core.symbolic.CaseRules;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 
 import java.util.List;
 

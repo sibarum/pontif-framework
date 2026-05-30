@@ -1,7 +1,7 @@
 package sibarum.pontif.demo;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;

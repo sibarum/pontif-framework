@@ -1,7 +1,7 @@
 package sibarum.pontif.demo;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.FunctionCheck;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.Simplifier;
@@ -163,6 +163,29 @@ class FunctionDeclTest {
         ProofResult r = FunctionCheck.verifyDefinition(square, SIMPLIFIER);
         assertTrue(r.isPassed(),
                 "With HypothesisRules in production, square(x:[Int:@>=0]):[Int:@>=0] " +
+                "should pass at compile time. Got: " + r);
+    }
+
+    @Test
+    void linearBoundReturnSort_dischargesAtCompileTime() throws Exception {
+        // inc(x: Int[@>=1]) : Int[@>1] = x + 1
+        // SignAnalysis alone can only say POSITIVE — can't clear the >1
+        // threshold. BoundAnalysisRules (also in production) normalizes
+        // (x+1) - 1 = x ∈ [1, ∞) and folds the postcondition to true.
+        // This is the receipt-graph's `inc` headline test, now also
+        // pinned at the compile-time function-check layer.
+        Sort atLeastOne = Sort.refined("Int",
+                SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(1)));
+        Sort greaterThanOne = Sort.refined("Int",
+                SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(1)));
+        FunctionDecl inc = FunctionDecl.definition(
+                "inc",
+                List.of(new FunctionDecl.Param("x", atLeastOne)),
+                greaterThanOne,
+                SymExpr.add(SymExpr.var("x"), SymExpr.lit(1)));
+        ProofResult r = FunctionCheck.verifyDefinition(inc, SIMPLIFIER);
+        assertTrue(r.isPassed(),
+                "With BoundAnalysisRules in production, inc(x:[Int:@>=1]):[Int:@>1] " +
                 "should pass at compile time. Got: " + r);
     }
 

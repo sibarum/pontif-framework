@@ -9,7 +9,7 @@ import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.symbolic.categorical.Functor;
 import sibarum.pontif.core.symbolic.categorical.FunctorLaws;
 import sibarum.pontif.core.symbolic.categorical.Functors;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.LambdaRules;
 import sibarum.pontif.core.symbolic.TotalExpressionRules;
 

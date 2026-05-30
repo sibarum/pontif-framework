@@ -9,7 +9,7 @@ import sibarum.pontif.ast.literal.IntLiteral;
 import sibarum.pontif.ast.match.MatchNode;
 import sibarum.pontif.ast.match.MatchNode.Branch;
 import sibarum.pontif.core.Pontif;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;

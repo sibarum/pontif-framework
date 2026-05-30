@@ -2,7 +2,7 @@ package sibarum.pontif.ir;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.Origin;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
 

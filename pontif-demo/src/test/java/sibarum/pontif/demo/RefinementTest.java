@@ -1,7 +1,7 @@
 package sibarum.pontif.demo;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.core.symbolic.DefaultRules;
+import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;

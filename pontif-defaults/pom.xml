@@ -8,7 +8,7 @@
         <artifactId>pontif-framework</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>pontif-ir</artifactId>
+    <artifactId>pontif-defaults</artifactId>
 
     <dependencies>
         <dependency>
@@ -17,16 +17,7 @@
         </dependency>
         <dependency>
             <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-ast</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-predicates</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-defaults</artifactId>
-            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
