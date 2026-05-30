@@ -147,11 +147,12 @@ class FunctionDeclTest {
     }
 
     @Test
-    void bodyUsingParameters_definitionYieldsResidualWithoutRung25Rules() throws Exception {
+    void bodyUsingParameters_dischargesAtCompileTime() throws Exception {
         // square(x: Int[@>=0]) : Int[@>=0] = x * x
-        // Without HypothesisRules / SignAnalysis in the rule set, the simplifier
-        // cannot connect the precondition x>=0 to the postcondition x*x>=0 —
-        // it residuals honestly.
+        // HypothesisRules is part of DefaultRules.production() — the
+        // simplifier connects the precondition x>=0 to the postcondition
+        // x*x>=0 via SignAnalysis (positive * positive >= 0) and Passes
+        // at compile time. Without HypothesisRules this would Residual.
         Sort nonNegative = Sort.refined("Int",
                 SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GE, SymExpr.lit(0)));
         FunctionDecl square = FunctionDecl.definition(
@@ -159,10 +160,10 @@ class FunctionDeclTest {
                 List.of(new FunctionDecl.Param("x", nonNegative)),
                 nonNegative,
                 SymExpr.mul(SymExpr.var("x"), SymExpr.var("x")));
-        // This SIMPLIFIER does NOT include HypothesisRules
         ProofResult r = FunctionCheck.verifyDefinition(square, SIMPLIFIER);
-        assertInstanceOf(ProofResult.Residual.class, r,
-                "Without rung-2.5 rules in the simplifier; expect Residual. Got: " + r);
+        assertTrue(r.isPassed(),
+                "With HypothesisRules in production, square(x:[Int:@>=0]):[Int:@>=0] " +
+                "should pass at compile time. Got: " + r);
     }
 
     // --- Singleton-typed parameter / return ---

@@ -436,18 +436,28 @@ of it is what's deferred.
   `instanceof` chains, not sealed switches, so adding the variants
   didn't break it — but it also can't infer bounds from `(x > 0) &&
   (x < 10)`.
-- **Sign/linear discharge is inactive in the production `Simplifier`.**
-  `HypothesisRules.HYPOTHESIS_DISCHARGE` (the rule that folds a `Cmp`
-  goal to `true` via `Refinements.discharge` → `SignAnalysis`) is NOT in
-  `PontifCompiler.defaultRules()` — only `Refinement+Arithmetic+Boolean+
-  Structural` are. So the in-`Simplifier` function-verification path
-  (`FunctionCheck.verifyDefinition`, "proven return sort") gets no
-  sign/linear reasoning in production; only the receipt-graph path
-  (`IntegerDischarge`, now with `BoundAnalysis`) does. The "default-rule
-  drift" item below is the broader cleanup; this is the specific
-  consequence worth deciding deliberately — if proven-return-sort should
-  benefit at compile time outside the receipt graph, `HypothesisRules`
-  (and a `BoundAnalysis`-backed rule) need to join the production set.
+- **Sign discharge in the production `Simplifier` ✅ landed.**
+  `HypothesisRules` (the rule that folds a `Cmp` goal to `true` via
+  `Refinements.discharge` → `SignAnalysis`) is now part of
+  `DefaultRules.production()`. The compile-time function-verification
+  path (`FunctionCheck.verifyDefinition`, "proven return sort") now gets
+  the same sign reasoning the receipt-graph path has — e.g.,
+  `square(x:[Int:@>=0]):[Int:@>=0] -> x*x` Passes at compile time
+  instead of going Residual (pinned by
+  `FunctionDeclTest.bodyUsingParameters_dischargesAtCompileTime`).
+
+  **Still open:** a `BoundAnalysis`-backed rule in production for the
+  linear-bound cases sign analysis can't handle (e.g.
+  `inc(x:[Int:@>=1]):[Int:@>1] -> x+1`). Blocked on a layering
+  question: `BoundAnalysis` lives in `pontif-predicates`, but
+  `DefaultRules` lives in `pontif-core` (one layer below). Options:
+  (a) move `DefaultRules.production()` up to `pontif-predicates` and
+  have `pontif-core` consumers reach the smaller `core-only` subset;
+  (b) split — have `pontif-predicates` ship a `BoundAnalysisRules`
+  module and let `PontifCompiler.defaultRules()` compose
+  `DefaultRules.production() + BoundAnalysisRules.all()`. (b) re-creates
+  the drift hazard the canonical-DefaultRules slice just fixed unless
+  the composition itself becomes the canonical source. Design call.
 
 ## Exception handling
 

@@ -12,7 +12,6 @@ import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.core.symbolic.DefaultRules;
-import sibarum.pontif.core.symbolic.HypothesisRules;
 
 import java.util.List;
 
@@ -23,13 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SignAnalysisTest {
 
-    private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
-
-    private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = DefaultRules.production();
-        all.addAll(HypothesisRules.all());
-        return all;
-    }
+    private static final Simplifier SIMPLIFIER = new Simplifier(DefaultRules.production());
 
     // --- Lattice arithmetic ---
 

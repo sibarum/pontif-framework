@@ -5,15 +5,12 @@ import sibarum.pontif.core.symbolic.DefaultRules;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
-import sibarum.pontif.core.symbolic.HypothesisRules;
 import sibarum.pontif.core.symbolic.Refinements;
-import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,13 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
  */
 class UnionIntersectionDispatchTest {
 
-    private static final Simplifier SIMPLIFIER = new Simplifier(allRules());
-
-    private static List<RewriteRule> allRules() {
-        List<RewriteRule> all = DefaultRules.production();
-        all.addAll(HypothesisRules.all());
-        return all;
-    }
+    private static final Simplifier SIMPLIFIER = new Simplifier(DefaultRules.production());
 
     private static final Sort POSITIVE = Sort.refined("Int",
             SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));

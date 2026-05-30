@@ -21,13 +21,12 @@ import java.util.List;
  *       runs. The behavior under {@code PontifCompiler} with default
  *       configuration. Currently:
  *       {@link RefinementRules} + {@link ArithmeticRules} +
- *       {@link BooleanRules} + {@link StructuralRules}.</li>
- *   <li>{@link #full()} — {@code production()} plus the optional sets
- *       most demo tests need: {@link HypothesisRules} (for dispatch /
- *       function-check reasoning) and {@link LambdaRules} (for
- *       beta-reduction). Whether either should join production is a
- *       deliberate downstream decision, not an accidental test-drift
- *       outcome.</li>
+ *       {@link BooleanRules} + {@link StructuralRules} +
+ *       {@link HypothesisRules}.</li>
+ *   <li>{@link #full()} — {@code production()} plus {@link LambdaRules}
+ *       (for beta-reduction). Lambda evaluation isn't on the production
+ *       path because lambda values are evaluated by the IR interpreter /
+ *       Truffle backend, not by the simplifier.</li>
  * </ul>
  *
  * <p>Each factory returns a fresh mutable {@code ArrayList} so callers
@@ -45,6 +44,13 @@ public final class DefaultRules {
      * ({@code [Point:@.x > 0]}) to actually reduce — the field-projection
      * rule turns {@code Record(...).x} into the field value so the
      * comparison can fold against a literal.
+     *
+     * <p>{@code HypothesisRules} gives the compile-time function-check
+     * path ({@link FunctionCheck#verifyDefinition}) the same sign / linear
+     * reasoning the receipt-graph path has via {@code IntegerDischarge}.
+     * Without it, a body like {@code x + 1} under hypothesis {@code x > 0}
+     * stays symbolic and {@code Refinements.satisfies(body, [Int:@>0])}
+     * reports Residual instead of Passed.
      */
     public static List<RewriteRule> production() {
         List<RewriteRule> rules = new ArrayList<>();
@@ -52,19 +58,18 @@ public final class DefaultRules {
         rules.addAll(ArithmeticRules.all());
         rules.addAll(BooleanRules.all());
         rules.addAll(StructuralRules.all());
+        rules.addAll(HypothesisRules.all());
         return rules;
     }
 
     /**
-     * {@link #production()} plus {@link HypothesisRules} and
-     * {@link LambdaRules} — the set most demo tests treat as "everything
-     * the simplifier can do." Not currently in production defaults;
-     * promoting either is a deliberate decision (see the
-     * sign/linear-discharge-in-production item in {@code docs/TODO.md}).
+     * {@link #production()} plus {@link LambdaRules} — the set demo
+     * tests treat as "everything the simplifier can do." Not currently
+     * in production defaults; lambda evaluation lives in the IR
+     * interpreter / Truffle backend.
      */
     public static List<RewriteRule> full() {
         List<RewriteRule> rules = production();
-        rules.addAll(HypothesisRules.all());
         rules.addAll(LambdaRules.all());
         return rules;
     }
