@@ -40,14 +40,9 @@ public final class SortChecker {
     /**
      * Sort names that aren't aliases — accepted as terminal sort references.
      *
-     * <p>{@code Int}, {@code Bool} are primitives.
-     *
-     * <p>{@code Function} is accepted as a placeholder Named sort for
-     * function-typed values. The fully-specified form is
-     * {@link IrSort.Function} (with explicit param + return shapes); the
-     * placeholder Named form is used in tests and in cases where the exact
-     * function shape isn't material. Tighter validation requiring the
-     * Function variant for function-typed bindings is a follow-up.
+     * <p>{@code Int}, {@code Bool} are primitives. Function-typed bindings
+     * use {@link IrSort.Function} (with explicit param + return shapes),
+     * not a placeholder Named sort.
      *
      * <p>{@code "_"} and {@code "_record"} are internal sentinels produced
      * by parser desugars (match-destructure scrutinee placeholder,
@@ -55,7 +50,7 @@ public final class SortChecker {
      * leak into the IR and must validate.
      */
     private static final Set<String> PRIMITIVE_SORT_NAMES = Set.of(
-            "Int", "Bool", "Function",
+            "Int", "Bool",
             "_", "_record");
 
     private SortChecker() {}

@@ -322,12 +322,14 @@ of it is what's deferred.
 
 ## Type system
 
-- **Tighten the `Function` sort placeholder.** `IrSort.named("Function")`
-  is currently accepted as a primitive in `SortChecker` to keep legacy
-  lambda-test patterns compiling. The right shape for function-typed
-  bindings is `IrSort.Function([params...], returnSort)`. Migrate the
-  tests that use the named placeholder to the variant, then remove
-  `Function` from `PRIMITIVE_SORT_NAMES`.
+- **Tighten the `Function` sort placeholder ✅ landed.** `"Function"`
+  removed from `SortChecker.PRIMITIVE_SORT_NAMES`. All test sites
+  migrated to `IrSort.Function(paramSorts, returnSort, origin)` — the
+  Java tests gained typed helpers (`FN = Int→Int`, `HOF = (Int→Int)→Int`,
+  `CURRIED = Int→(Int→Int)`); the S-expr tests migrated to the
+  `(function (Int) Int)` surface form (which was already supported by
+  `Parser.parseFunctionSort`). A test that explicitly demonstrated the
+  new form is now redundant and removed.
 - **Record-literal vs. declared-sort mismatch (S-expr only).** The alt
   parser's struct-literal forms close the gap at construction time by
   going through `declaredStructs`; the S-expr `(record ...)` form

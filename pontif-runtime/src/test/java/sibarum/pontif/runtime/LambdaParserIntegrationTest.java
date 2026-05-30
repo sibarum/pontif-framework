@@ -41,7 +41,7 @@ class LambdaParserIntegrationTest {
         String src = """
                 (module letLambda
                   ()
-                  (let f Function (lambda ((x Int)) Int (* x x))
+                  (let f (function (Int) Int) (lambda ((x Int)) Int (* x x))
                     (call f 7)))
                 """;
         RunResult r = run(src, "letLambda.ptf");
@@ -56,7 +56,7 @@ class LambdaParserIntegrationTest {
                 (module closure
                   ()
                   (let n Int 10
-                    (let f Function (lambda ((x Int)) Int (+ x n))
+                    (let f (function (Int) Int) (lambda ((x Int)) Int (+ x n))
                       (call f 5))))
                 """;
         RunResult r = run(src, "closure.ptf");
@@ -73,9 +73,9 @@ class LambdaParserIntegrationTest {
         // Then (call add5 3) resolves via the local binding for add5.
         String src = """
                 (module addN
-                  ((defn addN ((n Int)) Function
+                  ((defn addN ((n Int)) (function (Int) Int)
                      (lambda ((x Int)) Int (+ x n))))
-                  (let add5 Function (call addN 5)
+                  (let add5 (function (Int) Int) (call addN 5)
                     (call add5 3)))
                 """;
         RunResult r = run(src, "addN.ptf");
@@ -106,22 +106,6 @@ class LambdaParserIntegrationTest {
         RunResult r = run(src, "shadow.ptf");
         assertEquals(true, r.isError(),
                 "expected error: a Long value can't be invoked as a closure");
-    }
-
-    @Test
-    void functionSortSyntax_replacesNamedFunctionPlaceholder() throws Exception {
-        // Same as higherOrder_namedFunctionReturnsLambda but using the real
-        // function sort form instead of a Named "Function" placeholder.
-        String src = """
-                (module addN
-                  ((defn addN ((n Int)) (function (Int) Int)
-                     (lambda ((x Int)) Int (+ x n))))
-                  (let add5 (function (Int) Int) (call addN 5)
-                    (call add5 3)))
-                """;
-        RunResult r = run(src, "fnSort.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("8", r.text());
     }
 
     @Test

@@ -160,7 +160,9 @@ class SortCheckerTest {
                 IrSort.named("Int"),
                 IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.lit(1)));
         IrExpr body = new IrExpr.Call("f", List.of(IrExpr.lit(5)), Origin.NONE);
-        IrExpr letIn = IrExpr.letIn("f", IrSort.named("Function"), lambda, body);
+        IrSort fnSort = new IrSort.Function(
+                List.of(IrSort.named("Int")), IrSort.named("Int"), Origin.NONE);
+        IrExpr letIn = IrExpr.letIn("f", fnSort, lambda, body);
         IrModule m = new IrModule("m", List.of(), letIn);
         compile(m);
     }
@@ -169,10 +171,12 @@ class SortCheckerTest {
     void callToFunctionParam_accepted() throws Exception {
         // function apply(f:Function, x:Int):Int -> f(x)
         // f is a param; calling it must be allowed.
+        IrSort fnSort = new IrSort.Function(
+                List.of(IrSort.named("Int")), IrSort.named("Int"), Origin.NONE);
         IrStmt.FunctionDecl fd = new IrStmt.FunctionDecl(
                 "apply",
                 List.of(
-                        new IrParam("f", IrSort.named("Function")),
+                        new IrParam("f", fnSort),
                         new IrParam("x", IrSort.named("Int"))),
                 IrSort.named("Int"),
                 new IrExpr.Call("f", List.of(IrExpr.var("x")), Origin.NONE),

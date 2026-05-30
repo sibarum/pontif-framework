@@ -27,7 +27,9 @@ class TruffleLambdaTest {
     }
 
     private static final IrSort INT = IrSort.named("Int");
-    private static final IrSort FN = IrSort.named("Function");
+    private static final IrSort FN = new IrSort.Function(List.of(INT), INT, sibarum.pontif.core.Origin.NONE);
+    private static final IrSort HOF = new IrSort.Function(List.of(FN), INT, sibarum.pontif.core.Origin.NONE);
+    private static final IrSort CURRIED = new IrSort.Function(List.of(INT), FN, sibarum.pontif.core.Origin.NONE);
 
     // --- Basic Apply ---
 
@@ -95,7 +97,7 @@ class TruffleLambdaTest {
                 INT,
                 IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(5))));
         IrExpr main = IrExpr.letIn("doubler", FN, doubler,
-                IrExpr.letIn("applyTo5", FN, applyTo5,
+                IrExpr.letIn("applyTo5", HOF, applyTo5,
                         IrExpr.apply(IrExpr.var("applyTo5"), List.of(IrExpr.var("doubler")))));
         assertEquals(10L, runTruffle(new IrModule("ho", List.of(), main)));
     }
@@ -111,7 +113,7 @@ class TruffleLambdaTest {
                 List.of(new IrParam("n", INT)),
                 FN,
                 inner);
-        IrExpr main = IrExpr.letIn("addN", FN, addN,
+        IrExpr main = IrExpr.letIn("addN", CURRIED, addN,
                 IrExpr.letIn("add5", FN,
                         IrExpr.apply(IrExpr.var("addN"), List.of(IrExpr.lit(5))),
                         IrExpr.apply(IrExpr.var("add5"), List.of(IrExpr.lit(3)))));
@@ -129,7 +131,7 @@ class TruffleLambdaTest {
                 List.of(new IrParam("n", INT)),
                 FN,
                 inner);
-        IrExpr main = IrExpr.letIn("make", FN, make,
+        IrExpr main = IrExpr.letIn("make", CURRIED, make,
                 IrExpr.letIn("f", FN,
                         IrExpr.apply(IrExpr.var("make"), List.of(IrExpr.lit(100))),
                         IrExpr.apply(IrExpr.var("f"), List.of(IrExpr.lit(1)))));

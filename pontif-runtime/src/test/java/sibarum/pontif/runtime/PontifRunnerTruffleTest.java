@@ -69,9 +69,9 @@ class PontifRunnerTruffleTest {
     void closureCapture_truffle() throws Exception {
         String src = """
                 (module closure
-                  ((defn addN ((n Int)) Function
+                  ((defn addN ((n Int)) (function (Int) Int)
                      (lambda ((x Int)) Int (+ x n))))
-                  (let add5 Function (call addN 5)
+                  (let add5 (function (Int) Int) (call addN 5)
                     (call add5 3)))
                 """;
         assertEquals("8", runTruffle(src, "closure.ptf").text());
