@@ -10,6 +10,7 @@ import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -183,5 +184,63 @@ class RefinementValidatorTest {
         // The combinator only admits comparisons (whose complement is exact).
         assertThrows(IllegalArgumentException.class,
                 () -> Refinement.splitOn(SymExpr.bool(true), Refinement.leaf(), Refinement.leaf()));
+    }
+
+    // --- proof-supply via the issuer (Slice 1b) -----------------------------
+
+    /** {@code function bad(x:Int):[Int:@>0] -> x} — false for x <= 0. */
+    private static IrModule badModule() {
+        return new IrModule("m",
+                List.of(IrStmt.functionDecl("bad",
+                        List.of(new IrParam("x", IrSort.named("Int"))),
+                        IrSort.refined("Int",
+                                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0))),
+                        IrExpr.var("x"))),
+                IrExpr.lit(0));
+    }
+
+    private static BuiltinIssuer.Attempt attemptAt(
+            List<BuiltinIssuer.Attempt> attempts, GraphReference ref) {
+        return attempts.stream()
+                .filter(a -> a.nodeIndex() == ref.nodeIndex() && a.branchIndex() == ref.branchIndex())
+                .findFirst().orElseThrow();
+    }
+
+    @Test
+    void issuerDischargesIsSparseViaSuppliedProof() throws Exception {
+        // The headline of the proof-supply path: a true-but-hard return the
+        // built-in engine reports NOT DISCHARGED becomes discharged once a
+        // conservative refinement proof is supplied — extending reach without
+        // extending trust (the kernel still validates every leaf).
+        ReceiptGraph graph = Drafter.draft(isSparseModule());
+        GraphReference ref = new GraphReference(0, 0);  // isSparse, sole branch
+
+        assertFalse(attemptAt(BuiltinIssuer.attemptAll(graph), ref).discharged(),
+                "built-in engine should NOT discharge isSparse on its own");
+
+        Refinement proof = Refinement.splitOn(cmp("x_0", SymExpr.CmpOp.GE, 3),
+                Refinement.leaf(),
+                Refinement.splitOn(cmp("x_0", SymExpr.CmpOp.LE, -6),
+                        Refinement.leaf(), singletons(-5, 2)));
+        BuiltinIssuer.Attempt a =
+                attemptAt(BuiltinIssuer.attemptAll(graph, Map.of(ref, proof)), ref);
+        assertTrue(a.discharged(), "supplied proof should discharge isSparse");
+        assertTrue(a.provenByRefinement(), "discharge should be attributed to the proof");
+    }
+
+    @Test
+    void issuerRefusesFalseObligationEvenWithAProof() throws Exception {
+        // bad(x:Int):[Int:@>0] -> x is FALSE for x <= 0. No conservative split
+        // can discharge it — the x<1 (i.e. x<=0) leaf leaves x>0 unprovable —
+        // so a supplied "proof" simply fails to validate. The recourse cannot
+        // launder a falsehood.
+        ReceiptGraph graph = Drafter.draft(badModule());
+        GraphReference ref = new GraphReference(0, 0);
+        Refinement attemptedProof = Refinement.splitOn(
+                cmp("x_0", SymExpr.CmpOp.GE, 1), Refinement.leaf(), Refinement.leaf());
+        BuiltinIssuer.Attempt a =
+                attemptAt(BuiltinIssuer.attemptAll(graph, Map.of(ref, attemptedProof)), ref);
+        assertFalse(a.discharged(), "no valid proof exists for a false obligation");
+        assertFalse(a.provenByRefinement());
     }
 }

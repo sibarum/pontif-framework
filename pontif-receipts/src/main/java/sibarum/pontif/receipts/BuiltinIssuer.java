@@ -43,6 +43,13 @@ public final class BuiltinIssuer {
     /** Issuer identifier carried by every receipt this issuer produces. */
     public static final String ISSUER_ID = "<pontif-default>";
 
+    /**
+     * Attribution for an obligation discharged not by the built-in engine but
+     * by a human-supplied {@link Refinement} proof the kernel validated
+     * ({@link RefinementValidator}).
+     */
+    public static final String REFINEMENT_ISSUER_ID = "<refinement-proof>";
+
     private BuiltinIssuer() {}
 
     /**
@@ -55,7 +62,9 @@ public final class BuiltinIssuer {
      * the goal under those hypotheses. Surfacing failures alongside the
      * goal/hypotheses is what lets a report say "tried {@code r_1 + 5 >= 10}
      * with {@code r_1 >= 5}, discharged" — readers see *why* the proof works
-     * (or doesn't).
+     * (or doesn't). {@code provenByRefinement} is true when the built-in
+     * engine couldn't discharge the goal but a supplied {@link Refinement}
+     * proof did (validated by {@link RefinementValidator}).
      */
     public record Attempt(
             int nodeIndex,
@@ -63,7 +72,8 @@ public final class BuiltinIssuer {
             SymExpr obligation,
             List<SymExpr> hypotheses,
             SymExpr substitutedGoal,
-            boolean discharged) {
+            boolean discharged,
+            boolean provenByRefinement) {
         public Attempt {
             hypotheses = List.copyOf(hypotheses);
         }
@@ -75,6 +85,26 @@ public final class BuiltinIssuer {
      * bound to the result var. Order: node, then branch.
      */
     public static List<Attempt> attemptAll(ReceiptGraph graph) {
+        return attemptAll(graph, Map.of());
+    }
+
+    /**
+     * As {@link #attemptAll(ReceiptGraph)}, but a branch the built-in engine
+     * can't discharge gets a second chance: if {@code proofs} supplies a
+     * {@link Refinement} for that branch's {@link GraphReference}, it's
+     * validated ({@link RefinementValidator}) and, if every leaf discharges,
+     * the obligation counts as discharged <em>by proof</em>
+     * ({@link Attempt#provenByRefinement}).
+     *
+     * <p>Soundness is the validator's, and it's the whole point: a
+     * conservative split can rescue a true-but-hard obligation (e.g.
+     * {@code isSparse}) but can never validate a false one — no split makes a
+     * false leaf discharge — so a bogus proof simply fails to validate and the
+     * branch stays open. The proof-supply path extends reach without extending
+     * trust.
+     */
+    public static List<Attempt> attemptAll(
+            ReceiptGraph graph, Map<GraphReference, Refinement> proofs) {
         List<Attempt> attempts = new ArrayList<>();
         List<Node> nodes = graph.roots();
         for (int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++) {
@@ -89,10 +119,16 @@ public final class BuiltinIssuer {
                 Branch branch = node.branches().get(branchIndex);
                 PathFacts facts = PathFacts.of(node, branch);
                 SymExpr goal = facts.substituteDefinition(obligation);
-                boolean ok = IntegerDischarge.discharge(facts.hypotheses(), goal);
+                boolean engineOk = IntegerDischarge.discharge(facts.hypotheses(), goal);
+                boolean viaProof = false;
+                if (!engineOk) {
+                    Refinement proof = proofs.get(new GraphReference(nodeIndex, branchIndex));
+                    viaProof = proof != null
+                            && RefinementValidator.validate(node, branch, obligation, proof).verified();
+                }
                 attempts.add(new Attempt(
                         nodeIndex, branchIndex, obligation,
-                        facts.hypotheses(), goal, ok));
+                        facts.hypotheses(), goal, engineOk || viaProof, viaProof));
             }
         }
         return attempts;
@@ -104,11 +140,22 @@ public final class BuiltinIssuer {
      * obligation; its reference points at the branch that discharged it.
      */
     public static List<ClosingReceipt> close(ReceiptGraph graph) {
+        return close(graph, Map.of());
+    }
+
+    /**
+     * As {@link #close(ReceiptGraph)}, but consulting supplied
+     * {@link Refinement} proofs. A receipt closed by a validated proof is
+     * attributed to {@link #REFINEMENT_ISSUER_ID} rather than the built-in
+     * engine.
+     */
+    public static List<ClosingReceipt> close(
+            ReceiptGraph graph, Map<GraphReference, Refinement> proofs) {
         List<ClosingReceipt> receipts = new ArrayList<>();
-        for (Attempt a : attemptAll(graph)) {
+        for (Attempt a : attemptAll(graph, proofs)) {
             if (a.discharged()) {
                 receipts.add(new ClosingReceipt(
-                        ISSUER_ID,
+                        a.provenByRefinement() ? REFINEMENT_ISSUER_ID : ISSUER_ID,
                         a.obligation(),
                         new GraphReference(a.nodeIndex(), a.branchIndex()),
                         Map.of()));
