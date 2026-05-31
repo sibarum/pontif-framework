@@ -353,6 +353,25 @@ and fails the compile (`CompileResult.Failed`) for any refined return whose
 obligation is NOT discharged. Step C = let a supplied `Refinement` (Slice 1b)
 discharge the hard ones first, so the gate consults proofs before rejecting.
 
+*Full shape-coverage measurement ✅ (`blastRadius_coversEveryCorpusShape`).*
+Classified one representative per distinct refined-return shape in the corpus
+(35 refined returns total). **Impact is LIGHT, not heavy:** thresholds
+(`@>1/@>=1/@>=0`), `@>0`-with-supporting-hyp, sign (`x*x`), inductive,
+dependent value-pins (`a+b`, `n*2`, `y+1` — reflexive), singletons (`0`,
+`42`), `[Bool:false]`, and product-magnitude (`@>=6`, the Slice-0 win) are all
+PROVABLE. Only three kinds reject: (1) genuinely-false (`@>0` from
+unconstrained input — gate working as intended; the pre-existing corpus has
+**zero** of these, so no latent bugs hid behind unverified returns); (2) the
+true-but-hard polynomial (`@>=-16` — proof recourse; only this session's tests
+use it); and (3) — the one **new actionable finding** — **union returns
+(`[Int:0|1]`) are UNPROVABLE because `BoundAnalysis.discharge`/
+`IntegerDischarge` handle only `Cmp` goals, not `Or`.** A union obligation
+like `0==0 | 0==1` is trivially true but the engine won't evaluate a
+disjunction. **Small fix (do before flipping the gate):** discharge an `Or`
+goal if any disjunct discharges (and `And` if all do). That moves union
+returns to PROVABLE, shrinking the rejected set to exactly
+{genuinely-false, true-but-hard-with-proof}.
+
 **✅ Confirmed working (locked in by tests):** dependent return refinements
 referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
 and the spec-only form synthesizes the body from the `a+b` pin. This is
