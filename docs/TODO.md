@@ -382,6 +382,25 @@ discharge goal; deep-nested mixes degrade gracefully — an unreadable disjunct
 just doesn't discharge.) **Path to the gate (step B) is now clear:**
 provable → pass, false → reject, hard → consult supplied proof.
 
+*Step B (the gate) ✅ landed.* `PontifCompiler.compileModule` now rejects a
+declared return refinement the proof system can't discharge — consulting the
+receipt-graph engine over a cleanly-drafted graph, rejecting only on a
+positive NOT-DISCHARGED verdict, and **abstaining** (not rejecting) when
+drafting throws (so the drafter's scope gaps never punish valid code).
+`ReturnGateTest` proves enforcement (false rejected; provable incl. inductive
+and bare-Int accepted); full suite green (the corpus is provable-or-abstained).
+**Remaining for completeness:**
+1. **Proof-authoring surface** — proofs are Java-`Map` only, not wired through
+   `compileAlt`, so an `isSparse`-style hard return written *in the playground*
+   rejects with no in-language recourse. This is now the gating prerequisite
+   (Slice C); until it lands, the gate is "reject hard returns" rather than
+   "reject hard returns lacking a proof."
+2. **Direct `IrCompiler` path is ungated** by design — it sits below
+   pontif-receipts (cycle), so the gate is at the `PontifCompiler` layer only.
+   The IR API stays unprotected (test harnesses use it); fine, since the
+   user-facing surface is gated.
+3. Optional: a `pontif.gateReturns` toggle if the gate ever needs to be opt-out.
+
 **✅ Confirmed working (locked in by tests):** dependent return refinements
 referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
 and the spec-only form synthesizes the body from the `a+b` pin. This is
