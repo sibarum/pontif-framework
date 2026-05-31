@@ -917,12 +917,21 @@ feasibility; it's answerable entirely in Java with no Pontif-side
   doesn't close; an *insufficient* split (valid partition, open leaf)
   reports unverified with the trace pinpointing the open leaf. Purely
   additive (no existing file touched); full suite green.
-- Slice 1b — wire `Refinement` into the graph + `ReceiptGraphPrinter` +
-  `ReceiptGraphReport` so a refined branch renders in the
-  `target/receipt-graphs/*.receipts.txt` artifact, and `BuiltinIssuer`/
-  `Notary` handle refined branches (issuer derives the obligation and
-  hands it to the validator; closing receipt over the refined leaves).
-  This is the reviewable-artifact half of Slice 1.
+- Slice 1b — proof-supply into the issuer. **Issuer integration ✅ landed
+  (2026-05-31):** `BuiltinIssuer.attemptAll/close(graph, Map<GraphReference,
+  Refinement>)` — a branch the engine can't discharge is rescued by a
+  supplied proof the kernel validates (`RefinementValidator`); discharged
+  obligations carry `Attempt.provenByRefinement` and receipts attribute to
+  `REFINEMENT_ISSUER_ID`. Sound by the validator: `isSparse` rescued, `bad`
+  (false) refused by any proof. This is the **recourse** that gates step B.
+  **Still to do (the reviewable-artifact half):** render proof-discharged
+  branches + their split tree in `ReceiptGraphReport` (gated on a proof
+  *authoring surface* — proofs are Java-side only until proof files parse;
+  premature before then). And **Notary proof-verification**: for a
+  `REFINEMENT_ISSUER_ID` receipt the notary should re-run the validator, not
+  just attempt refutation (current soundness rests on the validator gating
+  emission at `close`-time, which is sound for that flow but the notary
+  should independently re-check).
 - Slice 2 — split supplied as data (not hardcoded) + recursion to
   singletons for region B.
 - Slice 3 — `refine` as a Pontif function: Pontif-side `SymExpr`/`Branch`,
