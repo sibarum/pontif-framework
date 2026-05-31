@@ -344,10 +344,14 @@ rejected set is exactly {needs-a-proof, real-error}. **Key refinement this
 surfaced:** the gate should consult the **receipt-graph engine**
 (`BuiltinIssuer`/`Notary` — per-branch, recursion-capable), NOT
 `FunctionCheck.verifyDefinition` (whole-body; can't carry the inductive
-hypotheses recursion needs — `factorial` would fail it). So step B = wire
-`IrCompiler` to reject a refined return whose receipt-graph obligation is NOT
-discharged; step C = let a supplied `Refinement` (Slice 1b) discharge the hard
-ones first.
+hypotheses recursion needs — `factorial` would fail it). So step B = a
+post-IrCompile gate in **`PontifCompiler.compileModule` (pontif-runtime)** —
+**not `IrCompiler`**: `pontif-ir` sits *below* `pontif-receipts`
+(`receipts → ir`, verified), so `IrCompiler` calling `BuiltinIssuer` would be
+a dependency cycle. The gate drafts the graph, runs `BuiltinIssuer`/`Notary`,
+and fails the compile (`CompileResult.Failed`) for any refined return whose
+obligation is NOT discharged. Step C = let a supplied `Refinement` (Slice 1b)
+discharge the hard ones first, so the gate consults proofs before rejecting.
 
 **✅ Confirmed working (locked in by tests):** dependent return refinements
 referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
