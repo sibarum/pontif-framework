@@ -94,4 +94,50 @@ class ReturnVerificationMeasurementTest {
         assertEquals(expected, classify(corpus),
                 "engine reach changed — update the blast-radius expectation (and celebrate/investigate)");
     }
+
+    @Test
+    void blastRadius_coversEveryCorpusShape() throws Exception {
+        // One representative per distinct refined-return *shape* found across
+        // the test corpus (survey: thresholds, inductive, dependent value-pins,
+        // singletons, bool, union, product-magnitude, the hard polynomial).
+        // Note shape != verdict: @>0 is provable WITH a supporting hypothesis
+        // (posFromGe1) and unprovable WITHOUT (falsePos).
+        String corpus = """
+                module m
+
+                function risesAboveOne(x:[Int:@>=1]):[Int:@>1] -> x + 1
+                function oneOrMore(x:[Int:@>=0]):[Int:@>=1] -> x + 1
+                function nonNeg(x:Int):[Int:@>=0] -> x * x
+                function posFromGe1(x:[Int:@>=1]):[Int:@>0] -> x
+                function falsePos(x:Int):[Int:@>0] -> x
+                function depAdd(a:Int, b:Int):[Int:a+b] -> a + b
+                function depDbl(n:Int):[Int:n*2] -> n * 2
+                function depSucc(y:Int):[Int:y+1] -> y + 1
+                function singZero():[Int:0]
+                function singAns():[Int:42]
+                function alwaysFalse():[Bool:false]
+                function bit():[Int:0|1] -> 0
+                function prodMag(x:[Int:@>=2], y:[Int:@>=3]):[Int:@>=6] -> x * y
+                function sparse(x:Int):[Int:@>=-16] -> (x-3) * (x+5)
+                """;
+
+        Map<String, String> expected = new LinkedHashMap<>();
+        expected.put("risesAboveOne", "PROVABLE");   // threshold @>1
+        expected.put("oneOrMore",     "PROVABLE");   // threshold @>=1
+        expected.put("nonNeg",        "PROVABLE");   // sign @>=0
+        expected.put("posFromGe1",    "PROVABLE");   // @>0 WITH supporting hyp
+        expected.put("falsePos",      "UNPROVABLE"); // @>0 WITHOUT — genuinely false
+        expected.put("depAdd",        "PROVABLE");   // dependent value-pin (reflexive)
+        expected.put("depDbl",        "PROVABLE");   // dependent
+        expected.put("depSucc",       "PROVABLE");   // dependent
+        expected.put("singZero",      "PROVABLE");   // singleton (synthesized)
+        expected.put("singAns",       "PROVABLE");   // singleton
+        expected.put("alwaysFalse",   "PROVABLE");   // [Bool:false] — PREDICT (reflexive)
+        expected.put("bit",           "UNPROVABLE"); // [Int:0|1] — PREDICT (Or goal unhandled)
+        expected.put("prodMag",       "PROVABLE");   // product magnitude — Slice 0
+        expected.put("sparse",        "UNPROVABLE"); // true-but-hard → needs a proof
+
+        assertEquals(expected, classify(corpus),
+                "shape-coverage verdict changed — reconcile the prediction with reality");
+    }
 }
