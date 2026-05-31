@@ -173,6 +173,50 @@ class BoundAnalysisTest {
         assertTrue(BoundAnalysis.discharge(List.of(xr, yr), goal));
     }
 
+    // --- discharge(): disjunctive / conjunctive goals (union returns) -------
+
+    @Test
+    void dischargesUnionValueReturn() {
+        // [Int:0|1] with body 0 → goal (0==0 | 0==1); the first disjunct holds.
+        SymExpr goal = SymExpr.or(
+                cmp(lit(0), SymExpr.CmpOp.EQ, lit(0)),
+                cmp(lit(0), SymExpr.CmpOp.EQ, lit(1)));
+        assertTrue(BoundAnalysis.discharge(List.of(), goal));
+    }
+
+    @Test
+    void dischargesOrGoalWhenADisjunctHolds() {
+        // x == 0 | x == 1  from  x == 0
+        SymExpr goal = SymExpr.or(
+                cmp(v("x"), SymExpr.CmpOp.EQ, lit(0)),
+                cmp(v("x"), SymExpr.CmpOp.EQ, lit(1)));
+        assertTrue(BoundAnalysis.discharge(
+                List.of(cmp(v("x"), SymExpr.CmpOp.EQ, lit(0))), goal));
+    }
+
+    @Test
+    void dischargesAndGoalWhenAllConjunctsHold() {
+        // (x >= 0 ∧ x >= 1)  from  x >= 1
+        SymExpr goal = SymExpr.and(ge(v("x"), 0), ge(v("x"), 1));
+        assertTrue(BoundAnalysis.discharge(List.of(ge(v("x"), 1)), goal));
+    }
+
+    @Test
+    void refusesOrGoalWhenNoDisjunctHolds() {
+        // x == 0 | x == 1  with nothing known about x — x could be 7
+        SymExpr goal = SymExpr.or(
+                cmp(v("x"), SymExpr.CmpOp.EQ, lit(0)),
+                cmp(v("x"), SymExpr.CmpOp.EQ, lit(1)));
+        assertFalse(BoundAnalysis.discharge(List.of(), goal));
+    }
+
+    @Test
+    void refusesAndGoalWhenAConjunctFails() {
+        // (x >= 1 ∧ x >= 5)  from  x >= 1 — the second conjunct isn't provable
+        SymExpr goal = SymExpr.and(ge(v("x"), 1), ge(v("x"), 5));
+        assertFalse(BoundAnalysis.discharge(List.of(ge(v("x"), 1)), goal));
+    }
+
     // --- discharge(): soundness (must refuse) -------------------------------
 
     @Test

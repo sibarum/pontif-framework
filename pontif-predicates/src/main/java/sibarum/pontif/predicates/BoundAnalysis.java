@@ -55,10 +55,22 @@ public final class BoundAnalysis {
      * Can {@code goal} (a {@link SymExpr.Cmp}) be discharged from
      * {@code hypotheses}? Normalizes to {@code (subject - bound) OP 0},
      * bounds the difference, and checks whether the <em>whole</em> resulting
-     * interval satisfies {@code OP 0}. Non-comparison goals are not decided
+     * interval satisfies {@code OP 0}. Disjunctive / conjunctive goals are
+     * decomposed (see below); any other non-comparison goal is not decided
      * here ({@code false}).
      */
     public static boolean discharge(List<SymExpr> hypotheses, SymExpr goal) {
+        // A union *value* refinement reaches here as an Or of comparisons
+        // (e.g. [Int:0|1] → @==0 | @==1; [Int:@<0|@>10] likewise). Sound to
+        // discharge an Or if any disjunct discharges, an And if all conjuncts
+        // do. Incomplete — a true Or whose disjuncts each need a *distinct*
+        // case-split isn't caught here; that's the refinement-proof's job.
+        if (goal instanceof SymExpr.Or(SymExpr orL, SymExpr orR)) {
+            return discharge(hypotheses, orL) || discharge(hypotheses, orR);
+        }
+        if (goal instanceof SymExpr.And(SymExpr andL, SymExpr andR)) {
+            return discharge(hypotheses, andL) && discharge(hypotheses, andR);
+        }
         if (!(goal instanceof SymExpr.Cmp(SymExpr subject, SymExpr.CmpOp op, SymExpr bound))) {
             return false;
         }

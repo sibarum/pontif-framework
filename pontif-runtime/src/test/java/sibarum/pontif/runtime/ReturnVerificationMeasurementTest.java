@@ -133,7 +133,7 @@ class ReturnVerificationMeasurementTest {
         expected.put("singZero",      "PROVABLE");   // singleton (synthesized)
         expected.put("singAns",       "PROVABLE");   // singleton
         expected.put("alwaysFalse",   "PROVABLE");   // [Bool:false] — PREDICT (reflexive)
-        expected.put("bit",           "UNPROVABLE"); // [Int:0|1] — PREDICT (Or goal unhandled)
+        expected.put("bit",           "PROVABLE");   // [Int:0|1] — now provable (Or-goal fix)
         expected.put("prodMag",       "PROVABLE");   // product magnitude — Slice 0
         expected.put("sparse",        "UNPROVABLE"); // true-but-hard → needs a proof
 
