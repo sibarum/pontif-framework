@@ -135,6 +135,44 @@ class BoundAnalysisTest {
         assertTrue(BoundAnalysis.discharge(contradictory, gt(v("x"), 1000)));
     }
 
+    // --- discharge(): product magnitude (interval multiplication) -----------
+
+    @Test
+    void dischargesProductMagnitude() {
+        // x * y >= 6  from  x >= 2, y >= 3  — sign alone gives only >= 1;
+        // interval-multiplying the factors gives [6, ∞).
+        SymExpr goal = cmp(mul(v("x"), v("y")), SymExpr.CmpOp.GE, lit(6));
+        assertTrue(BoundAnalysis.discharge(List.of(ge(v("x"), 2), ge(v("y"), 3)), goal));
+    }
+
+    @Test
+    void dischargesSparsePolynomialUpperRegion() {
+        // (x-3)*(x+5) >= -16  from  x >= 3  — isSparse branch A.
+        // (x-3) ∈ [0,∞), (x+5) ∈ [8,∞), product ∈ [0,∞) >= -16.
+        SymExpr poly = mul(add(v("x"), lit(-3)), add(v("x"), lit(5)));
+        SymExpr goal = cmp(poly, SymExpr.CmpOp.GE, lit(-16));
+        assertTrue(BoundAnalysis.discharge(List.of(ge(v("x"), 3)), goal));
+    }
+
+    @Test
+    void dischargesSparsePolynomialLowerRegion() {
+        // (x-3)*(x+5) >= -16  from  x <= -6  — isSparse branch C.
+        // (x-3) ∈ (-∞,-9], (x+5) ∈ (-∞,-1], product (two negatives) ∈ [9,∞).
+        SymExpr poly = mul(add(v("x"), lit(-3)), add(v("x"), lit(5)));
+        SymExpr goal = cmp(poly, SymExpr.CmpOp.GE, lit(-16));
+        assertTrue(BoundAnalysis.discharge(
+                List.of(cmp(v("x"), SymExpr.CmpOp.LE, lit(-6))), goal));
+    }
+
+    @Test
+    void dischargesBoundedProductUpperBound() {
+        // x * y <= 20  from  (1<=x<=4), (2<=y<=5)  → [1,4]·[2,5] = [2,20]
+        SymExpr xr = SymExpr.and(ge(v("x"), 1), cmp(v("x"), SymExpr.CmpOp.LE, lit(4)));
+        SymExpr yr = SymExpr.and(ge(v("y"), 2), cmp(v("y"), SymExpr.CmpOp.LE, lit(5)));
+        SymExpr goal = cmp(mul(v("x"), v("y")), SymExpr.CmpOp.LE, lit(20));
+        assertTrue(BoundAnalysis.discharge(List.of(xr, yr), goal));
+    }
+
     // --- discharge(): soundness (must refuse) -------------------------------
 
     @Test
@@ -155,6 +193,19 @@ class BoundAnalysisTest {
         // x * x >= 1 with no hypotheses — x could be 0 (the doc's false-ish case)
         SymExpr goal = cmp(mul(v("x"), v("x")), SymExpr.CmpOp.GE, lit(1));
         assertFalse(BoundAnalysis.discharge(List.of(), goal));
+    }
+
+    @Test
+    void refusesSparsePolynomialMiddleRegionWithoutSplit() {
+        // (x-3)*(x+5) >= -16  from  -5 <= x <= 2  — isSparse branch B.
+        // The true minimum (-16, at x=-1) holds, but interval mult over the
+        // whole region gives [-8,-1]·[0,7] = [-56,0], lower bound -56 < -16.
+        // The engine must REFUSE here — this is precisely the case that needs
+        // a case-split (the receipt-graph-refinement slice), not a wider bound.
+        SymExpr poly = mul(add(v("x"), lit(-3)), add(v("x"), lit(5)));
+        SymExpr goal = cmp(poly, SymExpr.CmpOp.GE, lit(-16));
+        List<SymExpr> region = List.of(ge(v("x"), -5), cmp(v("x"), SymExpr.CmpOp.LE, lit(2)));
+        assertFalse(BoundAnalysis.discharge(region, goal));
     }
 
     @Test

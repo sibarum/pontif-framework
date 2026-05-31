@@ -92,6 +92,38 @@ public record Interval(long lo, long hi) {
         return new Interval(satAdd(lo, other.lo), satAdd(hi, other.hi));
     }
 
+    /**
+     * The image of multiplying two ranges: the smallest interval containing
+     * every product {@code a·b} with {@code a ∈ this} and {@code b ∈ other}.
+     * A product is bilinear in its operands, so its extreme values over the
+     * box {@code this × other} occur at the four endpoint corners — the
+     * min/max over them bounds every interior product (sound; tight when
+     * neither interval straddles a sign change).
+     *
+     * <p>This is what lets the bound engine recover product <em>magnitude</em>
+     * ({@code x·y >= 6} from {@code x>=2, y>=3} → {@code [2,∞)·[3,∞)=[6,∞)})
+     * rather than only product <em>sign</em>.
+     *
+     * <p><b>The {@code 0·∞} corner is {@code 0}, and this is forced, not
+     * conventional.</b> {@code 0} is an attained endpoint; {@code ∞} is the
+     * sentinel for "unbounded over finite values", not a value. The slice at
+     * the {@code 0} endpoint contributes exactly {@code 0} to the product
+     * set, while the unboundedness rides on the other corners. Any other
+     * choice is unsound: {@code [0,0]·(-∞,∞)} has true product {@code {0}},
+     * which only {@code 0·∞ = 0} reproduces (anything else excludes the real
+     * value {@code 0}).
+     */
+    public Interval multiply(Interval other) {
+        if (isEmpty() || other.isEmpty()) return empty();
+        long a = satMulFull(lo, other.lo);
+        long b = satMulFull(lo, other.hi);
+        long c = satMulFull(hi, other.lo);
+        long d = satMulFull(hi, other.hi);
+        long newLo = Math.min(Math.min(a, b), Math.min(c, d));
+        long newHi = Math.max(Math.max(a, b), Math.max(c, d));
+        return new Interval(newLo, newHi);
+    }
+
     // --- Saturating long arithmetic over the ±∞ sentinels ------------------
 
     /**
@@ -123,6 +155,26 @@ public record Interval(long lo, long hi) {
             return Math.addExact(a, b);
         } catch (ArithmeticException overflow) {
             return a > 0 ? POS_INF : NEG_INF;
+        }
+    }
+
+    /**
+     * {@code a · b}, saturating, where <em>either</em> operand may be a
+     * {@code ±∞} sentinel (unlike {@link #satMul}, whose first operand is a
+     * finite coefficient). {@code 0 · ±∞ = 0} — the attained-endpoint rule,
+     * forced by soundness; see {@link #multiply}. Finite overflow saturates
+     * to the infinity matching the product's sign.
+     */
+    private static long satMulFull(long a, long b) {
+        if (a == 0 || b == 0) return 0;
+        boolean negative = (a < 0) != (b < 0);
+        if (a == POS_INF || a == NEG_INF || b == POS_INF || b == NEG_INF) {
+            return negative ? NEG_INF : POS_INF;
+        }
+        try {
+            return Math.multiplyExact(a, b);
+        } catch (ArithmeticException overflow) {
+            return negative ? NEG_INF : POS_INF;
         }
     }
 }

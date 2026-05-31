@@ -119,6 +119,13 @@ public final class BoundAnalysis {
      *       This is what bounds opaque products: {@code n*r} with
      *       {@code n>0, r>=1} signs {@code POSITIVE → [1, ∞)}, and
      *       {@code x*x → NON_NEGATIVE → [0, ∞)}.</li>
+     *   <li>for a product atom {@code l*r}, the interval-product of its
+     *       factors' bounds. Sign reasoning gives only the product's
+     *       <em>sign</em> ({@code x*y → [1, ∞)} from {@code x>=2, y>=3});
+     *       multiplying the factor intervals recovers its <em>magnitude</em>
+     *       ({@code [2,∞)·[3,∞) = [6, ∞)}). The two compose under
+     *       intersection — for {@code x*x} over {@code [2,5]} the sign rule
+     *       gives {@code [0,∞)} and the product gives {@code [4,25]}.</li>
      * </ul>
      */
     private static Interval atomBound(SymExpr atom, List<SymExpr> hypotheses) {
@@ -128,6 +135,17 @@ public final class BoundAnalysis {
             if (fromHyp != null) iv = iv.intersect(fromHyp);
         }
         iv = iv.intersect(fromSign(SignAnalysis.computeSign(atom, hypotheses)));
+        // An opaque product atom (a Mul both of whose factors are
+        // non-constant — the only Mul shape normalize leaves as an atom) is
+        // additionally bounded by multiplying its factors' bounds. Sound:
+        // each factor bound is sound and Interval.multiply over-approximates;
+        // intersecting can only tighten, never falsely discharge. Recursion
+        // terminates on strictly-smaller subexpressions.
+        if (atom instanceof SymExpr.Mul(SymExpr l, SymExpr r)) {
+            Interval product = evaluate(LinearForm.normalize(l), hypotheses)
+                    .multiply(evaluate(LinearForm.normalize(r), hypotheses));
+            iv = iv.intersect(product);
+        }
         return iv;
     }
 
