@@ -476,9 +476,17 @@ of it is what's deferred.
 ## Architecture
 
 - **`Closure` (`pontif-ir`) vs. `LambdaValue` (`pontif-ast`) parallel
-  types.** Same conceptual role, different inner shapes
-  (`Environment` vs `CallTarget + captures[]`). Not a bug, but two
-  places to keep in sync if closure semantics ever change.
+  types — deliberate, not actionable.** Reviewed 2026-05-30; these
+  aren't duplication, they're two correct realizations of "closure"
+  for two execution models. `Closure` uses `Environment` (name → value)
+  for the IR interpreter's lazy AST traversal; `LambdaValue` uses
+  Truffle's `CallTarget + Object[]` for positional pre-compiled
+  invocation. Unifying would force either Truffle into the IR
+  interpreter (wrong layering) or name-keyed lookup into the Truffle
+  path (defeats its purpose). The "kept in sync" cost is real but
+  minor — only capture-by-value/reference-style changes would touch
+  both. Entry preserved as a tombstone so the question isn't
+  re-opened without new information.
 - **`CompiledFunction.verification` and `CompiledModule.diagnostics`
   write-only stubs ✅ removed.** Both fields were always set to
   `ProofResult.passed()` and never read; the receipt-graph subsystem is
