@@ -12,8 +12,14 @@ import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.parser.Parser;
+import sibarum.pontif.ir.AliasResolver;
+import sibarum.pontif.receipts.BuiltinIssuer;
+import sibarum.pontif.receipts.Drafter;
+import sibarum.pontif.receipts.ReceiptGraph;
+import sibarum.pontif.receipts.ReceiptGraphPrinter;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Source → {@link CompiledProgram} pipeline. Parses with a configured
@@ -113,7 +119,50 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + e.getMessage()));
         }
+        // Return-refinement gate: reject a declared return the proof system
+        // can't discharge (and no proof is supplied). Sound but incomplete —
+        // it only rejects on a positive NOT-DISCHARGED verdict over a graph
+        // that drafted cleanly; programs outside the receipt-graph's current
+        // scope (drafting throws) abstain rather than reject, so the drafter's
+        // gaps never punish otherwise-valid code.
+        Optional<String> unprovable = firstUnprovableReturn(module);
+        if (unprovable.isPresent()) {
+            return new CompileResult.Failed(RunResult.error(unprovable.get()));
+        }
         return new CompileResult.Compiled(new CompiledProgram(compiled, compiler, simplifier, sourceName));
+    }
+
+    /**
+     * The first function whose declared return refinement the proof system
+     * can't discharge, as an error message — or empty if every refined return
+     * is discharged (or the program falls outside the receipt-graph's scope,
+     * in which case we abstain). Consults the receipt-graph engine
+     * ({@link BuiltinIssuer}), which handles recursion via back-references;
+     * supplied proofs aren't wired through this surface yet (no in-language
+     * proof-authoring), so hard returns reject here until that lands.
+     */
+    private static Optional<String> firstUnprovableReturn(IrModule module) {
+        ReceiptGraph graph;
+        try {
+            graph = Drafter.draft(AliasResolver.resolve(module));
+        } catch (Exception | StackOverflowError e) {
+            return Optional.empty();  // outside the drafter's scope → abstain
+        }
+        List<BuiltinIssuer.Attempt> attempts = BuiltinIssuer.attemptAll(graph);
+        for (int nodeIndex = 0; nodeIndex < graph.roots().size(); nodeIndex++) {
+            final int idx = nodeIndex;
+            List<BuiltinIssuer.Attempt> nodeAttempts =
+                    attempts.stream().filter(a -> a.nodeIndex() == idx).toList();
+            if (!nodeAttempts.isEmpty()
+                    && nodeAttempts.stream().anyMatch(a -> !a.discharged())) {
+                return Optional.of("Cannot prove the declared return refinement of '"
+                        + graph.roots().get(idx).functionName() + "': "
+                        + ReceiptGraphPrinter.renderSym(nodeAttempts.get(0).obligation())
+                        + " — prove it (supply a refinement proof), weaken the declared "
+                        + "return, or drop the narrowing.");
+            }
+        }
+        return Optional.empty();
     }
 
     public sealed interface CompileResult permits CompileResult.Compiled, CompileResult.Failed {

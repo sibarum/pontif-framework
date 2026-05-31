@@ -233,16 +233,14 @@ class PlaygroundProbeTest {
     }
 
     @Test
-    void finding_unprovableReturnRefinementIsUnenforced() throws Exception {
-        // FINDING (soundness gap — verified root cause): return refinements are
-        // never verified by the compile pipeline. FunctionCheck.verifyDefinition
-        // (the "proven return sort" check) is implemented + demo-tested but NOT
-        // invoked by IrCompiler.compile (shared by compile/compileAlt). The
-        // compiler checks only *argument* refinements (StaticDispatch / runtime
-        // match), never *returns*. So bad(x:Int):[Int:@>0] -> x compiles and
-        // bad(-1) returns -1, silently violating the declared [Int:@>0]. Locked
-        // in as current behavior; wiring verifyDefinition into compile is a
-        // design call.
+    void directIrCompilerPathRemainsUngated() throws Exception {
+        // The return-refinement gate now lives in PontifCompiler (the playground
+        // path) and rejects this — see ReturnGateTest.rejectsUnprovableReturn.
+        // But THIS harness compiles via AltParser → IrCompiler directly, which
+        // sits below pontif-receipts and so can't run the receipt-graph gate
+        // (dependency cycle). So the direct IrCompiler path stays ungated: bad
+        // compiles and bad(-1) returns -1. Documents the layer boundary — the
+        // gate protects the user-facing surface, not the low-level IR API.
         assertEquals(-1L, run("""
                 function bad(x:Int):[Int:@>0] -> x
                 bad(-1)"""));
