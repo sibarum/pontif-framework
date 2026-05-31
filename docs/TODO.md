@@ -588,6 +588,123 @@ of it is what's deferred.
   actions are the controlled escape hatch. Likely as a side-by-side IR
   family (`IrAction`, `IrActionStmt`) rather than a tag on `IrExpr`.
 
+## Receipt-graph refinement — custom issuers as type-checked Pontif functions
+
+*Recorded architectural direction, not an immediate slice.*
+
+The receipt-graph subsystem currently sits parallel to the dependent-type
+machinery rather than being driven by it (see "How much of the dependent
+type machinery is leveraging the receipt graph?" — answer: almost none).
+The architecturally clean move that resolves this without weakening the
+trust base, and simultaneously unlocks user-defined proof systems
+(traction, Tri-logic, anything algebra-specific), looks roughly like:
+
+**Receipt-graph nodes become a runtime-accessible value with structure
+Pontif can pattern-match on.** A custom issuer is a Pontif function of
+shape:
+
+```
+function refine(b: Branch): [List<Branch>:
+    covers(@, b) & disjoint(@) & all-recursively-dischargeable(@)]
+```
+
+The construction precondition `covers & disjoint & all-recursively-
+dischargeable` is the proof of validity. The kernel decides it via the
+machinery that already gates ordinary Pontif functions:
+
+- **Coverage**: match totality (the `PredicateArithmetic` kernel decides
+  union-covers-domain for the integer/bool fragment).
+- **Disjointness**: overload-overlap rejection (the same kernel decides
+  pairwise unsatisfiability).
+- **Per-leaf discharge**: refinement satisfaction (existing
+  `Refinements.satisfies` + `BoundAnalysis`).
+
+**Trust does not move.** The Drafter stays Java-trusted (deterministic,
+small, no reasoning). The Notary stays Java-trusted (refutation-only). A
+user's custom issuer is *no more trusted than any other user function* —
+its outputs are values whose validity is gated by refinement at
+construction time. If Pontif type-checks the issuer, it's correct; if it
+doesn't, no value is constructed and no proof is asserted. Both outcomes
+are safe.
+
+**The clean payoff: nonlinear discharge via piecewise-linear case
+analysis, kernel-verified.**
+
+Worked example. Prove `(x-3)*(x+5) >= -16` for any integer x. The
+linear-bound engine can't handle this directly — it's a nonlinear product
+of two atoms, and `BoundAnalysis` treats the whole product as a single
+opaque atom (bounded only by sign reasoning, which gives nothing
+useful here).
+
+A custom issuer refines the single branch `(unconditional, prove
+(x-3)*(x+5) >= -16)` into three sub-branches:
+
+```
+branch A [x >= 3]:          goal: (x-3)*(x+5) >= -16
+branch B [-5 < x < 3]:      goal: (x-3)*(x+5) >= -16
+branch C [x <= -5]:         goal: (x-3)*(x+5) >= -16
+```
+
+The kernel verifies (no double-counting; the three guards partition
+ℤ exhaustively). Each leaf is now a piecewise problem:
+
+- Branch A: under `x >= 3`, both `(x-3) >= 0` and `(x+5) >= 8`, so the
+  product `>= 0 >= -16` by `BoundAnalysis`'s opaque-product rule.
+- Branch B: the minimum of `(x-3)*(x+5)` on `[-4, 2]` is at `x = -1`,
+  giving `(-4)*4 = -16`. A second refinement splits this case on
+  `x <= -1` vs `x >= -1`, each closing via linear bounds on `(x-3)` and
+  `(x+5)` separately.
+- Branch C: under `x <= -5`, both `(x-3) <= -8` and `(x+5) <= 0`, so the
+  product `>= 0 >= -16` again.
+
+**The whole proof is recorded in the refined receipt graph.** No step
+happens off the books; every case is named and verified. The custom
+issuer can be inspected, replayed, and audited. The trust comes from
+the kernel checking each refinement step at construction time, not from
+trusting the issuer's logic. **Traceability and trust come from the
+same property.**
+
+**The recursive case (infinite streams).** A refining issuer can recurse
+indefinitely on case-splits — terminating by Pontif's structural-
+recursion / match-totality guarantees, exactly the same property that
+makes ordinary recursive functions trusted to terminate. This means
+decision-procedure-shaped proofs (Cooper-style quantifier elimination,
+simplex-style case enumeration) become user-writable as recursive Pontif
+functions, with the kernel verifying soundness at each split.
+
+**What this changes elsewhere:**
+- The "issuer plugin interface (Maven-style)" deferred item largely
+  dissolves — custom issuers are just user functions; no plugin protocol
+  needed beyond the language itself.
+- The "Deep work — oracle territory" section shrinks. Piecewise-linear
+  nonlinear reasoning is no longer oracle work; only the parts that
+  *can't* be expressed as piecewise-linear case analysis over integer
+  ranges remain (genuinely transcendental shapes, undecidable fragments,
+  quantified statements that don't admit case enumeration).
+- The compile-time function-check path could consult custom issuers'
+  outputs — closing the "receipt-graph and compile-time check are
+  parallel, not integrated" gap noted elsewhere.
+
+**Design call when this is taken on:**
+
+What exactly goes in `ClosingReceipt`'s refinement clause? Three
+candidates:
+
+- Strict: `[ClosingReceipt: discharge(graph.facts(@.ref), @.conclusion)]`
+  — Pontif must re-verify the obligation from the named path facts.
+  Requires `discharge` callable from Pontif (in some form).
+- Structural: `[ClosingReceipt: substituted(@.ref).implies(@.conclusion)]`
+  — the substituted goal at the referenced branch implies the
+  conclusion. Less about specific decision procedures, more about
+  logical entailment.
+- Loose: well-formedness only; the payload carries the proof witness
+  for third-party verification. Snake-oil territory unless signed.
+
+The middle ground is probably the design sweet spot, but it's a real
+choice.
+
+---
+
 ## Deep work — oracle territory
 
 Anything past Pontif's built-in trivial issuer is oracle work; the
