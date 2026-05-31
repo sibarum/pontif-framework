@@ -80,6 +80,16 @@ public final class OverloadOverlap {
                     IrStmt.FunctionDecl b = overloads.get(j);
                     Result r = checkPair(a, b);
                     if (r instanceof Result.Overlapping ov) {
+                        // Zero-arg overloads are value/let bindings, not real
+                        // overloads — "overlap at parameter 1" is nonsense when
+                        // there's no parameter. Report it as a redefinition.
+                        if (a.params().isEmpty()) {
+                            throw new CompileException(
+                                    "'" + a.name() + "' is already defined — a value or "
+                                            + "zero-argument function named '" + a.name()
+                                            + "' can't be declared twice (no shadowing).",
+                                    b.origin());
+                        }
                         throw new CompileException(
                                 "Overloads of '" + a.name()
                                         + "' overlap at parameter " + (ov.paramIndex() + 1)

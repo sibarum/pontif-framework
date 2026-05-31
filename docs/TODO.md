@@ -305,6 +305,76 @@ of it is what's deferred.
 
 ---
 
+## Return verification + refinement-syntax direction (2026-05-31 session)
+
+Decisions and findings from a playground pre-flight pass (`pontif-runtime/
+PlaygroundProbeTest`, 35 probes — realistic alt programs run end-to-end).
+
+**🔴 Soundness gap — return refinements are never verified in the run path.**
+`FunctionCheck.verifyDefinition` (the "proven return sort" check) is
+implemented + demo-tested but **never called by `IrCompiler.compile`** (the
+path both `compile`/`compileAlt`/playground share). The compiler checks only
+*argument* refinements (`StaticDispatch.imply`, runtime match via
+`Refinements.satisfies`) — never *returns*. So `function bad(x:Int):[Int:@>0]
+-> x` compiles and `bad(-1)` returns `-1`, silently violating its declared
+sort. **Decision (James): reject unprovable returns.** A declared return is a
+*claim* — prove it or it's rejected; the programmer's recourse to not prove
+is to not *declare* the narrowing. Inference stays best-effort (narrow only
+what's provable, else base) — it never lies, just stays conservative.
+Silent-widen is rejected (it's the COTT "lie by omission").
+**Coupling (load-bearing):** with an incomplete engine and no proof-supply
+path wired in, naive rejection rejects *true-but-unprovable* returns —
+including `isSparse` `[Int:@>=-16]`. So reject-unprovable-returns is the
+policy that makes the receipt-graph refinement (Slice 1b) *necessary*, not
+decorative. **Sequence:** (A) wire `verifyDefinition` in as a non-fatal
+*measurement* first (blast radius across the corpus — how many declared
+returns are provable today); (B) flip to hard rejection for provable cases;
+(C) wire Slice-1b `Refinement` into compile as the proof-supply recourse for
+the hard cases. Do NOT flip rejection before C or the language bricks on its
+own incompleteness.
+
+**✅ Confirmed working (locked in by tests):** dependent return refinements
+referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
+and the spec-only form synthesizes the body from the `a+b` pin. This is
+"Scenario 1" (crucial for synthesis / elaborate proofs) and it already works;
+no build needed.
+
+**Refinement-syntax direction (the "#2" thread).** Unifying principle:
+*a refinement can refer to whatever's in scope at its position; the sugar is
+just dropping what's inferable.* The grammar is unambiguous — every stage's
+kind is fixed by its leading lexeme (`@…` = focus/drill; `(` after an ident =
+deconstruction; comparison = predicate with implicit/explicit subject; bare
+ident = sort-or-name). `:` is one uniform "refined-by / has-sort" connective
+(not overloaded); `@.field` is the operator that shifts the subject inward.
+Wanted forms:
+- `[Int>=0]` ≡ `[Int:@>=0]` (base + implicit `@`); needed where there's no
+  subject (return/param positions).
+- `[@>0]` contextual base — should work on *any* statically-typed scrutinee,
+  not just a bare Var (**fixes F1**: `match n+1 { [@<=0] -> … }` currently
+  parse-errors "no contextual base"; explicit `[Int:@<=0]` is the workaround).
+- Constructor deconstruction `[Point(x>0, y==0)]` — binds-and-constrains per
+  field (breadth). Endorsed.
+- Path refinement `[Vector:@.x:Rational:@.denominator>0]` — drill one field
+  deep, no sibling `_`s (depth). Composes with deconstruction:
+  `[Vector:@.x:Rational(numerator>0, denominator>0)]`.
+- The one enabling slice under all of these: **type/name/field-environment-
+  aware match-and-refinement elaboration** (today the parser is nearly
+  type-blind — the F1 root). Open decision: are types and values separate
+  namespaces (Capital vs lowercase, as all examples assume)? If yes, a leading
+  identifier is classified *lexically* before any scope lookup.
+
+**"Scenario 2" restriction (no tuples yet).** A bare free-name match predicate
+`match x { [y>0] -> … }` has no referent without tuples/deconstruction to
+introduce `y` — it's a **hard error** until tuples land (confirmed rejected by
+test). Names in match arms come only from constructor deconstruction;
+return-refinement names come only from the parameter list.
+
+**Confirmed known gaps (now test-pinned):** `!` boolean negation parses but
+can't lower (no `Not` op, F2); inline alt lambda `(x:Int)->…` not parseable
+(F3). **Fixed this session:** `let` redefinition now reports "'n' is already
+defined" instead of the generic overload-overlap message (`OverloadOverlap`
+special-cases zero-arg overloads).
+
 ## Traits — follow-on work
 
 - **Default method impls in trait bodies.** Trait body provides a
@@ -703,6 +773,157 @@ candidates:
 The middle ground is probably the design sweet spot, but it's a real
 choice.
 
+### Implementation working-session refinements (2026-05-31)
+
+Worked through *how* to build it; surfaced corrections and a sharper
+design. **These supersede the worked-example analysis above and the
+matching claims in `docs/receipt-graph-refinement.md`** — update both
+when this is taken on.
+
+**Correction — the worked example does NOT close today, and not for the
+reason given.** Branches A/B/C above all reach `NOT DISCHARGED` on the
+current engine. `BoundAnalysis` treats `(x-3)*(x+5)` as one opaque atom
+(`LinearForm.normalize`: a `Mul` with neither side constant → opaque),
+so it never bounds the two factors. The only fallback is `SignAnalysis`,
+which *loses the shift*: `signFromHypotheses` fires only when the
+hypothesis is about the literally-identical expression, so `sign(x-3)`
+under `x>=3` is `sign(x) ⊕ sign(-3) = POSITIVE ⊕ NEGATIVE = TOP`. Product
+→ TOP → no bound. So even branch A (the "easy" one) fails. The doc's "no
+new trusted code" claim is wrong: a base-engine addition is a hard
+prerequisite.
+
+**Slice 0 (prerequisite, independently useful) — interval × interval
+multiplication. ✅ landed (2026-05-31).**
+- `Interval.multiply(other)`: four-corner method (`lo·lo, lo·hi, hi·lo,
+  hi·hi`, take min/max). Needs a general saturating mul where *either*
+  operand may be `±∞` (the current `satMul` assumes a finite
+  coefficient). The `0·∞` corner is **forced to 0** — see design note.
+- `BoundAnalysis.atomBound`: when the atom is a genuine opaque `Mul(l,r)`,
+  recursively `bound(l)`/`bound(r)`, multiply, and **intersect** into the
+  existing hypotheses+sign result (they compose — `x*x` over `[2,5]` gets
+  `[4,25] ∩ [0,∞)`). Recursion terminates on subexpression structure.
+- Closes branch A (`[0,∞)·[8,∞)=[0,∞)`), branch C
+  (`[-∞,-9]·[-∞,-1]=[9,∞)`), AND the long-standing `x*y>=6` from
+  `x>=2,y>=3` gap (`[2,∞)·[3,∞)=[6,∞)`) — *with no case-split at all*.
+  Moves product-magnitude out of oracle territory.
+- Regression watch: factorial `n_0*r_1>=1` (mult → `[1,∞)`, same as the
+  sign path); `x*x` unbounded (sign still carries it).
+- No design ambiguity; executable as-is.
+
+*Landed:* `Interval.multiply` (four-corner, with explicit `satMulFull`
+where the `0·∞=0` soundness decision is commented at its site) +
+`BoundAnalysis.atomBound` recursing into opaque-`Mul` factors and
+intersecting the interval-product into the hyp+sign result. Closes
+`x*y>=6` and isSparse branches A/C with no split; the un-split middle
+region B correctly *refuses* (pinned as a soundness test — the case that
+motivates the next slice). New `IntervalTest` (12) + 6 `BoundAnalysisTest`
+cases; full suite green, no regressions.
+
+**Design note — `0·∞=0` is forced by soundness, not convention; `∞`
+never becomes a value.** Forcing counterexample: `[0,0]·[-∞,∞]` has true
+product `{0}`; any `0·∞=k≠0` yields `[k,k]`, excluding the real value 0 →
+unsound (would discharge `result≠0` for an identically-zero expression).
+Set-level trichotomy: `0·∞` (really `0·S`, S finite-unbounded) → solution
+set `{0}`, forced; `1/0` (`q·0=1`) → empty set, *no* sound value
+(Lean/Isabelle's `1/0=0` is a totality *convention* that knowingly breaks
+`(1/x)·x=1` at 0 — chosen, not forced); `0/0` (`q·0=0`) → everything,
+genuine `⊤`. Principle: `∞` is a lattice sentinel ("unbounded above"),
+never a `SymExpr` value — so there is no extended-integer algebra
+(`ℤ∪{±∞}` is no ring) to commit to, and `∞` always erases back to a
+one-sided / absent refinement. Consistent with `Frac` already rejecting
+`denom==0` and with totality gating any future division.
+
+**Design refinement — conservative morphisms make coverage/disjointness
+invariants, not checks.** Supersedes the "Coverage = match totality /
+Disjointness = overload-overlap" framing above. Instead of "user produces
+`List<Branch>`, kernel then *checks* coverage+disjointness via
+`PredicateArithmetic`," the only splitting primitive is a binary cut:
+
+```
+splitOn(branch, p) → { branch ∧ p , branch ∧ ¬p }
+```
+
+- Coverage is excluded middle (`(G∧p)∨(G∧¬p)=G`); disjointness is
+  non-contradiction (`(G∧p)∧(G∧¬p)=⊥`). Both hold *by construction* —
+  invalid partitions are unrepresentable. **This removes
+  `PredicateArithmetic` from the split-validation path entirely** (one of
+  the two reach-limiting kernels drops out).
+- `¬p` stays symbolic (never simplified, for conservation); only *leaf
+  discharge* interprets guards, and the fallible engine can only fail-safe
+  (honest non-discharge, never false discharge). Tree-soundness and
+  leaf-soundness are cleanly separated.
+- No expressiveness lost: any finite predicate-partition is a tree of
+  binary cuts (the doc's 3-way A/B/C = two `splitOn`s). The cut tree *is*
+  the traceable proof.
+- Limit: `splitOn` conserves the *domain partition* only. Goal-rewrite
+  (`obligation ⟺ obligation'`) and induction (back-reference IH, already
+  shipping) are separate morphism classes with their own conservation
+  laws. Kit is `{split, discharge, induct}`; build only `splitOn` now,
+  generalize the morphism interface only once a second instance exists.
+
+**Leaf endgame + termination.** Branch B (bounded interval with interior
+minimum) needs recursion: `splitOn` down to singletons `x=-5..2`, where
+interval-mult is *exact* and each leaf is a constant comparison.
+Termination measure for the split-recursion = the interval's width
+(strictly decreasing) — answers open-Q#5 for this morphism class.
+
+**Feasibility framing — per-application validation, no universal
+verification.** For the "human writes the split" milestone the split is
+*concrete data*, so nothing is universally quantified — you validate
+ground output, exactly as the Notary validates an emitted receipt (it
+never trusts issuer *logic*). The "is `refine` valid for all inputs"
+question only arises later, when a split becomes a reusable Pontif
+function. So the hard architectural fork is off the table for
+feasibility; it's answerable entirely in Java with no Pontif-side
+`SymExpr` / `refine`.
+
+**Re-slicing (feasibility-first):**
+- Slice 0 ✅ landed — interval multiplication (above). Unblocks every leaf;
+  independently useful.
+- Slice 1a ✅ landed (2026-05-31) — conservative combinator + validator.
+  `Refinement` (sealed `Leaf`/`Split`): the only constructor is
+  `splitOn(p, whenTrue, whenFalse)` storing *only* `p` — the `¬p` guard is
+  *derived* (`complement`, exact op-flip over the total order), so a
+  non-partition is unrepresentable; coverage (excluded middle) and
+  disjointness (non-contradiction) are structural, never checked.
+  `RefinementValidator` walks the tree reusing `PathFacts` +
+  `IntegerDischarge`, accumulating split guards, verifying only per-leaf
+  discharge, and returns a tree-shaped `Outcome` (fully traceable: which
+  guard each leaf sat under, whether it closed). Cmp-only predicates for
+  now (And/Or De Morgan deferred — compose binary cuts instead).
+  **Headline test:** `isSparse` `(x-3)*(x+5) >= -16` closes end-to-end via
+  splits A `[x>=3]` / C `[x<=-6]` (both via Slice-0 interval mult) + region
+  B `[-5..2]` recursed to singletons (exact). Negative controls: un-split
+  doesn't close; an *insufficient* split (valid partition, open leaf)
+  reports unverified with the trace pinpointing the open leaf. Purely
+  additive (no existing file touched); full suite green.
+- Slice 1b — wire `Refinement` into the graph + `ReceiptGraphPrinter` +
+  `ReceiptGraphReport` so a refined branch renders in the
+  `target/receipt-graphs/*.receipts.txt` artifact, and `BuiltinIssuer`/
+  `Notary` handle refined branches (issuer derives the obligation and
+  hands it to the validator; closing receipt over the refined leaves).
+  This is the reviewable-artifact half of Slice 1.
+- Slice 2 — split supplied as data (not hardcoded) + recursion to
+  singletons for region B.
+- Slice 3 — `refine` as a Pontif function: Pontif-side `SymExpr`/`Branch`,
+  calling user code during checking, validator on its output. The
+  language lift; open-Qs #1/#2/#4 live here.
+- Slices 0–2 are Java-only and deliver the reviewable text artifact;
+  Slice 3 concentrates the language work.
+
+**Proof-file model (separate file, like a unit test — with one
+reframe).** Bespoke proofs live in a separate file, opt-in where the
+auto-prover falls short, one subject per file, independently checkable,
+reviewable, distributable as a library. *But* a proof is a **required
+lemma keyed to an obligation, not an optional test**: if the obligation
+doesn't auto-discharge, the proof file is load-bearing for the type's
+validity — its absence or staleness must hard-fail compilation. Binding
+is semantic (`proves isSparse : @ >= -16`, matched to the graph);
+staleness is caught by a `skeletonMatches`-style re-draft-and-compare
+(the Notary already does this for receipt graphs). The conservative
+combinators are what make the hand-authored file safe — it can express an
+*insufficient* proof (leaves don't close) but never a *wrong* one.
+
 ---
 
 ## Deep work — oracle territory
@@ -721,9 +942,11 @@ earn its keep.
   opaque-atom sign bounds. The oracle boundary moved: **linear integer
   arithmetic is built-in; oracles start at general nonlinear / quantified /
   multi-atom-linear.** Still out of reach — `sum(n) == n*(n+1)/2`
-  (nonlinear closed form), product *magnitude* (`x*y >= 6` from
-  `x>=2,y>=3` gets only the sign), and multi-atom hypothesis constraints
+  (nonlinear closed form) and multi-atom hypothesis constraints
   (`x+y>0` bounds neither alone — needs Fourier–Motzkin / Presburger).
+  (Product *magnitude*, `x*y >= 6` from `x>=2,y>=3`, **left** oracle
+  territory when the receipt-graph-refinement Slice 0 interval-multiply
+  landed 2026-05-31 — `[2,∞)·[3,∞)=[6,∞)`, no case-split. See that section.)
   Z3-style arithmetic, an inductive prover, or a hand-written issuer
   module fit there.
 - **Proof Authority (PA) trust model — roadmap goal, low priority.**
