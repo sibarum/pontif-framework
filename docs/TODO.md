@@ -333,6 +333,22 @@ returns are provable today); (B) flip to hard rejection for provable cases;
 the hard cases. Do NOT flip rejection before C or the language bricks on its
 own incompleteness.
 
+*Step A (measurement) ✅ landed (`ReturnVerificationMeasurementTest`).* Across
+a representative corpus: **PROVABLE** today — `factorial` (inductive back-ref
+IH), `inc` (linear threshold), `square` (sign square-rule), `prod` (product
+magnitude — the Slice-0 win at the verification level), `addNonNeg` (linear);
+**UNPROVABLE** — `isSparse` (true-but-hard → needs the Slice-1 proof-supply
+recourse) and `bad` (genuinely false → correctly rejected). Blast radius is
+the expected shape: simple linear/sign/inductive returns sail through; the
+rejected set is exactly {needs-a-proof, real-error}. **Key refinement this
+surfaced:** the gate should consult the **receipt-graph engine**
+(`BuiltinIssuer`/`Notary` — per-branch, recursion-capable), NOT
+`FunctionCheck.verifyDefinition` (whole-body; can't carry the inductive
+hypotheses recursion needs — `factorial` would fail it). So step B = wire
+`IrCompiler` to reject a refined return whose receipt-graph obligation is NOT
+discharged; step C = let a supplied `Refinement` (Slice 1b) discharge the hard
+ones first.
+
 **✅ Confirmed working (locked in by tests):** dependent return refinements
 referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
 and the spec-only form synthesizes the body from the `a+b` pin. This is
