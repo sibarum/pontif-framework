@@ -372,6 +372,16 @@ goal if any disjunct discharges (and `And` if all do). That moves union
 returns to PROVABLE, shrinking the rejected set to exactly
 {genuinely-false, true-but-hard-with-proof}.
 
+*Or-goal fix ✅ landed.* `BoundAnalysis.discharge` now decomposes
+disjunctive/conjunctive goals (Or → any disjunct discharges; And → all do).
+Union value returns (`[Int:0|1]`, `[Int:@<0|@>10]`) now discharge; `bit`
+flipped to PROVABLE in the shape-coverage measurement. So the gate's rejected
+set is now exactly {genuinely-false, true-but-hard-with-proof} — the clean
+partition. (Type-union `[Int|Rational|Decimal]` is the sort system's, not a
+discharge goal; deep-nested mixes degrade gracefully — an unreadable disjunct
+just doesn't discharge.) **Path to the gate (step B) is now clear:**
+provable → pass, false → reject, hard → consult supplied proof.
+
 **✅ Confirmed working (locked in by tests):** dependent return refinements
 referencing parameters — `function add(a:Int,b:Int):[Int:a+b] -> a+b` runs,
 and the spec-only form synthesizes the body from the `a+b` pin. This is
