@@ -108,6 +108,64 @@ public final class PontifCompiler {
     }
 
     /**
+     * Compiles a project from disk: discovers the {@code module.ptf.toml} root
+     * marker, scans + parses every {@code .ptf} module under {@code rootDir},
+     * resolves the entry module (marker {@code entry}, else the sole module with
+     * a {@code main}), and links. The on-disk counterpart of
+     * {@link #compileProject(Map, String)}.
+     */
+    public CompileResult compileProjectDir(java.nio.file.Path rootDir) {
+        sibarum.pontif.runtime.module.ProjectRoot root;
+        Map<String, IrModule> modules;
+        try {
+            root = sibarum.pontif.runtime.module.ProjectRoot.read(rootDir);
+            modules = sibarum.pontif.runtime.module.ModuleLoader.load(rootDir);
+        } catch (ParseException pe) {
+            return new CompileResult.Failed(
+                    RunResult.error("Parse error: " + pe.getMessage(), pe.origin()));
+        } catch (java.io.IOException io) {
+            return new CompileResult.Failed(RunResult.error("Project load error: " + io.getMessage()));
+        } catch (RuntimeException e) {
+            return new CompileResult.Failed(RunResult.error("Project load error: " + e.getMessage()));
+        }
+        if (modules.isEmpty()) {
+            return new CompileResult.Failed(
+                    RunResult.error("No .ptf modules found under " + rootDir));
+        }
+        if (root.entryModule().isPresent()) {
+            String entry = root.entryModule().get();
+            if (!modules.containsKey(entry)) {
+                return new CompileResult.Failed(RunResult.error(
+                        "Entry module '" + entry + "' (from " + sibarum.pontif.runtime.module
+                                .ProjectRoot.MARKER + ") is not among the project's modules: "
+                                + modules.keySet()));
+            }
+            return compileProject(modules, entry);
+        }
+        String inferred = soleModuleWithMain(modules);
+        if (inferred == null) {
+            return new CompileResult.Failed(RunResult.error(
+                    "No entry module: set `entry = \"…\"` in " + sibarum.pontif.runtime.module
+                            .ProjectRoot.MARKER + ", or have exactly one module with a main expression."));
+        }
+        return compileProject(modules, inferred);
+    }
+
+    /** The single module whose {@code main} isn't the trivial {@code 0} placeholder, or null. */
+    private static String soleModuleWithMain(Map<String, IrModule> modules) {
+        String found = null;
+        for (Map.Entry<String, IrModule> e : modules.entrySet()) {
+            sibarum.pontif.ir.IrExpr main = e.getValue().main();
+            boolean trivial = main instanceof sibarum.pontif.ir.IrExpr.Lit l && l.value() == 0L;
+            if (!trivial) {
+                if (found != null) return null;  // ambiguous — more than one main
+                found = e.getKey();
+            }
+        }
+        return found;
+    }
+
+    /**
      * Compiles a multi-file project: links the parsed modules into one combined
      * module (FQN-keyed, coherence-checked) and runs it through the same
      * pipeline as a single file — so the return gate, overload check, and
