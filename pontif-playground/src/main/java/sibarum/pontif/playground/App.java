@@ -96,6 +96,11 @@ public final class App {
 
             module tour
 
+            # The proof vocabulary (Leaf, Split) ships as a builtin module you
+            # import — like a standard library. The `requires` line below brings
+            # them into scope; no need to declare them yourself.
+            requires std.proof.{Leaf, Split}
+
             # Most returns prove themselves. inc's declared return [Int:@>1] is
             # a linear bound: given x >= 1, the engine sees x + 1 lands in
             # [2, infinity) and clears the > 1 bar on its own — no help needed.
@@ -106,11 +111,9 @@ public final class App {
             # product, and the built-in engine can't see that. Declaring
             # [Int:@>=0] would be rejected on its own. So we hand it a PROOF.
 
-            # A proof is a tree of case-splits, built from these two structs.
-            # (Split refers to itself through the [Leaf|Split] union, so this is
-            # also a recursive type — lists and trees work the same way.)
-            struct Leaf()
-            struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
+            # A proof is a tree of case-splits, built from Leaf and Split (the
+            # types imported above). Split refers to itself through a
+            # [Leaf|Split] union — it's a recursive type, like lists and trees.
 
             # Split on x >= 1; each leaf is then within the engine's reach:
             #   x >= 1  ->  both factors >= 0, so the product >= 0

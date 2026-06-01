@@ -51,10 +51,9 @@ class PlaygroundIntegrationTest {
     private static final String DEFAULT_TOUR = """
             module tour
 
-            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
+            requires std.proof.{Leaf, Split}
 
-            struct Leaf()
-            struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
+            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
             function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
             proof quirk = Split(x >= 1, Leaf(), Leaf())

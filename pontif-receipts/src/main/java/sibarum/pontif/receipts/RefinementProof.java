@@ -42,7 +42,9 @@ public final class RefinementProof {
                             + proofTree.getClass().getSimpleName(),
                     proofTree.origin());
         }
-        String type = rec.typeName();
+        // Match on the local constructor name: in a linked project the type is
+        // FQN'd (e.g. `std.proof/Split`), in a single bare file it's just `Split`.
+        String type = localName(rec.typeName());
         if ("Leaf".equals(type)) {
             if (!rec.members().isEmpty()) {
                 throw new CompileException("proof Leaf takes no fields", rec.origin());
@@ -62,9 +64,41 @@ public final class RefinementProof {
                     fromIr(member(rec, "whenTrue"), rename),
                     fromIr(member(rec, "whenFalse"), rename));
         }
+        if ("Singletons".equals(type)) {
+            // Generative "recursion to singletons": unfold to a conservative
+            // ladder isolating each integer in [lo, hi] over the subject. The
+            // subject is renamed to its graph form like a Split predicate; lo/hi
+            // must be integer literals.
+            SymExpr subject = Substitute.apply(
+                    IrCompiler.compileSymExpr(member(rec, "subject")), rename);
+            long lo = intLiteral(rec, "lo");
+            long hi = intLiteral(rec, "hi");
+            if (lo > hi) {
+                throw new CompileException(
+                        "proof Singletons has empty range: lo=" + lo + " > hi=" + hi, rec.origin());
+            }
+            return Refinement.splitToSingletons(subject, lo, hi);
+        }
         throw new CompileException(
-                "unknown proof constructor '" + type + "'; expected Leaf or Split",
+                "unknown proof constructor '" + type + "'; expected Leaf, Split, or Singletons",
                 rec.origin());
+    }
+
+    /** The local part of a possibly-FQN'd type name ({@code std.proof/Split} → {@code Split}). */
+    private static String localName(String typeName) {
+        if (typeName == null) return null;
+        int slash = typeName.lastIndexOf('/');
+        return slash >= 0 ? typeName.substring(slash + 1) : typeName;
+    }
+
+    private static long intLiteral(IrExpr.Record rec, String field) throws CompileException {
+        IrExpr e = member(rec, field);
+        if (e instanceof IrExpr.Lit lit) {
+            return lit.value();
+        }
+        throw new CompileException(
+                "proof Singletons field '" + field + "' must be an integer literal; got "
+                        + e.getClass().getSimpleName(), e.origin());
     }
 
     private static IrExpr member(IrExpr.Record rec, String name) throws CompileException {

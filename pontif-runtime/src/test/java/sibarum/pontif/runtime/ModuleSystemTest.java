@@ -276,6 +276,37 @@ class ModuleSystemTest {
     }
 
     @Test
+    void singleFile_requiresBuiltinProofModule_constructsImportedStruct() {
+        // A single alt file that `requires std.proof.{...}` opts into the module
+        // pipeline: the builtin std.proof module is injected, the import is
+        // validated, and the imported Leaf/Split types construct as records.
+        // No `module` decl, no hand-declared structs.
+        String src = """
+                requires std.proof.{Leaf, Split}
+                Split(true, Leaf(), Leaf())
+                """;
+        CompileResult r = compiler.compileAlt(src, "demo.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "expected compile success; got: " + ((CompileResult.Failed) r).error().text());
+        assertTrue(!runner.run(r, Engine.INTERPRETER).isError());
+    }
+
+    @Test
+    void requiresBuiltin_thatIsNotImported_isUnaffected() {
+        // A program importing nothing from std.proof must not see Leaf/Split —
+        // proving builtins are injected only on demand (no shadowing of a user's
+        // own Leaf, no ambiguity pollution).
+        String src = """
+                struct Leaf(tag:Int)
+                Leaf(7).tag
+                """;
+        CompileResult r = compiler.compileAlt(src, "demo.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "expected compile success; got: " + ((CompileResult.Failed) r).error().text());
+        assertEquals("7", runner.run(r, Engine.INTERPRETER).text());
+    }
+
+    @Test
     void unknownEntryModule_isHardError() {
         Map<String, String> src = new LinkedHashMap<>();
         src.put("lib", "module lib\nfunction f(x:Int):Int -> x\n0");

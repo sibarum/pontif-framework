@@ -58,7 +58,9 @@ public final class StructLiteralRewriter {
                     }
                     yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, ti.origin());
                 }
-                default -> stmt;  // TypeAlias / Requires / Exports / Proof / NoOp carry no struct-literal expr
+                case IrStmt.Proof p -> new IrStmt.Proof(
+                        p.functionName(), rewriteExpr(p.proofTree(), structs), p.origin());
+                default -> stmt;  // TypeAlias / Requires / Exports / NoOp carry no struct-literal expr
             });
         }
         return new IrModule(combined.name(), out, rewriteExpr(combined.main(), structs));

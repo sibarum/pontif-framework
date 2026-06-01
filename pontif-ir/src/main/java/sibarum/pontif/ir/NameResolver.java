@@ -69,7 +69,10 @@ public final class NameResolver {
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
                         resolveTypeName(ta.name(), m, table, ta.origin()),
                         rewriteSort(ta.sort(), m, table), ta.origin());
-                default -> stmt;  // Requires / Exports / Proof / NoOp unchanged
+                case IrStmt.Proof p -> new IrStmt.Proof(
+                        resolveCallName(p.functionName(), m, table),
+                        rewrite(p.proofTree(), m, table), p.origin());
+                default -> stmt;  // Requires / Exports / NoOp unchanged
             });
         }
         return new IrModule(m, out, rewrite(module.main(), m, table));

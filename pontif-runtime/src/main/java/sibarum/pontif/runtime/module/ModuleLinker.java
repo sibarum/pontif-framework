@@ -12,8 +12,11 @@ import sibarum.pontif.ir.NameResolver;
 import sibarum.pontif.ir.StructLiteralRewriter;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Links the parsed modules of a project into a single combined {@link IrModule}
@@ -51,15 +54,20 @@ public final class ModuleLinker {
             throw new CompileException(
                     "Unknown entry module '" + entryModule + "'", Origin.NONE);
         }
-        ModuleSymbolTable table = ModuleSymbolTable.build(modules);
+        // Seed compiler-provided modules that some user module `requires` — and
+        // only those, so a program that imports none is unaffected (no shadowing
+        // or ambiguity from unused builtins).
+        Map<String, IrModule> all = withRequiredBuiltins(modules);
+
+        ModuleSymbolTable table = ModuleSymbolTable.build(all);
         // Coherence + import validation run on the pre-FQN-rewrite modules
         // (bare names match the table).
-        CoherenceCheck.check(modules, table);
-        ModuleImportCheck.check(modules, table);
+        CoherenceCheck.check(all, table);
+        ModuleImportCheck.check(all, table);
 
         List<IrStmt> statements = new ArrayList<>();
         IrExpr main = IrExpr.lit(0);
-        for (Map.Entry<String, IrModule> e : modules.entrySet()) {
+        for (Map.Entry<String, IrModule> e : all.entrySet()) {
             IrModule resolved = NameResolver.resolve(e.getValue(), table);
             statements.addAll(resolved.statements());
             if (e.getKey().equals(entryModule)) {
@@ -70,5 +78,38 @@ public final class ModuleLinker {
         // parser only sees local structs); now that every struct definition is
         // FQN'd and visible in the combined module, rewrite them to Records.
         return StructLiteralRewriter.rewrite(new IrModule(entryModule, statements, main));
+    }
+
+    /**
+     * Returns {@code modules} augmented with any builtin module that a user
+     * module {@code requires} (and that the user hasn't itself defined). When no
+     * builtin is required, returns {@code modules} unchanged — so non-importing
+     * programs link exactly as before.
+     */
+    private static Map<String, IrModule> withRequiredBuiltins(Map<String, IrModule> modules) {
+        Set<String> required = new HashSet<>();
+        for (IrModule m : modules.values()) {
+            for (IrStmt s : m.statements()) {
+                if (s instanceof IrStmt.Requires r) required.add(r.targetModule());
+            }
+        }
+        Map<String, IrModule> builtins = BuiltinModules.all();
+        boolean any = false;
+        for (String name : builtins.keySet()) {
+            if (required.contains(name) && !modules.containsKey(name)) {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return modules;
+
+        Map<String, IrModule> all = new LinkedHashMap<>();
+        for (Map.Entry<String, IrModule> e : builtins.entrySet()) {
+            if (required.contains(e.getKey()) && !modules.containsKey(e.getKey())) {
+                all.put(e.getKey(), e.getValue());
+            }
+        }
+        all.putAll(modules);
+        return all;
     }
 }

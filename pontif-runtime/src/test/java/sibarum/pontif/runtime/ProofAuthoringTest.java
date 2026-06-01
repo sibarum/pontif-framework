@@ -131,6 +131,38 @@ class ProofAuthoringTest {
     }
 
     @Test
+    void builtinProofTypes_viaRequires_closeHardReturn() {
+        // The proof vocabulary is imported from the builtin std.proof module —
+        // no hand-declared Leaf/Split. The single `requires` routes the file
+        // through the linker, which injects std.proof and FQN-resolves the
+        // imported types so the proof tree translates and discharges.
+        assertCompiles("""
+                requires std.proof.{Leaf, Split}
+                function f(x:Int):[Int:@>=0] -> x*(x-1)
+                proof f = Split(x>=1, Leaf(), Leaf())
+                42
+                """);
+    }
+
+    @Test
+    void isSparse_viaImportedSingletons_closesCompactly() {
+        // Same flagship hard return as isSparse_closesPiecewiseViaAuthoredProof,
+        // but the middle region [-5, 2] is the builtin `Singletons(x, -5, 2)`
+        // directive (unfolded to the cut ladder by RefinementProof) instead of a
+        // nine-deep hand-written Split chain — the Slice-2 "recursion to
+        // singletons" surfaced through the imported proof vocabulary.
+        assertCompiles("""
+                requires std.proof.{Leaf, Split, Singletons}
+                function isSparse(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
+                proof isSparse =
+                  Split(x>=3, Leaf(),
+                    Split(x<=-6, Leaf(),
+                      Singletons(x, -5, 2)))
+                42
+                """);
+    }
+
+    @Test
     void unrelatedFunctionEdit_leavesValidProofValid() {
         // "Stale only on meaningful change": a second, unrelated function in the
         // same module doesn't disturb f's node, so f's proof still validates.

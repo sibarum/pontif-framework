@@ -418,11 +418,15 @@ and bare-Int accepted); full suite green (the corpus is provable-or-abstained).
    - **Decision (James's, resolved):** recursive types were built first; the
      struct-tree path came nearly free after (no DSL parser needed). The DSL
      alternative is moot.
+   - **Singleton ladders ✅ (2026-06-01):** the `Singletons(subject, lo, hi)`
+     builtin constructor + `splitToSingletons` unfolding closed the "translator
+     reads unevaluated IR so the middle region is a flat literal" gap — the
+     ladder is now generated, not hand-written. **Shipped `Leaf`/`Split` prelude
+     ✅ (2026-06-01)** via the builtin `std.proof` module (see module-system
+     section).
    - **Deferred:** multi-branch (per-`match`-arm) proofs — needs branch-
      addressing syntax (v1 asserts single-branch); proofs on overloaded
-     functions (v1 asserts sole-node-of-name); recursion-in-proof to generate
-     singleton ladders (translator reads *unevaluated* IR, so `isSparse`'s
-     middle region is a flat literal); a shipped `Leaf`/`Split` prelude;
+     functions (v1 asserts sole-node-of-name);
      separate distributable proof files; explicit `proves Name : pred` claims +
      sharper stale messages; And/Or (De Morgan) split predicates; position-
      robust (rename-proof) variable binding; Notary re-validation of
@@ -902,6 +906,29 @@ representation + reasoners. Full suite green throughout (~1060 tests).
     legitimately reference an unimported trait (orphan rule permits the impl in
     the type's module). Choose later between auto-resolve-the-one-owner vs. a
     "declared in 'geo' but not imported — add `requires geo.{Point}`" hint.
+  - **Builtin modules ✅ landed (2026-06-01).** Compiler-provided importable
+    modules — the first real consumer proving imports/exports are *actually*
+    functional (a standard library you `requires`), and the end of per-file
+    redeclaration of framework types. **Decisions (James):** compiler-registered
+    (Java-constructed `IrModule`, no `.ptf` source to ship/parse) + **explicit**
+    `requires` (not auto-imported). `pontif-runtime/module/BuiltinModules` builds
+    `std.proof` (structs `Leaf`, `Split(p, whenTrue:[Leaf|Split], whenFalse:…)`,
+    `Singletons(subject, lo, hi)`); `ModuleLinker.combine` injects a builtin
+    module **only when some user module `requires` it** (so unused builtins never
+    shadow a user's own `Leaf` nor pollute ambiguity). `compileAlt` routes a file
+    with any `requires` through the linker (single-file-with-requires = a
+    one-module project + injected builtins); a no-`requires` file stays on the
+    bare path, unchanged. Proofs consume the imported vocab: `NameResolver` FQNs
+    `IrStmt.Proof` (name + tree), `StructLiteralRewriter` rewrites the proof
+    tree's Call→Record, `RefinementProof.fromIr` matches builtin types by local
+    name (FQN-aware) and unfolds `Singletons` via `splitToSingletons`. Playground
+    default migrated to `requires std.proof.{Leaf, Split}` (drops the hand-
+    declared structs). Pinned by `ModuleSystemTest` (single-file requires builtin;
+    unused builtin not injected), `ProofAuthoringTest`
+    (`builtinProofTypes_viaRequires_…`, `isSparse_viaImportedSingletons_…`),
+    `PlaygroundIntegrationTest`. Subsumes the deferred "shipped Leaf/Split
+    prelude" item. Dotted module names (`std.proof`) already parse in `requires`
+    (the `peek(1)==IDENT` guard stops `parseDottedName` at `.{`).
   - **Remaining (parser-blindness, same bucket):**
     - **`recv.method()` sugar cross-module** (needs the receiver's imported
       type known pre-link; the sugar needs the receiver's *sort*, not known
@@ -1170,13 +1197,30 @@ feasibility; it's answerable entirely in Java with no Pontif-side
   re-run the validator, not just attempt refutation (current soundness rests on
   the validator gating emission at `close`-time / the gate at compile-time —
   sound for those flows, but the notary should independently re-check).
-- Slice 2 — split supplied as data (not hardcoded) + recursion to
-  singletons for region B.
+- Slice 2 — split supplied as data + recursion to singletons. ✅ landed
+  (2026-06-01). Two parts:
+  - **Generative combinator:** `Refinement.splitToSingletons(subject, lo, hi)`
+    — a ladder of conservative `subject <= k` cuts isolating every integer in
+    `[lo, hi]` as a singleton leaf, built purely from `splitOn` (coverage/
+    disjointness stay structural; terminating by interval width). The
+    hand-rolled `singletons` helper in `RefinementValidatorTest` now delegates
+    to it; pinned by `generatedSingletonLadderClosesIsSparseRegionB` +
+    `splitToSingletons_degenerateAndEmptyRanges`.
+  - **Source surface (via builtin module, NOT a magic struct):** "split
+    supplied as data" was already covered by the in-source `proof f = Split(…)`
+    syntax (return-gate proof-authoring). What remained — generating the
+    singleton ladder compactly instead of a hand-written N-deep chain — is now
+    the **`Singletons(subject, lo, hi)`** constructor, shipped in the builtin
+    `std.proof` module (see the module-system section). `RefinementProof.fromIr`
+    recognizes it (by local name, FQN-aware) and unfolds via `splitToSingletons`.
+    Headline: `ProofAuthoringTest.isSparse_viaImportedSingletons_closesCompactly`
+    — isSparse's middle region `[-5,2]` is one `Singletons(x, -5, 2)` line, not
+    the nine-deep `Split` ladder of `isSparse_closesPiecewiseViaAuthoredProof`.
 - Slice 3 — `refine` as a Pontif function: Pontif-side `SymExpr`/`Branch`,
   calling user code during checking, validator on its output. The
   language lift; open-Qs #1/#2/#4 live here.
-- Slices 0–2 are Java-only and deliver the reviewable text artifact;
-  Slice 3 concentrates the language work.
+- Slices 0–2 are Java-only (+ the proof surface) and deliver the reviewable
+  text artifact; Slice 3 concentrates the language work.
 
 **Proof-file model (separate file, like a unit test — with one
 reframe).** Bespoke proofs live in a separate file, opt-in where the

@@ -73,6 +73,48 @@ public sealed interface Refinement permits Refinement.Leaf, Refinement.Split {
     }
 
     /**
+     * "Recursion to singletons": a generated ladder of conservative cuts that
+     * isolates every integer in {@code [lo, hi]} as its own singleton leaf.
+     *
+     * <p>Built purely from {@link #splitOn} — a chain of {@code subject <= k}
+     * cuts for {@code k} from {@code lo} up to {@code hi-1}, each true-side
+     * pinning {@code subject} to one value and the final false-side pinning it
+     * to {@code hi}. So coverage and disjointness stay <b>structural</b> (every
+     * cut is a predicate and its derived complement); this is just a compact
+     * spelling of a tree the caller could write by hand. Terminating because
+     * the cut threshold strictly increases toward {@code hi} — the interval
+     * width is the measure (answering the split-recursion termination question
+     * for this morphism class).
+     *
+     * <p>Intended for a bounded region already pinned by the accumulated guards
+     * of enclosing splits — e.g. {@code isSparse}'s middle region {@code [-5, 2]}
+     * between the {@code x>=3} and {@code x<=-6} cuts — where the leaf goal
+     * (here an opaque product) discharges only when {@code subject} is a single
+     * point and interval arithmetic is exact. A leaf that the supplied
+     * {@code [lo, hi]} fails to pin simply stays open (honest non-discharge);
+     * the combinator can widen reach but never launder a falsehood.
+     *
+     * @throws IllegalArgumentException if {@code lo > hi}
+     */
+    static Refinement splitToSingletons(SymExpr subject, long lo, long hi) {
+        if (lo > hi) {
+            throw new IllegalArgumentException("empty range: lo=" + lo + " > hi=" + hi);
+        }
+        if (lo == hi) {
+            return leaf();  // already a single point under the accumulated guards
+        }
+        Refinement acc = splitOn(le(subject, hi - 1), leaf(), leaf());
+        for (long k = hi - 2; k >= lo; k--) {
+            acc = splitOn(le(subject, k), leaf(), acc);
+        }
+        return acc;
+    }
+
+    private static SymExpr le(SymExpr subject, long k) {
+        return SymExpr.cmp(subject, SymExpr.CmpOp.LE, SymExpr.lit(k));
+    }
+
+    /**
      * The exact logical complement of a comparison, by operator flip. Faithful
      * over a total order (the integer domain) — there is no third outcome
      * between {@code a OP b} and {@code a (¬OP) b}, which is what lets the

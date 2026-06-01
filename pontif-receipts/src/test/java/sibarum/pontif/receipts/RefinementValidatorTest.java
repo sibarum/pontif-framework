@@ -74,18 +74,12 @@ class RefinementValidatorTest {
     }
 
     /**
-     * Peels {@code [lo, hi]} into singletons via {@code x_0 <= k} cuts. Each
-     * {@code true} side pins {@code x_0} to one value (an exact point interval,
-     * where interval multiplication is exact); the final {@code false} side is
-     * {@code x_0 == hi}.
+     * Peels {@code [lo, hi]} into singletons over {@code x_0} via the
+     * first-class generative combinator (was hand-rolled here; the combinator
+     * now owns the {@code <= k}-cut ladder, so these tests exercise it).
      */
     private static Refinement singletons(long lo, long hi) {
-        Refinement acc = Refinement.splitOn(
-                cmp("x_0", SymExpr.CmpOp.LE, hi - 1), Refinement.leaf(), Refinement.leaf());
-        for (long k = hi - 2; k >= lo; k--) {
-            acc = Refinement.splitOn(cmp("x_0", SymExpr.CmpOp.LE, k), Refinement.leaf(), acc);
-        }
-        return acc;
+        return Refinement.splitToSingletons(SymExpr.var("x_0"), lo, hi);
     }
 
     // --- the clean single split ---------------------------------------------
@@ -143,6 +137,34 @@ class RefinementValidatorTest {
         RefinementValidator.Result result = validate(isSparseModule(), tree);
         assertTrue(result.verified(),
                 () -> "isSparse should close piecewise; goal was " + result.substitutedGoal());
+    }
+
+    @Test
+    void generatedSingletonLadderClosesIsSparseRegionB() throws Exception {
+        // The generative combinator used directly (not via the test helper):
+        // the middle region [-5, 2] is now a single splitToSingletons call,
+        // not a hand-written ladder — the Slice-2 "recursion to singletons".
+        Refinement tree = Refinement.splitOn(cmp("x_0", SymExpr.CmpOp.GE, 3),
+                Refinement.leaf(),
+                Refinement.splitOn(cmp("x_0", SymExpr.CmpOp.LE, -6),
+                        Refinement.leaf(),
+                        Refinement.splitToSingletons(SymExpr.var("x_0"), -5, 2)));
+        assertTrue(validate(isSparseModule(), tree).verified());
+    }
+
+    @Test
+    void splitToSingletons_degenerateAndEmptyRanges() {
+        // A single-point range needs no cut — it's already pinned by guards.
+        assertTrue(Refinement.splitToSingletons(SymExpr.var("x_0"), 4, 4)
+                instanceof Refinement.Leaf);
+        // A two-point range is exactly one cut (true=lo, false=hi).
+        assertTrue(Refinement.splitToSingletons(SymExpr.var("x_0"), 4, 5)
+                instanceof Refinement.Split s
+                && s.whenTrue() instanceof Refinement.Leaf
+                && s.whenFalse() instanceof Refinement.Leaf);
+        // An empty range is a caller error, not a silent no-op.
+        assertThrows(IllegalArgumentException.class,
+                () -> Refinement.splitToSingletons(SymExpr.var("x_0"), 5, 4));
     }
 
     @Test
