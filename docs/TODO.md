@@ -860,14 +860,54 @@ representation + reasoners. Full suite green throughout (~1060 tests).
     registry, RecordValue.typeName) unchanged — opaque FQN strings flow through.
     Pinned by `ModuleSystemTest` (cross-module struct type + qualified method) +
     `TraitDispatchTest` (FQN fallback, dotted-module regression).
-  - **Remaining (parser-blindness, same bucket):** struct *literals* for
-    *imported* types (`Point(…)` in an importing module parses as a call — the
-    parser only knows locally-declared structs) and the `recv.method()` sugar
-    cross-module (needs the receiver's imported type known pre-link). Explicit
-    qualified forms work today (construct via a constructor function; call
-    `Type.method(x)`). Plus diagnostics: unexported-name, ambiguous-import,
-    ambiguous-type-reference (resolver currently resolves silently / leaves bare
-    → generic "unknown sort"). And: re-exports/import-aliasing, `Capital=type`.
+  - **Struct literals for imported types ✅ landed (2026-06-01).** A new
+    post-link pass `pontif-ir/StructLiteralRewriter` turns a constructor-shaped
+    `Call` into a `Record` when the called name is a declared struct type —
+    fixing the parser-blindness consistently with `NameResolver` (rewrite
+    post-link, never feed cross-module data into the per-file parser). Runs on
+    the *combined* module inside `ModuleLinker.combine` (so it sees every
+    module's FQN'd struct defs via `TypeRegistry.collect`); single-file compile
+    never reaches it and is unchanged (its literals are already `Record`s). Now
+    `requires geo.{Point}; Point(7, 9)` constructs directly — no `make`
+    constructor needed. Positional arity is checked (wrong count → hard
+    `CompileException`). Pinned by `ModuleSystemTest.importedStruct_constructed
+    Directly_…` + `…wrongArity_isHardError`. **Scope:** positional form only —
+    the by-name `Point{x=…}` form for imported structs still fails at parse time
+    (parser can't even produce a Call), and struct literals inside refinement
+    *predicates* aren't walked; both stay in this bucket.
+  - **Import-site diagnostics ✅ landed (2026-06-01).** New link-time pass
+    `pontif-ir/ModuleImportCheck` (run alongside `CoherenceCheck` on the
+    pre-FQN modules) validates every `requires`: **requires-unknown-module**,
+    **unexported-name** (private-by-default, Rust-style — a name is importable
+    only if the source's `exports` clause lists it; a name not declared at all
+    is reported distinctly from one that's declared-but-private), and
+    **ambiguous-import** (same local name imported from two different sources).
+    Each throws an origin-anchored `CompileException` instead of resolving
+    silently / failing later as generic "unknown function". **Visibility
+    decision (James, 2026-06-01): private-by-default, hard error** — no
+    `exports` clause ⇒ exports nothing. Pinned by `ModuleSystemTest`
+    (`importingPrivateName_…`, `importingUndeclaredName_…`,
+    `requiringUnknownModule_…`, `sameNameImportedFromTwoModules_…`).
+  - **ambiguous-type-reference ✅ landed (2026-06-01).** `NameResolver.resolve
+    TypeName` now threads an `Origin` and, in its leave-bare branch, rejects a
+    bare unqualified type name declared in **2+ other modules** (not resolvable
+    locally / by import / by module-qualification) with a precise
+    `CompileException` ("type 'Point' … is ambiguous — declared in [a, b];
+    qualify it … or import exactly one") instead of leaving it bare to fail
+    later as generic "unknown sort". Pinned by
+    `ModuleSystemTest.bareTypeDeclaredInTwoModules_isAmbiguous`. **Deferred
+    design call — the sole-owner-unimported case stays leave-bare:** a bare type
+    declared in exactly *one* other module is NOT auto-resolved nor errored,
+    because erroring there would regress cross-module trait impls that
+    legitimately reference an unimported trait (orphan rule permits the impl in
+    the type's module). Choose later between auto-resolve-the-one-owner vs. a
+    "declared in 'geo' but not imported — add `requires geo.{Point}`" hint.
+  - **Remaining (parser-blindness, same bucket):**
+    - **`recv.method()` sugar cross-module** (needs the receiver's imported
+      type known pre-link; the sugar needs the receiver's *sort*, not known
+      until after linking). Explicit qualified `Type.method(x)` works today.
+    - **re-exports / import-aliasing, `Capital=type`** (needs IR change —
+      `IrStmt.Exports` must carry the re-exported module — plus parser work).
 - **Action classes / mutable semantics.** Pure functions stay pure;
   actions are the controlled escape hatch. Likely as a side-by-side IR
   family (`IrAction`, `IrActionStmt`) rather than a tag on `IrExpr`.

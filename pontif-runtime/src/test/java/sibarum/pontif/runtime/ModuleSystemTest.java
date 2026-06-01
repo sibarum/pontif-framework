@@ -135,6 +135,45 @@ class ModuleSystemTest {
     }
 
     @Test
+    void importedStruct_constructedDirectly_asPositionalLiteral() {
+        // app imports geo's Point TYPE and constructs it directly with the
+        // positional literal `Point(7, 9)` — no `make` constructor. The parser
+        // lowers this to Call("Point", …) (it can't see the imported struct);
+        // the linker's StructLiteralRewriter turns the FQN'd Call into a Record.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                originX(Point(7, 9))
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
+    void importedStruct_wrongArity_isHardError() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                originX(Point(7))
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("expects 2 positional arg(s) but got 1"), () -> err);
+    }
+
+    @Test
     void crossModuleMethod_resolvesViaTypeOwner() {
         // app calls geo's qualified method `Point.magnitude` on a geo/Point it
         // got from geo's `make`. app declares neither Point nor the method, but
@@ -154,6 +193,86 @@ class ModuleSystemTest {
                 Point.magnitude(make(3, 4))
                 """);
         assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
+    void importingPrivateName_isHardError() {
+        // lib declares `secret` but doesn't export it (private-by-default).
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("lib", """
+                module lib
+                exports @.{inc}
+                function inc(x:Int):Int -> x + 1
+                function secret(x:Int):Int -> x
+                """);
+        src.put("app", """
+                module app
+                requires lib.{secret}
+                secret(5)
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("does not export 'secret'"), () -> err);
+    }
+
+    @Test
+    void importingUndeclaredName_isHardError() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("lib", """
+                module lib
+                exports @.{inc}
+                function inc(x:Int):Int -> x + 1
+                """);
+        src.put("app", """
+                module app
+                requires lib.{ghost}
+                inc(1)
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("declares no name 'ghost'"), () -> err);
+    }
+
+    @Test
+    void requiringUnknownModule_isHardError() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("app", """
+                module app
+                requires nope.{f}
+                0
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("requires unknown module 'nope'"), () -> err);
+    }
+
+    @Test
+    void sameNameImportedFromTwoModules_isAmbiguous() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("a", "module a\nexports @.{f}\nfunction f(x:Int):Int -> x + 1\n");
+        src.put("b", "module b\nexports @.{f}\nfunction f(x:Int):Int -> x + 2\n");
+        src.put("app", """
+                module app
+                requires a.{f}
+                requires b.{f}
+                f(10)
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("imports 'f' from both"), () -> err);
+    }
+
+    @Test
+    void bareTypeDeclaredInTwoModules_isAmbiguous() {
+        // Both a and b declare a struct `Point`. app references `Point` bare in a
+        // param position without declaring or importing it — neither owner is
+        // selectable, so the reference is ambiguous (was a silent "unknown sort").
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("a", "module a\nstruct Point(x:Int)\n");
+        src.put("b", "module b\nstruct Point(y:Int)\n");
+        src.put("app", """
+                module app
+                function f(p:Point):Int -> 0
+                0
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("'Point'") && err.contains("ambiguous"), () -> err);
     }
 
     @Test

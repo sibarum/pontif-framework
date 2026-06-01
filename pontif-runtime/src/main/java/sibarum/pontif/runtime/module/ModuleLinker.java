@@ -6,8 +6,10 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.ir.ModuleImportCheck;
 import sibarum.pontif.ir.ModuleSymbolTable;
 import sibarum.pontif.ir.NameResolver;
+import sibarum.pontif.ir.StructLiteralRewriter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,8 +52,10 @@ public final class ModuleLinker {
                     "Unknown entry module '" + entryModule + "'", Origin.NONE);
         }
         ModuleSymbolTable table = ModuleSymbolTable.build(modules);
-        // Coherence runs on the pre-FQN-rewrite modules (bare names match the table).
+        // Coherence + import validation run on the pre-FQN-rewrite modules
+        // (bare names match the table).
         CoherenceCheck.check(modules, table);
+        ModuleImportCheck.check(modules, table);
 
         List<IrStmt> statements = new ArrayList<>();
         IrExpr main = IrExpr.lit(0);
@@ -62,6 +66,9 @@ public final class ModuleLinker {
                 main = resolved.main();
             }
         }
-        return new IrModule(entryModule, statements, main);
+        // Constructor-shaped calls to *imported* structs parsed as Calls (the
+        // parser only sees local structs); now that every struct definition is
+        // FQN'd and visible in the combined module, rewrite them to Records.
+        return StructLiteralRewriter.rewrite(new IrModule(entryModule, statements, main));
     }
 }

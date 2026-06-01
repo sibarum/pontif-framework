@@ -1,5 +1,7 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.Origin;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,9 +30,11 @@ import java.util.Set;
  *       left bare for {@code SortChecker}/dispatch to handle as today.</li>
  * </ol>
  *
- * <p>v1 leaves <b>type</b> references bare (type names are global across a
- * project); per-module type namespacing is a follow-up. So only function-shaped
- * names are qualified here.
+ * <p>Type references are FQN-rewritten too (per-module type namespacing): see
+ * {@link #resolveTypeName}, which mirrors {@link #resolveCallName} over
+ * {@code typeOwners} and additionally rejects an <b>ambiguous</b> bare type name
+ * (declared in two or more other modules, not resolvable locally/by-import) with
+ * a precise error instead of leaving it bare to fail later as "unknown sort".
  */
 public final class NameResolver {
 
@@ -43,7 +47,7 @@ public final class NameResolver {
 
     private NameResolver() {}
 
-    public static IrModule resolve(IrModule module, ModuleSymbolTable table) {
+    public static IrModule resolve(IrModule module, ModuleSymbolTable table) throws CompileException {
         String m = module.name();
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) {
@@ -59,25 +63,35 @@ public final class NameResolver {
                                 rewriteSort(mm.returnSort(), m, table), rewrite(mm.body(), m, table), mm.origin()));
                     }
                     yield new IrStmt.TraitImpl(
-                            resolveTypeName(ti.typeName(), m, table),
-                            resolveTypeName(ti.traitName(), m, table), methods, ti.origin());
+                            resolveTypeName(ti.typeName(), m, table, ti.origin()),
+                            resolveTypeName(ti.traitName(), m, table, ti.origin()), methods, ti.origin());
                 }
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
-                        resolveTypeName(ta.name(), m, table), rewriteSort(ta.sort(), m, table), ta.origin());
+                        resolveTypeName(ta.name(), m, table, ta.origin()),
+                        rewriteSort(ta.sort(), m, table), ta.origin());
                 default -> stmt;  // Requires / Exports / Proof / NoOp unchanged
             });
         }
         return new IrModule(m, out, rewrite(module.main(), m, table));
     }
 
-    private static List<IrParam> rewriteParams(List<IrParam> params, String m, ModuleSymbolTable table) {
+    private static List<IrParam> rewriteParams(List<IrParam> params, String m, ModuleSymbolTable table)
+            throws CompileException {
         List<IrParam> out = new ArrayList<>(params.size());
         for (IrParam p : params) out.add(new IrParam(p.name(), rewriteSort(p.sort(), m, table)));
         return out;
     }
 
-    /** Resolve a type name to its FQN (mirrors {@link #resolveCallName} over {@code typeOwners}). */
-    static String resolveTypeName(String t, String m, ModuleSymbolTable table) {
+    /**
+     * Resolve a type name to its FQN (mirrors {@link #resolveCallName} over
+     * {@code typeOwners}). A bare name not resolvable locally, by import, or by
+     * module-qualification but declared in <b>two or more</b> other modules is an
+     * <b>ambiguous-type-reference</b> error rather than a silent leave-bare that
+     * later surfaces as a generic "unknown sort". The sole-owner-unimported case
+     * stays leave-bare (a separate design call — see TODO).
+     */
+    static String resolveTypeName(String t, String m, ModuleSymbolTable table, Origin origin)
+            throws CompileException {
         if (t.indexOf('/') >= 0 || PRIMITIVES.contains(t)) return t;
         if (table.typeOwners(t).contains(m)) return ModuleSymbolTable.fqn(m, t);
         String src = table.importSource(m, t);
@@ -86,21 +100,30 @@ public final class NameResolver {
         if (dot > 0 && table.requiredModules(m).contains(t.substring(0, dot))) {
             return ModuleSymbolTable.fqn(t.substring(0, dot), t.substring(dot + 1));
         }
-        return t;  // primitive handled above / unknown — leave bare for SortChecker
+        Set<String> owners = table.typeOwners(t);
+        if (owners.size() >= 2) {
+            throw new CompileException(
+                    "type '" + t + "' referenced in module '" + m + "' is ambiguous — "
+                            + "declared in " + owners + "; qualify it (e.g. `"
+                            + owners.iterator().next() + "." + t + "`) or import exactly one",
+                    origin);
+        }
+        return t;  // primitive handled above / unknown / sole-owner-unimported — leave bare for SortChecker
     }
 
     /** Recursively FQN-rewrites every type name appearing in a sort. */
-    private static IrSort rewriteSort(IrSort sort, String m, ModuleSymbolTable table) {
+    private static IrSort rewriteSort(IrSort sort, String m, ModuleSymbolTable table)
+            throws CompileException {
         return switch (sort) {
-            case IrSort.Named n -> new IrSort.Named(resolveTypeName(n.name(), m, table), n.origin());
+            case IrSort.Named n -> new IrSort.Named(resolveTypeName(n.name(), m, table, n.origin()), n.origin());
             case IrSort.Refined r -> new IrSort.Refined(
-                    resolveTypeName(r.name(), m, table), r.predicate(), r.origin());
+                    resolveTypeName(r.name(), m, table, r.origin()), r.predicate(), r.origin());
             case IrSort.Structural s -> {
                 Map<String, IrSort> members = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
                     members.put(e.getKey(), rewriteSort(e.getValue(), m, table));
                 }
-                yield new IrSort.Structural(resolveTypeName(s.name(), m, table), members, s.origin());
+                yield new IrSort.Structural(resolveTypeName(s.name(), m, table, s.origin()), members, s.origin());
             }
             case IrSort.Function f -> {
                 List<IrSort> ps = new ArrayList<>(f.paramSorts().size());
@@ -112,7 +135,7 @@ public final class NameResolver {
                 for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
                     methods.put(e.getKey(), (IrSort.Function) rewriteSort(e.getValue(), m, table));
                 }
-                yield new IrSort.Trait(resolveTypeName(t.name(), m, table), methods, t.origin());
+                yield new IrSort.Trait(resolveTypeName(t.name(), m, table, t.origin()), methods, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());
@@ -152,7 +175,7 @@ public final class NameResolver {
         return n;  // primitive / local lambda / unknown — leave bare
     }
 
-    private static IrExpr rewrite(IrExpr e, String m, ModuleSymbolTable table) {
+    private static IrExpr rewrite(IrExpr e, String m, ModuleSymbolTable table) throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
             case IrExpr.Bool b -> b;
@@ -189,7 +212,7 @@ public final class NameResolver {
                 for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
                     mem.put(en.getKey(), rewrite(en.getValue(), m, table));
                 }
-                String typeName = r.typeName() == null ? null : resolveTypeName(r.typeName(), m, table);
+                String typeName = r.typeName() == null ? null : resolveTypeName(r.typeName(), m, table, r.origin());
                 yield new IrExpr.Record(typeName, mem, r.origin());
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
