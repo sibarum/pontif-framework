@@ -12,13 +12,16 @@ import sibarum.pontif.receipts.Drafter;
 import sibarum.pontif.receipts.GraphReference;
 import sibarum.pontif.receipts.Node;
 import sibarum.pontif.receipts.Notary;
+import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
+import sibarum.pontif.receipts.Refinement;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -61,7 +64,7 @@ public final class ReceiptGraphReport {
         try {
             IrModule resolved = AliasResolver.resolve(parsed);
             ReceiptGraph graph = Drafter.draft(resolved);
-            return new Result.Generated(render(sourceName, graph));
+            return new Result.Generated(render(sourceName, resolved, graph));
         } catch (CompileException ce) {
             return new Result.Failed("Compile error: " + ce.getMessage());
         }
@@ -87,16 +90,21 @@ public final class ReceiptGraphReport {
 
     // --- Rendering ---------------------------------------------------------
 
-    private static String render(String sourceName, ReceiptGraph graph) {
+    private static String render(String sourceName, IrModule module, ReceiptGraph graph) {
         StringBuilder sb = new StringBuilder();
         sb.append("# Receipt-graph report: ").append(sourceName).append("\n\n");
         sb.append(ReceiptGraphPrinter.print(graph));
+
+        // In-source proofs rescue branches the built-in engine can't close, so
+        // the report agrees with the return gate (same ProofBinding). Binding
+        // problems are skipped here — the report is diagnostic, not a gate.
+        Map<GraphReference, Refinement> proofs = ProofBinding.bind(module, graph).proofs();
 
         // Obligations: every per-branch claim the issuer considered, with
         // outcome — including the ones it COULDN'T discharge, so a tightened
         // return refinement that fails is visible rather than silent.
         sb.append("\n## Obligations -- issuer ").append(BuiltinIssuer.ISSUER_ID).append("\n");
-        List<BuiltinIssuer.Attempt> attempts = BuiltinIssuer.attemptAll(graph);
+        List<BuiltinIssuer.Attempt> attempts = BuiltinIssuer.attemptAll(graph, proofs);
         List<Node> nodes = graph.roots();
         for (int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++) {
             Node node = nodes.get(nodeIndex);
@@ -152,11 +160,14 @@ public final class ReceiptGraphReport {
                     .append("\n");
         }
         if (a.discharged()) {
+            String issuer = a.provenByRefinement()
+                    ? BuiltinIssuer.REFINEMENT_ISSUER_ID : BuiltinIssuer.ISSUER_ID;
             ClosingReceipt cr = new ClosingReceipt(
-                    BuiltinIssuer.ISSUER_ID, a.obligation(),
+                    issuer, a.obligation(),
                     new GraphReference(a.nodeIndex(), a.branchIndex()), java.util.Map.of());
             Notary.Verdict v = Notary.hypothesisSupported(graph, cr);
-            sb.append("        -> discharged [notary: ")
+            sb.append("        -> discharged ")
+                    .append(a.provenByRefinement() ? "[via proof; notary: " : "[notary: ")
                     .append(v.accepted() ? "accepted" : "REJECTED").append("]\n");
         } else {
             sb.append("        -> NOT DISCHARGED (beyond the default issuer; runtime check remains)\n");

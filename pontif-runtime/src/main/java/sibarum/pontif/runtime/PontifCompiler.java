@@ -3,14 +3,11 @@ package sibarum.pontif.runtime;
 import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
-import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.ir.IrParam;
-import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
@@ -19,14 +16,11 @@ import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.Drafter;
 import sibarum.pontif.receipts.GraphReference;
-import sibarum.pontif.receipts.Node;
+import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
-import sibarum.pontif.receipts.RefinementProof;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -160,21 +154,6 @@ public final class PontifCompiler {
      * all hard errors.
      */
     private static Optional<String> firstUnprovableReturn(IrModule module) {
-        // Collect in-source proofs by target function name (from the pre-resolve
-        // module — AliasResolver passes them through unchanged either way).
-        Map<String, IrStmt.Proof> proofDecls = new LinkedHashMap<>();
-        Map<String, IrStmt.FunctionDecl> fnDecls = new LinkedHashMap<>();
-        for (IrStmt stmt : module.statements()) {
-            if (stmt instanceof IrStmt.Proof p) {
-                if (proofDecls.put(p.functionName(), p) != null) {
-                    return Optional.of("Duplicate proof for '" + p.functionName()
-                            + "' — at most one proof per function.");
-                }
-            } else if (stmt instanceof IrStmt.FunctionDecl fd) {
-                fnDecls.putIfAbsent(fd.name(), fd);
-            }
-        }
-
         ReceiptGraph graph;
         try {
             graph = Drafter.draft(AliasResolver.resolve(module));
@@ -182,54 +161,14 @@ public final class PontifCompiler {
             return Optional.empty();  // outside the drafter's scope → abstain
         }
 
-        // Map each function name to the node(s) drafted for it (one per
-        // declaration, source order). Overloaded names get multiple.
-        Map<String, List<Integer>> nodeIdxByName = new HashMap<>();
-        for (int i = 0; i < graph.roots().size(); i++) {
-            nodeIdxByName.computeIfAbsent(graph.roots().get(i).functionName(),
-                    k -> new java.util.ArrayList<>()).add(i);
+        // Bind in-source proofs to obligations (shared with ReceiptGraphReport so
+        // the two views agree). Any binding problem — unknown/overloaded/orphaned/
+        // multi-branch target, duplicate, untranslatable tree — is a hard error.
+        ProofBinding.Result bound = ProofBinding.bind(module, graph);
+        if (!bound.problems().isEmpty()) {
+            return Optional.of(bound.problems().get(0));
         }
-
-        // Validate proof targets and translate each to a Refinement keyed by its
-        // node/branch. v1 supports a sole, single-branch node per name.
-        Map<GraphReference, Refinement> proofs = new HashMap<>();
-        for (Map.Entry<String, IrStmt.Proof> e : proofDecls.entrySet()) {
-            String fn = e.getKey();
-            List<Integer> idxs = nodeIdxByName.get(fn);
-            if (idxs == null || idxs.isEmpty()) {
-                return Optional.of("Proof references unknown function '" + fn + "'.");
-            }
-            if (idxs.size() > 1) {
-                return Optional.of("Proof for '" + fn + "' targets an overloaded function — "
-                        + "proofs on overloaded functions aren't supported yet.");
-            }
-            int nodeIdx = idxs.get(0);
-            Node node = graph.roots().get(nodeIdx);
-            if (!node.resultVar().sort().isRefined()) {
-                return Optional.of("Proof for '" + fn + "' is orphaned — '" + fn
-                        + "' has no refined return to prove; remove the proof.");
-            }
-            if (node.branches().size() != 1) {
-                return Optional.of("Proof for '" + fn + "' targets a multi-branch (match) "
-                        + "function — per-branch proofs aren't supported yet.");
-            }
-            // Rename source params to their call-instance graph form (x → x_0),
-            // matching the Drafter, so the proof's predicates align with PathFacts.
-            Map<String, SymExpr> rename = new HashMap<>();
-            IrStmt.FunctionDecl fd = fnDecls.get(fn);
-            if (fd != null) {
-                for (IrParam p : fd.params()) {
-                    rename.put(p.name(), SymExpr.var(p.name() + "_0"));
-                }
-            }
-            try {
-                proofs.put(new GraphReference(nodeIdx, 0),
-                        RefinementProof.fromIr(e.getValue().proofTree(), rename));
-            } catch (CompileException ce) {
-                return Optional.of("Proof for '" + fn + "' could not be used: "
-                        + ce.getMessage());
-            }
-        }
+        Map<GraphReference, Refinement> proofs = bound.proofs();
 
         List<BuiltinIssuer.Attempt> attempts = BuiltinIssuer.attemptAll(graph, proofs);
         for (int nodeIndex = 0; nodeIndex < graph.roots().size(); nodeIndex++) {
@@ -240,7 +179,9 @@ public final class PontifCompiler {
                     && nodeAttempts.stream().anyMatch(a -> !a.discharged())) {
                 String fn = graph.roots().get(idx).functionName();
                 String obligation = ReceiptGraphPrinter.renderSym(nodeAttempts.get(0).obligation());
-                if (proofDecls.containsKey(fn)) {
+                // A proof was supplied for this node but didn't discharge → stale
+                // or insufficient (per-function re-validation, not a snapshot diff).
+                if (proofs.containsKey(new GraphReference(idx, 0))) {
                     return Optional.of("The supplied proof for '" + fn
                             + "' no longer discharges its obligation " + obligation
                             + " — it's stale or insufficient; update or remove it.");

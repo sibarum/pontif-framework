@@ -766,15 +766,20 @@ representation + reasoners. Full suite green throughout (~1060 tests).
   `line:col → character offset` conversion.
 - **Interactive verification.** The playground launches and renders
   cleanly under timeout but I can't drive button clicks from a shell.
-- **Playground default sample errors on Run (pre-existing).** `App.DEFAULT_CODE`
-  ships `isEven`/`isOdd` with a union return `[Int:0|1]` over *mutual recursion*,
-  which the return gate can't discharge — so the out-of-box program rejects on
-  the first Run (pinned by `PlaygroundIntegrationTest.unionMutualRecursion_…`).
-  The engine would need to reason from a disjunctive *hypothesis*
-  (`r_0 == r_1 ∧ r_1 ∈ {0,1} ⟹ r_0 ∈ {0,1}`) — the Or-*goal* discharge doesn't
-  cover it, and it can't be proof-authored (overloaded). Fix the sample (drop
-  the narrowing, or swap in a non-recursive `bit`-style union demo) or extend
-  the engine. The `factorial`/`inc`/`sign`/`timesTwo` showcase runs fine.
+- **Union return over mutual recursion isn't gate-provable (engine gap).**
+  `isEven`/`isOdd` with `[Int:0|1]` returns can't be discharged: it needs
+  reasoning from a disjunctive *hypothesis* (`r_0 == r_1 ∧ r_1 ∈ {0,1} ⟹
+  r_0 ∈ {0,1}` — the call's union-narrowed result), which the Or-*goal*
+  discharge doesn't cover, and which can't be proof-authored (overloaded).
+  Pinned by `PlaygroundIntegrationTest.unionMutualRecursion_…`. (This used to
+  ship in `App.DEFAULT_CODE` and errored the playground on first Run; the
+  default was replaced 2026-06-01 — see below.)
+- **Playground default ✅ replaced (2026-06-01).** `App.DEFAULT_CODE` is now a
+  hand-written-proof tour: `inc` (auto linear-bound), the recursive `Leaf`/
+  `Split` proof structs, and `quirk = x*(x-1):[Int:@>=0]` rescued by
+  `proof quirk = Split(x>=1, Leaf(), Leaf())` → evaluates to 25. Compiles past
+  the gate and runs; the Receipts view shows `quirk` discharged via proof.
+  Pinned by `PlaygroundIntegrationTest.playgroundDefaultTour_…`.
 - **Playground uses the alt parser** (was "S-expr only" — stale): `App.onRunClicked`
   calls `PontifCompiler.compileAlt`. The S-expr `Parser` remains the stable test
   surface; the `proof`/recursive-struct forms are alt-only.
@@ -1069,14 +1074,18 @@ feasibility; it's answerable entirely in Java with no Pontif-side
   obligations carry `Attempt.provenByRefinement` and receipts attribute to
   `REFINEMENT_ISSUER_ID`. Sound by the validator: `isSparse` rescued, `bad`
   (false) refused by any proof. This is the **recourse** that gates step B.
-  **Still to do (the reviewable-artifact half):** render proof-discharged
-  branches + their split tree in `ReceiptGraphReport` (gated on a proof
-  *authoring surface* — proofs are Java-side only until proof files parse;
-  premature before then). And **Notary proof-verification**: for a
-  `REFINEMENT_ISSUER_ID` receipt the notary should re-run the validator, not
-  just attempt refutation (current soundness rests on the validator gating
-  emission at `close`-time, which is sound for that flow but the notary
-  should independently re-check).
+  **Reviewable-artifact half ✅ landed (2026-06-01):** now that proofs parse
+  (`proof f = …`), `ReceiptGraphReport` binds in-source proofs via the shared
+  `pontif-receipts/ProofBinding` (same binding the gate uses, so Run and the
+  Receipts view agree) and renders a proof-rescued branch as
+  `-> discharged [via proof; notary: accepted]` instead of `NOT DISCHARGED`
+  (pinned by `ReceiptGraphReportTest.handWrittenProof_showsDischargedViaProof`).
+  Rendering the split *tree* itself is still TODO (the report shows the branch
+  outcome, not the proof's internal case-splits). **Still to do — Notary
+  proof-verification:** for a `REFINEMENT_ISSUER_ID` receipt the notary should
+  re-run the validator, not just attempt refutation (current soundness rests on
+  the validator gating emission at `close`-time / the gate at compile-time —
+  sound for those flows, but the notary should independently re-check).
 - Slice 2 — split supplied as data (not hardcoded) + recursion to
   singletons for region B.
 - Slice 3 — `refine` as a Pontif function: Pontif-side `SymExpr`/`Branch`,

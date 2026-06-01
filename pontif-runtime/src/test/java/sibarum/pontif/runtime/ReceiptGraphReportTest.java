@@ -219,6 +219,45 @@ class ReceiptGraphReportTest {
     }
 
     @Test
+    void handWrittenProof_showsDischargedViaProof() throws Exception {
+        // quirk = x*(x-1) >= 0 is beyond the built-in engine (opaque product),
+        // but a hand-written split closes it. The report must agree with the
+        // gate — render the branch as discharged [via proof], not NOT DISCHARGED.
+        String src = """
+                module quirk
+                struct Leaf()
+                struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
+                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+                proof quirk = Split(x>=1, Leaf(), Leaf())
+                quirk(5)
+                """;
+        Path path = ReceiptGraphReport.writeReport(OUT, "quirkProof", src, "quirkProof.ptf");
+        String text = Files.readString(path);
+        System.out.println(text);
+
+        assertTrue(text.contains("quirk  :  r_0 >= 0"), () -> text);
+        assertTrue(text.contains("-> discharged [via proof; notary: accepted]"),
+                () -> "quirk's obligation should render as proof-discharged:\n" + text);
+        assertTrue(!text.contains("NOT DISCHARGED"),
+                () -> "the supplied proof should close quirk in the report:\n" + text);
+    }
+
+    @Test
+    void withoutProof_quirkShowsNotDischarged() throws Exception {
+        // The same program minus the proof: the report honestly shows NOT
+        // DISCHARGED — confirming the proof is what flips it and the report
+        // tracks the gate's view rather than going silent.
+        String src = """
+                module quirk
+                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+                quirk(5)
+                """;
+        Path path = ReceiptGraphReport.writeReport(OUT, "quirkNoProof", src, "quirkNoProof.ptf");
+        String text = Files.readString(path);
+        assertTrue(text.contains("NOT DISCHARGED"), () -> text);
+    }
+
+    @Test
     void parseError_writesFailureArtifact() throws Exception {
         String src = "module broken\nfunction (((";
         Path path = ReceiptGraphReport.writeReport(OUT, "broken", src, "broken.ptf");
