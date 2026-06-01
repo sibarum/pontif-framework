@@ -106,6 +106,35 @@ class ModuleSystemTest {
     }
 
     @Test
+    void sameTypeName_inTwoModules_doesNotCollide_andCrossModuleStructTypeFlows() {
+        // geo and viz BOTH declare a struct `Point` (different shapes). Per-module
+        // type FQNs (geo/Point vs viz/Point) keep them distinct in the combined
+        // module — no duplicate-alias collision. app constructs geo's Point via
+        // geo's `make` constructor (struct literals for *imported* structs are a
+        // separate parser enhancement) and reads it back via geo's originX —
+        // proving the geo/Point type flows across modules in signatures + fields.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{make, originX}
+                struct Point(x:Int, y:Int)
+                function make(x:Int, y:Int):Point -> Point(x, y)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("viz", """
+                module viz
+                struct Point(r:Int, g:Int, b:Int)
+                function red(p:Point):Int -> p.r
+                """);
+        src.put("app", """
+                module app
+                requires geo.{make, originX}
+                originX(make(7, 9))
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
     void unknownEntryModule_isHardError() {
         Map<String, String> src = new LinkedHashMap<>();
         src.put("lib", "module lib\nfunction f(x:Int):Int -> x\n0");

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Rewrites a module's function/method/operator declarations and every call site
@@ -33,6 +34,13 @@ import java.util.Map;
  */
 public final class NameResolver {
 
+    /**
+     * Type names that are never module-qualified: primitives and the parser's
+     * internal sentinels. Mirrors {@code SortChecker.PRIMITIVE_SORT_NAMES}
+     * (kept in sync — both must agree on "not a user type").
+     */
+    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "_", "_record");
+
     private NameResolver() {}
 
     public static IrModule resolve(IrModule module, ModuleSymbolTable table) {
@@ -41,21 +49,81 @@ public final class NameResolver {
         for (IrStmt stmt : module.statements()) {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
-                        ModuleSymbolTable.fqn(m, fd.name()), fd.params(),
-                        fd.returnSort(), rewrite(fd.body(), m, table), fd.origin());
+                        ModuleSymbolTable.fqn(m, fd.name()), rewriteParams(fd.params(), m, table),
+                        rewriteSort(fd.returnSort(), m, table), rewrite(fd.body(), m, table), fd.origin());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl mm : ti.methods()) {
                         methods.add(new IrStmt.FunctionDecl(
-                                ModuleSymbolTable.fqn(m, mm.name()), mm.params(),
-                                mm.returnSort(), rewrite(mm.body(), m, table), mm.origin()));
+                                ModuleSymbolTable.fqn(m, mm.name()), rewriteParams(mm.params(), m, table),
+                                rewriteSort(mm.returnSort(), m, table), rewrite(mm.body(), m, table), mm.origin()));
                     }
+                    // typeName/traitName FQN-rewriting is Slice B (trait dispatch).
                     yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, ti.origin());
                 }
-                default -> stmt;  // TypeAlias / Requires / Exports / Proof / NoOp unchanged
+                case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
+                        resolveTypeName(ta.name(), m, table), rewriteSort(ta.sort(), m, table), ta.origin());
+                default -> stmt;  // Requires / Exports / Proof / NoOp unchanged
             });
         }
         return new IrModule(m, out, rewrite(module.main(), m, table));
+    }
+
+    private static List<IrParam> rewriteParams(List<IrParam> params, String m, ModuleSymbolTable table) {
+        List<IrParam> out = new ArrayList<>(params.size());
+        for (IrParam p : params) out.add(new IrParam(p.name(), rewriteSort(p.sort(), m, table)));
+        return out;
+    }
+
+    /** Resolve a type name to its FQN (mirrors {@link #resolveCallName} over {@code typeOwners}). */
+    static String resolveTypeName(String t, String m, ModuleSymbolTable table) {
+        if (t.indexOf('/') >= 0 || PRIMITIVES.contains(t)) return t;
+        if (table.typeOwners(t).contains(m)) return ModuleSymbolTable.fqn(m, t);
+        String src = table.importSource(m, t);
+        if (src != null) return ModuleSymbolTable.fqn(src, t);
+        int dot = t.indexOf('.');
+        if (dot > 0 && table.requiredModules(m).contains(t.substring(0, dot))) {
+            return ModuleSymbolTable.fqn(t.substring(0, dot), t.substring(dot + 1));
+        }
+        return t;  // primitive handled above / unknown — leave bare for SortChecker
+    }
+
+    /** Recursively FQN-rewrites every type name appearing in a sort. */
+    private static IrSort rewriteSort(IrSort sort, String m, ModuleSymbolTable table) {
+        return switch (sort) {
+            case IrSort.Named n -> new IrSort.Named(resolveTypeName(n.name(), m, table), n.origin());
+            case IrSort.Refined r -> new IrSort.Refined(
+                    resolveTypeName(r.name(), m, table), r.predicate(), r.origin());
+            case IrSort.Structural s -> {
+                Map<String, IrSort> members = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
+                    members.put(e.getKey(), rewriteSort(e.getValue(), m, table));
+                }
+                yield new IrSort.Structural(resolveTypeName(s.name(), m, table), members, s.origin());
+            }
+            case IrSort.Function f -> {
+                List<IrSort> ps = new ArrayList<>(f.paramSorts().size());
+                for (IrSort p : f.paramSorts()) ps.add(rewriteSort(p, m, table));
+                yield new IrSort.Function(ps, rewriteSort(f.returnSort(), m, table), f.origin());
+            }
+            case IrSort.Trait t -> {
+                Map<String, IrSort.Function> methods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                    methods.put(e.getKey(), (IrSort.Function) rewriteSort(e.getValue(), m, table));
+                }
+                yield new IrSort.Trait(resolveTypeName(t.name(), m, table), methods, t.origin());
+            }
+            case IrSort.Union u -> {
+                List<IrSort> bs = new ArrayList<>(u.branches().size());
+                for (IrSort b : u.branches()) bs.add(rewriteSort(b, m, table));
+                yield new IrSort.Union(bs, u.origin());
+            }
+            case IrSort.Intersection i -> {
+                List<IrSort> bs = new ArrayList<>(i.branches().size());
+                for (IrSort b : i.branches()) bs.add(rewriteSort(b, m, table));
+                yield new IrSort.Intersection(bs, i.origin());
+            }
+        };
     }
 
     /** Resolve a call name to its FQN per the rules in the class doc. */
@@ -80,7 +148,7 @@ public final class NameResolver {
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(), rewrite(op.left(), m, table), rewrite(op.right(), m, table), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(
-                    l.name(), l.declaredSort(), rewrite(l.value(), m, table),
+                    l.name(), rewriteSort(l.declaredSort(), m, table), rewrite(l.value(), m, table),
                     rewrite(l.body(), m, table), l.origin());
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
@@ -88,7 +156,8 @@ public final class NameResolver {
                 yield new IrExpr.Call(resolveCallName(c.functionName(), m, table), args, c.origin());
             }
             case IrExpr.Lambda lam -> new IrExpr.Lambda(
-                    lam.params(), lam.returnSort(), rewrite(lam.body(), m, table), lam.origin());
+                    rewriteParams(lam.params(), m, table), rewriteSort(lam.returnSort(), m, table),
+                    rewrite(lam.body(), m, table), lam.origin());
             case IrExpr.Apply app -> {
                 List<IrExpr> args = new ArrayList<>(app.args().size());
                 for (IrExpr a : app.args()) args.add(rewrite(a, m, table));
@@ -97,7 +166,8 @@ public final class NameResolver {
             case IrExpr.Match mt -> {
                 List<IrExpr.MatchBranch> bs = new ArrayList<>(mt.branches().size());
                 for (IrExpr.MatchBranch b : mt.branches()) {
-                    bs.add(new IrExpr.MatchBranch(b.pattern(), rewrite(b.result(), m, table)));
+                    bs.add(new IrExpr.MatchBranch(
+                            rewriteSort(b.pattern(), m, table), rewrite(b.result(), m, table)));
                 }
                 yield new IrExpr.Match(rewrite(mt.scrutinee(), m, table), bs, mt.origin());
             }
@@ -106,7 +176,8 @@ public final class NameResolver {
                 for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
                     mem.put(en.getKey(), rewrite(en.getValue(), m, table));
                 }
-                yield new IrExpr.Record(r.typeName(), mem, r.origin());
+                String typeName = r.typeName() == null ? null : resolveTypeName(r.typeName(), m, table);
+                yield new IrExpr.Record(typeName, mem, r.origin());
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewrite(fa.base(), m, table), fa.fieldName(), fa.origin());
