@@ -847,14 +847,27 @@ representation + reasoners. Full suite green throughout (~1060 tests).
     `ModuleLoaderTest` (temp-dir e2e: marker entry, inferred entry, subdirectory
     discovery, duplicate + unknown-entry errors). A project on disk now
     compiles + runs end-to-end.
-  - **Remaining diagnostics:** unexported-name (importing a name the source
-    module doesn't `exports`), ambiguous-import (two requires provide the same
-    name) — the resolver currently resolves silently; promote to errors.
-  - **v1 limits (deferred):** type names are **global** across a project (two
-    modules declaring the same struct/trait name → duplicate-alias error);
-    per-module type namespacing, function-overload coherence (FQN-keying already
-    isolates per-module generics), re-exports/import-aliasing, and `Capital=type`
-    lexical classification are follow-ups.
+  - **Per-module type namespacing ✅ landed (2026-06-01).** `NameResolver`
+    FQN-rewrites every type-name occurrence (struct/trait/alias decls + all
+    references: param/return/let/lambda sorts, match patterns, refinement bases,
+    `Record.typeName`) via a recursive `rewriteSort` + `resolveTypeName`. Two
+    modules can reuse a type name (`geo/Point` vs `viz/Point`). Methods + trait
+    impls cross-module: a qualified `Type.method` call resolves via the type's
+    owning module; `TraitImpl` type/trait names are FQN'd; `resolveTraitFallback`
+    is `/`-aware (module boundary split before the `Trait.method` dot, so a
+    dotted module name `a.b/Show.render` isn't mis-split). Downstream
+    (TypeRegistry, SortChecker, structRegistry, recursive-types coinductive
+    registry, RecordValue.typeName) unchanged — opaque FQN strings flow through.
+    Pinned by `ModuleSystemTest` (cross-module struct type + qualified method) +
+    `TraitDispatchTest` (FQN fallback, dotted-module regression).
+  - **Remaining (parser-blindness, same bucket):** struct *literals* for
+    *imported* types (`Point(…)` in an importing module parses as a call — the
+    parser only knows locally-declared structs) and the `recv.method()` sugar
+    cross-module (needs the receiver's imported type known pre-link). Explicit
+    qualified forms work today (construct via a constructor function; call
+    `Type.method(x)`). Plus diagnostics: unexported-name, ambiguous-import,
+    ambiguous-type-reference (resolver currently resolves silently / leaves bare
+    → generic "unknown sort"). And: re-exports/import-aliasing, `Capital=type`.
 - **Action classes / mutable semantics.** Pure functions stay pure;
   actions are the controlled escape hatch. Likely as a side-by-side IR
   family (`IrAction`, `IrActionStmt`) rather than a tag on `IrExpr`.

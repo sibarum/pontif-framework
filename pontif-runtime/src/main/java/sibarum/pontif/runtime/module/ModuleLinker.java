@@ -28,9 +28,11 @@ import java.util.Map;
  * module. A single-file compile never goes through here, so its (bare) keys are
  * untouched.
  *
- * <p>v1 limitation: type names are global across the project (two modules
- * declaring the same struct/trait name surface as a duplicate-type-alias error
- * from {@code AliasResolver}). Per-module type namespacing is a follow-up.
+ * <p>Type names are per-module too: {@code NameResolver} FQN-rewrites struct/
+ * trait/alias names (and every reference), so two modules can reuse a type name
+ * (`a/Point` vs `b/Point`) without colliding in the combined module. A
+ * duplicate-type-alias error now only fires on a genuine same-module
+ * redeclaration.
  */
 public final class ModuleLinker {
 
