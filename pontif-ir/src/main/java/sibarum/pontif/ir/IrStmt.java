@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 
 import java.util.List;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.NoOp {
 
     Origin origin();
 
@@ -26,6 +26,10 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
 
     static TraitImpl traitImpl(String typeName, String traitName, List<FunctionDecl> methods) {
         return new TraitImpl(typeName, traitName, methods, Origin.NONE);
+    }
+
+    static Proof proof(String functionName, IrExpr proofTree) {
+        return new Proof(functionName, proofTree, Origin.NONE);
     }
 
     record FunctionDecl(
@@ -84,6 +88,28 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
                 throw new IllegalArgumentException("TraitImpl traitName must be non-empty");
             }
             methods = List.copyOf(methods);
+        }
+    }
+
+    /**
+     * A hand-authored proof for a function's declared return refinement,
+     * written in-source as a struct-literal tree (a {@code Refinement}-shaped
+     * {@code Leaf}/{@code Split} value). The {@code proofTree} is the
+     * <b>unevaluated</b> {@link IrExpr} — never compiled or evaluated, so its
+     * {@code Split} predicates stay symbolic. The return-refinement gate
+     * ({@code PontifCompiler}) translates it to a
+     * {@link sibarum.pontif.receipts.Refinement} and validates it against the
+     * named function's obligation; a proof that no longer discharges is a hard
+     * compile error. Surface form (alt syntax): {@code proof f = Split(...)}.
+     */
+    record Proof(String functionName, IrExpr proofTree, Origin origin) implements IrStmt {
+        public Proof {
+            if (functionName == null || functionName.isEmpty()) {
+                throw new IllegalArgumentException("Proof functionName must be non-empty");
+            }
+            if (proofTree == null) {
+                throw new IllegalArgumentException("Proof tree must be non-null");
+            }
         }
     }
 

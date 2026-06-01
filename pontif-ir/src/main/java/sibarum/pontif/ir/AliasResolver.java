@@ -110,6 +110,12 @@ public final class AliasResolver {
                 } else {
                     newStatements.add(ta);
                 }
+            } else if (stmt instanceof IrStmt.Proof p) {
+                // Pass through unchanged: the proof tree's Var("x") are proof
+                // variables (the function's params), not sort aliases — there is
+                // nothing to resolve, and rewriting would be wrong. The gate
+                // reads it and translates it after drafting.
+                newStatements.add(p);
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
             }

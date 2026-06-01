@@ -390,24 +390,43 @@ drafting throws (so the drafter's scope gaps never punish valid code).
 `ReturnGateTest` proves enforcement (false rejected; provable incl. inductive
 and bare-Int accepted); full suite green (the corpus is provable-or-abstained).
 **Remaining for completeness:**
-1. **Proof-authoring surface** — proofs are Java-`Map` only, not wired through
-   `compileAlt`, so an `isSparse`-style hard return written *in the playground*
-   rejects with no in-language recourse. This is the gating prerequisite
-   (Slice C); until it lands, the gate is "reject hard returns" rather than
-   "reject hard returns lacking a proof." **Two paths, and a blocker found:**
-   - *Struct-tree* (write the proof as Pontif struct literals; a Java
-     translator `IrExpr.Record → Refinement` feeds the gate). Elegant
-     (proof-as-data, host-typechecked), no parser. **Now UNBLOCKED** —
-     recursive types landed (see "Recursive types (foundational) ✅" below), so
-     `Refinement = [Leaf|Split]` with `Split` holding `Refinement`s is
-     expressible. Remaining work is the `IrExpr.Record → Refinement` translator
-     + binding it to the obligation; no foundational lift left.
-   - *DSL* (a small proof-file syntax → `Refinement` directly; the recursive
-     type stays Java-side). Needs a parser, but **sidesteps recursive sorts**.
-   - **Decision (James's):** if recursive types are wanted broadly (they're
-     table stakes for serious work), build them first — struct-tree proofs come
-     nearly free after. If proofs-only ASAP, the DSL avoids the foundational
-     lift.
+1. **Proof-authoring surface ✅ landed (struct-tree, in-source).** The gate now
+   consults hand-authored proofs, so it's "reject hard returns *lacking a valid
+   proof*," not "reject hard returns." A new top-level alt form
+   `proof <fn> = <Leaf/Split tree>` (`IrStmt.Proof`, carrying the *unevaluated*
+   `IrExpr` so split predicates stay symbolic) is parsed by `AltParser`;
+   `pontif-receipts/RefinementProof.fromIr` translates the struct literal to a
+   `Refinement` (renaming source params `x` → graph `x_0`, requiring each
+   `Split` predicate be a `Cmp`); `PontifCompiler.firstUnprovableReturn` binds
+   each proof to its function's node (`GraphReference(nodeIndex, 0)`) and calls
+   `BuiltinIssuer.attemptAll(graph, proofs)`. **Headline:** `function f(x:Int):
+   [Int:@>=0] -> x*(x-1)` with `proof f = Split(x>=1, Leaf(), Leaf())` compiles
+   (was rejected); the flagship `isSparse` `(x-3)*(x+5) >= -16` closes via an
+   in-source piecewise proof. The user declares `struct Leaf()` /
+   `struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])` (the
+   recursive types that just landed). Covered by `ProofAuthoringTest` (e2e) +
+   `RefinementProofTest` (translator).
+   - **Staleness = per-function re-validation, NOT a snapshot compare** (James's
+     call): every compile re-checks each proof against its function's freshly
+     drafted obligation, so an unrelated edit never disturbs a valid proof,
+     while a change that breaks one yields a scoped hard error. Reserved hard
+     errors: supplied-proof-no-longer-discharges (stale/insufficient),
+     proof-for-unknown-function, orphaned-proof (return refinement dropped),
+     duplicate proof. A redundant proof (engine already discharges) is silently
+     fine (could warn later). A skeletonMatches structural compare was
+     *rejected* — it would over-trigger on still-valid cosmetic edits.
+   - **Decision (James's, resolved):** recursive types were built first; the
+     struct-tree path came nearly free after (no DSL parser needed). The DSL
+     alternative is moot.
+   - **Deferred:** multi-branch (per-`match`-arm) proofs — needs branch-
+     addressing syntax (v1 asserts single-branch); proofs on overloaded
+     functions (v1 asserts sole-node-of-name); recursion-in-proof to generate
+     singleton ladders (translator reads *unevaluated* IR, so `isSparse`'s
+     middle region is a flat literal); a shipped `Leaf`/`Split` prelude;
+     separate distributable proof files; explicit `proves Name : pred` claims +
+     sharper stale messages; And/Or (De Morgan) split predicates; position-
+     robust (rename-proof) variable binding; Notary re-validation of
+     `REFINEMENT_ISSUER_ID` receipts.
 2. **Direct `IrCompiler` path is ungated** by design — it sits below
    pontif-receipts (cycle), so the gate is at the `PontifCompiler` layer only.
    The IR API stays unprotected (test harnesses use it); fine, since the

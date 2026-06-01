@@ -54,7 +54,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let",
             "assign", "trait", "Type",
-            "match",
+            "match", "proof",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -227,7 +227,7 @@ public final class AltParser {
         AltToken t = peek();
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let", "assign").contains(t.text());
+                "function", "method", "struct", "let", "assign", "proof").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -289,6 +289,7 @@ public final class AltParser {
             case "method"   -> parseMethod();
             case "let"      -> parseLet();
             case "assign"   -> parseAssignTrait();
+            case "proof"    -> parseProof();
             default -> throw new ParseException(
                     "Unknown top-level keyword '" + head.text() + "'",
                     head.origin());
@@ -849,6 +850,23 @@ public final class AltParser {
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
+    }
+
+    /**
+     * Proof declaration: {@code proof <functionName> = <structTree>}. The RHS
+     * is an ordinary expression — a {@code Leaf}/{@code Split} struct-literal
+     * tree — captured <b>unevaluated</b> as {@link IrStmt.Proof}'s tree. The
+     * return-refinement gate translates and validates it; nothing here checks
+     * its shape (so {@code Split}'s predicate stays a symbolic comparison). The
+     * {@code Leaf}/{@code Split} structs must be declared earlier so the RHS
+     * parses through the struct-literal path into an {@link IrExpr.Record}.
+     */
+    private IrStmt parseProof() throws ParseException {
+        AltToken start = expectKeyword("proof");
+        String functionName = parseDottedName();
+        expect(AltToken.Kind.EQUALS);
+        IrExpr tree = parseExpr();
+        return new IrStmt.Proof(functionName, tree, start.origin());
     }
 
     private IrStmt parseStruct() throws ParseException {

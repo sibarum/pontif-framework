@@ -75,6 +75,7 @@ public final class IrCompiler {
                         dispatch.traitRegistry().declareTrait(t.name());
                     }
                 }
+                case IrStmt.Proof p -> { /* proof metadata; consumed by the return-refinement gate (PontifCompiler), never compiled or evaluated */ }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
             }
         }
