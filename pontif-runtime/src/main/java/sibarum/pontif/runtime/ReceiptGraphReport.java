@@ -16,6 +16,7 @@ import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
+import sibarum.pontif.runtime.module.ModuleLinker;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -62,7 +63,14 @@ public final class ReceiptGraphReport {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
         try {
-            IrModule resolved = AliasResolver.resolve(parsed);
+            // Link first when the file `requires` anything (e.g. builtin proof
+            // types from std.proof) — the SAME rule the compiler's Run path uses
+            // (ModuleLinker.combineSingle), so the Receipts view and Run never
+            // disagree about whether a branch discharged. Without this the
+            // imported proof vocabulary stays unresolved and every proof-rescued
+            // branch would falsely render NOT DISCHARGED.
+            IrModule linked = ModuleLinker.combineSingle(parsed);
+            IrModule resolved = AliasResolver.resolve(linked);
             ReceiptGraph graph = Drafter.draft(resolved);
             return new Result.Generated(render(sourceName, resolved, graph));
         } catch (CompileException ce) {

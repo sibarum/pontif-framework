@@ -243,6 +243,27 @@ class ReceiptGraphReportTest {
     }
 
     @Test
+    void importedProofTypes_reportAgreesWithRun() throws Exception {
+        // Regression: when the proof vocabulary is imported from the builtin
+        // std.proof module (the playground default), the report must LINK first
+        // — same as Run — or the proof tree stays unresolved and quirk falsely
+        // renders NOT DISCHARGED even though the runtime executes it. This is the
+        // "Receipts say not discharged, runtime runs happily" bug.
+        String src = """
+                module tour
+                requires std.proof.{Leaf, Split}
+                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+                proof quirk = Split(x>=1, Leaf(), Leaf())
+                quirk(5)
+                """;
+        String text = generate(src, "tour.ptf");
+        assertTrue(text.contains("-> discharged [via proof; notary: accepted]"),
+                () -> "imported-proof quirk should render as proof-discharged:\n" + text);
+        assertTrue(!text.contains("NOT DISCHARGED"),
+                () -> "the imported proof should close quirk in the report:\n" + text);
+    }
+
+    @Test
     void withoutProof_quirkShowsNotDischarged() throws Exception {
         // The same program minus the proof: the report honestly shows NOT
         // DISCHARGED — confirming the proof is what flips it and the report

@@ -8,7 +8,6 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
@@ -106,18 +105,21 @@ public final class PontifCompiler {
                     RunResult.error("Parse error: " + e.getMessage()));
         }
         // A file that `requires` anything (e.g. builtin proof types from
-        // std.proof) opts into the module pipeline: link it as a one-module
-        // project so the required builtins are injected, imports validated, and
-        // names FQN-resolved. A file with no `requires` stays on the bare
-        // single-file path, byte-for-byte unchanged.
-        if (hasRequires(module)) {
-            return compileProject(Map.of(module.name(), module), module.name());
+        // std.proof) opts into the module pipeline: link it so the required
+        // builtins are injected, imports validated, and names FQN-resolved. A
+        // file with no `requires` stays on the bare single-file path,
+        // byte-for-byte unchanged. The link/skip rule is shared with the
+        // receipt-graph report via ModuleLinker.combineSingle.
+        IrModule linked;
+        try {
+            linked = ModuleLinker.combineSingle(module);
+        } catch (CompileException ce) {
+            return new CompileResult.Failed(
+                    RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
+        } catch (RuntimeException e) {
+            return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(module, sourceName);
-    }
-
-    private static boolean hasRequires(IrModule module) {
-        return module.statements().stream().anyMatch(s -> s instanceof IrStmt.Requires);
+        return compileModule(linked, sourceName);
     }
 
     /**

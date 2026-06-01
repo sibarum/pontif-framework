@@ -48,6 +48,22 @@ public final class ModuleLinker {
      * @param entryModule the module whose {@code main} runs
      * @throws CompileException on an unknown entry module or a coherence violation
      */
+    /**
+     * Links a single parsed module <b>iff</b> it declares any {@code requires}
+     * (so builtin modules are injected and names FQN-resolved); otherwise
+     * returns it unchanged — the bare single-file path. This is the one shared
+     * "was this file linked?" rule, used by both the compiler ({@code compileAlt})
+     * and the receipt-graph report, so Run and the Receipts view can never
+     * disagree about whether a file went through linking.
+     */
+    public static IrModule combineSingle(IrModule parsed) throws CompileException {
+        boolean hasRequires = parsed.statements().stream()
+                .anyMatch(s -> s instanceof IrStmt.Requires);
+        return hasRequires
+                ? combine(Map.of(parsed.name(), parsed), parsed.name())
+                : parsed;
+    }
+
     public static IrModule combine(Map<String, IrModule> modules, String entryModule)
             throws CompileException {
         if (!modules.containsKey(entryModule)) {
