@@ -392,9 +392,26 @@ and bare-Int accepted); full suite green (the corpus is provable-or-abstained).
 **Remaining for completeness:**
 1. **Proof-authoring surface** — proofs are Java-`Map` only, not wired through
    `compileAlt`, so an `isSparse`-style hard return written *in the playground*
-   rejects with no in-language recourse. This is now the gating prerequisite
+   rejects with no in-language recourse. This is the gating prerequisite
    (Slice C); until it lands, the gate is "reject hard returns" rather than
-   "reject hard returns lacking a proof."
+   "reject hard returns lacking a proof." **Two paths, and a blocker found:**
+   - *Struct-tree* (write the proof as Pontif struct literals; a Java
+     translator `IrExpr.Record → Refinement` feeds the gate). Elegant
+     (proof-as-data, host-typechecked), no parser — **but BLOCKED**: it needs
+     a recursive sort (`Split` contains `Refinement`s), and **Pontif has no
+     recursive sorts** — `AliasResolver` rejects self-reference as a "Cyclic
+     type alias chain" (pinned by `RecursiveSortProbeTest`). So this path is
+     gated on a *foundational* feature (which also unblocks lists/trees/ASTs —
+     valuable far beyond proofs): teach the resolver contractive recursion
+     (allow recursion through a constructor boundary; keep rejecting degenerate
+     alias-to-alias cycles), and make the interpreter/dispatch/narrowing not
+     loop on recursive sorts.
+   - *DSL* (a small proof-file syntax → `Refinement` directly; the recursive
+     type stays Java-side). Needs a parser, but **sidesteps recursive sorts**.
+   - **Decision (James's):** if recursive types are wanted broadly (they're
+     table stakes for serious work), build them first — struct-tree proofs come
+     nearly free after. If proofs-only ASAP, the DSL avoids the foundational
+     lift.
 2. **Direct `IrCompiler` path is ungated** by design — it sits below
    pontif-receipts (cycle), so the gate is at the `PontifCompiler` layer only.
    The IR API stays unprotected (test harnesses use it); fine, since the
