@@ -298,52 +298,48 @@ public final class AltParser {
 
     // --- Declarations: requires / exports ---
     // Form: `requires X.{name, name, ...}` and `exports @.{name, name, ...}`.
-    // No semantics yet — both parse as NoOp until the module system lands.
+    // Lower to structured IrStmt.Requires/Exports; the module loader/linker and
+    // name resolver consume them. Inert when a single file compiles on its own.
 
     private IrStmt parseRequires() throws ParseException {
         AltToken start = expectKeyword("requires");
-        StringBuilder label = new StringBuilder("requires ");
-        label.append(parseDottedName());
-        label.append(parseDotBraceSymbolList());
+        String target = parseDottedName();
+        List<String> names = parseDotBraceSymbolList();
         AltToken last = tokens.get(pos - 1);
-        return new IrStmt.NoOp(label.toString(), start.spanTo(last));
+        return new IrStmt.Requires(target, names, start.spanTo(last));
     }
 
     private IrStmt parseExports() throws ParseException {
         AltToken start = expectKeyword("exports");
-        StringBuilder label = new StringBuilder("exports ");
+        boolean self = false;
         if (peek().kind() == AltToken.Kind.AT) {
             consume();
-            label.append("@");
+            self = true;
         } else {
-            label.append(parseDottedName());
+            // A non-`@` qualifier (re-export of another module) — parse and keep
+            // the names; the qualifier itself is unused until re-exports land.
+            parseDottedName();
         }
-        label.append(parseDotBraceSymbolList());
+        List<String> names = parseDotBraceSymbolList();
         AltToken last = tokens.get(pos - 1);
-        return new IrStmt.NoOp(label.toString(), start.spanTo(last));
+        return new IrStmt.Exports(names, self, start.spanTo(last));
     }
 
-    /**
-     * Parses the {@code .{name, name, ...}} dictionary-decomposition tail.
-     * Returns a stringified rendering for use in the parent's NoOp label.
-     */
-    private String parseDotBraceSymbolList() throws ParseException {
+    /** Parses the {@code .{name, name, ...}} list tail into its symbol names. */
+    private List<String> parseDotBraceSymbolList() throws ParseException {
         expect(AltToken.Kind.DOT);
         expect(AltToken.Kind.LBRACE);
-        StringBuilder sb = new StringBuilder(".{");
+        List<String> names = new ArrayList<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) {
                 expect(AltToken.Kind.COMMA);
-                sb.append(", ");
             }
-            AltToken sym = expect(AltToken.Kind.IDENT);
-            sb.append(sym.text());
+            names.add(expect(AltToken.Kind.IDENT).text());
             first = false;
         }
         expect(AltToken.Kind.RBRACE);
-        sb.append("}");
-        return sb.toString();
+        return names;
     }
 
     // --- Function declarations ---

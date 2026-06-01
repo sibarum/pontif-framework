@@ -76,6 +76,8 @@ public final class IrCompiler {
                     }
                 }
                 case IrStmt.Proof p -> { /* proof metadata; consumed by the return-refinement gate (PontifCompiler), never compiled or evaluated */ }
+                case IrStmt.Requires r -> { /* import decl; consumed by the module loader/linker + name resolver, not the per-module compile */ }
+                case IrStmt.Exports e -> { /* export decl; consumed by the linker's visibility check */ }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
             }
         }

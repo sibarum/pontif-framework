@@ -116,6 +116,10 @@ public final class AliasResolver {
                 // nothing to resolve, and rewriting would be wrong. The gate
                 // reads it and translates it after drafting.
                 newStatements.add(p);
+            } else if (stmt instanceof IrStmt.Requires || stmt instanceof IrStmt.Exports) {
+                // Module import/export decls: no sorts to resolve; the loader/
+                // linker + name resolver consume them. Pass through unchanged.
+                newStatements.add(stmt);
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
             }

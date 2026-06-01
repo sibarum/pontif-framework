@@ -61,8 +61,16 @@ class AltParserIntegrationTest {
         IrModule m = AltParser.parseModule(src, "t.ptf");
         assertEquals("m", m.name());
         assertEquals(2, m.statements().size());
-        assertTrue(m.statements().get(0) instanceof sibarum.pontif.ir.IrStmt.NoOp);
-        assertTrue(m.statements().get(1) instanceof sibarum.pontif.ir.IrStmt.NoOp);
+        assertTrue(m.statements().get(0) instanceof sibarum.pontif.ir.IrStmt.Requires);
+        sibarum.pontif.ir.IrStmt.Requires req =
+                (sibarum.pontif.ir.IrStmt.Requires) m.statements().get(0);
+        assertEquals("math", req.targetModule());
+        assertEquals(java.util.List.of("min", "max", "avg", "floor"), req.names());
+        assertTrue(m.statements().get(1) instanceof sibarum.pontif.ir.IrStmt.Exports);
+        sibarum.pontif.ir.IrStmt.Exports exp =
+                (sibarum.pontif.ir.IrStmt.Exports) m.statements().get(1);
+        assertTrue(exp.self());
+        assertEquals(java.util.List.of("factorial", "isEven"), exp.names());
         // Main still parses & runs.
         assertEquals(42L, run(src));
     }
@@ -751,15 +759,21 @@ class AltParserIntegrationTest {
                 42
                 """;
         IrModule m = AltParser.parseModule(src, "t.ptf");
-        // requires, exports, spec-only let = 3 NoOps. (Spec-only functions /
-        // methods with non-synthesizable returns are now hard errors, not
-        // NoOps — see spec_only_*_is_hard_error. Synthesizable spec-only decls
-        // — `[Bool:true]`, `[Int:42]`, `[Int:0]` — become FunctionDecls at
+        // requires/exports now lower to structured IrStmt.Requires/Exports; the
+        // spec-only `let Point.origin:Point` is the lone remaining NoOp.
+        // (Spec-only functions/methods with non-synthesizable returns are hard
+        // errors now — see spec_only_*_is_hard_error. Synthesizable spec-only
+        // decls — `[Bool:true]`, `[Int:42]`, `[Int:0]` — become FunctionDecls at
         // parse time; methods WITH a body desugar to FunctionDecls too.)
+        long requiresCount = m.statements().stream()
+                .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.Requires).count();
+        long exportsCount = m.statements().stream()
+                .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.Exports).count();
         long noOpCount = m.statements().stream()
-                .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.NoOp)
-                .count();
-        assertEquals(3, noOpCount);
+                .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.NoOp).count();
+        assertEquals(1, requiresCount);
+        assertEquals(1, exportsCount);
+        assertEquals(1, noOpCount);
         // Main is 42.
         assertEquals(42L, run("module m\n42"));
     }

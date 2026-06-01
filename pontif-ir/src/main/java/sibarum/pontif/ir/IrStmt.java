@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 
 import java.util.List;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
 
     Origin origin();
 
@@ -30,6 +30,14 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
 
     static Proof proof(String functionName, IrExpr proofTree) {
         return new Proof(functionName, proofTree, Origin.NONE);
+    }
+
+    static Requires requires(String targetModule, List<String> names) {
+        return new Requires(targetModule, names, Origin.NONE);
+    }
+
+    static Exports exports(List<String> names, boolean self) {
+        return new Exports(names, self, Origin.NONE);
     }
 
     record FunctionDecl(
@@ -114,10 +122,36 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
     }
 
     /**
+     * Import declaration: {@code requires a.b.{name, name, …}} — pulls the named
+     * symbols from module {@code targetModule} (a dotted module name) into this
+     * module's scope. Consumed by the module loader/linker and the name
+     * resolver; inert when a single file is compiled on its own.
+     */
+    record Requires(String targetModule, List<String> names, Origin origin) implements IrStmt {
+        public Requires {
+            if (targetModule == null || targetModule.isEmpty()) {
+                throw new IllegalArgumentException("Requires targetModule must be non-empty");
+            }
+            names = List.copyOf(names);
+        }
+    }
+
+    /**
+     * Export declaration: {@code exports @.{name, …}} (this module; {@code self}
+     * true) lists the local symbols this module makes visible to importers.
+     * Consumed by the linker's visibility check; inert for a single file.
+     */
+    record Exports(List<String> names, boolean self, Origin origin) implements IrStmt {
+        public Exports {
+            names = List.copyOf(names);
+        }
+    }
+
+    /**
      * Placeholder for syntactic forms the parser recognizes but the IR
-     * doesn't yet support (e.g., {@code requires}, {@code exports}, spec-only
-     * functions, {@code method} declarations, top-level {@code let} without a
-     * body). Carries a human-readable {@code label} of the original form for
+     * doesn't yet support (e.g., spec-only functions, {@code method}
+     * declarations, top-level {@code let} without a body). Carries a
+     * human-readable {@code label} of the original form for
      * diagnostics; otherwise contributes nothing to compilation or execution.
      */
     record NoOp(String label, Origin origin) implements IrStmt {
