@@ -821,9 +821,35 @@ representation + reasoners. Full suite green throughout (~1060 tests).
   inferring `let q = factorial(3)`, the parser only knows
   `factorial`'s declared return sort, not the specific narrowing from
   the matched overload. Gated on the dispatch-inference priority work.
-- **Module system: `requires`, `exports`, namespacing.** Currently
-  `module` is a label, `requires`/`exports` are no-ops. Needs a
-  loader, symbol resolver, and compile-time linking.
+- **Module system — core ✅ landed (2026-06-01); disk loader remains.** Multi-file
+  projects link and run: `requires`/`exports` lower to structured
+  `IrStmt.Requires`/`Exports`; `ModuleSymbolTable` indexes cross-module
+  ownership; `NameResolver` FQN-keys function/method/operator decls + call sites
+  (`module/localKey`, `/` reserved for the module↔local boundary so the local
+  dot-grammar survives); `CoherenceCheck` enforces the Rust-style orphan rule
+  (`impl Trait for Type` only in the trait's or type's module — closes the
+  global-`TraitRegistry` piracy hole); `ModuleLinker.combine` builds the symbol
+  table, runs coherence, FQN-resolves each module, and **concatenates** all
+  statements into one combined `IrModule` so `SortChecker`/overload/return-gate
+  run unchanged; `PontifCompiler.compileProject(modules, entry)` is the new
+  entry. Single-file `compile`/`compileAlt` is byte-for-byte unchanged (the
+  module passes are linker-invoked, never wired into per-module compile).
+  Pinned by `ModuleSystemTest` (cross-module call, qualified `lib.f`, FQN
+  name-isolation) + `CoherenceCheckTest` (orphan rule). **Nice property:** the
+  concatenate-then-compile approach handles cross-module *mutual recursion* for
+  free (all decls coexist in the combined module) — no topo-order/cycle staging
+  needed.
+  - **Remaining: the disk loader.** `compileProject` takes a pre-parsed
+    `Map<String,IrModule>`; the file scanner — `ProjectRoot`/`ModuleLoader`
+    (walk `**/*.ptf`, read each `module` decl, build name→file) + a
+    `module.ptf.toml` root marker with an optional `entry` line + entry-point
+    resolution — is the next slice. Plus diagnostics (unexported-name,
+    ambiguous-import) and the v1 limits below.
+  - **v1 limits (deferred):** type names are **global** across a project (two
+    modules declaring the same struct/trait name → duplicate-alias error);
+    per-module type namespacing, function-overload coherence (FQN-keying already
+    isolates per-module generics), re-exports/import-aliasing, and `Capital=type`
+    lexical classification are follow-ups.
 - **Action classes / mutable semantics.** Pure functions stay pure;
   actions are the controlled escape hatch. Likely as a side-by-side IR
   family (`IrAction`, `IrActionStmt`) rather than a tag on `IrExpr`.
