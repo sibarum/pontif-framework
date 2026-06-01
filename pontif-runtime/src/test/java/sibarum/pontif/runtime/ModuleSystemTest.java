@@ -135,6 +135,28 @@ class ModuleSystemTest {
     }
 
     @Test
+    void crossModuleMethod_resolvesViaTypeOwner() {
+        // app calls geo's qualified method `Point.magnitude` on a geo/Point it
+        // got from geo's `make`. app declares neither Point nor the method, but
+        // the method-call key `Point.magnitude` resolves via Point's owning
+        // module (geo) → geo/Point.magnitude.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{make}
+                struct Point(x:Int, y:Int)
+                function make(x:Int, y:Int):Point -> Point(x, y)
+                function Point.magnitude(p:Point):Int -> p.x + p.y
+                """);
+        src.put("app", """
+                module app
+                requires geo.{make}
+                Point.magnitude(make(3, 4))
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
     void unknownEntryModule_isHardError() {
         Map<String, String> src = new LinkedHashMap<>();
         src.put("lib", "module lib\nfunction f(x:Int):Int -> x\n0");

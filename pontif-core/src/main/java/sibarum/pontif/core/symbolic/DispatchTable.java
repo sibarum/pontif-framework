@@ -180,17 +180,23 @@ public final class DispatchTable {
      */
     private DispatchResult resolveTraitFallback(
             String name, List<SymExpr> arguments, Simplifier simplifier) {
-        int dot = name.indexOf('.');
-        if (dot <= 0 || dot >= name.length() - 1) return null;
-        String traitName = name.substring(0, dot);
-        String methodName = name.substring(dot + 1);
+        // A key may be module-qualified (module/Trait.method); the module part
+        // can itself contain dots (a.b), so split off the module at the '/'
+        // boundary FIRST, then do the Trait.method split on the local part.
+        int slash = name.indexOf('/');
+        String modulePrefix = slash >= 0 ? name.substring(0, slash + 1) : "";  // "module/" or ""
+        String local = slash >= 0 ? name.substring(slash + 1) : name;
+        int dot = local.indexOf('.');
+        if (dot <= 0 || dot >= local.length() - 1) return null;
+        String traitName = modulePrefix + local.substring(0, dot);  // module/Trait (or bare Trait)
+        String methodName = local.substring(dot + 1);
         if (arguments.isEmpty()) return null;
         SymExpr first = arguments.get(0);
         if (!(first instanceof SymExpr.Record r)) return null;
-        String concreteType = r.typeName();
+        String concreteType = r.typeName();  // already an FQN when linked (module/Type)
         if (concreteType == null) return null;
         if (!traitRegistry.satisfies(traitName, concreteType)) return null;
-        String redirected = concreteType + "." + methodName;
+        String redirected = concreteType + "." + methodName;  // module/Type.method
         DispatchResult result = resolveDirect(redirected, arguments, simplifier);
         // Suppress NoMatch fallback (let the caller report the original
         // trait-lookup error); a real Resolved or Ambiguous result wins.

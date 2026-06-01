@@ -58,8 +58,9 @@ public final class NameResolver {
                                 ModuleSymbolTable.fqn(m, mm.name()), rewriteParams(mm.params(), m, table),
                                 rewriteSort(mm.returnSort(), m, table), rewrite(mm.body(), m, table), mm.origin()));
                     }
-                    // typeName/traitName FQN-rewriting is Slice B (trait dispatch).
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, ti.origin());
+                    yield new IrStmt.TraitImpl(
+                            resolveTypeName(ti.typeName(), m, table),
+                            resolveTypeName(ti.traitName(), m, table), methods, ti.origin());
                 }
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
                         resolveTypeName(ta.name(), m, table), rewriteSort(ta.sort(), m, table), ta.origin());
@@ -133,8 +134,20 @@ public final class NameResolver {
         String src = table.importSource(m, n);
         if (src != null) return ModuleSymbolTable.fqn(src, n);
         int dot = n.indexOf('.');
-        if (dot > 0 && table.requiredModules(m).contains(n.substring(0, dot))) {
-            return ModuleSymbolTable.fqn(n.substring(0, dot), n.substring(dot + 1));
+        if (dot > 0) {
+            String prefix = n.substring(0, dot);
+            String rest = n.substring(dot + 1);
+            // Qualified function call: prefix is a required module → module/rest.
+            if (table.requiredModules(m).contains(prefix)) {
+                return ModuleSymbolTable.fqn(prefix, rest);
+            }
+            // Method / trait-method call: prefix is a TYPE (e.g. p.magnitude
+            // routed to `Point.magnitude`, or `Show.render`). The method lives
+            // in the type's owning module → ownerModule/Type.method.
+            String typeOwner = table.soleTypeOwner(prefix);
+            if (typeOwner != null) {
+                return ModuleSymbolTable.fqn(typeOwner, n);
+            }
         }
         return n;  // primitive / local lambda / unknown — leave bare
     }

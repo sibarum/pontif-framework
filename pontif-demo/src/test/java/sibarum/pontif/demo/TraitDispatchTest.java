@@ -115,6 +115,46 @@ class TraitDispatchTest {
     }
 
     @Test
+    void traitFallback_firesWithModuleQualifiedFqnKeys() {
+        // After module linking, keys are FQNs: trait show/Show, impl method
+        // geo/Point.quack, and the record's typeName is geo/Point. The fallback
+        // must split the module boundary ('/') before the Trait.method dot.
+        TraitRegistry registry = new TraitRegistry();
+        registry.register("show/Show", "geo/Point");
+        DispatchTable table = new DispatchTable(registry);
+        table.register(FunctionDecl.declaration(
+                "geo/Point.quack",
+                List.of(new FunctionDecl.Param("self", POINT_STRUCT)),
+                Sort.of("Audio")));
+
+        DispatchResult result = table.resolve(
+                "show/Show.quack", List.of(pointRecord("geo/Point", 3, 4)), SIMPLIFIER);
+
+        DispatchResult.Resolved resolved = assertInstanceOf(DispatchResult.Resolved.class, result);
+        assertEquals("geo/Point.quack", resolved.decl().name());
+    }
+
+    @Test
+    void traitFallback_dottedModuleName_isNotMisSplitOnTheModuleDot() {
+        // The trait's module name has a dot (a.b). A naive indexOf('.') would
+        // split there and mis-read the trait; the '/'-first split keeps a.b/Show
+        // intact.
+        TraitRegistry registry = new TraitRegistry();
+        registry.register("a.b/Show", "geo/Point");
+        DispatchTable table = new DispatchTable(registry);
+        table.register(FunctionDecl.declaration(
+                "geo/Point.quack",
+                List.of(new FunctionDecl.Param("self", POINT_STRUCT)),
+                Sort.of("Audio")));
+
+        DispatchResult result = table.resolve(
+                "a.b/Show.quack", List.of(pointRecord("geo/Point", 3, 4)), SIMPLIFIER);
+
+        DispatchResult.Resolved resolved = assertInstanceOf(DispatchResult.Resolved.class, result);
+        assertEquals("geo/Point.quack", resolved.decl().name());
+    }
+
+    @Test
     void traitFallback_skipped_whenConcreteTypeNotRegistered() {
         // Point is NOT registered as Duck-satisfier — call should NoMatch
         // exactly as if the fallback didn't exist.
