@@ -20,6 +20,7 @@ import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
+import sibarum.pontif.runtime.module.ModuleLinker;
 
 import java.util.List;
 import java.util.Map;
@@ -107,8 +108,28 @@ public final class PontifCompiler {
     }
 
     /**
+     * Compiles a multi-file project: links the parsed modules into one combined
+     * module (FQN-keyed, coherence-checked) and runs it through the same
+     * pipeline as a single file — so the return gate, overload check, and
+     * runtime are all shared. {@code entryModule}'s {@code main} is the program
+     * entry. Single-file {@link #compile}/{@link #compileAlt} are unaffected.
+     */
+    public CompileResult compileProject(Map<String, IrModule> modules, String entryModule) {
+        IrModule combined;
+        try {
+            combined = ModuleLinker.combine(modules, entryModule);
+        } catch (CompileException ce) {
+            return new CompileResult.Failed(
+                    RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
+        } catch (RuntimeException e) {
+            return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
+        }
+        return compileModule(combined, entryModule);
+    }
+
+    /**
      * Runs the IR compile pipeline on an already-parsed module. Shared by
-     * {@link #compile} and {@link #compileAlt}.
+     * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
      */
     private CompileResult compileModule(IrModule module, String sourceName) {
         Simplifier simplifier = new Simplifier(simplifierRules);
