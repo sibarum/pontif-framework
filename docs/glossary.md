@@ -20,6 +20,12 @@ the base may be omitted in a bracket-form refinement: `match (x:Int) { [@<0]
 -> ... }` has the base `Int` inferred. Required to be explicit when context
 is ambiguous (union scrutinee, top-level function return, etc.).
 
+**coherence rule (orphan rule)** — A trait impl `impl Trait for Type` may be
+declared only in the module owning `Trait` or `Type`, never a third module
+owning neither. Borrowed from Rust; closes the type-piracy hole Pontif's global
+trait registry would otherwise open under multi-dispatch. Enforced at link time
+(`CoherenceCheck`) over fully-qualified type names. See **module**.
+
 **drafter** — Pontif's built-in deterministic component that produces
 receipt-graphs from source. Single job, no reasoning. Immutable —
 changes only across Pontif language versions. Not pluggable. Lives in
@@ -44,6 +50,14 @@ Chosen over "closer" to avoid collisions with `Closure` in the IR
 layer and with the comparative "more close" in prose. "Closer" is fine
 colloquially.
 
+**module** — A `.ptf` source file declaring `module a.b` at its top. The unit of
+namespacing: every function and type it declares gets a fully-qualified key
+(`module/name` internally; `/` is the module↔local boundary) so distinct modules
+can reuse names without colliding. `requires pkg.{names}` imports; `exports
+@.{names}` lists what it makes visible (`@` = this module). A project is a
+directory tree of modules linked into one program, entry named in
+`module.ptf.toml`. See **coherence rule**.
+
 **narrowing** — What `:` denotes everywhere. `x:T` reads "x narrows to T."
 Used at every level — params, refinements, struct fields, function returns.
 Chosen over "has type" / "is of sort" because it's descriptive and reads
@@ -66,6 +80,14 @@ produce receipts. Pontif won't audit it; if it has a bug, expect runtime
 errors. Examples: Z3, custom solvers, AI provers, hand-written receipts.
 From Pontif's perspective the name is precise, not metaphorical — oracles
 are opaque sources of trusted-by-fiat results.
+
+**proof** — A hand-authored, in-source discharge for a declared return
+refinement the built-in engine can't prove on its own:
+`proof f = Split(p, whenTrue, whenFalse)` / `Leaf()` — a tree of case-splits the
+kernel validates at the return gate. Conservative: it can rescue a
+true-but-hard return but never launder a false one (a false leaf simply won't
+discharge). Distinct from a **receipt** (which records a discharge the engine
+made) — a proof *supplies* one the engine couldn't.
 
 **Proof Authority (PA)** — *Roadmap goal, not yet implemented.* A trusted
 issuer whose receipts are accepted by attribution rather than independent
