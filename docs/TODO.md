@@ -766,10 +766,18 @@ representation + reasoners. Full suite green throughout (~1060 tests).
   `line:col → character offset` conversion.
 - **Interactive verification.** The playground launches and renders
   cleanly under timeout but I can't drive button clicks from a shell.
-- **Playground uses the S-expr parser only.** `App.onRunClicked` calls
-  `PontifCompiler.compile`, which uses the S-expr `Parser`. To run
-  alt-syntax programs, the compiler or runner needs an `Engine`-style
-  enum, or a separate "alt" toolbar button, or autodetection.
+- **Playground default sample errors on Run (pre-existing).** `App.DEFAULT_CODE`
+  ships `isEven`/`isOdd` with a union return `[Int:0|1]` over *mutual recursion*,
+  which the return gate can't discharge — so the out-of-box program rejects on
+  the first Run (pinned by `PlaygroundIntegrationTest.unionMutualRecursion_…`).
+  The engine would need to reason from a disjunctive *hypothesis*
+  (`r_0 == r_1 ∧ r_1 ∈ {0,1} ⟹ r_0 ∈ {0,1}`) — the Or-*goal* discharge doesn't
+  cover it, and it can't be proof-authored (overloaded). Fix the sample (drop
+  the narrowing, or swap in a non-recursive `bit`-style union demo) or extend
+  the engine. The `factorial`/`inc`/`sign`/`timesTwo` showcase runs fine.
+- **Playground uses the alt parser** (was "S-expr only" — stale): `App.onRunClicked`
+  calls `PontifCompiler.compileAlt`. The S-expr `Parser` remains the stable test
+  surface; the `proof`/recursive-struct forms are alt-only.
 
 ## Alt syntax — surface forms that parse but produce `IrStmt.NoOp`
 
