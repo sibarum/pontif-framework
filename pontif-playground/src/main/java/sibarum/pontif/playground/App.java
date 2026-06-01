@@ -47,6 +47,7 @@ import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.pontif.playground.generated.Icons;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
+import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
 
 import java.io.IOException;
@@ -88,46 +89,9 @@ public final class App {
 
     private static final float WHEEL_PIXELS_PER_STEP = 40f;
 
-    private static final String DEFAULT_CODE = """
-            # Pontif quick tour — click Run to compile and evaluate this module.
-            # Pontif PROVES every declared return refinement at compile time, or
-            # rejects it. When the built-in prover falls short, you hand it a
-            # proof. Comments start with #.
-
-            module tour
-
-            # The proof vocabulary (Leaf, Split) ships as a builtin module you
-            # import — like a standard library. The `requires` line below brings
-            # them into scope; no need to declare them yourself.
-            requires std.proof.{Leaf, Split}
-
-            # Most returns prove themselves. inc's declared return [Int:@>1] is
-            # a linear bound: given x >= 1, the engine sees x + 1 lands in
-            # [2, infinity) and clears the > 1 bar on its own — no help needed.
-            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
-
-            # Some don't. quirk(x) = x * (x - 1) is the product of two
-            # consecutive integers, so it's always >= 0 — but it's an opaque
-            # product, and the built-in engine can't see that. Declaring
-            # [Int:@>=0] would be rejected on its own. So we hand it a PROOF.
-
-            # A proof is a tree of case-splits, built from Leaf and Split (the
-            # types imported above). Split refers to itself through a
-            # [Leaf|Split] union — it's a recursive type, like lists and trees.
-
-            # Split on x >= 1; each leaf is then within the engine's reach:
-            #   x >= 1  ->  both factors >= 0, so the product >= 0
-            #   x <  1  ->  x <= 0 and x - 1 <= -1, product of two negatives >= 0
-            # The combinators are conservative: a bogus split can never validate,
-            # so a proof rescues a true-but-hard return but never launders a
-            # false one. (Delete the proof line and Run — quirk is rejected.)
-            function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
-            proof quirk = Split(x >= 1, Leaf(), Leaf())
-
-            # Main expression — runs when you click Run.
-            # inc(4) = 5, quirk(5) = 20.  Sum: 25.
-            inc(4) + quirk(5)
-            """;
+    // The default editor content is the canonical quick tour, owned by
+    // pontif-runtime so the app and the runtime test suite share one copy.
+    private static final String DEFAULT_CODE = QuickTour.SOURCE;
 
     // Component references held in static fields so the toolbar's click
     // handler and the worker thread can find them without rebuilding the

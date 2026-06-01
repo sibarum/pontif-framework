@@ -47,19 +47,12 @@ class PlaygroundIntegrationTest {
         assertTrue(r.text().contains("quirk"), () -> "expected a quirk rejection; got: " + r.text());
     }
 
-    /** Mirrors {@code App.DEFAULT_CODE} (kept in sync by hand; pinned above). */
-    private static final String DEFAULT_TOUR = """
-            module tour
-
-            requires std.proof.{Leaf, Split}
-
-            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
-
-            function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
-            proof quirk = Split(x >= 1, Leaf(), Leaf())
-
-            inc(4) + quirk(5)
-            """;
+    /**
+     * The playground's shipped default ({@code App.DEFAULT_CODE} is the same
+     * {@link QuickTour#SOURCE}), so this canary tracks the real default with no
+     * hand-kept copy to drift.
+     */
+    private static final String DEFAULT_TOUR = QuickTour.SOURCE;
 
     /**
      * A proof-bearing program runs end to end: the gate accepts the hard return

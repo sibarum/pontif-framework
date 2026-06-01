@@ -718,10 +718,10 @@ class AltParserIntegrationTest {
     }
 
     @Test
-    void playground_default_sample_runs_to_134() throws Exception {
-        // Mirror of pontif-playground App.DEFAULT_CODE. Keeps the playground's
-        // visible default covered: if a parser/compiler change breaks this
-        // program, the test catches it before the user opens the playground.
+    void multiFeatureSample_runs_to_134() throws Exception {
+        // A multi-feature smoke sample (overloads, mutual recursion, match,
+        // value-pin synthesis) exercised end to end. NOT the playground default
+        // — that's QuickTour.SOURCE, pinned by PlaygroundIntegrationTest.
         String src = """
                 module tour
 
