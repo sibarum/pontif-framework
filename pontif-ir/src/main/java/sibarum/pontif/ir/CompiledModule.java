@@ -13,7 +13,8 @@ public record CompiledModule(
         DispatchTable dispatch,
         Map<FunctionDecl, CompiledFunction> functions,
         IrExpr main,
-        Map<IrSort, Sort> compiledSorts) {
+        Map<IrSort, Sort> compiledSorts,
+        Map<String, Sort> structRegistry) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
@@ -21,6 +22,10 @@ public record CompiledModule(
         // by record-equality, so two structurally-equal IrSorts at different
         // origins remain distinct entries. Defensive copy keeps the map opaque.
         compiledSorts = new IdentityHashMap<>(compiledSorts);
+        // Nominal struct definitions by name (alias name and struct name), so a
+        // by-reference struct sort can be resolved to its shape at check time
+        // without inlining. Keyed by name (record-equality), unlike compiledSorts.
+        structRegistry = Map.copyOf(structRegistry);
     }
 
     /**

@@ -209,6 +209,51 @@ class StructuralSortTest {
         assertFalse(Refinements.imply(scalar, struct, SIMPLIFIER).isPassed());
     }
 
+    // --- Nominal / recursive struct implication (registry + coinductive guard) ---
+
+    @Test
+    void recursiveStructImpliesItself_terminates() throws Exception {
+        // struct Node(v:Int, next:Node) — a by-reference self-reference. With the
+        // registry resolving "Node" to its structural definition, subsumption
+        // unfolds Node and revisits the (Node, Node) pair; the coinductive guard
+        // assumes it holds and stops, so this returns Passed instead of looping.
+        Sort node = Sort.structural("Node", Map.of(
+                "v", Sort.of("Int"),
+                "next", Sort.of("Node")));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Node", node));
+        assertTrue(Refinements.imply(Sort.of("Node"), Sort.of("Node"), withReg).isPassed(),
+                "recursive Node should imply itself and terminate");
+    }
+
+    @Test
+    void byReferenceStructs_resolveStructurallyViaRegistry() throws Exception {
+        // Bare named sorts Sort.of("Big")/Sort.of("Small") resolve to their
+        // structural definitions via the registry, so width subtyping works on
+        // nominal references — not just on inlined structural sorts.
+        Sort big = Sort.structural("Big", Map.of(
+                "name", Sort.of("String"),
+                "age", Sort.of("Int")));
+        Sort small = Sort.structural("Small", Map.of(
+                "name", Sort.of("String")));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Big", big, "Small", small));
+        assertTrue(Refinements.imply(Sort.of("Big"), Sort.of("Small"), withReg).isPassed(),
+                "{name, age} should imply {name} through registry resolution");
+    }
+
+    @Test
+    void disjointNominalStructs_doNotImply() throws Exception {
+        // The soundness case at the sort level: a Node arg must not satisfy a
+        // Leaf param. Resolved structurally, Node lacks Leaf's 'tag' field, so
+        // imply fails — rather than treating the bare name "Leaf" as unconstrained.
+        Sort node = Sort.structural("Node", Map.of(
+                "v", Sort.of("Int"),
+                "next", Sort.of("Node")));
+        Sort leaf = Sort.structural("Leaf", Map.of("tag", Sort.of("Int")));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Node", node, "Leaf", leaf));
+        assertFalse(Refinements.imply(Sort.of("Node"), Sort.of("Leaf"), withReg).isPassed(),
+                "Node should NOT imply Leaf (Node lacks 'tag')");
+    }
+
     // --- Nested structural sorts ---
 
     @Test

@@ -2,9 +2,11 @@ package sibarum.pontif.ir;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Substitutes named type-alias references with their aliased sorts.
@@ -38,15 +40,32 @@ public final class AliasResolver {
     private AliasResolver() {}
 
     public static IrModule resolve(IrModule module) throws CompileException {
+        // Structs are NOMINAL: a struct reference stays IrSort.Named and is
+        // resolved by name against the registry on demand, never inlined — this
+        // is what lets the type graph refer to itself through a constructor
+        // (recursive types). Only pure abbreviations (type Coord = Int, type
+        // Pair = [A|B]) inline. Excluding structs from the alias table means
+        // resolveSort never follows a reference into a struct body, so any
+        // recursion that passes THROUGH a struct constructor is naturally
+        // admitted, while a constructor-free abbreviation cycle (type A = [A|Int])
+        // is still caught by the path-based cycle check below. That equivalence
+        // — "recursion must pass through a constructor" — is the contractiveness
+        // discipline, enforced for free by the exclusion.
         Map<String, IrSort> aliases = new HashMap<>();
+        Set<String> declaredNames = new HashSet<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.TypeAlias ta) {
-                if (aliases.containsKey(ta.name())) {
+                if (!declaredNames.add(ta.name())) {
                     throw new CompileException(
                             "Duplicate type alias '" + ta.name() + "'",
                             ta.origin());
                 }
-                aliases.put(ta.name(), ta.sort());
+                // Struct definitions are nominal — kept by-reference, never
+                // entered into the inlining table — so abbreviations inline but
+                // struct references (incl. self-references) stay IrSort.Named.
+                if (!(ta.sort() instanceof IrSort.Structural)) {
+                    aliases.put(ta.name(), ta.sort());
+                }
             }
         }
 
@@ -75,9 +94,22 @@ public final class AliasResolver {
             } else if (stmt instanceof IrStmt.TypeAlias ta) {
                 // Type aliases are kept downstream so SortChecker can see them:
                 // trait contracts for TraitImpl validation; struct definitions
-                // for `[StructName:@.field…]` refinement validation; other
-                // aliases are inert pass-through (IrCompiler skips them).
-                newStatements.add(ta);
+                // for nominal resolution + `[StructName:@.field…]` refinement
+                // validation; other aliases are inert pass-through (IrCompiler
+                // skips them). For a struct definition we still resolve
+                // abbreviation references inside its member sorts (so a field
+                // typed `Coord` where `type Coord = Int` becomes `Int`); struct
+                // references stay nominal because structs are absent from
+                // resolvedAliases — substituteResolved leaves them as Named,
+                // which also makes this terminate on a recursive member.
+                if (ta.sort() instanceof IrSort.Structural) {
+                    newStatements.add(new IrStmt.TypeAlias(
+                            ta.name(),
+                            substituteResolved(ta.sort(), resolvedAliases),
+                            ta.origin()));
+                } else {
+                    newStatements.add(ta);
+                }
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
             }

@@ -58,7 +58,7 @@ public final class SortChecker {
     public static void check(IrModule module) throws CompileException {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
-        Map<String, IrSort.Structural> structDefs = collectStructDefs(module);
+        Map<String, IrSort.Structural> structDefs = TypeRegistry.collect(module);
 
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
@@ -74,24 +74,6 @@ public final class SortChecker {
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs);
-    }
-
-    /**
-     * Collects declared struct definitions from preserved {@link IrStmt.TypeAlias}
-     * statements whose sort is an {@link IrSort.Structural}. Used by
-     * {@link #validateSortNames} to recognize {@code [StructName:…]}-form
-     * refinements and validate their {@code @.field} references against the
-     * struct's declared members.
-     */
-    private static Map<String, IrSort.Structural> collectStructDefs(IrModule module) {
-        Map<String, IrSort.Structural> map = new LinkedHashMap<>();
-        for (IrStmt stmt : module.statements()) {
-            if (stmt instanceof IrStmt.TypeAlias ta
-                    && ta.sort() instanceof IrSort.Structural s) {
-                map.put(s.name(), s);
-            }
-        }
-        return map;
     }
 
     /**
@@ -229,7 +211,14 @@ public final class SortChecker {
             throws CompileException {
         switch (sort) {
             case IrSort.Named n -> {
-                if (!PRIMITIVE_SORT_NAMES.contains(n.name())) {
+                // A surviving Named is either a primitive or a nominal struct
+                // reference (structs are no longer inlined — see AliasResolver).
+                // Resolving by name against structDefs, rather than recursing
+                // into the struct body, is what keeps this terminating on a
+                // recursive type: struct Node(next:Node) validates without
+                // unrolling Node.
+                if (!PRIMITIVE_SORT_NAMES.contains(n.name())
+                        && !structDefs.containsKey(n.name())) {
                     throw new CompileException(
                             "Unknown sort '" + n.name() + "' — not a primitive "
                                     + "and not a declared type (did you forget a "
@@ -403,8 +392,9 @@ public final class SortChecker {
             }
             case IrExpr.FieldAccess fa -> {
                 checkExpr(fa.base(), typeEnv, functionReturns, structDefs);
-                IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns);
-                if (baseSort instanceof IrSort.Structural sp) {
+                IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
+                IrSort.Structural sp = resolveNominal(baseSort, structDefs);
+                if (sp != null) {
                     if (!sp.members().containsKey(fa.fieldName())) {
                         throw new CompileException(
                                 "Record of sort '" + sp.name() + "' has no field '"
@@ -441,7 +431,7 @@ public final class SortChecker {
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs) throws CompileException {
-        IrSort scrutineeIr = inferSort(m.scrutinee(), typeEnv, functionReturns);
+        IrSort scrutineeIr = inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs);
         if (scrutineeIr == null) return;  // unknown domain → defer
 
         // Struct totality (Tier A): a bare structural arm (no refined fields)
@@ -519,7 +509,7 @@ public final class SortChecker {
     private static boolean tryTierBSingleField(
             IrExpr.Match m, IrSort scrutineeIr,
             Map<String, IrSort.Structural> structDefs) throws CompileException {
-        IrSort.Structural scrutineeStruct = scrutineeStructDef(scrutineeIr, structDefs);
+        IrSort.Structural scrutineeStruct = resolveNominal(scrutineeIr, structDefs);
         if (scrutineeStruct == null) return false;
 
         String varyingField = null;
@@ -581,14 +571,17 @@ public final class SortChecker {
     }
 
     /**
-     * The declared struct definition for a scrutinee — directly when it's
-     * {@link IrSort.Structural}, via {@code structDefs} for a
-     * {@link IrSort.Named}/{@link IrSort.Refined} pointing at a declared
-     * struct. {@code null} when the scrutinee isn't a struct.
+     * Resolves a sort to its declared struct definition — directly when it's
+     * {@link IrSort.Structural}, by name via {@code structDefs} for a nominal
+     * {@link IrSort.Named}/{@link IrSort.Refined} reference. {@code null} when
+     * the sort isn't a struct. Resolving by a single name lookup (never
+     * recursing into the struct body) is what keeps every consumer terminating
+     * on a recursive type.
      */
-    private static IrSort.Structural scrutineeStructDef(
-            IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
-        return switch (scrutineeIr) {
+    private static IrSort.Structural resolveNominal(
+            IrSort sort, Map<String, IrSort.Structural> structDefs) {
+        if (sort == null) return null;  // unknown inferred sort — not a struct
+        return switch (sort) {
             case IrSort.Structural s -> s;
             case IrSort.Named n -> structDefs.get(n.name());
             case IrSort.Refined r -> structDefs.get(r.name());
@@ -599,7 +592,7 @@ public final class SortChecker {
     /** Field set of a struct scrutinee, or {@code null} for non-structs. */
     private static Set<String> scrutineeFieldSet(
             IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
-        IrSort.Structural def = scrutineeStructDef(scrutineeIr, structDefs);
+        IrSort.Structural def = resolveNominal(scrutineeIr, structDefs);
         return def != null ? def.members().keySet() : null;
     }
 
@@ -666,12 +659,20 @@ public final class SortChecker {
      * propagation.
      */
     private static IrSort inferSort(IrExpr expr, Map<String, IrSort> typeEnv,
-                                    Map<String, IrSort> functionReturns) {
+                                    Map<String, IrSort> functionReturns,
+                                    Map<String, IrSort.Structural> structDefs) {
         return switch (expr) {
             case IrExpr.Var v -> typeEnv.get(v.name());
             case IrExpr.FieldAccess fa -> {
-                IrSort base = inferSort(fa.base(), typeEnv, functionReturns);
-                if (base instanceof IrSort.Structural sp) {
+                IrSort base = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
+                // Resolve a nominal struct reference to its definition by name
+                // (single lookup — no body recursion), then project the field.
+                // A field whose own sort is a nominal struct reference yields
+                // that Named back, so a deeper access resolves one level per
+                // FieldAccess node: bounded by expression depth, never by the
+                // (possibly recursive) type graph.
+                IrSort.Structural sp = resolveNominal(base, structDefs);
+                if (sp != null) {
                     yield sp.members().get(fa.fieldName());
                 }
                 yield null;

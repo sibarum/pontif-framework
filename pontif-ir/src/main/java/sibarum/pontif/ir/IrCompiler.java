@@ -81,8 +81,18 @@ public final class IrCompiler {
 
         registerSortsInExpr(resolved.main(), compiledSorts);
 
+        // Nominal struct registry: name → compiled structural Sort, for both the
+        // alias name and the struct's own name (see TypeRegistry). Lets the
+        // runtime/dispatch resolve a by-reference struct sort to its shape on
+        // demand — the Sort-layer counterpart of the IR-layer struct registry.
+        Map<String, Sort> structRegistry = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort.Structural> e : TypeRegistry.collect(resolved).entrySet()) {
+            structRegistry.put(e.getKey(), compileSort(e.getValue()));
+        }
+
         return new CompiledModule(
-                resolved.name(), dispatch, functions, resolved.main(), compiledSorts);
+                resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
+                structRegistry);
     }
 
     private void compileFunctionDecl(

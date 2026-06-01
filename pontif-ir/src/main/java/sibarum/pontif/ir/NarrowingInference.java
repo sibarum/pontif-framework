@@ -124,7 +124,7 @@ public final class NarrowingInference {
         for (IrExpr arg : call.args()) {
             argNarrowings.add(infer(arg, ctx));
         }
-        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings);
+        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings, ctx.sortRegistry());
         if (!(result instanceof StaticDispatch.Result.Resolved resolved)) {
             return null;
         }
@@ -153,7 +153,7 @@ public final class NarrowingInference {
         for (IrExpr arg : c.args()) {
             argNarrowings.add(infer(arg, ctx));
         }
-        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings);
+        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings, ctx.sortRegistry());
         if (result instanceof StaticDispatch.Result.Resolved resolved) {
             return resolved.returnSort();
         }

@@ -62,7 +62,29 @@ public final class Refinements {
         return checkImpliesOnLongs(factOp, a, goalOp, b);
     }
 
+    /**
+     * Resolves a by-reference struct sort ({@code Sort.of("Node")}) to its
+     * structural definition via the simplifier's registry. A sort that already
+     * carries structure (refined / structural / function / union / intersection)
+     * or a name absent from the registry (a primitive, an undeclared name) is
+     * returned unchanged. One lookup, no recursion — the structural definition's
+     * own members stay by-reference and are resolved lazily one level at a time,
+     * so this never unrolls a recursive type.
+     */
+    private static Sort resolveNominal(Sort sort, java.util.Map<String, Sort> registry) {
+        if (sort.isRefined() || sort.isStructural() || sort.isFunction()
+                || sort.isUnion() || sort.isIntersection()) {
+            return sort;
+        }
+        Sort resolved = registry.get(sort.name());
+        return resolved != null ? resolved : sort;
+    }
+
     public static ProofResult satisfies(SymExpr value, Sort sort, Simplifier simplifier) {
+        // Resolve a nominal struct reference to its definition so its shape is
+        // checked. Terminates by the finite value even on a recursive type:
+        // descent only follows members present in the runtime record.
+        sort = resolveNominal(sort, simplifier.registry());
         if (sort.isStructural()) {
             return satisfiesStructural(value, sort, simplifier);
         }
@@ -213,11 +235,19 @@ public final class Refinements {
     }
 
     public static ProofResult imply(Sort tighter, Sort looser, Simplifier simplifier) {
+        return imply(tighter, looser, simplifier, Coinduction.Assumed.empty());
+    }
+
+    private static ProofResult imply(Sort tighter, Sort looser, Simplifier simplifier,
+                                     Coinduction.Assumed assumed) {
+        // Resolve by-reference struct sorts so subsumption compares structure.
+        tighter = resolveNominal(tighter, simplifier.registry());
+        looser = resolveNominal(looser, simplifier.registry());
         if (tighter.isStructural() && looser.isStructural()) {
-            return implyStructural(tighter, looser, simplifier);
+            return implyStructural(tighter, looser, simplifier, assumed);
         }
         if (tighter.isFunction() && looser.isFunction()) {
-            return implyFunction(tighter, looser, simplifier);
+            return implyFunction(tighter, looser, simplifier, assumed);
         }
         if (tighter.isStructural() || looser.isStructural()
                 || tighter.isFunction() || looser.isFunction()) {
@@ -241,7 +271,8 @@ public final class Refinements {
         return ProofResult.residual(obligation);
     }
 
-    private static ProofResult implyFunction(Sort tighter, Sort looser, Simplifier simplifier) {
+    private static ProofResult implyFunction(Sort tighter, Sort looser, Simplifier simplifier,
+                                             Coinduction.Assumed assumed) {
         if (tighter.functionParams().size() != looser.functionParams().size()) {
             return ProofResult.failed(
                     "Function arity mismatch: " + tighter + " vs " + looser);
@@ -250,7 +281,7 @@ public final class Refinements {
         for (int i = 0; i < tighter.functionParams().size(); i++) {
             Sort tParam = tighter.functionParams().get(i);
             Sort lParam = looser.functionParams().get(i);
-            ProofResult r = imply(lParam, tParam, simplifier);
+            ProofResult r = imply(lParam, tParam, simplifier, assumed);
             if (!r.isPassed()) {
                 if (r instanceof ProofResult.Failed f) {
                     return ProofResult.failed("Parameter " + i + " (contravariant): " + f.witness());
@@ -259,7 +290,7 @@ public final class Refinements {
             }
         }
         // Return sorts are covariant: tighter's return implies looser's return
-        ProofResult retCheck = imply(tighter.functionReturnSort(), looser.functionReturnSort(), simplifier);
+        ProofResult retCheck = imply(tighter.functionReturnSort(), looser.functionReturnSort(), simplifier, assumed);
         if (!retCheck.isPassed()) {
             if (retCheck instanceof ProofResult.Failed f) {
                 return ProofResult.failed("Return sort: " + f.witness());
@@ -269,14 +300,24 @@ public final class Refinements {
         return ProofResult.passed();
     }
 
-    private static ProofResult implyStructural(Sort tighter, Sort looser, Simplifier simplifier) {
+    private static ProofResult implyStructural(Sort tighter, Sort looser, Simplifier simplifier,
+                                               Coinduction.Assumed assumed) {
+        // Coinductive guard: subsumption on equi-recursive structs is a greatest
+        // fixed point. Revisiting a (tighter, looser) name pair already on the
+        // path means it's the hypothesis discharging itself — assume it holds and
+        // stop, which is what makes `imply(Node, Node)` terminate. Sound because
+        // every non-back-edge member obligation below is still checked normally.
+        if (assumed.holds(tighter.name(), looser.name())) {
+            return ProofResult.passed();
+        }
+        Coinduction.Assumed next = assumed.assuming(tighter.name(), looser.name());
         for (java.util.Map.Entry<String, Sort> required : looser.members().entrySet()) {
             Sort tighterMember = tighter.members().get(required.getKey());
             if (tighterMember == null) {
                 return ProofResult.failed(
                         "Tighter sort " + tighter.name() + " lacks required member '" + required.getKey() + "'");
             }
-            ProofResult memberResult = imply(tighterMember, required.getValue(), simplifier);
+            ProofResult memberResult = imply(tighterMember, required.getValue(), simplifier, next);
             if (!memberResult.isPassed()) {
                 if (memberResult instanceof ProofResult.Failed f) {
                     return ProofResult.failed(

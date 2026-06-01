@@ -65,7 +65,6 @@ public record InferenceContext(
     public static InferenceContext fromModule(IrModule module) {
         Map<String, List<IrStmt.FunctionDecl>> overloads = new LinkedHashMap<>();
         Map<String, IrSort> returns = new LinkedHashMap<>();
-        Map<String, IrSort.Structural> structs = new LinkedHashMap<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 overloads.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
@@ -75,11 +74,9 @@ public record InferenceContext(
                     overloads.computeIfAbsent(m.name(), k -> new ArrayList<>()).add(m);
                     returns.put(m.name(), m.returnSort());
                 }
-            } else if (stmt instanceof IrStmt.TypeAlias ta
-                    && ta.sort() instanceof IrSort.Structural s) {
-                structs.put(s.name(), s);
             }
         }
+        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
         return new InferenceContext(Map.of(), returns, structs, overloads);
     }
 
@@ -98,5 +95,24 @@ public record InferenceContext(
     /** Returns a new context with the overload map replaced. */
     public InferenceContext withOverloads(Map<String, List<IrStmt.FunctionDecl>> ovs) {
         return new InferenceContext(typeEnv, functionReturns, structDefs, ovs);
+    }
+
+    /**
+     * The nominal-struct registry (name → structural {@link sibarum.pontif.core.types.Sort})
+     * for {@link StaticDispatch}, so subsumption between by-reference struct
+     * sorts is decided structurally rather than treating them as unconstrained.
+     * Best-effort: a struct whose definition fails to compile is omitted (the
+     * consumer then degrades to the conservative bare-name comparison).
+     */
+    public Map<String, sibarum.pontif.core.types.Sort> sortRegistry() {
+        Map<String, sibarum.pontif.core.types.Sort> reg = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort.Structural> e : structDefs.entrySet()) {
+            try {
+                reg.put(e.getKey(), IrCompiler.compileSort(e.getValue()));
+            } catch (CompileException ignored) {
+                // Skip — consumer falls back to bare-name comparison for this one.
+            }
+        }
+        return reg;
     }
 }

@@ -27,6 +27,16 @@ public final class IrInterpreter {
         return eval(module.main(), Environment.empty(), module);
     }
 
+    /**
+     * The simplifier carrying this module's nominal-struct registry, so
+     * {@link Refinements} can resolve a by-reference struct sort to its shape
+     * when checking a value or dispatching. Without it a struct param sort is a
+     * bare name treated as unconstrained — accepting any value.
+     */
+    private Simplifier checker(CompiledModule module) {
+        return simplifier.withRegistry(module.structRegistry());
+    }
+
     public Object eval(IrExpr expr, Environment env, CompiledModule module) {
         return switch (expr) {
             case IrExpr.Lit l -> l.value();
@@ -71,7 +81,7 @@ public final class IrInterpreter {
         for (int i = 0; i < match.branches().size(); i++) {
             IrExpr.MatchBranch branch = match.branches().get(i);
             Sort pattern = module.sortFor(branch.pattern());
-            ProofResult result = Refinements.satisfies(symbolicValue, pattern, simplifier);
+            ProofResult result = Refinements.satisfies(symbolicValue, pattern, checker(module));
             if (result instanceof ProofResult.Passed) {
                 try {
                     return eval(branch.result(), env, module);
@@ -177,7 +187,7 @@ public final class IrInterpreter {
             argSymbolics.add(toSymExpr(argValue));
         }
 
-        DispatchResult dr = module.dispatch().resolve(call.functionName(), argSymbolics, simplifier);
+        DispatchResult dr = module.dispatch().resolve(call.functionName(), argSymbolics, checker(module));
         switch (dr) {
             case DispatchResult.NoMatch nm -> throw new RuntimeCheckException(
                     "Dispatch failed for '" + call.functionName() + "': " + nm.reason(),
@@ -188,7 +198,7 @@ public final class IrInterpreter {
                     call.origin());
             case DispatchResult.Resolved resolved -> {
                 try {
-                    resolved.call().executeChecks(Map.of(), simplifier);
+                    resolved.call().executeChecks(Map.of(), checker(module));
                 } catch (RuntimeCheckException rce) {
                     if (rce.origin().isPresent()) {
                         throw rce;

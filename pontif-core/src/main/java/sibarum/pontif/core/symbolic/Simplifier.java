@@ -11,14 +11,28 @@ public final class Simplifier {
 
     private final List<RewriteRule> rules;
     private final Context context;
+    /**
+     * Nominal struct definitions, by name. Lets {@link Refinements} resolve a
+     * by-reference struct sort ({@code Sort.of("Node")}) to its structural
+     * definition on demand — the registry that makes nominal/recursive types
+     * checkable without inlining. Empty by default; callers that have struct
+     * definitions ({@code IrInterpreter}, dispatch / overload checks) attach
+     * it via {@link #withRegistry}.
+     */
+    private final Map<String, Sort> registry;
 
     public Simplifier(List<RewriteRule> rules) {
         this(rules, Context.EMPTY);
     }
 
     public Simplifier(List<RewriteRule> rules, Context context) {
+        this(rules, context, Map.of());
+    }
+
+    public Simplifier(List<RewriteRule> rules, Context context, Map<String, Sort> registry) {
         this.rules = List.copyOf(rules);
         this.context = context;
+        this.registry = Map.copyOf(registry);
     }
 
     public static Simplifier of(RewriteRule... rules) {
@@ -26,11 +40,21 @@ public final class Simplifier {
     }
 
     public Simplifier withContext(Context context) {
-        return new Simplifier(rules, context);
+        return new Simplifier(rules, context, registry);
+    }
+
+    /** A copy carrying the given nominal-struct registry. */
+    public Simplifier withRegistry(Map<String, Sort> registry) {
+        return new Simplifier(rules, context, registry);
     }
 
     public Context context() {
         return context;
+    }
+
+    /** Nominal struct definitions by name; empty when none were attached. */
+    public Map<String, Sort> registry() {
+        return registry;
     }
 
     public SymExpr simplify(SymExpr expr) {

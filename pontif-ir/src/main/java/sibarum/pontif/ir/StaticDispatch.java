@@ -54,6 +54,19 @@ public final class StaticDispatch {
     public static Result resolve(
             List<IrStmt.FunctionDecl> overloads,
             List<IrSort> argNarrowings) {
+        return resolve(overloads, argNarrowings, java.util.Map.of());
+    }
+
+    /**
+     * As {@link #resolve(List, List)} but with a nominal-struct registry
+     * (name → structural {@link Sort}) so subsumption between struct-typed
+     * params/args is decided structurally rather than by treating a
+     * by-reference struct sort as unconstrained.
+     */
+    public static Result resolve(
+            List<IrStmt.FunctionDecl> overloads,
+            List<IrSort> argNarrowings,
+            java.util.Map<String, Sort> registry) {
         if (overloads.isEmpty()) {
             return new Result.Unresolved("no overloads registered");
         }
@@ -61,7 +74,7 @@ public final class StaticDispatch {
         List<IrStmt.FunctionDecl> definite = new ArrayList<>();
         boolean anyResidual = false;
         for (IrStmt.FunctionDecl ov : overloads) {
-            MatchStatus s = matchStatus(ov, argNarrowings);
+            MatchStatus s = matchStatus(ov, argNarrowings, registry);
             switch (s) {
                 case PASSED -> definite.add(ov);
                 case RESIDUAL -> anyResidual = true;
@@ -80,7 +93,7 @@ public final class StaticDispatch {
         }
 
         // Multiple definite matches — pick most-specific.
-        IrStmt.FunctionDecl winner = pickMostSpecific(definite);
+        IrStmt.FunctionDecl winner = pickMostSpecific(definite, registry);
         if (winner != null) {
             return new Result.Resolved(winner);
         }
@@ -97,9 +110,10 @@ public final class StaticDispatch {
      * results. Arity mismatch is {@link MatchStatus#FAILED}. Null arg
      * narrowings degrade the whole result to {@link MatchStatus#RESIDUAL}.
      */
-    private static MatchStatus matchStatus(IrStmt.FunctionDecl ov, List<IrSort> args) {
+    private static MatchStatus matchStatus(IrStmt.FunctionDecl ov, List<IrSort> args,
+                                           java.util.Map<String, Sort> registry) {
         if (ov.params().size() != args.size()) return MatchStatus.FAILED;
-        Simplifier simp = new Simplifier(List.of());
+        Simplifier simp = new Simplifier(List.of()).withRegistry(registry);
         MatchStatus overall = MatchStatus.PASSED;
         for (int i = 0; i < args.size(); i++) {
             IrSort argNarrowing = args.get(i);
@@ -125,13 +139,14 @@ public final class StaticDispatch {
      * {@code candidates}, or {@code null} if no unique most-specific
      * overload exists (multiple incomparable, or ties).
      */
-    private static IrStmt.FunctionDecl pickMostSpecific(List<IrStmt.FunctionDecl> candidates) {
+    private static IrStmt.FunctionDecl pickMostSpecific(List<IrStmt.FunctionDecl> candidates,
+                                                        java.util.Map<String, Sort> registry) {
         List<IrStmt.FunctionDecl> undominated = new ArrayList<>();
         for (IrStmt.FunctionDecl c : candidates) {
             boolean dominated = false;
             for (IrStmt.FunctionDecl other : candidates) {
                 if (other == c) continue;
-                if (isStrictlyMoreSpecific(other, c)) {
+                if (isStrictlyMoreSpecific(other, c, registry)) {
                     dominated = true;
                     break;
                 }
@@ -141,14 +156,16 @@ public final class StaticDispatch {
         return undominated.size() == 1 ? undominated.get(0) : null;
     }
 
-    private static boolean isStrictlyMoreSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b) {
-        if (!isAtLeastAsSpecific(a, b)) return false;
-        return !isAtLeastAsSpecific(b, a);
+    private static boolean isStrictlyMoreSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b,
+                                                  java.util.Map<String, Sort> registry) {
+        if (!isAtLeastAsSpecific(a, b, registry)) return false;
+        return !isAtLeastAsSpecific(b, a, registry);
     }
 
-    private static boolean isAtLeastAsSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b) {
+    private static boolean isAtLeastAsSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b,
+                                               java.util.Map<String, Sort> registry) {
         if (a.params().size() != b.params().size()) return false;
-        Simplifier simp = new Simplifier(List.of());
+        Simplifier simp = new Simplifier(List.of()).withRegistry(registry);
         for (int i = 0; i < a.params().size(); i++) {
             try {
                 Sort aSort = IrCompiler.compileSort(a.params().get(i).sort());

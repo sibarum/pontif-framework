@@ -397,15 +397,11 @@ and bare-Int accepted); full suite green (the corpus is provable-or-abstained).
    "reject hard returns lacking a proof." **Two paths, and a blocker found:**
    - *Struct-tree* (write the proof as Pontif struct literals; a Java
      translator `IrExpr.Record → Refinement` feeds the gate). Elegant
-     (proof-as-data, host-typechecked), no parser — **but BLOCKED**: it needs
-     a recursive sort (`Split` contains `Refinement`s), and **Pontif has no
-     recursive sorts** — `AliasResolver` rejects self-reference as a "Cyclic
-     type alias chain" (pinned by `RecursiveSortProbeTest`). So this path is
-     gated on a *foundational* feature (which also unblocks lists/trees/ASTs —
-     valuable far beyond proofs): teach the resolver contractive recursion
-     (allow recursion through a constructor boundary; keep rejecting degenerate
-     alias-to-alias cycles), and make the interpreter/dispatch/narrowing not
-     loop on recursive sorts.
+     (proof-as-data, host-typechecked), no parser. **Now UNBLOCKED** —
+     recursive types landed (see "Recursive types (foundational) ✅" below), so
+     `Refinement = [Leaf|Split]` with `Split` holding `Refinement`s is
+     expressible. Remaining work is the `IrExpr.Record → Refinement` translator
+     + binding it to the obligation; no foundational lift left.
    - *DSL* (a small proof-file syntax → `Refinement` directly; the recursive
      type stays Java-side). Needs a parser, but **sidesteps recursive sorts**.
    - **Decision (James's):** if recursive types are wanted broadly (they're
@@ -477,67 +473,62 @@ special-cases zero-arg overloads).
 
 ## Type system
 
-### ⭐ Recursive types (foundational) — target state
+### ⭐ Recursive types (foundational) ✅ landed
 
-**Problem.** Pontif has no recursive types. `AliasResolver` resolves a
-struct's member types by *eager structural substitution* (inline every named
-type into a finite tree), so any self-reference — `struct Node(v:Int,
-next:Node)`, or `struct Split(t:[Leaf|Split])` — trips its cycle detector and
-is rejected as a "Cyclic type alias chain". Pinned by
-`RecursiveSortProbeTest`. This blocks lists, trees, ASTs, JSON — and the
-struct-tree proof-authoring path (a `Split` holding `Refinement`s). Don't
-bolt on a half-baked patch (per James, 2026-05-31); build the real thing.
+Pontif now has recursive types. `struct Node(v:Int, next:Node)` and
+`struct Split(p:Int, t:[Leaf|Split], f:[Leaf|Split])` compile, and recursive
+*values* construct + traverse end-to-end (pinned by `RecursiveSortProbeTest`).
+The blocker is gone: the struct-tree proof-authoring path (`Refinement =
+[Leaf|Split]` holding `Refinement`s) is now expressible.
 
-**The reframe.** Eager inlining is *fundamentally* incompatible with
-recursion (you can't unroll an infinite tree). So the target abandons
-inlining as the representation: **named/struct types become nominal,
-resolved by reference against a type registry, on demand.** A sort stays a
-finite term that may *refer* to named types (incl. itself, through a
-constructor); the type graph is held by-name, never unrolled. `AliasResolver`
-stops being an inliner and becomes a **validator**.
+**What landed (textbook equi-recursive — deliberately not novel):**
+- **Nominal, by-reference.** A struct reference stays `IrSort.Named` and is
+  resolved by name against a registry on demand, never inlined.
+  `AliasResolver` excludes `IrSort.Structural` aliases from its inlining table
+  (only pure abbreviations like `type Coord = Int` still inline) and resolves
+  abbreviation references *inside* kept struct members while leaving struct
+  refs nominal. Canonical struct collection is `pontif-ir/TypeRegistry.collect`
+  (keyed by both the alias name and the struct's own name, since
+  `(deftype Point (struct P …))` lets them differ). `SortChecker` accepts a
+  `Named` whose name is a declared struct, and projects fields via a shared
+  `resolveNominal` (single name lookup, never unrolling).
+- **Contractiveness for free.** Because structs are absent from the alias
+  table, `resolveSort` never follows a reference into a struct body — so
+  recursion *through a constructor* is admitted while a constructor-free
+  abbreviation cycle (`type A = [A|Int]`, `type A = B; type B = A`) is still
+  caught by the existing path-based cycle check. No separate checker needed.
+  (Inhabitability polish — reachable base case — deferred.)
+- **Coinductive `imply`.** `pontif-core/symbolic/Coinduction` (immutable
+  `Assumed` ordered-pair set + `Seen` name set). `Refinements.imply` resolves
+  by-reference struct sorts via a registry carried on the `Simplifier`
+  (`withRegistry`) and guards `implyStructural` with the assumption set:
+  revisiting a `(tighter, looser)` name pair assumes it holds (GFP) and
+  returns `Passed`, so `imply(Node, Node)` terminates. `StaticDispatch` threads
+  the registry (`InferenceContext.sortRegistry()`).
+- **Soundness restored, not just termination.** Nominalizing structs made a
+  struct param a bare `Sort.of("Point")` — which `satisfies`/`imply` treated
+  as *unconstrained* (a real regression: `id(42)` for `id(p:Point):Point` was
+  accepted). The registry resolution in `satisfies` (runtime, via
+  `IrInterpreter` attaching `CompiledModule.structRegistry`) and `imply`
+  (dispatch) restores structural checking. Pinned by
+  `RecursiveSortProbeTest.nominalStructParam_stillCheckedStructurally` and
+  `StructuralSortTest` (recursive self-imply terminates; disjoint nominal
+  structs don't imply).
 
-**Three decisions that define the target** (all textbook recursive-types —
-deliberately *not* novel; a foundation should be boring and proven):
-1. **Nominal, by-reference.** A struct reference is always `Named(Name)`,
-   resolved via the registry (already kept downstream — half there). Only
-   pure abbreviations (`type Coord = Int`, no constructor) still inline;
-   structs never do. No special recursive-vs-non-recursive representation.
-2. **Equi-recursive + coinductive relations.** A type *is* its unfolding —
-   no `fold`/`unfold` ceremony (programmer-friendly; iso-recursive would
-   ritualize every field access). Cost lands on the checker: every
-   sort-level relation (equality, `imply`/subsumption, `satisfies`,
-   match-totality, narrowing) is computed **coinductively** with a
-   visited-pair assumption set — revisit `(name, name)` ⇒ assume it holds,
-   stop. One uniform termination discipline (Amadio–Cardelli /
-   Brandt–Henglein), NOT per-consumer depth-caps. This is the line between
-   "principled" and "superglue".
-3. **Contractiveness well-formedness.** Replace blunt "any cycle = error"
-   with "recursion must pass through a constructor": `type A = [A|Int]`
-   rejected; `struct Branch(next:[Branch|Leaf])` accepted. Optional polish:
-   inhabitability check (a recursive type needs a reachable base case).
+**Reasoners that did NOT need a guard (empirically):**
+- **Runtime `satisfies(value, sort)`** — value-directed; descent follows only
+  fields present in the finite record, so it terminates on recursive types
+  even while resolving nominal members.
+- **`OverloadOverlap`** — compares by base name (nominally correct: distinct
+  struct names are disjoint, same names overlap); its `imply` uses are
+  same-base / refined-vs-bare, which the existing logic handles.
+- **`NarrowingInference`** — recursion is expression-directed (finite);
+  `inferFieldAccess` does a single-level `structDefs` lookup per node and never
+  chases a field's struct definition. The `Seen` guard would be dead code
+  today; revisit only if narrowing ever walks nested struct sorts.
 
-**Unaffected / composes.** Runtime is untouched — recursive *values* are
-finite and bound their own traversal, so eval/match terminate as today (only
-*sort-only* reasoners need the coinductive guard; value-directed ones are
-naturally bounded). Composes with refinements (refine a recursive type) and
-narrowing (coinductive walk). Mutual recursion falls out for free (assumption
-set spans names) — which is why explicit names beat `@` (`@` can't express
-it). Syntax already parses: `struct Branch(left:[Branch|Leaf], …)` failed at
-`AliasResolver`, not the parser — so **no frontend work**.
-
-**Staging (not big-bang; suite green throughout).**
-1. `AliasResolver` → validator + by-reference representation + registry
-   (structs nominal; contractiveness replaces the cycle-reject).
-2. Make each sort-only reasoner coinductive, one at a time:
-   `SortChecker`, `Refinements.imply`/`satisfies`, `StaticDispatch`/
-   `OverloadOverlap`, `NarrowingInference`. (Value-directed paths —
-   interpreter match, `satisfies(value, sort)` — already terminate.)
-3. Flip `RecursiveSortProbeTest`; add list/tree round-trip tests.
-
-**Gates** the struct-tree proof-authoring path (see "Return verification"
-above): once recursive types land, `Refinement = [Leaf|Split]` is expressible
-in Pontif, and proofs become struct literals + a `IrExpr.Record → Refinement`
-translator — no proof DSL needed.
+**No frontend work** — the syntax already parsed; the change was entirely
+representation + reasoners. Full suite green throughout (~1060 tests).
 
 - **Tighten the `Function` sort placeholder ✅ landed.** `"Function"`
   removed from `SortChecker.PRIMITIVE_SORT_NAMES`. All test sites
