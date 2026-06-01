@@ -25,64 +25,42 @@ class PlaygroundIntegrationTest {
     }
 
     /**
-     * The gate-sensitive return shapes from the playground sample that the
-     * engine CAN discharge: inductive ({@code factorial}), linear-bound
-     * ({@code inc}), bare ({@code sign}), value-pinned spec-only
-     * ({@code timesTwo}). Runs cleanly and evaluates.
-     *
-     * <p>(Excludes {@code isEven}/{@code isOdd} — see
-     * {@link #unionMutualRecursion_returnNotYetGateProvable}.)
+     * The playground's shipped default tour (mirrors {@code App.DEFAULT_CODE}):
+     * an auto-discharged linear bound ({@code inc}), recursive proof structs,
+     * and a hard return ({@code quirk = x*(x-1) >= 0}) rescued by a hand-written
+     * case-split proof. Must compile past the gate and evaluate to 25. If this
+     * breaks, the playground errors on the first Run — the canary.
      */
     @Test
-    void playgroundSample_dischargeableReturns_runsEndToEnd() {
-        String src = """
-                module tour
-
-                function factorial(n:[Int:@==0]) :[Int:@>=1] -> 1
-                function factorial(n:[Int:@>0])  :[Int:@>=1] -> n * factorial(n-1)
-
-                function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
-
-                function sign(n:Int):Int -> match n
-                  [@<0 ] -> -1
-                  [@==0] ->  0
-                  [@>0 ] ->  1
-
-                function timesTwo(n:Int):[Int:n*2]
-
-                factorial(5) + inc(4) + sign(-3) + timesTwo(7)
-                """;
-        RunResult r = run(src);
-        assertFalse(r.isError(), () -> "must run cleanly; got: " + r.text());
-        assertEquals("138", r.text());  // 120 + 5 + (-1) + 14
+    void playgroundDefaultTour_compilesPastGateAndEvaluates() {
+        RunResult r = run(DEFAULT_TOUR);
+        assertFalse(r.isError(), () -> "playground default must run cleanly; got: " + r.text());
+        assertEquals("25", r.text());  // inc(4)=5 + quirk(5)=20
     }
 
-    /**
-     * KNOWN GAP (pre-existing, surfaced 2026-06-01): the playground's shipped
-     * {@code App.DEFAULT_CODE} includes {@code isEven}/{@code isOdd} with a union
-     * return {@code [Int:0|1]} over mutual recursion — and it does NOT pass the
-     * return gate, so the default sample errors on the first Run. Closing it
-     * needs {@code r_0 == r_1 ∧ r_1 ∈ {0,1} ⟹ r_0 ∈ {0,1}}: reasoning from a
-     * disjunctive <em>hypothesis</em> (the call's union-narrowed result), which
-     * the Or-<em>goal</em> discharge doesn't cover, and which can't be proof-
-     * authored yet (overloaded functions are out of v1 proof scope). Not caused
-     * by recursive types / proof-authoring — the discharge path is unchanged.
-     * Flip when the engine (or the default sample) is fixed.
-     */
+    /** The proof is load-bearing: drop it and the same program is rejected. */
     @Test
-    void unionMutualRecursion_returnNotYetGateProvable() {
-        String src = """
-                function isEven(n:[Int:@==0]) :[Int:0|1] -> 1
-                function isEven(n:[Int:@>0])  :[Int:0|1] -> isOdd(n-1)
-                function isOdd (n:[Int:@==0]) :[Int:0|1] -> 0
-                function isOdd (n:[Int:@>0])  :[Int:0|1] -> isEven(n-1)
-                isEven(8)
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected the gate to reject the union mutual-recursion return");
-        assertTrue(r.text().contains("isEven") || r.text().contains("isOdd"),
-                () -> "expected an isEven/isOdd return-gate rejection; got: " + r.text());
+    void playgroundDefaultTour_withoutProof_isRejected() {
+        String withoutProof = DEFAULT_TOUR.replaceAll("(?m)^proof quirk.*$", "");
+        RunResult r = run(withoutProof);
+        assertTrue(r.isError(), "without the proof, quirk's [Int:@>=0] must be rejected");
+        assertTrue(r.text().contains("quirk"), () -> "expected a quirk rejection; got: " + r.text());
     }
+
+    /** Mirrors {@code App.DEFAULT_CODE} (kept in sync by hand; pinned above). */
+    private static final String DEFAULT_TOUR = """
+            module tour
+
+            function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
+
+            struct Leaf()
+            struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
+
+            function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+            proof quirk = Split(x >= 1, Leaf(), Leaf())
+
+            inc(4) + quirk(5)
+            """;
 
     /**
      * A proof-bearing program runs end to end: the gate accepts the hard return

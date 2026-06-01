@@ -89,50 +89,41 @@ public final class App {
     private static final float WHEEL_PIXELS_PER_STEP = 40f;
 
     private static final String DEFAULT_CODE = """
-            # Pontif quick tour — click Run to parse, compile, and evaluate
-            # this module on a background thread.  Click Receipts to draft
-            # the receipt-graph and see each function's return refinement
-            # discharged (or honestly NOT DISCHARGED).  Comments start with #.
+            # Pontif quick tour — click Run to compile and evaluate this module.
+            # Pontif PROVES every declared return refinement at compile time, or
+            # rejects it. When the built-in prover falls short, you hand it a
+            # proof. Comments start with #.
 
             module tour
 
-            # Multi-method dispatch + inductive proof.  Both overloads return
-            # [Int:@>=1]: the base branch closes via 1>=1, and the recursive
-            # branch closes because the back-reference carries r_1>=1 as the
-            # inductive hypothesis — POSITIVE * POSITIVE = POSITIVE.
-            function factorial(n:[Int:@==0]) :[Int:@>=1] -> 1
-            function factorial(n:[Int:@>0])  :[Int:@>=1] -> n * factorial(n-1)
-
-            # Linear-bound discharge.  Sign analysis only knows >0 / >=0; it
-            # can't clear the >1 bar.  BoundAnalysis normalizes (x+1)-1 to
-            # x in [1, infty) and discharges directly.  The >0-vs->1 cliff is
-            # gone — any [Int op n] threshold is now built-in.
+            # Most returns prove themselves. inc's declared return [Int:@>1] is
+            # a linear bound: given x >= 1, the engine sees x + 1 lands in
+            # [2, infinity) and clears the > 1 bar on its own — no help needed.
             function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
-            # Mutual recursion across overloaded functions — no forward
-            # declaration needed; dispatch resolves names at call time.
-            function isEven(n:[Int:@==0]) :[Int:0|1] -> 1
-            function isEven(n:[Int:@>0])  :[Int:0|1] -> isOdd(n-1)
-            function isOdd (n:[Int:@==0]) :[Int:0|1] -> 0
-            function isOdd (n:[Int:@>0])  :[Int:0|1] -> isEven(n-1)
+            # Some don't. quirk(x) = x * (x - 1) is the product of two
+            # consecutive integers, so it's always >= 0 — but it's an opaque
+            # product, and the built-in engine can't see that. Declaring
+            # [Int:@>=0] would be rejected on its own. So we hand it a PROOF.
 
-            # Pattern matching on refinement predicates.  `@` is the scrutinee
-            # value; the base sort (Int) is inferred from `n`.  The compiler
-            # checks the three arms are exhaustive over Int at compile time.
-            function sign(n:Int):Int -> match n
-              [@<0 ] -> -1
-              [@==0] ->  0
-              [@>0 ] ->  1
+            # A proof is a tree of case-splits, built from these two structs.
+            # (Split refers to itself through the [Leaf|Split] union, so this is
+            # also a recursive type — lists and trees work the same way.)
+            struct Leaf()
+            struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
 
-            # Spec-only synthesis: a return sort that pins a single value
-            # derives the body for you — `:[Int:n*2]` sugars to `@==n*2`, and
-            # the parser extracts the RHS as the function's body.  No `-> body`.
-            function timesTwo(n:Int):[Int:n*2]
+            # Split on x >= 1; each leaf is then within the engine's reach:
+            #   x >= 1  ->  both factors >= 0, so the product >= 0
+            #   x <  1  ->  x <= 0 and x - 1 <= -1, product of two negatives >= 0
+            # The combinators are conservative: a bogus split can never validate,
+            # so a proof rescues a true-but-hard return but never launders a
+            # false one. (Delete the proof line and Run — quirk is rejected.)
+            function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+            proof quirk = Split(x >= 1, Leaf(), Leaf())
 
             # Main expression — runs when you click Run.
-            # factorial(5)=120, inc(4)=5, isEven(8)=1, sign(-3)=-1, timesTwo(7)=14
-            # Sum: 139.
-            factorial(5) + inc(4) + isEven(8) + sign(-3) + timesTwo(7)
+            # inc(4) = 5, quirk(5) = 20.  Sum: 25.
+            inc(4) + quirk(5)
             """;
 
     // Component references held in static fields so the toolbar's click
