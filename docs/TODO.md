@@ -839,12 +839,17 @@ representation + reasoners. Full suite green throughout (~1060 tests).
   concatenate-then-compile approach handles cross-module *mutual recursion* for
   free (all decls coexist in the combined module) — no topo-order/cycle staging
   needed.
-  - **Remaining: the disk loader.** `compileProject` takes a pre-parsed
-    `Map<String,IrModule>`; the file scanner — `ProjectRoot`/`ModuleLoader`
-    (walk `**/*.ptf`, read each `module` decl, build name→file) + a
-    `module.ptf.toml` root marker with an optional `entry` line + entry-point
-    resolution — is the next slice. Plus diagnostics (unexported-name,
-    ambiguous-import) and the v1 limits below.
+  - **Disk loader ✅ landed (2026-06-01).** `PontifCompiler.compileProjectDir(root)`
+    discovers the `module.ptf.toml` marker (`ProjectRoot`, hand-parsed optional
+    `entry = "…"`), scans `**/*.ptf` (`ModuleLoader`, keyed by each file's
+    `module` decl, duplicate-name rejected), resolves the entry (marker entry /
+    sole-module-with-a-main / clear error), and links. Pinned by
+    `ModuleLoaderTest` (temp-dir e2e: marker entry, inferred entry, subdirectory
+    discovery, duplicate + unknown-entry errors). A project on disk now
+    compiles + runs end-to-end.
+  - **Remaining diagnostics:** unexported-name (importing a name the source
+    module doesn't `exports`), ambiguous-import (two requires provide the same
+    name) — the resolver currently resolves silently; promote to errors.
   - **v1 limits (deferred):** type names are **global** across a project (two
     modules declaring the same struct/trait name → duplicate-alias error);
     per-module type namespacing, function-overload coherence (FQN-keying already
