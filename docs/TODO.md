@@ -477,6 +477,68 @@ special-cases zero-arg overloads).
 
 ## Type system
 
+### ⭐ Recursive types (foundational) — target state
+
+**Problem.** Pontif has no recursive types. `AliasResolver` resolves a
+struct's member types by *eager structural substitution* (inline every named
+type into a finite tree), so any self-reference — `struct Node(v:Int,
+next:Node)`, or `struct Split(t:[Leaf|Split])` — trips its cycle detector and
+is rejected as a "Cyclic type alias chain". Pinned by
+`RecursiveSortProbeTest`. This blocks lists, trees, ASTs, JSON — and the
+struct-tree proof-authoring path (a `Split` holding `Refinement`s). Don't
+bolt on a half-baked patch (per James, 2026-05-31); build the real thing.
+
+**The reframe.** Eager inlining is *fundamentally* incompatible with
+recursion (you can't unroll an infinite tree). So the target abandons
+inlining as the representation: **named/struct types become nominal,
+resolved by reference against a type registry, on demand.** A sort stays a
+finite term that may *refer* to named types (incl. itself, through a
+constructor); the type graph is held by-name, never unrolled. `AliasResolver`
+stops being an inliner and becomes a **validator**.
+
+**Three decisions that define the target** (all textbook recursive-types —
+deliberately *not* novel; a foundation should be boring and proven):
+1. **Nominal, by-reference.** A struct reference is always `Named(Name)`,
+   resolved via the registry (already kept downstream — half there). Only
+   pure abbreviations (`type Coord = Int`, no constructor) still inline;
+   structs never do. No special recursive-vs-non-recursive representation.
+2. **Equi-recursive + coinductive relations.** A type *is* its unfolding —
+   no `fold`/`unfold` ceremony (programmer-friendly; iso-recursive would
+   ritualize every field access). Cost lands on the checker: every
+   sort-level relation (equality, `imply`/subsumption, `satisfies`,
+   match-totality, narrowing) is computed **coinductively** with a
+   visited-pair assumption set — revisit `(name, name)` ⇒ assume it holds,
+   stop. One uniform termination discipline (Amadio–Cardelli /
+   Brandt–Henglein), NOT per-consumer depth-caps. This is the line between
+   "principled" and "superglue".
+3. **Contractiveness well-formedness.** Replace blunt "any cycle = error"
+   with "recursion must pass through a constructor": `type A = [A|Int]`
+   rejected; `struct Branch(next:[Branch|Leaf])` accepted. Optional polish:
+   inhabitability check (a recursive type needs a reachable base case).
+
+**Unaffected / composes.** Runtime is untouched — recursive *values* are
+finite and bound their own traversal, so eval/match terminate as today (only
+*sort-only* reasoners need the coinductive guard; value-directed ones are
+naturally bounded). Composes with refinements (refine a recursive type) and
+narrowing (coinductive walk). Mutual recursion falls out for free (assumption
+set spans names) — which is why explicit names beat `@` (`@` can't express
+it). Syntax already parses: `struct Branch(left:[Branch|Leaf], …)` failed at
+`AliasResolver`, not the parser — so **no frontend work**.
+
+**Staging (not big-bang; suite green throughout).**
+1. `AliasResolver` → validator + by-reference representation + registry
+   (structs nominal; contractiveness replaces the cycle-reject).
+2. Make each sort-only reasoner coinductive, one at a time:
+   `SortChecker`, `Refinements.imply`/`satisfies`, `StaticDispatch`/
+   `OverloadOverlap`, `NarrowingInference`. (Value-directed paths —
+   interpreter match, `satisfies(value, sort)` — already terminate.)
+3. Flip `RecursiveSortProbeTest`; add list/tree round-trip tests.
+
+**Gates** the struct-tree proof-authoring path (see "Return verification"
+above): once recursive types land, `Refinement = [Leaf|Split]` is expressible
+in Pontif, and proofs become struct literals + a `IrExpr.Record → Refinement`
+translator — no proof DSL needed.
+
 - **Tighten the `Function` sort placeholder ✅ landed.** `"Function"`
   removed from `SortChecker.PRIMITIVE_SORT_NAMES`. All test sites
   migrated to `IrSort.Function(paramSorts, returnSort, origin)` — the
