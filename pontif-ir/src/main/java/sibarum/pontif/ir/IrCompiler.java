@@ -156,6 +156,7 @@ public final class IrCompiler {
     private static void registerSortsInExpr(IrExpr expr, Map<IrSort, Sort> map) throws CompileException {
         switch (expr) {
             case IrExpr.Lit l -> { }
+            case IrExpr.Dec d -> { }
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
@@ -236,6 +237,12 @@ public final class IrCompiler {
     public static SymExpr compileSymExpr(IrExpr expr) throws CompileException {
         return switch (expr) {
             case IrExpr.Lit l -> SymExpr.lit(l.value());
+            // Decimal refinements are rejected at SortChecker (integer-only
+            // discharge engine), so a decimal literal should never reach a
+            // refinement predicate. Guard it explicitly.
+            case IrExpr.Dec d -> throw new CompileException(
+                    "Decimal literals are not supported inside refinement predicates "
+                            + "(the discharge engine is integer-only).", d.origin());
             case IrExpr.Bool b -> SymExpr.bool(b.value());
             case IrExpr.Var v -> SymExpr.var(v.name());
             case IrExpr.SelfRef s -> SymExpr.self();

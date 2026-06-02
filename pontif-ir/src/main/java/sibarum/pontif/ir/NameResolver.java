@@ -43,7 +43,7 @@ public final class NameResolver {
      * internal sentinels. Mirrors {@code SortChecker.PRIMITIVE_SORT_NAMES}
      * (kept in sync — both must agree on "not a user type").
      */
-    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "_", "_record");
+    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "Decimal", "_", "_record");
 
     private NameResolver() {}
 
@@ -181,6 +181,7 @@ public final class NameResolver {
     private static IrExpr rewrite(IrExpr e, String m, ModuleSymbolTable table) throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

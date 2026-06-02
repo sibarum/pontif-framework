@@ -549,6 +549,7 @@ public final class AltParser {
         return switch (expr) {
             case IrExpr.SelfRef s -> true;
             case IrExpr.Lit l -> false;
+            case IrExpr.Dec d -> false;
             case IrExpr.Bool b -> false;
             case IrExpr.Var v -> false;
             case IrExpr.BinOp op -> containsSelfRef(op.left()) || containsSelfRef(op.right());
@@ -692,6 +693,10 @@ public final class AltParser {
                             b,
                             b.origin()),
                     b.origin());
+            // Decimal literals carry no value-level narrowing (the discharge
+            // engine is integer-only); the bare Decimal sort is the maximal
+            // shape we infer.
+            case IrExpr.Dec d -> new IrSort.Named("Decimal", d.origin());
             case IrExpr.Var v -> {
                 IrSort scoped = currentScope.get(v.name());
                 if (scoped != null) yield scoped;
@@ -719,6 +724,16 @@ public final class AltParser {
                 yield IrSort.named("_");
             }
             case IrExpr.BinOp op -> {
+                // Decimal arithmetic yields a bare Decimal (no value refinement —
+                // see the Dec literal case). Int arithmetic and all comparisons
+                // keep the value-pinned refinement.
+                boolean decimalArith = switch (op.op()) {
+                    case ADD, SUB, MUL -> isDecimalOperand(op.left()) || isDecimalOperand(op.right());
+                    default -> false;
+                };
+                if (decimalArith) {
+                    yield IrSort.named("Decimal");
+                }
                 String baseName = switch (op.op()) {
                     case ADD, SUB, MUL -> "Int";
                     case LT, LE, GT, GE, EQ, NE, AND, OR -> "Bool";
@@ -1258,6 +1273,7 @@ public final class AltParser {
                 || typeName.equals("_record")
                 || typeName.equals("Int")
                 || typeName.equals("Bool")
+                || typeName.equals("Decimal")
                 || typeName.equals("Function")) {
             return null;
         }
@@ -1745,6 +1761,7 @@ public final class AltParser {
         return switch (expr) {
             case SymExpr.Bool b -> new IrExpr.Bool(b.value(), origin);
             case SymExpr.Lit l -> new IrExpr.Lit(l.value(), origin);
+            case SymExpr.Dec d -> new IrExpr.Dec(d.value(), origin);
             case SymExpr.Self s -> new IrExpr.SelfRef(origin);
             case SymExpr.Cmp(SymExpr left, SymExpr.CmpOp op, SymExpr right) ->
                     new IrExpr.BinOp(cmpOpToIrOp(op),
@@ -1857,6 +1874,11 @@ public final class AltParser {
         };
     }
 
+    /** True when {@code expr}'s maximal-inferred sort has base name {@code Decimal}. */
+    private boolean isDecimalOperand(IrExpr expr) {
+        return "Decimal".equals(baseSortName(inferMaximalSort(expr)));
+    }
+
     /**
      * If {@code expr} is a chain of {@link IrExpr.FieldAccess} rooted at an
      * {@link IrExpr.Var}, returns the dotted name (e.g., {@code "Point.manhattan"}).
@@ -1890,6 +1912,10 @@ public final class AltParser {
             case INTEGER -> {
                 consume();
                 yield new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
+            }
+            case DECIMAL -> {
+                consume();
+                yield new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
             }
             case IDENT -> {
                 if (t.text().equals("true")) {

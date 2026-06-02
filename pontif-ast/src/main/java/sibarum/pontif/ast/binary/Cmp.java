@@ -2,6 +2,8 @@ package sibarum.pontif.ast.binary;
 
 import sibarum.pontif.core.PontifNode;
 
+import java.math.BigDecimal;
+
 public final class Cmp extends BinaryOp {
 
     public enum Op { LT, LE, GT, GE, EQ, NE }
@@ -23,6 +25,17 @@ public final class Cmp extends BinaryOp {
 
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
+        if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            int c = ((BigDecimal) leftValue).compareTo((BigDecimal) rightValue);
+            return switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+            };
+        }
         long l = (Long) leftValue;
         long r = (Long) rightValue;
         return switch (op) {

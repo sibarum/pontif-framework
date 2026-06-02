@@ -55,10 +55,16 @@ public final class BoundAnalysisRules {
         return List.of(BOUND_DISCHARGE);
     }
 
-    /** True iff {@code expr} (or any subexpression) is a {@link SymExpr.Frac}. */
+    /**
+     * True iff {@code expr} (or any subexpression) is a non-integer value
+     * ({@link SymExpr.Frac} or {@link SymExpr.Dec}). The integer-strict bound
+     * engine abstains when one is present — the soundness gate that keeps
+     * rationals/decimals out of integer reasoning.
+     */
     private static boolean containsFrac(SymExpr expr) {
         return switch (expr) {
             case SymExpr.Frac unused -> true;
+            case SymExpr.Dec unused -> true;
             case SymExpr.Lit unused -> false;
             case SymExpr.Bool unused -> false;
             case SymExpr.Var unused -> false;

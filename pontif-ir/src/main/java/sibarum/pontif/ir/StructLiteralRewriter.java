@@ -70,6 +70,7 @@ public final class StructLiteralRewriter {
             throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

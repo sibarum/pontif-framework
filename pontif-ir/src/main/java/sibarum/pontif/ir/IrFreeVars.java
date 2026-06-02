@@ -17,6 +17,7 @@ public final class IrFreeVars {
     private static void collect(IrExpr expr, Set<String> bound, LinkedHashSet<String> free) {
         switch (expr) {
             case IrExpr.Lit l -> {}
+            case IrExpr.Dec d -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {

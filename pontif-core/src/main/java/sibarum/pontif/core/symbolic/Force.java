@@ -17,6 +17,7 @@ public final class Force {
                 throw new UnresolvedSymbolException(
                         "Cannot force non-integer rational " + f.num() + "/" + f.denom() + " to a primitive");
             }
+            case SymExpr.Dec d -> d.value();
             case SymExpr.Add(SymExpr l, SymExpr r) -> (Long) apply(l) + (Long) apply(r);
             case SymExpr.Mul(SymExpr l, SymExpr r) -> (Long) apply(l) * (Long) apply(r);
             case SymExpr.Pow(SymExpr b, SymExpr e) -> {

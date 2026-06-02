@@ -10,6 +10,7 @@ import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +41,7 @@ public final class IrInterpreter {
     public Object eval(IrExpr expr, Environment env, CompiledModule module) {
         return switch (expr) {
             case IrExpr.Lit l -> l.value();
+            case IrExpr.Dec d -> d.value();
             case IrExpr.Bool b -> b.value();
             case IrExpr.Var v -> env.lookup(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(
@@ -138,6 +140,11 @@ public final class IrInterpreter {
     private Object evalBinOp(IrExpr.BinOp op, Environment env, CompiledModule module) {
         Object l = eval(op.left(), env, module);
         Object r = eval(op.right(), env, module);
+        // Decimal operands (same-type only in this slice) use BigDecimal
+        // arithmetic and compareTo-based comparison/equality, so 2.0 == 2.00.
+        if (l instanceof BigDecimal || r instanceof BigDecimal) {
+            return evalDecimalBinOp(op.op(), (BigDecimal) l, (BigDecimal) r);
+        }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
             case MUL -> (Long) l * (Long) r;
@@ -150,6 +157,23 @@ public final class IrInterpreter {
             case NE -> !java.util.Objects.equals(l, r);
             case AND -> (Boolean) l && (Boolean) r;
             case OR -> (Boolean) l || (Boolean) r;
+        };
+    }
+
+    private static Object evalDecimalBinOp(IrExpr.Op op, BigDecimal l, BigDecimal r) {
+        return switch (op) {
+            case ADD -> l.add(r);
+            case SUB -> l.subtract(r);
+            case MUL -> l.multiply(r);
+            case LT -> l.compareTo(r) < 0;
+            case LE -> l.compareTo(r) <= 0;
+            case GT -> l.compareTo(r) > 0;
+            case GE -> l.compareTo(r) >= 0;
+            case EQ -> l.compareTo(r) == 0;
+            case NE -> l.compareTo(r) != 0;
+            // Logical ops never have Decimal operands (they're Bool-typed).
+            case AND, OR -> throw new IllegalStateException(
+                    "Logical operator " + op + " applied to Decimal operands");
         };
     }
 
@@ -223,6 +247,7 @@ public final class IrInterpreter {
     private static SymExpr toSymExpr(Object value) {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
+        if (value instanceof BigDecimal d) return SymExpr.dec(d);
         if (value instanceof Boolean b) return SymExpr.bool(b);
         if (value instanceof RecordValue r) {
             LinkedHashMap<String, SymExpr> members = new LinkedHashMap<>();

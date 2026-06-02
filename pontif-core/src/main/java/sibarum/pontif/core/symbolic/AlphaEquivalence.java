@@ -28,6 +28,8 @@ public final class AlphaEquivalence {
             case SymExpr.Lit al -> b instanceof SymExpr.Lit bl && al.value() == bl.value();
             case SymExpr.Frac af -> b instanceof SymExpr.Frac bf
                     && af.num() == bf.num() && af.denom() == bf.denom();
+            case SymExpr.Dec ad -> b instanceof SymExpr.Dec bd
+                    && ad.value().compareTo(bd.value()) == 0;
             case SymExpr.Bool ab -> b instanceof SymExpr.Bool bb && ab.value() == bb.value();
             case SymExpr.Self as -> b instanceof SymExpr.Self;
             case SymExpr.Add(SymExpr al, SymExpr ar) -> {

@@ -16,6 +16,7 @@ import sibarum.pontif.ast.func.FunctionRegistry;
 import sibarum.pontif.ast.lambda.ApplyNode;
 import sibarum.pontif.ast.lambda.LambdaNode;
 import sibarum.pontif.ast.literal.Bool;
+import sibarum.pontif.ast.literal.DecimalLiteral;
 import sibarum.pontif.ast.literal.IntLiteral;
 import sibarum.pontif.ast.match.MatchNode;
 import sibarum.pontif.ast.record.FieldAccessNode;
@@ -83,6 +84,7 @@ public final class TruffleLowering {
     private PontifNode lowerExpr(IrExpr expr, CompiledModule module, FunctionRegistry registry) {
         PontifNode node = switch (expr) {
             case IrExpr.Lit l -> IntLiteral.of(l.value());
+            case IrExpr.Dec d -> DecimalLiteral.of(d.value());
             case IrExpr.Bool b -> Bool.of(b.value());
             case IrExpr.Var v -> Var.of(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(

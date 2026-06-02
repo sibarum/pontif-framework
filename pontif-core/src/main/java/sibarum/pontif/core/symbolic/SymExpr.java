@@ -2,11 +2,12 @@ package sibarum.pontif.core.symbolic;
 
 import sibarum.pontif.core.types.Sort;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
 public sealed interface SymExpr
-        permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Bool, SymExpr.Self,
+        permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Bool, SymExpr.Self,
                 SymExpr.Add, SymExpr.Mul, SymExpr.Pow,
                 SymExpr.Cmp, SymExpr.And, SymExpr.Or,
                 SymExpr.Lam, SymExpr.App, SymExpr.Case,
@@ -15,6 +16,7 @@ public sealed interface SymExpr
     static Var var(String name) { return new Var(name); }
     static Lit lit(long value) { return new Lit(value); }
     static Frac frac(long num, long denom) { return new Frac(num, denom); }
+    static Dec dec(BigDecimal value) { return new Dec(value); }
     static Bool bool(boolean value) { return new Bool(value); }
     static Self self() { return Self.INSTANCE; }
     static Add add(SymExpr left, SymExpr right) { return new Add(left, right); }
@@ -61,6 +63,15 @@ public sealed interface SymExpr
             return a;
         }
     }
+
+    /**
+     * Decimal value leaf — arbitrary-precision exact decimal (BigDecimal).
+     * A value atom like {@link Lit}/{@link Frac}; the integer-only discharge
+     * engines abstain on it (as they do on {@link Frac}), so it never enters
+     * integer reasoning. Carries only its value; {@code SignAnalysis} reads its
+     * {@code signum()}.
+     */
+    record Dec(BigDecimal value) implements SymExpr {}
 
     record Bool(boolean value) implements SymExpr {}
 

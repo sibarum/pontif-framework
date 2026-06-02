@@ -50,7 +50,7 @@ public final class SortChecker {
      * leak into the IR and must validate.
      */
     private static final Set<String> PRIMITIVE_SORT_NAMES = Set.of(
-            "Int", "Bool",
+            "Int", "Bool", "Decimal",
             "_", "_record");
 
     private SortChecker() {}
@@ -227,6 +227,21 @@ public final class SortChecker {
                 }
             }
             case IrSort.Refined r -> {
+                if (r.name().equals("Decimal")) {
+                    // Decimal is a value type only (this slice). Its planned
+                    // refinement vocabulary is exactly three narrows — sign,
+                    // range, and equality-up-to-precision — which need the
+                    // rational-calibrated discharge path (not the integer-only
+                    // engine in place today). Until that lands, reject rather than
+                    // silently widen (a [Decimal:...] return couldn't be proven and
+                    // would brick the return-verification gate). See docs/TODO.md.
+                    throw new CompileException(
+                            "Refinements over 'Decimal' are not yet wired. Decimal will "
+                                    + "support sign / range / equality narrows once the "
+                                    + "rational-calibrated discharge path lands; today's "
+                                    + "engine is integer-only. Use a bare 'Decimal' for now.",
+                            r.origin());
+                }
                 if (PRIMITIVE_SORT_NAMES.contains(r.name())) {
                     // Primitive-base refinement; predicate not yet structurally
                     // validated — refinement-predicate sort-checking is its
@@ -322,6 +337,7 @@ public final class SortChecker {
                 }
             }
             case IrExpr.Lit ignored -> {}
+            case IrExpr.Dec ignored -> {}
             case IrExpr.Bool ignored -> {}
             case IrExpr.Var ignored -> {}
             case IrExpr.SelfRef ignored -> {}
@@ -334,6 +350,7 @@ public final class SortChecker {
             throws CompileException {
         switch (expr) {
             case IrExpr.Lit l -> {}
+            case IrExpr.Dec d -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {}
@@ -627,6 +644,7 @@ public final class SortChecker {
             case SymExpr.Bool b -> Boolean.toString(b.value());
             case SymExpr.Self ignored -> "@";
             case SymExpr.Lit l -> Long.toString(l.value());
+            case SymExpr.Dec d -> d.value().toPlainString();
             case SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r) ->
                     renderPredicate(l) + " " + renderCmpOp(op) + " " + renderPredicate(r);
             case SymExpr.And(SymExpr l, SymExpr r) ->

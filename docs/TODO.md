@@ -6,7 +6,26 @@ items get removed (history is in git); this file is forward-looking.
 
 ---
 
-## ⭐ Active — Dispatch unification (one engine, two mechanisms)
+## 🎯 Current focus (2026-06-01) — resume the receipt-graph artifact
+
+**Goal-stack** (root → where we drifted): reviewable proof-tree **artifact** ←
+needs strong dispatch ← **dispatch inference** (✅ A–D) ← *[drifted into]*
+**dispatch unification** (⏸ parked at Phase 0). Dispatch inference — the original
+reason the artifact was paused — is **done**; the artifact (R1–R5, numeric
+discharge, the return-verification gate, in-source `std.proof` proofs) works
+end-to-end. **Open frontier = the deferred-refinements menus** under "Return
+verification" and "receipt-graph subsystem" below. Resume the artifact; return to
+dispatch unification only if a concrete slice hits real dispatch friction.
+
+---
+
+## ⏸ Parked — Dispatch unification (one engine, two mechanisms)
+
+*Parked 2026-06-01: recognized we'd drifted ~3 hops from the artifact and that
+its actual blocker (dispatch inference) already landed. Phase 0 docs committed
+(`cd9b74e`); plan + decisions intact in `docs/dispatch-unification.md`. Resume
+only if artifact work hits real dispatch friction — Phase 2 (methods on the
+receiver sort) is the valuable rung; Phase 1 (operators) is thin post-B1.*
 
 Put every dispatched call on the one shared resolution engine
 (`StaticDispatch` + `Refinements.imply` + most-specific) and delete the ad-hoc
@@ -33,19 +52,35 @@ dispatch landed (FQN keys + `CoherenceCheck`).
 - **Phase 4 — parser de-blinding + cleanup** (delete the parse-time
   sort-inference hacks).
 
-Open decisions tracked in the doc. **D2 (one namespace for methods + free
-functions?) is resolved: no** — two mechanisms, James's standing call. Live
-seams: **B1** (operator-valued trait contracts like `Int:Addable` — mechanism 1
-or 2? gates *primitives as trait implementors*), **B2** (static methods),
-**B3** (promotions), and **D1/D5** (BinOp fast-path).
+Open decisions tracked in the doc. **D2 (one namespace?) resolved: no** — two
+mechanisms. **B1 (operator-valued trait contracts) resolved: none** — operators
+are mechanism-1 only. **D5 (fast-path coverage) resolved** by the execution
+model: runtime dispatch is the semantics; static-lower to `BinOp` only when the
+operand's static sort is concrete (built-ins always are). Live seams: **B2**
+(static methods), **B3** (promotions), **D1** (BinOp as lowered form).
+
+**Puntable follow-ups surfaced while scoping Phase 1** (all "not off the table"):
+- **Static dispatch on union-typed operands (B4).** Runtime dispatch already
+  handles a union operand (the value is concrete at runtime); the missing piece is
+  a compile-time *exhaustiveness verifier* — prove every member of the union has a
+  matching overload before allowing the call. Non-trivial machinery; deferred.
+- **`compareTo`/`Ord`-style derivation.** Today each of `< <= > >= == !=` is
+  overloaded individually (they *are* already overloadable for user types —
+  `OVERLOADABLE_OPS`). The gap is deriving all six from one ordering, which is what
+  custom algebraic types actually want. Ergonomic sugar over existing overloading.
+- **Division operator `/`.** Not supported at all — no `IrExpr.Op` value;
+  `AltParser.opKind` throws on `/`. Add the `Op` + built-in `/(Int,Int):Int`
+  overload alongside the other arithmetic ops (naturally folds into Phase 1's
+  built-in set if/when wanted).
 
 ---
 
-## ⭐ Next priority — Dispatch inference at compile time
+## ✅ Landed — Dispatch inference at compile time (Phases A–D)
 
 Union/intersection sorts and traits landed during the receipt-graph
-pause, expanding the surface area dispatch inference must cover.
-Phased prerequisites for the full dispatch-inference work:
+pause, expanding the surface area dispatch inference must cover. All
+phases below are complete — this was the prerequisite the artifact pause
+was for, and it unblocked the receipt-graph resume.
 
 ### Phase A — Match-arm result narrowing ✅ landed
 

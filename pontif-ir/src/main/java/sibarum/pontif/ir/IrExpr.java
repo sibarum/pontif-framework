@@ -2,13 +2,14 @@ package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 public sealed interface IrExpr
-        permits IrExpr.Lit, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
+        permits IrExpr.Lit, IrExpr.Dec, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess {
@@ -22,6 +23,7 @@ public sealed interface IrExpr
     }
 
     static Lit lit(long value) { return new Lit(value, Origin.NONE); }
+    static Dec dec(BigDecimal value) { return new Dec(value, Origin.NONE); }
     static Bool bool(boolean value) { return new Bool(value, Origin.NONE); }
     static Var var(String name) { return new Var(name, Origin.NONE); }
     static SelfRef self() { return new SelfRef(Origin.NONE); }
@@ -37,6 +39,15 @@ public sealed interface IrExpr
     static FieldAccess fieldAccess(IrExpr base, String fieldName) { return new FieldAccess(base, fieldName, Origin.NONE); }
 
     record Lit(long value, Origin origin) implements IrExpr {}
+
+    /** Decimal literal — arbitrary-precision exact decimal (BigDecimal-backed). */
+    record Dec(BigDecimal value, Origin origin) implements IrExpr {
+        public Dec {
+            if (value == null) {
+                throw new IllegalArgumentException("Dec value must be non-null");
+            }
+        }
+    }
 
     record Bool(boolean value, Origin origin) implements IrExpr {}
 

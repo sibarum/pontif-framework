@@ -16,6 +16,7 @@ public final class Substitute {
             case SymExpr.Var v -> bindings.getOrDefault(v.name(), v);
             case SymExpr.Lit l -> l;
             case SymExpr.Frac f -> f;
+            case SymExpr.Dec d -> d;
             case SymExpr.Bool b -> b;
             case SymExpr.Self s -> s;
             case SymExpr.Add(SymExpr l, SymExpr r) -> new SymExpr.Add(apply(l, bindings), apply(r, bindings));
@@ -52,6 +53,7 @@ public final class Substitute {
             case SymExpr.Var v -> v;
             case SymExpr.Lit l -> l;
             case SymExpr.Frac f -> f;
+            case SymExpr.Dec d -> d;
             case SymExpr.Bool b -> b;
             case SymExpr.Add(SymExpr l, SymExpr r) -> new SymExpr.Add(applySelf(l, value), applySelf(r, value));
             case SymExpr.Mul(SymExpr l, SymExpr r) -> new SymExpr.Mul(applySelf(l, value), applySelf(r, value));

@@ -10,6 +10,7 @@ public final class SignAnalysis {
         return switch (expr) {
             case SymExpr.Lit(long v) -> signOfLong(v);
             case SymExpr.Frac(long n, long d) -> signOfLong(n);
+            case SymExpr.Dec d -> signOfLong(d.value().signum());
             case SymExpr.Self s -> signFromHypotheses(s, hypotheses);
             case SymExpr.Var v -> signFromHypotheses(v, hypotheses);
             case SymExpr.Add(SymExpr l, SymExpr r) ->

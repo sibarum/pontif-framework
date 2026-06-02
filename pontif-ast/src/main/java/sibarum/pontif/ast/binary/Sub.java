@@ -2,6 +2,8 @@ package sibarum.pontif.ast.binary;
 
 import sibarum.pontif.core.PontifNode;
 
+import java.math.BigDecimal;
+
 public final class Sub extends BinaryOp {
 
     private Sub(PontifNode left, PontifNode right) {
@@ -14,6 +16,9 @@ public final class Sub extends BinaryOp {
 
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
+        if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            return ((BigDecimal) leftValue).subtract((BigDecimal) rightValue);
+        }
         return (Long) leftValue - (Long) rightValue;
     }
 }

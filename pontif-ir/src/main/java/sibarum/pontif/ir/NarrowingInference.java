@@ -70,6 +70,9 @@ public final class NarrowingInference {
     public static IrSort infer(IrExpr expr, InferenceContext ctx) {
         return switch (expr) {
             case IrExpr.Lit l -> intSingleton(l.value());
+            // No value-level narrowing for decimals (integer-only engine);
+            // the bare Decimal sort is all we know.
+            case IrExpr.Dec d -> IrSort.named("Decimal");
             case IrExpr.Bool b -> boolSingleton(b.value());
             case IrExpr.Var v -> ctx.typeEnv().get(v.name());
             case IrExpr.LetIn let -> {
@@ -305,6 +308,7 @@ public final class NarrowingInference {
                     r.members().values().stream()
                             .allMatch(v -> selfAccessesAreOnlyField(v, targetField));
             case IrExpr.Lit ignored -> true;
+            case IrExpr.Dec ignored -> true;
             case IrExpr.Bool ignored -> true;
             case IrExpr.Var ignored -> true;
         };
@@ -376,6 +380,7 @@ public final class NarrowingInference {
                 yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
             }
             case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
@@ -446,6 +451,7 @@ public final class NarrowingInference {
                 yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
             }
             case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
         };

@@ -77,12 +77,12 @@ public final class AltLexer {
             // of a new token AND followed by digit AND the previous token wasn't
             // something that could be a left operand).
             if (Character.isDigit(c)) {
-                tokens.add(readInteger(startLine, startCol));
+                tokens.add(readNumber(startLine, startCol));
                 continue;
             }
             if (c == '-' && pos + 1 < src.length() && Character.isDigit(src.charAt(pos + 1))
                     && !isOperandTerminator(tokens)) {
-                tokens.add(readInteger(startLine, startCol));
+                tokens.add(readNumber(startLine, startCol));
                 continue;
             }
 
@@ -112,12 +112,20 @@ public final class AltLexer {
         if (tokens.isEmpty()) return false;
         AltToken last = tokens.get(tokens.size() - 1);
         return switch (last.kind()) {
-            case INTEGER, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
+            case INTEGER, DECIMAL, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
             default -> false;
         };
     }
 
-    private AltToken readInteger(int startLine, int startCol) {
+    /**
+     * Reads an integer or decimal literal. After the integer part (optional
+     * leading {@code -} then digits), a {@code '.'} <em>immediately followed by
+     * a digit</em> extends the token into a {@code DECIMAL} ({@code 3.14}). A
+     * trailing dot not followed by a digit is left for the {@code DOT} token, so
+     * field access ({@code p.x}) and {@code 3.foo} still tokenize correctly.
+     * Single decimal point only — scientific notation is not yet supported.
+     */
+    private AltToken readNumber(int startLine, int startCol) {
         int start = pos;
         if (src.charAt(pos) == '-') {
             advance();
@@ -125,7 +133,17 @@ public final class AltLexer {
         while (pos < src.length() && Character.isDigit(src.charAt(pos))) {
             advance();
         }
-        return new AltToken(AltToken.Kind.INTEGER, src.substring(start, pos), source, startLine, startCol);
+        boolean isDecimal = false;
+        if (pos + 1 < src.length() && src.charAt(pos) == '.'
+                && Character.isDigit(src.charAt(pos + 1))) {
+            isDecimal = true;
+            advance(); // consume '.'
+            while (pos < src.length() && Character.isDigit(src.charAt(pos))) {
+                advance();
+            }
+        }
+        AltToken.Kind kind = isDecimal ? AltToken.Kind.DECIMAL : AltToken.Kind.INTEGER;
+        return new AltToken(kind, src.substring(start, pos), source, startLine, startCol);
     }
 
     private AltToken readIdent(int startLine, int startCol) {

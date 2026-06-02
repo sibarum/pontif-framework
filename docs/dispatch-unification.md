@@ -91,6 +91,30 @@ The parser emits uniform nodes (a "call name on args" node and a method-call nod
 carrying receiver + field) and does **no** sort inference; one resolution pass
 runs post-parse, dispatching each node into its mechanism.
 
+### Execution model: runtime dispatch is the semantics; static-lowering is a guarded optimization
+
+The *meaning* of an operator/method call is **dispatch on the runtime values'
+sorts** (`DispatchTable.resolve` already resolves over the concrete runtime
+argument, most-specific). Static resolution is an **optimization layered on top**:
+lower a call to a fixed target (e.g. a built-in operator → `IrExpr.BinOp`) **only
+when the static operand sort is concrete enough that no more-specific overload
+could match at runtime.**
+
+- **Concrete static sort** (`Int`, a struct's exact type, a refinement thereof) —
+  nothing more specific can appear at runtime, so static == runtime; lower it.
+  Built-in `Int`/`Bool` operators are always in this case (`Int` is never
+  trait-typed — traits are over structs), so they always lower to `BinOp`.
+- **Trait-typed operand** — a more-specific concrete overload *could* match at
+  runtime, so **do not lower**; leave the `Call` and let runtime dispatch pick the
+  concrete type's op. This is how polymorphism is preserved; it's also the
+  template for later *devirtualizing* mechanism-2 method calls (lower only when
+  the receiver's static sort is concrete).
+- **Union-typed operand** — dispatch is well-defined at runtime (the value is
+  concrete then), but statically guaranteeing no runtime no-match needs a
+  union-exhaustiveness verifier (every member has a matching overload). **Deferred
+  — not off the table** (TODO); until then a union operand does not statically
+  dispatch.
+
 ## Invariants this must preserve
 
 - **Module-scoped + coherent.** Names FQN per module; the orphan rule governs
@@ -184,10 +208,17 @@ Each phase ships independently with the full suite green.
   there.
 - **B3 (Phase 1) — promotion semantics in mechanism 1.** Scope of the numeric
   tower / coercion behavior for operators (defer vs. minimal). Interacts with D5.
-- **D5 (Phase 1) — static-resolution coverage for the fast path.** What happens
-  when `StaticDispatch` can't resolve a primitive operator at compile time
-  (e.g. a fully dynamic operand)? Fall back to a runtime-dispatched operator
-  call; confirm the perf envelope.
+- **D5 (Phase 1) — static-resolution coverage for the fast path. RESOLVED by the
+  execution model above.** Lower to `BinOp` only when the static operand sort is
+  concrete; otherwise leave the `Call` for runtime dispatch (the semantics). For
+  Phase 1's built-in `Int`/`Bool` operators the operands are always concrete, so
+  they always lower — no genuinely-dynamic built-in-operator call arises. (The
+  one residual is union operands, deferred to the exhaustiveness verifier; see the
+  execution-model section and TODO.)
+- **B4 (deferred / TODO) — static dispatch on union-typed operands.** Runtime
+  dispatch handles a union operand fine (the value is concrete at runtime); the
+  missing piece is a compile-time verifier that every union member has a matching
+  overload. Tracked in `docs/TODO.md`. Not off the table.
 
 ## Relationship to `recv.method()` cross-module
 
