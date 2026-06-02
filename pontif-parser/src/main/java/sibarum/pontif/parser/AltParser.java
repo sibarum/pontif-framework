@@ -128,6 +128,18 @@ public final class AltParser {
     private final Map<IrSort, java.util.Set<String>> literalConstrainedFields =
             new java.util.IdentityHashMap<>();
 
+    /** Extra declarations emitted by a top-level destructuring let (one per bound field). */
+    private final List<IrStmt> pendingTopLevelDecls = new ArrayList<>();
+
+    /**
+     * Positional rename binders per struct pattern: field name → binder name.
+     * A bare ident clause that is NOT a declared field name binds the field at
+     * its clause position under the given name ({@code [Ternion(first, second,
+     * third)]}); idents that ARE field names stay name-keyed as before.
+     */
+    private final Map<IrSort, Map<String, String>> destructureRenames =
+            new java.util.IdentityHashMap<>();
+
     /**
      * Top-level let-bindings declared so far, keyed by their (possibly dotted)
      * name. Maps to the binding's inferred sort. Two uses: (1) bare references
@@ -217,6 +229,12 @@ public final class AltParser {
         List<IrStmt> stmts = new ArrayList<>();
         while (peek().kind() != AltToken.Kind.EOF && !isMainExpressionStart()) {
             stmts.add(parseTopLevelDecl());
+            // A top-level destructuring let emits one decl per bound field on
+            // top of the decl returned above — drain them in order.
+            if (!pendingTopLevelDecls.isEmpty()) {
+                stmts.addAll(pendingTopLevelDecls);
+                pendingTopLevelDecls.clear();
+            }
         }
         IrExpr main;
         if (peek().kind() == AltToken.Kind.EOF) {
@@ -600,6 +618,9 @@ public final class AltParser {
 
     private IrStmt parseLet() throws ParseException {
         AltToken start = expectKeyword("let");
+        if (peek().kind() == AltToken.Kind.LBRACKET) {
+            return parseDestructuringLetTop(start);
+        }
         String name = parseDottedName();
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
@@ -1055,11 +1076,16 @@ public final class AltParser {
             }
             consume();  // LPAREN
             java.util.Set<String> literalFields = new java.util.LinkedHashSet<>();
-            Map<String, IrSort> members = parseStructFields(baseTok.text(), baseTok.origin(), literalFields);
+            Map<String, String> renames = new LinkedHashMap<>();
+            Map<String, IrSort> members =
+                    parseStructFields(baseTok.text(), baseTok.origin(), literalFields, renames);
             expect(AltToken.Kind.RPAREN);
             IrSort.Structural structural = new IrSort.Structural(baseTok.text(), members, baseTok.origin());
             if (!literalFields.isEmpty()) {
                 literalConstrainedFields.put(structural, literalFields);
+            }
+            if (!renames.isEmpty()) {
+                destructureRenames.put(structural, renames);
             }
             return structural;
         }
@@ -1160,7 +1186,8 @@ public final class AltParser {
      * Mixed forms are allowed.
      */
     private Map<String, IrSort> parseStructFields(String typeName, Origin typeOrigin,
-            java.util.Set<String> literalFieldsOut) throws ParseException {
+            java.util.Set<String> literalFieldsOut, Map<String, String> renamesOut)
+            throws ParseException {
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
         int clauseIndex = -1;
@@ -1230,10 +1257,25 @@ public final class AltParser {
                 }
                 IrSort declSort = decl.members().get(fieldName.text());
                 if (declSort == null) {
-                    throw new ParseException(
-                            "Field '" + fieldName.text() + "' is not a member of struct '"
-                                    + typeName + "'",
-                            fieldName.origin());
+                    // Not a field name → a positional RENAME binder: bind the
+                    // field at this clause position under the given name
+                    // ([Ternion(first, second, third)]).
+                    List<String> order = new ArrayList<>(decl.members().keySet());
+                    if (clauseIndex >= order.size()) {
+                        throw new ParseException(
+                                "Too many fields for struct '" + typeName + "' ("
+                                        + order.size() + " declared)", fieldName.origin());
+                    }
+                    String posField = order.get(clauseIndex);
+                    if (members.containsKey(posField)) {
+                        throw new ParseException(
+                                "Field '" + posField + "' is given both by name and by position in ["
+                                        + typeName + "(...)]", fieldName.origin());
+                    }
+                    members.put(posField, decl.members().get(posField));
+                    renamesOut.put(posField, fieldName.text());
+                    first = false;
+                    continue;
                 }
                 fieldSort = declSort;
             }
@@ -1607,8 +1649,71 @@ public final class AltParser {
      * {@link #currentScope} for body parsing only; on exit, the previous
      * binding (if any — e.g., a shadowed function param) is restored.
      */
+    /**
+     * Expression-level destructuring let: {@code let [Pattern] = VALUE BODY} is
+     * sugar for {@code match VALUE { [Pattern] -> BODY }}. The match-totality
+     * checker enforces the let rule for free: the pattern must be proven total
+     * over the value's sort — trivially (a bare destructure) or via the kernel
+     * (a provable narrowing) — otherwise it's a refutable pattern and the
+     * compile fails, directing the user to a real match.
+     */
+    private IrExpr parseDestructuringLetExpr(AltToken start) throws ParseException {
+        IrSort pattern = parseSort();
+        expect(AltToken.Kind.EQUALS);
+        IrExpr value = parseExpr();
+        IrExpr body = parseExpr();
+        return desugarStructuralDestructure(
+                value,
+                List.of(new IrExpr.MatchBranch(pattern, body)),
+                start.origin());
+    }
+
+    /**
+     * Top-level destructuring let: {@code let [Ternion(a, b, c)] = VALUE}
+     * lowers to a synthetic 0-arg value binding plus one 0-arg accessor per
+     * bound field, each accessor being the single-arm match
+     * {@code match __d { [Pattern] -> field }} — the proof obligation and the
+     * binding semantics are identical to the expression level; only the
+     * lowering target differs (declarations instead of a scoped expression,
+     * exactly like plain lets).
+     */
+    private IrStmt parseDestructuringLetTop(AltToken start) throws ParseException {
+        IrSort pattern = parseSort();
+        if (!(pattern instanceof IrSort.Structural sp)) {
+            throw new ParseException(
+                    "A top-level destructuring let needs a struct pattern — "
+                            + "e.g. let [Ternion(a, b, c)] = …",
+                    start.origin());
+        }
+        expect(AltToken.Kind.EQUALS);
+        IrExpr value = parseExpr();
+        String synthetic = "__destructure$" + (syntheticCounter++);
+        IrSort valueSort = inferMaximalSort(value);
+        declaredTopLevelLets.put(synthetic, valueSort);
+        java.util.Set<String> constrainedOnly =
+                literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
+        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        for (Map.Entry<String, IrSort> e : sp.members().entrySet()) {
+            if (constrainedOnly.contains(e.getKey())) {
+                continue;  // literal field: constrains the match, binds nothing
+            }
+            String binder = renames.getOrDefault(e.getKey(), e.getKey());
+            IrExpr accessor = desugarStructuralDestructure(
+                    new IrExpr.Call(synthetic, List.of(), start.origin()),
+                    List.of(new IrExpr.MatchBranch(sp, new IrExpr.Var(binder, start.origin()))),
+                    start.origin());
+            declaredTopLevelLets.put(binder, e.getValue());
+            pendingTopLevelDecls.add(new IrStmt.FunctionDecl(
+                    binder, List.of(), e.getValue(), accessor, start.origin()));
+        }
+        return new IrStmt.FunctionDecl(synthetic, List.of(), valueSort, value, start.origin());
+    }
+
     private IrExpr parseLetExpr() throws ParseException {
         AltToken start = expectKeyword("let");
+        if (peek().kind() == AltToken.Kind.LBRACKET) {
+            return parseDestructuringLetExpr(start);
+        }
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         String name = nameTok.text();
         if (KEYWORDS.contains(name)) {
@@ -1889,6 +1994,8 @@ public final class AltParser {
                 // silently shadowed.
                 java.util.Set<String> constrainedOnly =
                         literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
+                Map<String, String> renames =
+                        destructureRenames.getOrDefault(sp, Map.of());
                 List<Map.Entry<String, IrSort>> entries =
                         new ArrayList<>(sp.members().entrySet());
                 for (int i = entries.size() - 1; i >= 0; i--) {
@@ -1897,7 +2004,7 @@ public final class AltParser {
                         continue;
                     }
                     result = new IrExpr.LetIn(
-                            e.getKey(),
+                            renames.getOrDefault(e.getKey(), e.getKey()),
                             e.getValue(),
                             new IrExpr.FieldAccess(scrutineeRef, e.getKey(), Origin.NONE),
                             result,
