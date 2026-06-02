@@ -38,6 +38,36 @@ class IrMatchTest {
         return program.run();
     }
 
+    /**
+     * Builds a {@link CompiledModule} by hand, skipping the compile pipeline
+     * (and so the SortChecker totality gate). The runtime no-match safety net
+     * is unreachable through a checked compile now that match totality is
+     * enforced (principle 8: undeterminable totality requires a default arm) —
+     * but it stays as defense-in-depth for hand-built IR, and these tests keep
+     * it honest.
+     */
+    private static CompiledModule compileUnchecked(IrModule module) throws Exception {
+        java.util.IdentityHashMap<IrSort, sibarum.pontif.core.types.Sort> sorts =
+                new java.util.IdentityHashMap<>();
+        if (module.main() instanceof IrExpr.Match m) {
+            for (IrExpr.MatchBranch b : m.branches()) {
+                sorts.put(b.pattern(), IrCompiler.compileSort(b.pattern()));
+            }
+        }
+        return new CompiledModule(
+                module.name(), new sibarum.pontif.core.symbolic.DispatchTable(),
+                java.util.Map.of(), module.main(), sorts, java.util.Map.of());
+    }
+
+    private static Object runUncheckedInterpreter(IrModule module) throws Exception {
+        return new IrInterpreter(simplifier()).eval(compileUnchecked(module));
+    }
+
+    private static Object runUncheckedTruffle(IrModule module) throws Exception {
+        Simplifier simp = simplifier();
+        return new TruffleLowering(new IrCompiler(simp)).lower(compileUnchecked(module)).run();
+    }
+
     // --- Pattern sorts reused across tests ---
 
     private static IrSort positive() {
@@ -87,7 +117,10 @@ class IrMatchTest {
                 IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(0)));
         IrExpr match = IrExpr.match(IrExpr.lit(5), List.of(
                 IrExpr.matchBranch(positive(), IrExpr.lit(1)),
-                IrExpr.matchBranch(nonNegative, IrExpr.lit(2))));
+                IrExpr.matchBranch(nonNegative, IrExpr.lit(2)),
+                // catch-all completes the cover (totality is enforced now);
+                // never taken — 5 hits the first accepting arm above.
+                IrExpr.matchBranch(anyInt(), IrExpr.lit(3))));
         IrModule module = new IrModule("m", List.of(), match);
         assertEquals(1L, runInterpreter(module));
     }
@@ -140,7 +173,7 @@ class IrMatchTest {
 
         RuntimeCheckException ex = assertThrows(
                 RuntimeCheckException.class,
-                () -> runInterpreter(module));
+                () -> runUncheckedInterpreter(module));
 
         assertEquals(matchSite, ex.origin());
         assertTrue(ex.getMessage().contains("test.ptf:17:4"),
@@ -161,7 +194,7 @@ class IrMatchTest {
 
         RuntimeCheckException ex = assertThrows(
                 RuntimeCheckException.class,
-                () -> runTruffle(module));
+                () -> runUncheckedTruffle(module));
 
         assertEquals(matchSite, ex.origin());
         assertTrue(ex.getMessage().contains("test.ptf:17:4"),
@@ -189,7 +222,9 @@ class IrMatchTest {
         Origin fieldSite = Origin.at("inner.ptf", 100, 1);
         IrExpr badFieldAccess = new IrExpr.FieldAccess(IrExpr.lit(5), "x", fieldSite);
         IrExpr match = new IrExpr.Match(IrExpr.lit(5),
-                List.of(IrExpr.matchBranch(positive(), badFieldAccess)),
+                List.of(IrExpr.matchBranch(positive(), badFieldAccess),
+                        // catch-all for totality; 5 takes the positive arm.
+                        IrExpr.matchBranch(anyInt(), IrExpr.lit(0))),
                 matchSite);
         IrModule module = new IrModule("m", List.of(), match);
 
@@ -213,7 +248,7 @@ class IrMatchTest {
 
         RuntimeCheckException ex = assertThrows(
                 RuntimeCheckException.class,
-                () -> runInterpreter(module));
+                () -> runUncheckedInterpreter(module));
 
         assertFalse(ex.origin().isPresent());
         assertFalse(ex.getMessage().startsWith("["),

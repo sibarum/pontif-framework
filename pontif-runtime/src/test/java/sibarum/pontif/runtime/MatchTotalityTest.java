@@ -16,12 +16,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Match totality (alt-syntax principle 8): {@code SortChecker} proves at
- * compile time that a match's arms cover the scrutinee's sort, for the
- * decidable Int-refinement fragment. A non-exhaustive match is a compile
- * error (with the uncovered region as the witness); exhaustive and
- * {@code _}-defaulted matches compile; struct / non-Int matches defer to the
- * runtime no-match check.
+ * Match totality (alt-syntax principle 8), under the conservation rule:
+ * <b>if totality cannot be determined at compile time, a default arm is
+ * required.</b> {@code SortChecker} proves coverage where it can (the
+ * decidable Int/Bool fragment, bare-struct Tier A, single-field Tier B,
+ * union-of-bare-arms Tier C); a provably non-exhaustive match is rejected
+ * with the uncovered witness; an <em>undecidable</em> match without a
+ * catch-all arm is rejected too — never deferred to a runtime gamble.
  */
 class MatchTotalityTest {
 
@@ -168,6 +169,69 @@ class MatchTotalityTest {
                 sumXY(Point(3, 4))
                 """;
         assertEquals(7L, run(src));
+    }
+
+    @Test
+    void undecidableTotality_withoutDefault_isCompileError() {
+        // Decimal-field struct arms are outside the decidable fragment — per
+        // the conservation rule, no default means compile error, not a
+        // runtime gamble.
+        String src = """
+                module m
+                struct Box(v:Decimal)
+                function f(b:Box):Int -> match b
+                  [Box:@.v==0] -> 0
+                f(Box(1.5))
+                """;
+        CompileException ex = assertThrows(CompileException.class, () -> run(src));
+        assertTrue(ex.getMessage().contains("cannot prove"),
+                () -> "Expected the cannot-prove rejection; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("default"),
+                () -> "Expected the add-a-default hint; got: " + ex.getMessage());
+    }
+
+    @Test
+    void undecidableTotality_withCatchAll_compilesAndRuns() throws Exception {
+        String src = """
+                module m
+                struct Box(v:Decimal)
+                function f(b:Box):Int -> match b
+                  [Box:@.v==0] -> 0
+                  [_] -> 1
+                f(Box(1.5))
+                """;
+        assertEquals(1L, run(src));
+    }
+
+    @Test
+    void underscoreDefault_overStructScrutinee_compilesAndRuns() throws Exception {
+        // `_` now falls back to the universal pattern where the precise
+        // complement isn't computable — usable as the default everywhere.
+        String src = """
+                module m
+                struct Box(v:Decimal)
+                function f(b:Box):Int -> match b
+                  [Box:@.v==0] -> 0
+                  _ -> 1
+                f(Box(0.0))
+                """;
+        assertEquals(0L, run(src));
+    }
+
+    @Test
+    void unionScrutinee_bareArmPerBranch_isTotalByConstruction() throws Exception {
+        // Tier C: every union branch covered by a bare arm of its type — the
+        // canonical sum-type match is determined total, no default required.
+        String src = """
+                module m
+                struct A(x:Int)
+                struct B(y:Int)
+                function f(v:[A|B]):Int -> match v
+                  [A] -> 1
+                  [B] -> 2
+                f(B(5))
+                """;
+        assertEquals(2L, run(src));
     }
 
     @Test

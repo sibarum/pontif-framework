@@ -4,6 +4,7 @@ import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
+import sibarum.pontif.predicates.SatResult;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -398,7 +399,16 @@ public final class SortChecker {
                 validateSortNames(l.declaredSort(), structDefs);
                 checkExpr(l.value(), typeEnv, functionReturns, structDefs);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
-                extended.put(l.name(), l.declaredSort());
+                IrSort bound = l.declaredSort();
+                // An undeclared binder ("_") takes the value's inferred sort,
+                // so a match on the binding has a real domain to prove
+                // totality over (the parser's synthetic scrutinee lets and
+                // bare `let x = …` both land here).
+                if (bound instanceof IrSort.Named n && n.name().equals("_")) {
+                    IrSort inferred = inferSort(l.value(), typeEnv, functionReturns, structDefs);
+                    if (inferred != null) bound = inferred;
+                }
+                extended.put(l.name(), bound);
                 checkExpr(l.body(), extended, functionReturns, structDefs);
             }
             case IrExpr.Call c -> {
@@ -462,22 +472,28 @@ public final class SortChecker {
 
     /**
      * Match totality (alt-syntax principle 8): every value of the scrutinee's
-     * sort must be covered by some arm, proven at compile time rather than
-     * trusted to a runtime check.
+     * sort must be covered by some arm. <b>The conservation rule: if totality
+     * cannot be determined at compile time, a default arm is required.</b>
+     * No value may fall through a match unhandled, and "we'll find out at
+     * runtime" is not a proof.
      *
-     * <p>This enforces it for the <b>decidable fragment</b> — all arms are
-     * {@link IrSort.Refined} over a known scrutinee sort the kernel reasons
-     * about (the integer-comparison fragment of {@link PredicateArithmetic}).
-     * Everywhere else it <b>defers</b>, leaving the interpreter's runtime
-     * no-match check as the safety net: a non-{@code Refined} arm
-     * (struct/structural destructuring), an un-inferrable scrutinee sort, a
-     * non-{@code Int} domain, or a kernel {@code Unknown}. A {@code _} arm is
-     * already desugared to the explicit complement by the parser, so those
-     * matches are total by construction and pass here trivially.
-     *
-     * <p>Sound by construction: an error is raised <em>only</em> when the
-     * kernel proves there are uncovered values, so the check never rejects a
-     * match it can't decide.
+     * <p>A match passes iff one of:
+     * <ul>
+     *   <li>it has a <b>catch-all arm</b> — {@code _} (which the parser
+     *       desugars to the precise complement where computable, the universal
+     *       {@code [_]} pattern otherwise), an explicit {@code [_]}, or a bare
+     *       arm of the scrutinee's own base sort — total by construction;</li>
+     *   <li>a proof tier <b>determines</b> totality: Tier A (a bare structural
+     *       destructure arm covers the whole struct), Tier C (a union scrutinee
+     *       with every branch covered by a bare arm of that branch's type),
+     *       Tier B (single-varying-field struct coverage), or the refined-arm
+     *       complement check over the decidable {@link PredicateArithmetic}
+     *       fragment.</li>
+     * </ul>
+     * Anything else — unknown scrutinee sort, arms outside the decidable
+     * fragment (Decimal predicates, multi-field struct refinements, …), or a
+     * kernel {@code Unknown} — is a compile error directing the user to add a
+     * {@code _} default.
      */
     private static void checkMatchTotality(
             IrExpr.Match m,
@@ -485,41 +501,57 @@ public final class SortChecker {
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs) throws CompileException {
         IrSort scrutineeIr = inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs);
-        if (scrutineeIr == null) return;  // unknown domain → defer
+
+        // A catch-all arm makes the match total by construction, regardless of
+        // what the other arms look like (ordered match: it catches the rest).
+        if (hasCatchAllArm(m, scrutineeIr)) {
+            return;
+        }
+        if (scrutineeIr == null) {
+            throw cannotProveTotality(m, null, "the scrutinee's sort is not statically known");
+        }
 
         // Struct totality (Tier A): a bare structural arm (no refined fields)
         // whose field set is a subset of the scrutinee's fields matches every
         // value of that struct shape — per Pontif's subset-semantics structural
-        // matching — so the match is trivially total. Richer struct totality
-        // (per-field coverage across refined-field arms, struct unions) is
-        // deferred — that's a multi-arm cross-product problem.
-        Set<String> scrutineeFields = scrutineeFieldSet(scrutineeIr, structDefs);
-        if (scrutineeFields != null) {
+        // matching — so the match is trivially total.
+        IrSort.Structural scrutineeStruct = resolveNominal(scrutineeIr, structDefs);
+        if (scrutineeStruct != null) {
             for (IrExpr.MatchBranch b : m.branches()) {
-                if (isBareStructuralCovering(b.pattern(), scrutineeFields)) {
+                if (isBareStructuralCovering(b.pattern(), scrutineeStruct, structDefs)) {
                     return;  // trivially total
                 }
             }
+        }
+
+        // Tier C: union scrutinee where every branch is covered by a bare arm
+        // of that branch's type ([Int] / [Ternion(z,n,w)] over [Int|Ternion]) —
+        // the canonical sum-type match, determined total structurally.
+        if (unionCoveredByBareArms(m, scrutineeIr, structDefs)) {
+            return;
         }
 
         // Tier B: single-varying-field struct totality. If every arm is a
         // structural pattern refining the SAME single field (with all others
         // bare), totality reduces to "does the union of arms' refinements on
         // that field cover the field's domain?" — a single-field problem the
-        // existing kernel decides. Multi-varying-field cross-product is harder
-        // and deferred.
+        // existing kernel decides.
         if (tryTierBSingleField(m, scrutineeIr, structDefs)) {
             return;  // total (or threw on non-exhaustive)
         }
 
         SymExpr union = null;
         for (IrExpr.MatchBranch b : m.branches()) {
-            if (!(b.pattern() instanceof IrSort.Refined refined)) return;  // non-refined arm → defer
+            if (!(b.pattern() instanceof IrSort.Refined refined)) {
+                throw cannotProveTotality(m, scrutineeIr,
+                        "arm patterns are outside the decidable fragment");
+            }
             SymExpr armPred;
             try {
                 armPred = IrCompiler.compileSymExpr(refined.predicate());
             } catch (CompileException e) {
-                return;  // arm predicate outside what we can lower → defer
+                throw cannotProveTotality(m, scrutineeIr,
+                        "an arm predicate is outside the decidable fragment");
             }
             union = (union == null) ? armPred : SymExpr.or(union, armPred);
         }
@@ -529,21 +561,99 @@ public final class SortChecker {
         try {
             domain = IrCompiler.compileSort(scrutineeIr);
         } catch (CompileException e) {
-            return;
+            throw cannotProveTotality(m, scrutineeIr,
+                    "the scrutinee's sort is outside the decidable fragment");
         }
 
-        // Uncovered = domain ∧ ¬(union of arms). The kernel returns Unknown for
-        // anything outside the Int-comparison fragment → defer on Unknown.
+        // Uncovered = domain ∧ ¬(union of arms).
         ComplementResult cr = PredicateArithmetic.complement(union, domain);
-        if (!(cr instanceof ComplementResult.Computed computed)) return;
+        if (!(cr instanceof ComplementResult.Computed computed)) {
+            throw cannotProveTotality(m, scrutineeIr,
+                    "coverage over this domain is undecidable");
+        }
         SymExpr uncovered = computed.predicate();
-        if (PredicateArithmetic.satisfiable(uncovered, domain).isYes()) {
+        SatResult sat = PredicateArithmetic.satisfiable(uncovered, domain);
+        if (sat.isYes()) {
             throw new CompileException(
                     "match over " + describeDomain(scrutineeIr) + " is not exhaustive — no arm covers "
                             + renderPredicate(uncovered)
                             + " (every match must be total; add the missing arm or a '_' default)",
                     m.origin());
         }
+        if (!(sat instanceof SatResult.No)) {
+            throw cannotProveTotality(m, scrutineeIr,
+                    "coverage over this domain is undecidable");
+        }
+    }
+
+    /** The conservation rule's rejection: undeterminable totality, no default. */
+    private static CompileException cannotProveTotality(
+            IrExpr.Match m, IrSort scrutineeIr, String reason) {
+        String domain = scrutineeIr == null ? "" : " over " + describeDomain(scrutineeIr);
+        return new CompileException(
+                "cannot prove this match" + domain + " is exhaustive — " + reason
+                        + ". Every match must be total: add a '_' default arm "
+                        + "(or an explicit catch-all like [_]).",
+                m.origin());
+    }
+
+    /**
+     * A catch-all arm: the universal {@code [_]} pattern (also what {@code _}
+     * desugars to outside the complement-computable fragment), or a bare arm
+     * of the scrutinee's own base sort (e.g. {@code [Ternion]} over a
+     * {@code Ternion} scrutinee).
+     */
+    private static boolean hasCatchAllArm(IrExpr.Match m, IrSort scrutineeIr) {
+        String scrutineeBase = scrutineeIr == null ? null : matchBaseName(scrutineeIr);
+        for (IrExpr.MatchBranch b : m.branches()) {
+            if (b.pattern() instanceof IrSort.Named n) {
+                if (n.name().equals("_")) return true;
+                if (scrutineeBase != null && n.name().equals(scrutineeBase)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Tier C: a union scrutinee is determined total when every union branch is
+     * covered by a bare arm of that branch's type — a bare {@code [Type]} arm
+     * or a bare structural destructure {@code [Type(a, b)]}. Refined union
+     * branches or arms fall back to the other tiers.
+     */
+    private static boolean unionCoveredByBareArms(
+            IrExpr.Match m, IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
+        if (!(scrutineeIr instanceof IrSort.Union u)) return false;
+        for (IrSort branch : u.branches()) {
+            if (branch instanceof IrSort.Refined) return false;
+            String base = matchBaseName(branch);
+            if (base == null) return false;
+            IrSort.Structural branchStruct = resolveNominal(branch, structDefs);
+            boolean covered = false;
+            for (IrExpr.MatchBranch b : m.branches()) {
+                IrSort p = b.pattern();
+                if (p instanceof IrSort.Named n && n.name().equals(base)) {
+                    covered = true;
+                    break;
+                }
+                if (branchStruct != null && p instanceof IrSort.Structural st
+                        && base.equals(st.name())
+                        && isBareStructuralCovering(p, branchStruct, structDefs)) {
+                    covered = true;
+                    break;
+                }
+            }
+            if (!covered) return false;
+        }
+        return true;
+    }
+
+    private static String matchBaseName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            default -> null;
+        };
     }
 
     /**
@@ -657,13 +767,27 @@ public final class SortChecker {
      * value of that struct shape — sufficient for trivial totality.
      */
     private static boolean isBareStructuralCovering(
-            IrSort armPattern, Set<String> scrutineeFields) {
+            IrSort armPattern, IrSort.Structural scrutinee,
+            Map<String, IrSort.Structural> structDefs) {
         if (!(armPattern instanceof IrSort.Structural arm)) return false;
-        for (IrSort fieldSort : arm.members().values()) {
-            if (fieldSort instanceof IrSort.Refined
-                    || fieldSort instanceof IrSort.Structural) return false;
+        for (Map.Entry<String, IrSort> e : arm.members().entrySet()) {
+            IrSort declared = scrutinee.members().get(e.getKey());
+            if (declared == null) return false;  // field not in the scrutinee → constrains
+            IrSort member = e.getValue();
+            if (member instanceof IrSort.Refined) return false;  // refines → constrains
+            if (member instanceof IrSort.Structural nested) {
+                // A nested destructure covers iff it covers the DECLARED nested
+                // shape recursively (a different nested shape would constrain).
+                IrSort.Structural declaredStruct = resolveNominal(declared, structDefs);
+                if (declaredStruct == null
+                        || !isBareStructuralCovering(nested, declaredStruct, structDefs)) {
+                    return false;
+                }
+            }
+            // bare Named members are binder annotations — non-constraining,
+            // matching the pre-existing Tier A behavior.
         }
-        return scrutineeFields.containsAll(arm.members().keySet());
+        return true;
     }
 
     private static String describeDomain(IrSort sort) {
@@ -717,6 +841,33 @@ public final class SortChecker {
                                     Map<String, IrSort.Structural> structDefs) {
         return switch (expr) {
             case IrExpr.Var v -> typeEnv.get(v.name());
+            // Literal scrutinees have the most statically-known sorts there are
+            // — their singletons. Needed now that undeterminable match totality
+            // is a hard error: `match 5 [@>=0 & @<=10] -> …` is total over
+            // [Int:@==5] (provably — only 5 can flow), while `match 20` against
+            // the same arm is provably non-exhaustive at compile time.
+            case IrExpr.Lit l -> IrSort.refined("Int",
+                    IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), l));
+            case IrExpr.Bool b -> IrSort.refined("Bool",
+                    IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), b));
+            // No decimal kernel reasoning — bare Decimal; matches over it need
+            // a default arm, per the rule.
+            case IrExpr.Dec d -> IrSort.named("Decimal");
+            // Arithmetic results: Int op Int is Int; any Decimal operand makes
+            // it Decimal (promotion). Comparisons/logical yield Bool. Lets a
+            // computed scrutinee like `match n + 1` have a provable domain.
+            case IrExpr.BinOp op -> switch (op.op()) {
+                case ADD, SUB, MUL, DIV, MOD -> {
+                    IrSort ls = inferSort(op.left(), typeEnv, functionReturns, structDefs);
+                    IrSort rs = inferSort(op.right(), typeEnv, functionReturns, structDefs);
+                    String lb = ls == null ? null : matchBaseName(ls);
+                    String rb = rs == null ? null : matchBaseName(rs);
+                    if ("Decimal".equals(lb) || "Decimal".equals(rb)) yield IrSort.named("Decimal");
+                    if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
+                    yield null;
+                }
+                case LT, LE, GT, GE, EQ, NE, AND, OR -> IrSort.named("Bool");
+            };
             case IrExpr.FieldAccess fa -> {
                 IrSort base = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
                 // Resolve a nominal struct reference to its definition by name

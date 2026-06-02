@@ -1688,13 +1688,17 @@ public final class AltParser {
             IrExpr scrutinee,
             List<IrExpr.MatchBranch> branches,
             int defaultArmIndex,
-            Origin defaultArmOrigin) throws ParseException {
+            Origin defaultArmOrigin) {
+        // Where the precise complement isn't computable, `_` falls back to the
+        // universal pattern [_] — ordered match makes that total by
+        // construction (the arm catches exactly what earlier arms didn't).
+        // The precise complement is kept where the kernel can compute it,
+        // because it gives the arm body an exact narrowing rather than `_`.
+        IrSort universal = new IrSort.Named("_", defaultArmOrigin);
+
         IrSort scrutineeIrSort = inferScrutineeSort(scrutinee);
         if (scrutineeIrSort == null) {
-            throw new ParseException(
-                    "Cannot infer scrutinee's sort for '_' default arm desugar; "
-                            + "give the scrutinee a known sort or write the explicit complement predicate",
-                    defaultArmOrigin);
+            return universal;
         }
 
         // Union the explicit arms' predicates as SymExpr.
@@ -1703,18 +1707,13 @@ public final class AltParser {
             if (i == defaultArmIndex) continue;
             IrSort armPattern = branches.get(i).pattern();
             if (!(armPattern instanceof IrSort.Refined refined)) {
-                throw new ParseException(
-                        "'_' default arm currently requires all other arms to use refined sorts "
-                                + "(e.g., [@<0]); got non-refined arm pattern: " + armPattern,
-                        defaultArmOrigin);
+                return universal;  // destructure / bare arms — no predicate to complement
             }
             SymExpr armPred;
             try {
                 armPred = IrCompiler.compileSymExpr(refined.predicate());
             } catch (CompileException ce) {
-                throw new ParseException(
-                        "Cannot compile arm predicate for '_' desugar: " + ce.getMessage(),
-                        defaultArmOrigin);
+                return universal;
             }
             unionPredicate = (unionPredicate == null) ? armPred : SymExpr.or(unionPredicate, armPred);
         }
@@ -1725,17 +1724,12 @@ public final class AltParser {
         try {
             scrutineeSort = IrCompiler.compileSort(scrutineeIrSort);
         } catch (CompileException ce) {
-            throw new ParseException(
-                    "Cannot compile scrutinee's sort for '_' desugar: " + ce.getMessage(),
-                    defaultArmOrigin);
+            return universal;
         }
 
         ComplementResult complement = PredicateArithmetic.complement(unionPredicate, scrutineeSort);
-        if (complement instanceof ComplementResult.Unknown unknown) {
-            throw new ParseException(
-                    "Cannot infer '_' default arm's predicate (" + unknown.reason()
-                            + "); write the predicate explicitly",
-                    defaultArmOrigin);
+        if (complement instanceof ComplementResult.Unknown) {
+            return universal;  // outside the decidable fragment — order does the work
         }
         SymExpr complementSym = ((ComplementResult.Computed) complement).predicate();
         IrExpr complementIr = symExprToIrExpr(complementSym, defaultArmOrigin);

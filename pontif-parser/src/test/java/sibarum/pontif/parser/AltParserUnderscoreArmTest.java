@@ -110,16 +110,18 @@ class AltParserUnderscoreArmTest {
         assertTrue(ex.getMessage().toLowerCase().contains("after '_'"));
     }
 
-    // --- Errors when the desugar can't be computed --------------------------
+    // --- Fallback when the precise complement can't be computed -------------
 
     @Test
-    void underscore_with_unknown_scrutinee_sort_throws() {
+    void underscore_with_unknown_scrutinee_sort_fallsBackToUniversalPattern() throws Exception {
         // Scrutinee is `(n+1)` — not a Var, so the parser can't infer its sort
-        // for the desugar. Use explicit-base arms so the contextual-base check
-        // doesn't fire first; the desugar's own validation is what triggers.
-        ParseException ex = assertThrows(ParseException.class, () ->
-                parseMatchInIntFunction("match (n+1) [Int:@<0] -> -1 _ -> 1"));
-        assertTrue(ex.getMessage().toLowerCase().contains("infer scrutinee"),
-                () -> "expected message about scrutinee sort; got: " + ex.getMessage());
+        // and can't compute the precise complement. Under the totality rule
+        // (undeterminable coverage requires a default), `_` must still WORK
+        // here — it falls back to the universal [_] pattern, which ordered
+        // match makes total by construction.
+        IrExpr.Match m = parseMatchInIntFunction("match (n+1) [Int:@<0] -> -1 _ -> 1");
+        IrSort last = m.branches().get(m.branches().size() - 1).pattern();
+        IrSort.Named universal = assertInstanceOf(IrSort.Named.class, last);
+        assertEquals("_", universal.name());
     }
 }

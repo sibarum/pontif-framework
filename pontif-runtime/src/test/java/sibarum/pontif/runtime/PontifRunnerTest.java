@@ -53,14 +53,13 @@ class PontifRunnerTest {
 
     @Test
     void runtimeError_returnsErrorWithOrigin() throws Exception {
-        // No matching match branch — runtime error with origin.
-        String src = """
-                (module m
-                  ()
-                  (match -3
-                    ((refined Int (> self 0)) 99)))
-                """;
-        RunResult r = run(src, "nomatch.ptf");
+        // Division by zero — a runtime error with origin. (This test used to
+        // provoke a match no-match, but match totality is enforced at compile
+        // time now — a partial match without a default no longer compiles, so
+        // the runtime no-match path is unreachable through a checked program.)
+        RunResult r = runner.run(
+                compiler.compileAlt("function f(x:Int):Int -> 10 / x\nf(0)", "divzero.ptf"),
+                Engine.INTERPRETER);
         assertTrue(r.isError());
         assertTrue(r.text().toLowerCase().contains("runtime"),
                 "expected runtime-error prefix; got: " + r.text());
