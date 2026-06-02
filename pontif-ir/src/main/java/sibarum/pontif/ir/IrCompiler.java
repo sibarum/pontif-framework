@@ -291,6 +291,11 @@ public final class IrCompiler {
             case ADD -> SymExpr.add(l, r);
             case MUL -> SymExpr.mul(l, r);
             case SUB -> SymExpr.add(l, SymExpr.mul(SymExpr.lit(-1), r));
+            // Division/remainder are not in the linear integer fragment the
+            // refinement kernel reasons over — reject in predicate position.
+            case DIV, MOD -> throw new CompileException(
+                    "Division/remainder ('/' , '%') is not supported inside refinement "
+                            + "predicates — the discharge kernel is linear.", op.origin());
             case LT -> SymExpr.cmp(l, SymExpr.CmpOp.LT, r);
             case LE -> SymExpr.cmp(l, SymExpr.CmpOp.LE, r);
             case GT -> SymExpr.cmp(l, SymExpr.CmpOp.GT, r);

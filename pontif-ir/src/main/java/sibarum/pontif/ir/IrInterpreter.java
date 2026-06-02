@@ -11,6 +11,7 @@ import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -149,6 +150,14 @@ public final class IrInterpreter {
             case ADD -> (Long) l + (Long) r;
             case MUL -> (Long) l * (Long) r;
             case SUB -> (Long) l - (Long) r;
+            case DIV -> {
+                if ((Long) r == 0L) throw new RuntimeCheckException("Integer division by zero", op.origin());
+                yield (Long) l / (Long) r;   // truncates toward zero
+            }
+            case MOD -> {
+                if ((Long) r == 0L) throw new RuntimeCheckException("Integer remainder by zero", op.origin());
+                yield (Long) l % (Long) r;   // sign of dividend; pairs with DIV (a == (a/b)*b + a%b)
+            }
             case LT -> (Long) l < (Long) r;
             case LE -> (Long) l <= (Long) r;
             case GT -> (Long) l > (Long) r;
@@ -165,6 +174,14 @@ public final class IrInterpreter {
             case ADD -> l.add(r);
             case SUB -> l.subtract(r);
             case MUL -> l.multiply(r);
+            case DIV -> {
+                if (r.signum() == 0) throw new RuntimeCheckException("Decimal division by zero");
+                yield l.divide(r, MathContext.DECIMAL128);   // lossy by explicit policy
+            }
+            case MOD -> {
+                if (r.signum() == 0) throw new RuntimeCheckException("Decimal remainder by zero");
+                yield l.remainder(r);
+            }
             case LT -> l.compareTo(r) < 0;
             case LE -> l.compareTo(r) <= 0;
             case GT -> l.compareTo(r) > 0;

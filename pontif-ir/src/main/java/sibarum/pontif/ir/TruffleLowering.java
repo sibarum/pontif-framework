@@ -3,6 +3,8 @@ package sibarum.pontif.ir;
 import com.oracle.truffle.api.CallTarget;
 import com.oracle.truffle.api.frame.FrameDescriptor;
 import sibarum.pontif.ast.binary.Add;
+import sibarum.pontif.ast.binary.Div;
+import sibarum.pontif.ast.binary.Mod;
 import sibarum.pontif.ast.binary.And;
 import sibarum.pontif.ast.binary.Cmp;
 import sibarum.pontif.ast.binary.Mul;
@@ -134,6 +136,8 @@ public final class TruffleLowering {
             case ADD -> Add.of(l, r);
             case MUL -> Mul.of(l, r);
             case SUB -> Sub.of(l, r);
+            case DIV -> Div.of(l, r);
+            case MOD -> Mod.of(l, r);
             case LT -> Cmp.of(l, r, Cmp.Op.LT);
             case LE -> Cmp.of(l, r, Cmp.Op.LE);
             case GT -> Cmp.of(l, r, Cmp.Op.GT);

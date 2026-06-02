@@ -17,7 +17,7 @@ public sealed interface IrExpr
     Origin origin();
 
     enum Op {
-        ADD, MUL, SUB,
+        ADD, MUL, SUB, DIV, MOD,
         LT, LE, GT, GE, EQ, NE,
         AND, OR
     }
