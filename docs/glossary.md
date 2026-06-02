@@ -15,6 +15,18 @@ same node rather than re-expanding. The no-duplicate-edges rule turns
 well-foundedness into a graph property and brings the postcondition along
 as an inductive hypothesis automatically.
 
+**backward language design** — Pontif's construction method
+(`docs/backward-language-design.md`): implement from the execution layer
+upward — Truffle AST → IR → reference language → alt syntax — each layer
+testable via the one below; the primary syntax is sugar over what already
+executes. **Generalized (2026-06-02):** the theory (information conservation,
+the algebraic kernel) is layer zero, beneath the execution AST. Design
+*decisions* flow backward too — each surface question is answered by the
+deepest layer with jurisdiction (let-pattern refutability ← the totality
+rule; `Int→Decimal` promotion ← losslessness; truncating `/` ← the `/`+`%`
+recovery identity). The whole language is one big syntactic sugar for the
+theory.
+
 **base-inference** — When a single base sort is unambiguous from context,
 the base may be omitted in a bracket-form refinement: `match (x:Int) { [@<0]
 -> ... }` has the base `Int` inferred. Required to be explicit when context
