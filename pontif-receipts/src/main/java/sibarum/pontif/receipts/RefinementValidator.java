@@ -34,7 +34,9 @@ final class RefinementValidator {
     static Result validate(Node node, Branch branch, SymExpr obligation, Refinement refinement) {
         PathFacts facts = PathFacts.of(node, branch);
         SymExpr goal = facts.substituteDefinition(obligation);
-        Outcome tree = walk(refinement, facts.hypotheses(), List.of(), goal);
+        // Per-leaf discharge routes by the obligation's domain (Int vs Decimal).
+        sibarum.pontif.core.types.Sort domain = node.resultVar().sort();
+        Outcome tree = walk(refinement, facts.hypotheses(), List.of(), goal, domain);
         return new Result(obligation, goal, tree);
     }
 
@@ -42,16 +44,17 @@ final class RefinementValidator {
             Refinement refinement,
             List<SymExpr> baseFacts,
             List<SymExpr> splitGuards,
-            SymExpr goal) {
+            SymExpr goal,
+            sibarum.pontif.core.types.Sort domain) {
         return switch (refinement) {
             case Refinement.Leaf ignored -> {
                 List<SymExpr> hyps = new ArrayList<>(baseFacts);
                 hyps.addAll(splitGuards);
-                yield new Outcome.LeafOutcome(splitGuards, IntegerDischarge.discharge(hyps, goal));
+                yield new Outcome.LeafOutcome(splitGuards, Discharge.discharge(domain, hyps, goal));
             }
             case Refinement.Split(SymExpr p, Refinement whenTrue, Refinement whenFalse) -> {
-                Outcome t = walk(whenTrue, baseFacts, append(splitGuards, p), goal);
-                Outcome f = walk(whenFalse, baseFacts, append(splitGuards, Refinement.complement(p)), goal);
+                Outcome t = walk(whenTrue, baseFacts, append(splitGuards, p), goal, domain);
+                Outcome f = walk(whenFalse, baseFacts, append(splitGuards, Refinement.complement(p)), goal, domain);
                 yield new Outcome.SplitOutcome(p, t, f);
             }
         };

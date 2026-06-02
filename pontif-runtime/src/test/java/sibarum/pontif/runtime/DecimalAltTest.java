@@ -98,13 +98,22 @@ class DecimalAltTest {
     }
 
     @Test
-    void decimalRefinement_isRejectedWithClearError() {
+    void decimalNarrowShapes_accepted_richPredicates_rejected() throws Exception {
+        // The three narrows (sign here) are accepted...
+        assertDecimal("1.5", run("function f(x:[Decimal:@>0]):Decimal -> x\nf(1.5)"));
+        // ...anything richer than a @-vs-constant comparison tree is not.
         CompileException ex = assertThrows(CompileException.class, () ->
-                run("function f(x:[Decimal:@>0]):Decimal -> x\n0"));
-        assertTrue(ex.getMessage().contains("Decimal"),
-                () -> "Expected the Decimal-refinement rejection; got: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("not yet wired") || ex.getMessage().contains("sign"),
-                () -> "Expected forward-pointing message; got: " + ex.getMessage());
+                run("function g(x:[Decimal:@*2 > 1]):Decimal -> x\n0"));
+        assertTrue(ex.getMessage().contains("Not a Decimal narrow"),
+                () -> "Expected the narrow-shape rejection; got: " + ex.getMessage());
+    }
+
+    @Test
+    void decimalNarrowParam_enforcedAtRuntime() {
+        // -1.5 fails the @>0 narrow — dispatch finds no matching overload.
+        Exception ex = assertThrows(Exception.class, () ->
+                run("function f(x:[Decimal:@>0]):Decimal -> x\nf(-1.5)"));
+        assertTrue(ex.getMessage() != null && !ex.getMessage().isEmpty());
     }
 
     @Test

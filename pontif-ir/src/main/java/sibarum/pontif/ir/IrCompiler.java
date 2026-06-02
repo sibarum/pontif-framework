@@ -237,12 +237,9 @@ public final class IrCompiler {
     public static SymExpr compileSymExpr(IrExpr expr) throws CompileException {
         return switch (expr) {
             case IrExpr.Lit l -> SymExpr.lit(l.value());
-            // Decimal refinements are rejected at SortChecker (integer-only
-            // discharge engine), so a decimal literal should never reach a
-            // refinement predicate. Guard it explicitly.
-            case IrExpr.Dec d -> throw new CompileException(
-                    "Decimal literals are not supported inside refinement predicates "
-                            + "(the discharge engine is integer-only).", d.origin());
+            // Decimal literals appear in Decimal narrows ([Decimal:@>=1.5]);
+            // SortChecker's shape validation governs where they're allowed.
+            case IrExpr.Dec d -> SymExpr.dec(d.value());
             case IrExpr.Bool b -> SymExpr.bool(b.value());
             case IrExpr.Var v -> SymExpr.var(v.name());
             case IrExpr.SelfRef s -> SymExpr.self();

@@ -119,7 +119,7 @@ public final class BuiltinIssuer {
                 Branch branch = node.branches().get(branchIndex);
                 PathFacts facts = PathFacts.of(node, branch);
                 SymExpr goal = facts.substituteDefinition(obligation);
-                boolean engineOk = IntegerDischarge.discharge(facts.hypotheses(), goal);
+                boolean engineOk = Discharge.discharge(resultSort, facts.hypotheses(), goal);
                 boolean viaProof = false;
                 if (!engineOk) {
                     Refinement proof = proofs.get(new GraphReference(nodeIndex, branchIndex));

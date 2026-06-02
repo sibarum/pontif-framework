@@ -41,7 +41,44 @@ public final class RefinementRules {
         return Optional.empty();
     };
 
+    /**
+     * Decimal counterpart to {@link #CMP_LIT_LIT}: folds a comparison where at
+     * least one side is a {@link SymExpr.Dec} and both sides are numeric
+     * constants (Dec, or an integer Lit — Decimal narrows like
+     * {@code [Decimal:@>0]} compare against integer-literal bounds), via
+     * BigDecimal {@code compareTo} — so equality is up-to-scale
+     * ({@code 2.0 == 2.00}). Decides Decimal narrows after Self-substitution,
+     * both statically and in runtime deferred checks.
+     */
+    public static final RewriteRule CMP_DEC_NUMERIC = (expr, simp) -> {
+        if (expr instanceof SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r)
+                && (l instanceof SymExpr.Dec || r instanceof SymExpr.Dec)) {
+            java.math.BigDecimal a = asNumeric(l);
+            java.math.BigDecimal b = asNumeric(r);
+            if (a == null || b == null) {
+                return Optional.empty();
+            }
+            int c = a.compareTo(b);
+            boolean truth = switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+            };
+            return Optional.of(SymExpr.bool(truth));
+        }
+        return Optional.empty();
+    };
+
+    private static java.math.BigDecimal asNumeric(SymExpr e) {
+        if (e instanceof SymExpr.Dec d) return d.value();
+        if (e instanceof SymExpr.Lit l) return java.math.BigDecimal.valueOf(l.value());
+        return null;
+    }
+
     public static List<RewriteRule> all() {
-        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL);
+        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL, CMP_DEC_NUMERIC);
     }
 }

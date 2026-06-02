@@ -26,7 +26,8 @@ public final class Refinements {
     }
 
     private static boolean isConstant(SymExpr expr) {
-        return expr instanceof SymExpr.Lit || expr instanceof SymExpr.Frac || expr instanceof SymExpr.Bool;
+        return expr instanceof SymExpr.Lit || expr instanceof SymExpr.Frac
+                || expr instanceof SymExpr.Dec || expr instanceof SymExpr.Bool;
     }
 
     /**
@@ -56,10 +57,10 @@ public final class Refinements {
             return false;
         }
         if (!factSubj.equals(goalSubj)) return false;
-        Long a = asLong(factBound);
-        Long b = asLong(goalBound);
+        java.math.BigDecimal a = asNumeric(factBound);
+        java.math.BigDecimal b = asNumeric(goalBound);
         if (a == null || b == null) return false;
-        return checkImpliesOnLongs(factOp, a, goalOp, b);
+        return checkImplies(factOp, a, goalOp, b);
     }
 
     /**
@@ -339,55 +340,71 @@ public final class Refinements {
         if (!(tl instanceof SymExpr.Self) || !(ll instanceof SymExpr.Self)) {
             return ProofResult.residual(looser);
         }
-        Long ta = asLong(tr);
-        Long la = asLong(lr);
+        java.math.BigDecimal ta = asNumeric(tr);
+        java.math.BigDecimal la = asNumeric(lr);
         if (ta == null || la == null) {
             return ProofResult.residual(looser);
         }
-        boolean holds = checkImpliesOnLongs(top, ta, lop, la);
+        boolean holds = checkImplies(top, ta, lop, la);
         return holds
                 ? ProofResult.passed()
                 : ProofResult.failed(
                         "Self " + top + " " + ta + " does not imply Self " + lop + " " + la);
     }
 
-    private static Long asLong(SymExpr e) {
-        if (e instanceof SymExpr.Lit l) return l.value();
-        if (e instanceof SymExpr.Frac f && f.denom() == 1) return f.num();
+    /**
+     * Numeric constant extraction for the implication check. Generalized to
+     * BigDecimal so the same dense-valid order logic serves both the integer
+     * and Decimal domains — integers convert exactly, so integer results are
+     * unchanged. (The integer-only discreteness facts — {@code >0 ⟹ >=1} —
+     * never lived here; they are quarantined in {@code BoundAnalysis}, reached
+     * only via the integer discharge route.)
+     */
+    private static java.math.BigDecimal asNumeric(SymExpr e) {
+        if (e instanceof SymExpr.Lit l) return java.math.BigDecimal.valueOf(l.value());
+        if (e instanceof SymExpr.Frac f && f.denom() == 1) return java.math.BigDecimal.valueOf(f.num());
+        if (e instanceof SymExpr.Dec d) return d.value();
         return null;
     }
 
-    private static boolean checkImpliesOnLongs(SymExpr.CmpOp tOp, long ta, SymExpr.CmpOp lOp, long la) {
+    /**
+     * Dense-valid implication over constant bounds: every case below holds in
+     * any ordered field (no integer adjacency). Value comparison is
+     * {@code compareTo}-based, so {@code 2.0} and {@code 2.00} agree.
+     */
+    private static boolean checkImplies(SymExpr.CmpOp tOp, java.math.BigDecimal ta,
+                                        SymExpr.CmpOp lOp, java.math.BigDecimal la) {
+        int c = ta.compareTo(la);
         return switch (tOp) {
             case GT -> switch (lOp) {
-                case GT -> ta >= la;
-                case GE -> ta >= la;
+                case GT -> c >= 0;
+                case GE -> c >= 0;
                 default -> false;
             };
             case GE -> switch (lOp) {
-                case GT -> ta > la;
-                case GE -> ta >= la;
+                case GT -> c > 0;
+                case GE -> c >= 0;
                 default -> false;
             };
             case LT -> switch (lOp) {
-                case LT -> ta <= la;
-                case LE -> ta <= la;
+                case LT -> c <= 0;
+                case LE -> c <= 0;
                 default -> false;
             };
             case LE -> switch (lOp) {
-                case LT -> ta < la;
-                case LE -> ta <= la;
+                case LT -> c < 0;
+                case LE -> c <= 0;
                 default -> false;
             };
             case EQ -> switch (lOp) {
-                case EQ -> ta == la;
-                case GT -> ta > la;
-                case GE -> ta >= la;
-                case LT -> ta < la;
-                case LE -> ta <= la;
-                case NE -> ta != la;
+                case EQ -> c == 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case NE -> c != 0;
             };
-            case NE -> lOp == SymExpr.CmpOp.NE && ta == la;
+            case NE -> lOp == SymExpr.CmpOp.NE && c == 0;
         };
     }
 }

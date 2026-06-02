@@ -80,7 +80,8 @@ public final class Notary {
 
         PathFacts facts = PathFacts.of(node, branch);
         SymExpr negatedGoal = facts.substituteDefinition(negation);
-        boolean refuted = IntegerDischarge.discharge(facts.hypotheses(), negatedGoal);
+        boolean refuted = Discharge.discharge(
+                node.resultVar().sort(), facts.hypotheses(), negatedGoal);
 
         return refuted
                 ? Verdict.rejected("path facts entail " + negatedGoal + ", refuting the conclusion")

@@ -207,6 +207,48 @@ public final class SortChecker {
      * structural sort can be inline-defined without a preceding {@code
      * struct} declaration.
      */
+    /**
+     * Validates that a {@code [Decimal:...]} predicate is one of Decimal's
+     * three narrows — sign, range, or equality-up-to-precision. Concretely: an
+     * And-tree whose leaves are comparisons of {@code @} against a numeric
+     * constant. Sign is the zero-bound case, range is the conjunction case,
+     * equality is the {@code ==} case; thresholds ({@code @>=1.5}) are
+     * degenerate ranges. Anything richer (arithmetic on {@code @},
+     * disjunctions, non-constant bounds) is rejected — not a type-narrowing
+     * problem, per the Decimal design.
+     */
+    private static void validateDecimalNarrow(IrExpr predicate, sibarum.pontif.core.Origin origin)
+            throws CompileException {
+        if (predicate instanceof IrExpr.BinOp op) {
+            switch (op.op()) {
+                case AND -> {
+                    validateDecimalNarrow(op.left(), origin);
+                    validateDecimalNarrow(op.right(), origin);
+                    return;
+                }
+                case LT, LE, GT, GE, EQ, NE -> {
+                    boolean selfVsConst =
+                            (op.left() instanceof IrExpr.SelfRef && isNumericConst(op.right()))
+                                    || (op.right() instanceof IrExpr.SelfRef && isNumericConst(op.left()));
+                    if (selfVsConst) {
+                        return;
+                    }
+                }
+                default -> { /* falls through to rejection */ }
+            }
+        }
+        throw new CompileException(
+                "Not a Decimal narrow. Decimal refinements are limited to sign / range / "
+                        + "equality — comparisons of '@' against a numeric constant, optionally "
+                        + "joined with '&': e.g. [Decimal:@>0], [Decimal:@>=0 & @<=1], "
+                        + "[Decimal:@==2.5].",
+                origin);
+    }
+
+    private static boolean isNumericConst(IrExpr e) {
+        return e instanceof IrExpr.Lit || e instanceof IrExpr.Dec;
+    }
+
     private static void validateSortNames(IrSort sort, Map<String, IrSort.Structural> structDefs)
             throws CompileException {
         switch (sort) {
@@ -228,19 +270,13 @@ public final class SortChecker {
             }
             case IrSort.Refined r -> {
                 if (r.name().equals("Decimal")) {
-                    // Decimal is a value type only (this slice). Its planned
-                    // refinement vocabulary is exactly three narrows — sign,
-                    // range, and equality-up-to-precision — which need the
-                    // rational-calibrated discharge path (not the integer-only
-                    // engine in place today). Until that lands, reject rather than
-                    // silently widen (a [Decimal:...] return couldn't be proven and
-                    // would brick the return-verification gate). See docs/TODO.md.
-                    throw new CompileException(
-                            "Refinements over 'Decimal' are not yet wired. Decimal will "
-                                    + "support sign / range / equality narrows once the "
-                                    + "rational-calibrated discharge path lands; today's "
-                                    + "engine is integer-only. Use a bare 'Decimal' for now.",
-                            r.origin());
+                    // Decimal's refinement vocabulary is exactly three narrows —
+                    // sign, range, and equality-up-to-precision — i.e. And-trees
+                    // of comparisons of @ against a numeric constant. Anything
+                    // richer isn't a type-narrowing problem (and the dense
+                    // discharge path covers exactly these shapes).
+                    validateDecimalNarrow(r.predicate(), r.origin());
+                    break;
                 }
                 if (PRIMITIVE_SORT_NAMES.contains(r.name())) {
                     // Primitive-base refinement; predicate not yet structurally
