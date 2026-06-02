@@ -204,9 +204,12 @@ Bottom-up, each slice testable end-to-end via the layer below.
   self-reference resolution. Defer to a later slice.
 - **Multi-trait constraints** in param positions (`x:Duck & Audible`).
   Defer to the in-progress union/intersection sort work.
-- **Primitives as trait implementors** (`Int` implements `Addable`).
-  Gated on the unified-operator-dispatch work that turns built-in
-  operators into real dispatch entries. Until then, traits work for
-  user types only.
+- **Primitives as trait implementors** (built-in type satisfies a
+  *named-method* trait, e.g. `Int : Showable`). Operators are never trait
+  contracts (dispatch-unification B1, resolved) — `Int : Addable`/`+` is not a
+  thing, so the numeric-trait motivation is gone. What's left is purely whether a
+  built-in may be registered in a trait's satisfier set (mechanism 2),
+  independent of the operator work. Low demand now. Today traits work for user
+  types only.
 - **Trait inheritance** (Trait B *extends* Trait A — B implies A).
   Pure sugar over multi-trait constraints; defer.

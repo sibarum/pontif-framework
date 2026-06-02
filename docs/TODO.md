@@ -6,6 +6,41 @@ items get removed (history is in git); this file is forward-looking.
 
 ---
 
+## ⭐ Active — Dispatch unification (one engine, two mechanisms)
+
+Put every dispatched call on the one shared resolution engine
+(`StaticDispatch` + `Refinements.imply` + most-specific) and delete the ad-hoc
+accidents — the built-in-operator `BinOp` bypass, the `Type.method`
+name-mangling, and the parse-time sort inference. **Not** a merge: Pontif keeps
+two separately-governed mechanisms — (1) free functions + operators as open,
+symmetric, promotion-capable global multi-dispatch; (2)
+methods/static/traits/inheritance as localized, rigid, receiver-rooted dispatch.
+Full plan, seams, target model, and the phased breakdown live in
+**`docs/dispatch-unification.md`**. Unblocked now that module-scoped coherent
+dispatch landed (FQN keys + `CoherenceCheck`).
+
+- **Phase 0 — docs/consolidation** ✅ (`docs/dispatch-unification.md`).
+- **Phase 1 — operators as mechanism-1 dispatch entries** (built-in `Int`/`Bool`
+  overloads + route `a op b` through dispatch with a `BinOp` fast-path; remove
+  the parse-time primitive bypass). Delivers uniform operator overloading.
+- **Phase 2 — methods resolve on the receiver sort (within mechanism 2)** (move
+  resolution post-typecheck so the parser no longer needs the receiver's sort;
+  methods keep their own namespace). **Delivers the deferred `recv.method()`
+  cross-module item** (see module-system section).
+- **Phase 3 — trait dispatch becomes mechanism-2 receiver-sort resolution** (the
+  `Trait.method → Type.method` redirect disappears; `TraitRegistry` keeps only
+  its narrowing-satisfaction role).
+- **Phase 4 — parser de-blinding + cleanup** (delete the parse-time
+  sort-inference hacks).
+
+Open decisions tracked in the doc. **D2 (one namespace for methods + free
+functions?) is resolved: no** — two mechanisms, James's standing call. Live
+seams: **B1** (operator-valued trait contracts like `Int:Addable` — mechanism 1
+or 2? gates *primitives as trait implementors*), **B2** (static methods),
+**B3** (promotions), and **D1/D5** (BinOp fast-path).
+
+---
+
 ## ⭐ Next priority — Dispatch inference at compile time
 
 Union/intersection sorts and traits landed during the receipt-graph
@@ -489,10 +524,14 @@ special-cases zero-arg overloads).
   parser extension to compose trait names with `&`.
 - **Trait inheritance** (Trait B extends Trait A — B implies A). Pure
   sugar over multi-trait constraints; defer.
-- **Primitives as trait implementors** (`Int` implements `Addable`).
-  Gated on the unified-operator-dispatch direction that would turn
-  built-in operators into real dispatch entries. Until then, traits
-  work for user types only.
+- **Primitives as trait implementors** (built-in type satisfies a *named-method*
+  trait, e.g. `Int : Showable`). **Note:** operators are never trait contracts
+  (dispatch-unification B1, resolved) — `Int : Addable`/`+` is *not* a thing, so
+  the original numeric-trait motivation is gone. What remains is a pure
+  mechanism-2 question — may `assign trait Int:Foo` register a built-in in a
+  trait's satisfier set? — independent of the operator work. Low demand now;
+  reconsider whether it's worth keeping at all. Today traits work for user types
+  only.
 
 ## Type system
 
@@ -930,9 +969,12 @@ representation + reasoners. Full suite green throughout (~1060 tests).
     prelude" item. Dotted module names (`std.proof`) already parse in `requires`
     (the `peek(1)==IDENT` guard stops `parseDottedName` at `.{`).
   - **Remaining (parser-blindness, same bucket):**
-    - **`recv.method()` sugar cross-module** (needs the receiver's imported
-      type known pre-link; the sugar needs the receiver's *sort*, not known
-      until after linking). Explicit qualified `Type.method(x)` works today.
+    - **`recv.method()` sugar cross-module** — **folded into dispatch
+      unification Phase 2** (`docs/dispatch-unification.md`): once methods
+      dispatch on the receiver's sort post-typecheck (instead of being resolved
+      by name at parse time), the parser no longer needs the receiver's sort and
+      cross-module resolution falls out for free. Not a separate task. Explicit
+      qualified `Type.method(x)` works today.
     - **re-exports / import-aliasing, `Capital=type`** (needs IR change —
       `IrStmt.Exports` must carry the re-exported module — plus parser work).
 - **Action classes / mutable semantics.** Pure functions stay pure;

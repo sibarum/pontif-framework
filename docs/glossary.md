@@ -26,6 +26,20 @@ owning neither. Borrowed from Rust; closes the type-piracy hole Pontif's global
 trait registry would otherwise open under multi-dispatch. Enforced at link time
 (`CoherenceCheck`) over fully-qualified type names. See **module**.
 
+**dispatch unification** — The planned effort (`docs/dispatch-unification.md`)
+to put every dispatched call on the **one shared resolution engine**
+(`StaticDispatch` + `Refinements.imply` + most-specific) and delete the ad-hoc
+accidents layered on top — the built-in-operator `BinOp` bypass, the
+`Type.method` name-mangling, and the parse-time sort inference. It does **not**
+merge methods and free functions into one namespace: Pontif keeps **two
+separately-governed mechanisms** — (1) free functions + operators as open,
+symmetric, promotion-capable global multi-dispatch (built-in `Int`/`Bool`
+operators registered as real overloads); (2) methods/static/traits/inheritance
+as localized, rigid, receiver-rooted dispatch. Operators live in mechanism 1
+(`+(Vector,Vector)`, not `Vector.+`); method resolution moves post-typecheck
+within mechanism 2, which delivers the `recv.method()` cross-module case as a
+side effect.
+
 **drafter** — Pontif's built-in deterministic component that produces
 receipt-graphs from source. Single job, no reasoning. Immutable —
 changes only across Pontif language versions. Not pluggable. Lives in
@@ -137,7 +151,9 @@ parallel dispatch axis* — the existing sort system + `:` operator
 handles trait satisfaction the same way it handles refinement
 narrowing. The runtime dispatch table has a fallback rule that
 redirects `Trait.method(value, ...)` calls to `Type.method(value, ...)`
-when the value's concrete type satisfies the trait. See
+when the value's concrete type satisfies the trait. (This redirect is slated to
+collapse into ordinary mechanism-2 receiver-sort resolution under **dispatch
+unification**, Phase 3.) See
 `docs/traits.md` for the full design.
 
 **`Type`** — Pontif's kind name for the sort-of-sorts. A trait sort
