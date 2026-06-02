@@ -119,6 +119,16 @@ public final class AltParser {
     private final Map<String, IrSort.Structural> declaredStructs = new LinkedHashMap<>();
 
     /**
+     * Struct-pattern members that were given as positional <em>literals</em>
+     * ({@code [Ternion(z, 0, w)]} — constrain the field, bind nothing). Keyed by
+     * the pattern's identity; the destructure desugar skips these in its
+     * let-wrap so the field name isn't silently bound (which could shadow an
+     * outer binding the user never asked to shadow).
+     */
+    private final Map<IrSort, java.util.Set<String>> literalConstrainedFields =
+            new java.util.IdentityHashMap<>();
+
+    /**
      * Top-level let-bindings declared so far, keyed by their (possibly dotted)
      * name. Maps to the binding's inferred sort. Two uses: (1) bare references
      * to a let name in expression position get rewritten to a 0-arg
@@ -1044,9 +1054,14 @@ public final class AltParser {
                 return parseFunctionSortBody(baseTok);
             }
             consume();  // LPAREN
-            Map<String, IrSort> members = parseStructFields(baseTok.text(), baseTok.origin());
+            java.util.Set<String> literalFields = new java.util.LinkedHashSet<>();
+            Map<String, IrSort> members = parseStructFields(baseTok.text(), baseTok.origin(), literalFields);
             expect(AltToken.Kind.RPAREN);
-            return new IrSort.Structural(baseTok.text(), members, baseTok.origin());
+            IrSort.Structural structural = new IrSort.Structural(baseTok.text(), members, baseTok.origin());
+            if (!literalFields.isEmpty()) {
+                literalConstrainedFields.put(structural, literalFields);
+            }
+            return structural;
         }
 
         // Bare name — `Int`, `Bool`, etc.
@@ -1138,14 +1153,66 @@ public final class AltParser {
      * Parses the comma-separated clause list inside {@code [Name(...)]}:
      *   - {@code field:Sort} — explicit per-field sort
      *   - {@code field}      — bare ident; sort looked up from {@link #declaredStructs}
+     *   - a <b>literal</b> ({@code 0}, {@code 1.5}, {@code true}) — positional:
+     *     the i-th clause maps to the i-th declared field, constraining it to
+     *     {@code [@==literal]} without binding it ({@code [Ternion(z, 0, w)]}).
+     *     Primitive-sorted fields only; names added to {@code literalFieldsOut}.
      * Mixed forms are allowed.
      */
-    private Map<String, IrSort> parseStructFields(String typeName, Origin typeOrigin)
-            throws ParseException {
+    private Map<String, IrSort> parseStructFields(String typeName, Origin typeOrigin,
+            java.util.Set<String> literalFieldsOut) throws ParseException {
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
+        int clauseIndex = -1;
         while (peek().kind() != AltToken.Kind.RPAREN) {
             if (!first) expect(AltToken.Kind.COMMA);
+            clauseIndex++;
+            AltToken t = peek();
+            boolean literalClause = t.kind() == AltToken.Kind.INTEGER
+                    || t.kind() == AltToken.Kind.DECIMAL
+                    || (t.kind() == AltToken.Kind.IDENT
+                            && (t.text().equals("true") || t.text().equals("false")));
+            if (literalClause) {
+                consume();
+                IrSort.Structural decl = declaredStructs.get(typeName);
+                if (decl == null) {
+                    throw new ParseException(
+                            "A literal field pattern inside [" + typeName + "(...)] requires '"
+                                    + typeName + "' to be declared before this point",
+                            t.origin());
+                }
+                List<String> order = new ArrayList<>(decl.members().keySet());
+                if (clauseIndex >= order.size()) {
+                    throw new ParseException(
+                            "Too many fields for struct '" + typeName + "' ("
+                                    + order.size() + " declared)", t.origin());
+                }
+                String posField = order.get(clauseIndex);
+                if (members.containsKey(posField)) {
+                    throw new ParseException(
+                            "Field '" + posField + "' is given both by name and by position in ["
+                                    + typeName + "(...)]", t.origin());
+                }
+                IrSort declSort = decl.members().get(posField);
+                String base = baseSortName(declSort);
+                if (!"Int".equals(base) && !"Bool".equals(base) && !"Decimal".equals(base)) {
+                    throw new ParseException(
+                            "A literal field pattern needs a primitive-sorted field; '"
+                                    + posField + "' of '" + typeName + "' has sort " + declSort,
+                            t.origin());
+                }
+                IrExpr lit = switch (t.kind()) {
+                    case INTEGER -> new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
+                    case DECIMAL -> new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+                    default -> new IrExpr.Bool(t.text().equals("true"), t.origin());
+                };
+                members.put(posField, new IrSort.Refined(base,
+                        new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
+                        t.origin()));
+                literalFieldsOut.add(posField);
+                first = false;
+                continue;
+            }
             AltToken fieldName = expect(AltToken.Kind.IDENT);
             IrSort fieldSort;
             if (peek().kind() == AltToken.Kind.COLON) {
@@ -1817,10 +1884,18 @@ public final class AltParser {
             IrExpr result = b.result();
             if (b.pattern() instanceof IrSort.Structural sp) {
                 // Wrap in reverse so the first field becomes the outermost let.
+                // Literal-constrained fields ([Ternion(z, 0, w)]) constrain the
+                // match but bind nothing — skipped here so the field name isn't
+                // silently shadowed.
+                java.util.Set<String> constrainedOnly =
+                        literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
                 List<Map.Entry<String, IrSort>> entries =
                         new ArrayList<>(sp.members().entrySet());
                 for (int i = entries.size() - 1; i >= 0; i--) {
                     Map.Entry<String, IrSort> e = entries.get(i);
+                    if (constrainedOnly.contains(e.getKey())) {
+                        continue;
+                    }
                     result = new IrExpr.LetIn(
                             e.getKey(),
                             e.getValue(),
