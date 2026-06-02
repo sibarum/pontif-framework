@@ -570,6 +570,15 @@ special-cases zero-arg overloads).
 
 ## Type system
 
+- **Greedy-postfix boundary after declaration bodies (bitten twice,
+  2026-06-02).** A main expression starting with `(` right after a function
+  whose body ends in an expression gets eaten as a postfix *call* on that body
+  (`-> Ratio(a, b)` followed by `(Ratio(1,2) / …)` parses as
+  `Ratio(a,b)(Ratio(1,2)…)`), silently misparsing. Workarounds: block braces
+  around the body, or bind the main expr via `let`. Real fix is probably a
+  newline/layout-sensitive postfix rule or requiring the callee to be
+  call-shaped. Bit the Ternion field-access test and the `/`-overload test.
+
 - **`@` as the current concrete type (future direction, 2026-06-02).** `@` is
   the refinement-predicate placeholder and deliberately NOT the method receiver
   (that's `self`). Eventually `@` may also denote the *current concrete type*

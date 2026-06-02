@@ -107,6 +107,28 @@ class DivisionAltTest {
     }
 
     @Test
+    void divisionAndRemainder_areOverloadable() throws Exception {
+        // `/` on a user type routes to the bare-operator overload; primitive
+        // division is untouched.
+        String src = """
+                struct Ratio(num:Int, den:Int)
+                function /(l:Ratio, r:Ratio):Ratio -> Ratio(l.num*r.den, l.den*r.num)
+                let q = Ratio(1,2) / Ratio(3,4)
+                q.num
+                """;
+        assertEquals(4L, run(src));
+        assertEquals(3L, run("7 / 2"));  // primitives still BinOp
+
+        String mod = """
+                struct Clock(h:Int)
+                function %(l:Clock, r:Clock):Clock -> Clock(l.h % r.h)
+                let c = Clock(27) % Clock(24)
+                c.h
+                """;
+        assertEquals(3L, run(mod));
+    }
+
+    @Test
     void divisionInRefinementPredicate_isRejected() {
         // '/' and '%' aren't in the linear kernel — reject in predicate position.
         CompileException ex = assertThrows(CompileException.class, () ->

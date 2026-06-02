@@ -288,7 +288,7 @@ public final class AltParser {
             if (!OVERLOADABLE_OPS.contains(opTok.text())) {
                 throw new ParseException(
                         "'" + opTok.text() + "' is not an overloadable operator "
-                                + "(overloadable: + - * < <= > >= == !=)",
+                                + "(overloadable: + - * / % < <= > >= == !=)",
                         opTok.origin());
             }
             return opTok.text();
@@ -1357,7 +1357,7 @@ public final class AltParser {
      * {@code &}.
      */
     private static final Set<String> OVERLOADABLE_OPS = Set.of(
-            "+", "-", "*",
+            "+", "-", "*", "/", "%",
             "<", "<=", ">", ">=", "==", "!=");
 
     /**
