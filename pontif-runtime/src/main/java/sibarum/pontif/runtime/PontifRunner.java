@@ -41,7 +41,12 @@ public final class PontifRunner {
         } catch (RuntimeCheckException rce) {
             return RunResult.error("Runtime error: " + rce.getMessage(), rce.origin());
         } catch (RuntimeException e) {
-            return RunResult.error("Runtime error: " + e.getMessage());
+            // Backstop for raw (non-Pontif) exceptions — name the class so the
+            // report is at least identifiable. Pontif-raised errors should be
+            // RuntimeCheckException with an origin; a bare Java exception
+            // surfacing here is itself a bug worth seeing.
+            return RunResult.error("Runtime error (internal " + e.getClass().getSimpleName()
+                    + "): " + e.getMessage());
         }
     }
 

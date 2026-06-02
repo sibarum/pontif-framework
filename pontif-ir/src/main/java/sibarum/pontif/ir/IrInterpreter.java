@@ -141,9 +141,20 @@ public final class IrInterpreter {
     private Object evalBinOp(IrExpr.BinOp op, Environment env, CompiledModule module) {
         Object l = eval(op.left(), env, module);
         Object r = eval(op.right(), env, module);
-        // Decimal operands (same-type only in this slice) use BigDecimal
-        // arithmetic and compareTo-based comparison/equality, so 2.0 == 2.00.
+        // Decimal operands use BigDecimal arithmetic and compareTo-based
+        // comparison/equality, so 2.0 == 2.00. Mixed Int/Decimal operands are a
+        // clear error, not a ClassCastException — Int VALUES aren't auto-promoted
+        // (literals at Decimal-declared boundaries are, by DecimalPromotion).
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
+            if (!(l instanceof BigDecimal) || !(r instanceof BigDecimal)) {
+                throw new RuntimeCheckException(
+                        "Operator '" + symbol(op.op()) + "' applied to mixed "
+                                + runtimeTypeName(l) + "/" + runtimeTypeName(r) + " operands — "
+                                + "Int values aren't auto-promoted in arithmetic. Write the "
+                                + "literal as a decimal (1 -> 1.0), or store it in a "
+                                + "Decimal-declared field/binding so it promotes.",
+                        op.origin());
+            }
             return evalDecimalBinOp(op.op(), (BigDecimal) l, (BigDecimal) r);
         }
         return switch (op.op()) {
@@ -167,6 +178,26 @@ public final class IrInterpreter {
             case AND -> (Boolean) l && (Boolean) r;
             case OR -> (Boolean) l || (Boolean) r;
         };
+    }
+
+    /** Surface symbol for an operator, for error messages. */
+    private static String symbol(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*";
+            case DIV -> "/"; case MOD -> "%";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ -> "=="; case NE -> "!=";
+            case AND -> "&"; case OR -> "|";
+        };
+    }
+
+    /** Pontif-facing name of a runtime value's type, for error messages. */
+    private static String runtimeTypeName(Object v) {
+        if (v instanceof Long || v instanceof Integer) return "Int";
+        if (v instanceof BigDecimal) return "Decimal";
+        if (v instanceof Boolean) return "Bool";
+        if (v instanceof RecordValue r) return r.typeName();
+        return v == null ? "null" : v.getClass().getSimpleName();
     }
 
     private static Object evalDecimalBinOp(IrExpr.Op op, BigDecimal l, BigDecimal r) {

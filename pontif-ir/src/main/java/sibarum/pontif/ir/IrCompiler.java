@@ -27,6 +27,11 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
+        // Promote Int literals to Decimal where the declared sort says Decimal
+        // (struct members, let bindings) — a lossless embedding. Runs here so
+        // both single-file and linked compiles get it.
+        resolved = DecimalPromotion.rewrite(resolved);
+
         // Static sort propagation: catch field-access typos and missing-field
         // references before they reach runtime. Best-effort; the runtime still
         // validates fields it couldn't resolve here.

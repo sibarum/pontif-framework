@@ -17,6 +17,7 @@ public final class Sub extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            requireBothDecimal(leftValue, rightValue, "-");
             return ((BigDecimal) leftValue).subtract((BigDecimal) rightValue);
         }
         return (Long) leftValue - (Long) rightValue;

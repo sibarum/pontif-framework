@@ -23,6 +23,7 @@ public final class Mod extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            requireBothDecimal(leftValue, rightValue, "%");
             BigDecimal r = (BigDecimal) rightValue;
             if (r.signum() == 0) throw new RuntimeCheckException("Decimal remainder by zero");
             return ((BigDecimal) leftValue).remainder(r);
