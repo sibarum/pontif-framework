@@ -24,12 +24,15 @@ public final class Div extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            BigDecimal lhs = asDecimal(leftValue, "/");
             BigDecimal r = asDecimal(rightValue, "/");
-            if (r.signum() == 0) throw new RuntimeCheckException("Decimal division by zero");
-            return asDecimal(leftValue, "/").divide(r, MathContext.DECIMAL128);
+            if (r.signum() == 0) throw new RuntimeCheckException(
+                    "Decimal division by zero: " + lhs.toPlainString() + " / 0", origin());
+            return lhs.divide(r, MathContext.DECIMAL128);
         }
         long r = (Long) rightValue;
-        if (r == 0L) throw new RuntimeCheckException("Integer division by zero");
+        if (r == 0L) throw new RuntimeCheckException(
+                "Integer division by zero: " + leftValue + " / 0", origin());
         return (Long) leftValue / r;
     }
 }

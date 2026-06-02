@@ -570,6 +570,12 @@ special-cases zero-arg overloads).
 
 ## Type system
 
+- **`@` as the current concrete type (future direction, 2026-06-02).** `@` is
+  the refinement-predicate placeholder and deliberately NOT the method receiver
+  (that's `self`). Eventually `@` may also denote the *current concrete type*
+  in type position (a Self-type) — parked, noted so the symbol isn't reused for
+  something else in the meantime.
+
 ### ⭐ Recursive types (foundational) ✅ landed
 
 Pontif now has recursive types. `struct Node(v:Int, next:Node)` and

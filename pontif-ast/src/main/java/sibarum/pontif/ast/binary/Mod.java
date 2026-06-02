@@ -23,12 +23,15 @@ public final class Mod extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
+            BigDecimal lhs = asDecimal(leftValue, "%");
             BigDecimal r = asDecimal(rightValue, "%");
-            if (r.signum() == 0) throw new RuntimeCheckException("Decimal remainder by zero");
-            return asDecimal(leftValue, "%").remainder(r);
+            if (r.signum() == 0) throw new RuntimeCheckException(
+                    "Decimal remainder by zero: " + lhs.toPlainString() + " % 0", origin());
+            return lhs.remainder(r);
         }
         long r = (Long) rightValue;
-        if (r == 0L) throw new RuntimeCheckException("Integer remainder by zero");
+        if (r == 0L) throw new RuntimeCheckException(
+                "Integer remainder by zero: " + leftValue + " % 0", origin());
         return (Long) leftValue % r;
     }
 }

@@ -1,6 +1,7 @@
 package sibarum.pontif.ir;
 
 import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.Refinements;
@@ -147,18 +148,20 @@ public final class IrInterpreter {
         // static sort (inferMaximalSort already types mixed arithmetic Decimal).
         // Non-numeric operands meeting a Decimal stay a clear error.
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
-            return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op));
+            return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op), op.origin());
         }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
             case MUL -> (Long) l * (Long) r;
             case SUB -> (Long) l - (Long) r;
             case DIV -> {
-                if ((Long) r == 0L) throw new RuntimeCheckException("Integer division by zero", op.origin());
+                if ((Long) r == 0L) throw new RuntimeCheckException(
+                        "Integer division by zero: " + l + " / 0", op.origin());
                 yield (Long) l / (Long) r;   // truncates toward zero
             }
             case MOD -> {
-                if ((Long) r == 0L) throw new RuntimeCheckException("Integer remainder by zero", op.origin());
+                if ((Long) r == 0L) throw new RuntimeCheckException(
+                        "Integer remainder by zero: " + l + " % 0", op.origin());
                 yield (Long) l % (Long) r;   // sign of dividend; pairs with DIV (a == (a/b)*b + a%b)
             }
             case LT -> (Long) l < (Long) r;
@@ -207,17 +210,19 @@ public final class IrInterpreter {
         return v == null ? "null" : v.getClass().getSimpleName();
     }
 
-    private static Object evalDecimalBinOp(IrExpr.Op op, BigDecimal l, BigDecimal r) {
+    private static Object evalDecimalBinOp(IrExpr.Op op, BigDecimal l, BigDecimal r, Origin origin) {
         return switch (op) {
             case ADD -> l.add(r);
             case SUB -> l.subtract(r);
             case MUL -> l.multiply(r);
             case DIV -> {
-                if (r.signum() == 0) throw new RuntimeCheckException("Decimal division by zero");
+                if (r.signum() == 0) throw new RuntimeCheckException(
+                        "Decimal division by zero: " + l.toPlainString() + " / 0", origin);
                 yield l.divide(r, MathContext.DECIMAL128);   // lossy by explicit policy
             }
             case MOD -> {
-                if (r.signum() == 0) throw new RuntimeCheckException("Decimal remainder by zero");
+                if (r.signum() == 0) throw new RuntimeCheckException(
+                        "Decimal remainder by zero: " + l.toPlainString() + " % 0", origin);
                 yield l.remainder(r);
             }
             case LT -> l.compareTo(r) < 0;

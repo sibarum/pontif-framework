@@ -86,13 +86,24 @@ class DivisionAltTest {
     }
 
     @Test
-    void intDivisionByZero_isRuntimeError() {
-        assertThrows(RuntimeCheckException.class, () -> run("5 / 0"));
+    void intDivisionByZero_isRuntimeError_withOriginAndDividend() {
+        RuntimeCheckException ex = assertThrows(RuntimeCheckException.class, () -> run("5 / 0"));
+        assertTrue(ex.getMessage().contains("5 / 0"), () -> "got: " + ex.getMessage());
+        assertTrue(ex.origin().isPresent(), "div-by-zero must carry an origin (file/line)");
     }
 
     @Test
-    void intRemainderByZero_isRuntimeError() {
-        assertThrows(RuntimeCheckException.class, () -> run("5 % 0"));
+    void intRemainderByZero_isRuntimeError_withOriginAndDividend() {
+        RuntimeCheckException ex = assertThrows(RuntimeCheckException.class, () -> run("5 % 0"));
+        assertTrue(ex.getMessage().contains("5 % 0"), () -> "got: " + ex.getMessage());
+        assertTrue(ex.origin().isPresent(), "rem-by-zero must carry an origin (file/line)");
+    }
+
+    @Test
+    void decimalDivisionByZero_isRuntimeError_withOriginAndDividend() {
+        RuntimeCheckException ex = assertThrows(RuntimeCheckException.class, () -> run("1.5 / 0.0"));
+        assertTrue(ex.getMessage().contains("1.5 / 0"), () -> "got: " + ex.getMessage());
+        assertTrue(ex.origin().isPresent(), "decimal div-by-zero must carry an origin (file/line)");
     }
 
     @Test
