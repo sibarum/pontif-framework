@@ -570,6 +570,22 @@ special-cases zero-arg overloads).
 
 ## Type system
 
+- **Approximate comparison family as SORT operators (parked sketch, James,
+  2026-06-02).** `<~`, `~=`, `>~` in sort position, lowering to EXACT
+  predicates against ε-shifted bounds (ε = one ulp at the bound's magnitude,
+  DECIMAL128 — same zero-free-parameter derivation as runtime `~=`): roughly
+  `@<~x → @ < x−ε`, `@~=x → @ >= x−ε & @ <= x+ε`, `@>~x → @ > x+ε`. Lowering
+  to exact sorts is what makes it admissible — the proof layer never forgives;
+  the forgiveness is compiled into exact geometry first. Payoff: the trichotomy
+  is a PROVABLY TOTAL match over a Decimal scrutinee (the lowered arms are
+  ordinary range narrows the dense discharger already proves), cracking the
+  "decimal matches need a default" limitation for numeric comparisons. Details
+  settled in discussion: boundary convention must be half-closed (strict
+  everywhere leaves x±ε uncovered — the totality prover is the acceptance
+  test); the bound must be statically known for ε to be a constant (variable
+  bounds stay runtime-`~=` territory). Nearly free to build: parser sugar +
+  ε-derivation; the whole proof path already exists.
+
 - **`@` as the current concrete type (future direction, 2026-06-02).** `@` is
   the refinement-predicate placeholder and deliberately NOT the method receiver
   (that's `self`). Eventually `@` may also denote the *current concrete type*
