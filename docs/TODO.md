@@ -582,9 +582,17 @@ special-cases zero-arg overloads).
   "decimal matches need a default" limitation for numeric comparisons. Details
   settled in discussion: boundary convention must be half-closed (strict
   everywhere leaves x±ε uncovered — the totality prover is the acceptance
-  test); the bound must be statically known for ε to be a constant (variable
-  bounds stay runtime-`~=` territory). Nearly free to build: parser sugar +
-  ε-derivation; the whole proof path already exists.
+  test). **The totality proof is PARAMETRIC, not numeric** (James): the three
+  regions partition the line for any anchor x and any ε ≥ 0 — the kernel needs
+  only x−ε ≤ x+ε (free), with the anchor as an opaque shared atom. So ε may be
+  derived at RUNTIME from the anchor's magnitude and the anchor may be a
+  variable; coverage is still proven at compile time. The real obligation:
+  **all arms of the family must anchor the SAME x** — same-anchor IS the
+  trichotomy's premise. Mixing anchors (`@<~0` with `@~=x`) is a category
+  error, not undecidability, and gets its own pointed diagnostic (tone per
+  James: "are you serious dude c'mon" — i.e., name the two anchors and state
+  that the trichotomy only closes around one). Nearly free to build: parser
+  sugar + ε-derivation; the whole proof path already exists.
 
 - **`@` as the current concrete type (future direction, 2026-06-02).** `@` is
   the refinement-predicate placeholder and deliberately NOT the method receiver
