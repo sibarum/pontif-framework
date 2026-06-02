@@ -117,6 +117,17 @@ class DivisionAltTest {
                 q.num
                 """;
         assertEquals(4L, run(src));
+
+        // The natural one-liner form — previously swallowed by the greedy
+        // postfix '(' across the newline (parsed as a CALL of the function
+        // body, losing the main). Now a postfix '(' must open on the same
+        // line, so this parses as a parenthesized main expression.
+        String natural = """
+                struct Ratio(num:Int, den:Int)
+                function /(l:Ratio, r:Ratio):Ratio -> Ratio(l.num*r.den, l.den*r.num)
+                (Ratio(1,2) / Ratio(3,4)).num
+                """;
+        assertEquals(4L, run(natural));
         assertEquals(3L, run("7 / 2"));  // primitives still BinOp
 
         String mod = """
@@ -126,6 +137,15 @@ class DivisionAltTest {
                 c.h
                 """;
         assertEquals(3L, run(mod));
+    }
+
+    @Test
+    void applyingANeverCallable_isCompileError() {
+        // Apply of a value that can statically never be a function — caught at
+        // compile time instead of sitting inert in an uncalled body.
+        CompileException ex = assertThrows(CompileException.class, () -> run("5(3)"));
+        assertTrue(ex.getMessage().contains("not callable"),
+                () -> "expected the not-callable rejection; got: " + ex.getMessage());
     }
 
     @Test

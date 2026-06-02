@@ -159,17 +159,18 @@ class TruffleLambdaTest {
     }
 
     @Test
-    void truffle_applyOnNonClosure_throwsWithApplyOrigin() throws Exception {
+    void truffle_applyOnNonClosure_isCompileErrorWithApplyOrigin() throws Exception {
+        // Statically-never-callable Apply is rejected at compile time now,
+        // origin preserved (was a runtime RuntimeCheckException).
         Origin applySite = Origin.at("test.ptf", 9, 5);
         IrExpr app = new IrExpr.Apply(IrExpr.lit(5), List.of(IrExpr.lit(1)), applySite);
-        RuntimeCheckException ex = assertThrows(
-                RuntimeCheckException.class,
+        CompileException ex = assertThrows(
+                CompileException.class,
                 () -> runTruffle(new IrModule("notFn", List.of(), app)));
-        assertEquals(applySite, ex.origin());
         assertTrue(ex.getMessage().contains("test.ptf:9:5"),
                 "expected origin in message; got: " + ex.getMessage());
-        assertTrue(ex.getMessage().toLowerCase().contains("closure"),
-                "expected closure diagnostic; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("not callable"),
+                "expected not-callable diagnostic; got: " + ex.getMessage());
     }
 
     // --- Interactions with named functions ---

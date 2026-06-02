@@ -221,12 +221,15 @@ class IrLambdaTest {
     }
 
     @Test
-    void applyOnNonClosure_throws() throws Exception {
-        // Apply(5, [1]) — 5 is not a function
+    void applyOnNonClosure_isCompileError() throws Exception {
+        // Apply(5, [1]) — 5 can statically never be a function; SortChecker
+        // rejects at compile time now (was a runtime RuntimeCheckException).
         IrExpr app = IrExpr.apply(IrExpr.lit(5), List.of(IrExpr.lit(1)));
         IrModule module = new IrModule("notFn", List.of(), app);
 
-        assertThrows(RuntimeCheckException.class, () -> run(module));
+        CompileException ex = assertThrows(CompileException.class, () -> run(module));
+        assert ex.getMessage().contains("not callable")
+                : "expected not-callable diagnostic; got: " + ex.getMessage();
     }
 
     // --- Interactions with named functions and dispatch ---

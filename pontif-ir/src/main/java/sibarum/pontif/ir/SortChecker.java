@@ -434,6 +434,21 @@ public final class SortChecker {
                 checkExpr(lam.body(), extended, functionReturns, structDefs);
             }
             case IrExpr.Apply app -> {
+                // Applying something that can statically NEVER be a function —
+                // a literal, a struct literal, an arithmetic/comparison result —
+                // is always a bug; reject at compile time rather than letting
+                // it sit inert until (never) invoked.
+                IrExpr fn = app.fn();
+                if (fn instanceof IrExpr.Lit || fn instanceof IrExpr.Dec
+                        || fn instanceof IrExpr.Bool || fn instanceof IrExpr.Record
+                        || fn instanceof IrExpr.BinOp) {
+                    throw new CompileException(
+                            "This expression is not callable (it is a "
+                                    + fn.getClass().getSimpleName()
+                                    + ", which can never be a function) — applied with "
+                                    + app.args().size() + " argument(s).",
+                            app.origin());
+                }
                 checkExpr(app.fn(), typeEnv, functionReturns, structDefs);
                 for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs);
             }

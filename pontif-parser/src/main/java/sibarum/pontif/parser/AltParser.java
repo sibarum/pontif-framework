@@ -1395,6 +1395,18 @@ public final class AltParser {
         return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
     }
 
+    /**
+     * A postfix {@code (} or <code>{</code> must open on the same line as the
+     * token it extends — a newline ends the call/struct-literal postfix chain.
+     * Without this, a declaration body silently swallowed the next construct:
+     * {@code -> Ratio(a, b)} followed by a {@code (expr).x} main parsed as a
+     * CALL of the body, the module lost its main, and the placeholder main 0
+     * "ran". Dot-chains may still continue across lines (fluent style).
+     */
+    private boolean postfixOpensOnSameLine(AltToken t) {
+        return pos > 0 && tokens.get(pos - 1).line() == t.line();
+    }
+
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
         IrExpr expr = parsePrimary();
         // Postfix: .IDENT (field access), (args) (positional call or struct
@@ -1405,7 +1417,7 @@ public final class AltParser {
                 consume();  // DOT
                 AltToken name = consume();
                 expr = new IrExpr.FieldAccess(expr, name.text(), t.origin());
-            } else if (t.kind() == AltToken.Kind.LPAREN) {
+            } else if (t.kind() == AltToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
                 AltToken open = consume();
                 // Struct-literal shortcut: a bare ident matching a declared
                 // struct constructs a record (positional), not a Call.
@@ -1446,6 +1458,7 @@ public final class AltParser {
                     expr = new IrExpr.Apply(expr, args, callOrigin);
                 }
             } else if (t.kind() == AltToken.Kind.LBRACE
+                    && postfixOpensOnSameLine(t)
                     && expr instanceof IrExpr.Var v
                     && declaredStructs.containsKey(v.name())) {
                 // By-name struct literal `Foo{x=a, y=b}`. The brace form is
