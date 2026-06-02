@@ -24,11 +24,11 @@ import java.util.Set;
 public final class AltLexer {
 
     private static final Set<String> MULTI_CHAR_OPS = Set.of(
-            "<=", ">=", "==", "!=");
+            "<=", ">=", "==", "!=", "~=");
 
     /** Single-char operators that may also begin a multi-char op. */
     private static final Set<Character> OP_START_CHARS = Set.of(
-            '+', '-', '*', '/', '%', '<', '>', '=', '!', '&', '|');
+            '+', '-', '*', '/', '%', '<', '>', '=', '!', '&', '|', '~');
 
     private final String src;
     private final String source;
@@ -178,6 +178,9 @@ public final class AltLexer {
                 advance();
                 return new AltToken(AltToken.Kind.OP, String.valueOf(c), source, startLine, startCol);
             }
+            case '~' -> throw new ParseException(
+                    "Bare '~' is not an operator — did you mean '~=' (approximate equality)?",
+                    Origin.at(source, startLine, startCol));
             default -> throw new ParseException(
                     "Internal: readOperator called on non-operator '" + c + "'",
                     Origin.at(source, startLine, startCol));

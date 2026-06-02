@@ -62,7 +62,7 @@ public final class AltParser {
         return switch (op) {
             case "|" -> 1;                              // logical/union OR
             case "&" -> 2;                              // logical/intersection AND
-            case "==", "!=" -> 3;
+            case "==", "!=", "~=" -> 3;
             case "<", "<=", ">", ">=" -> 4;
             case "+", "-" -> 5;
             case "*", "/", "%" -> 6;
@@ -83,6 +83,7 @@ public final class AltParser {
             case ">=" -> IrExpr.Op.GE;
             case "==" -> IrExpr.Op.EQ;
             case "!=" -> IrExpr.Op.NE;
+            case "~=" -> IrExpr.Op.APPROX;
             case "&" -> IrExpr.Op.AND;
             case "|" -> IrExpr.Op.OR;
             default -> throw new IllegalArgumentException("Unknown operator: " + op);
@@ -768,7 +769,7 @@ public final class AltParser {
                 }
                 String baseName = switch (op.op()) {
                     case ADD, SUB, MUL, DIV, MOD -> "Int";
-                    case LT, LE, GT, GE, EQ, NE, AND, OR -> "Bool";
+                    case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> "Bool";
                 };
                 yield new IrSort.Refined(
                         baseName,

@@ -18,7 +18,7 @@ public sealed interface IrExpr
 
     enum Op {
         ADD, MUL, SUB, DIV, MOD,
-        LT, LE, GT, GE, EQ, NE,
+        LT, LE, GT, GE, EQ, NE, APPROX,
         AND, OR
     }
 

@@ -170,6 +170,8 @@ public final class IrInterpreter {
             case GE -> (Long) l >= (Long) r;
             case EQ -> java.util.Objects.equals(l, r);
             case NE -> !java.util.Objects.equals(l, r);
+            // Without rounding in play, ~= coincides with == .
+            case APPROX -> java.util.Objects.equals(l, r);
             case AND -> (Boolean) l && (Boolean) r;
             case OR -> (Boolean) l || (Boolean) r;
         };
@@ -196,7 +198,7 @@ public final class IrInterpreter {
             case ADD -> "+"; case SUB -> "-"; case MUL -> "*";
             case DIV -> "/"; case MOD -> "%";
             case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
-            case EQ -> "=="; case NE -> "!=";
+            case EQ -> "=="; case NE -> "!="; case APPROX -> "~=";
             case AND -> "&"; case OR -> "|";
         };
     }
@@ -231,6 +233,9 @@ public final class IrInterpreter {
             case GE -> l.compareTo(r) >= 0;
             case EQ -> l.compareTo(r) == 0;
             case NE -> l.compareTo(r) != 0;
+            // Equal within one ulp at the working precision — the tolerance is
+            // exactly the loss the division policy declared (see Decimals).
+            case APPROX -> sibarum.pontif.core.Decimals.approxEqual(l, r);
             // Logical ops never have Decimal operands (they're Bool-typed).
             case AND, OR -> throw new IllegalStateException(
                     "Logical operator " + op + " applied to Decimal operands");

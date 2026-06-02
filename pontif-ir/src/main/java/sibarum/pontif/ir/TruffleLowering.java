@@ -144,6 +144,7 @@ public final class TruffleLowering {
             case GE -> Cmp.of(l, r, Cmp.Op.GE);
             case EQ -> Cmp.of(l, r, Cmp.Op.EQ);
             case NE -> Cmp.of(l, r, Cmp.Op.NE);
+            case APPROX -> Cmp.of(l, r, Cmp.Op.APPROX);
             case AND -> And.of(l, r);
             case OR -> Or.of(l, r);
         };

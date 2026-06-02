@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 
 public final class Cmp extends BinaryOp {
 
-    public enum Op { LT, LE, GT, GE, EQ, NE }
+    public enum Op { LT, LE, GT, GE, EQ, NE, APPROX }
 
     private final Op op;
 
@@ -26,7 +26,9 @@ public final class Cmp extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
-            int c = asDecimal(leftValue, op.name()).compareTo(asDecimal(rightValue, op.name()));
+            BigDecimal a = asDecimal(leftValue, op.name());
+            BigDecimal b = asDecimal(rightValue, op.name());
+            int c = a.compareTo(b);
             return switch (op) {
                 case LT -> c < 0;
                 case LE -> c <= 0;
@@ -34,6 +36,8 @@ public final class Cmp extends BinaryOp {
                 case GE -> c >= 0;
                 case EQ -> c == 0;
                 case NE -> c != 0;
+                // Equal within one ulp at the working precision (see Decimals).
+                case APPROX -> sibarum.pontif.core.Decimals.approxEqual(a, b);
             };
         }
         long l = (Long) leftValue;
@@ -45,6 +49,7 @@ public final class Cmp extends BinaryOp {
             case GE -> l >= r;
             case EQ -> l == r;
             case NE -> l != r;
+            case APPROX -> l == r;  // no rounding → ~= is ==
         };
     }
 }

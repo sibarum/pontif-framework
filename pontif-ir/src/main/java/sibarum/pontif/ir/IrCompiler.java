@@ -298,6 +298,12 @@ public final class IrCompiler {
             case DIV, MOD -> throw new CompileException(
                     "Division/remainder ('/' , '%') is not supported inside refinement "
                             + "predicates — the discharge kernel is linear.", op.origin());
+            // Approximate equality is a runtime value operator; the proof layer
+            // never forgives — predicates and narrows stay exact.
+            case APPROX -> throw new CompileException(
+                    "'~=' is not allowed inside refinement predicates — sorts use exact "
+                            + "equality; approximate equality is a runtime value operator.",
+                    op.origin());
             case LT -> SymExpr.cmp(l, SymExpr.CmpOp.LT, r);
             case LE -> SymExpr.cmp(l, SymExpr.CmpOp.LE, r);
             case GT -> SymExpr.cmp(l, SymExpr.CmpOp.GT, r);

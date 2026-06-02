@@ -881,7 +881,7 @@ public final class SortChecker {
                     if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
                     yield null;
                 }
-                case LT, LE, GT, GE, EQ, NE, AND, OR -> IrSort.named("Bool");
+                case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> IrSort.named("Bool");
             };
             case IrExpr.FieldAccess fa -> {
                 IrSort base = inferSort(fa.base(), typeEnv, functionReturns, structDefs);

@@ -10,6 +10,16 @@ refined (in `[Sort:pred]`) or the scrutinee (in a match arm). Each refinement
 binds its own `@`; nested refinements shadow. See `alternative-syntax.ptf`
 principle 3.
 
+**`~=`** — Approximate equality. Equal within one unit in the last place at
+the working precision (DECIMAL128, 34 significant digits), scaled to the
+larger operand's magnitude. The tolerance is *derived, not chosen*: it is
+exactly the loss the division policy declared, no free parameters. Coincides
+with `==` wherever no rounding exists (Ints, exact Decimals); `x ~= 0` for
+nonzero `x` is false (relative tolerance has no jurisdiction at zero). Not
+allowed in sort position — narrows and predicates stay exact; the proof layer
+never forgives. Motivated by `t * t.inv() == one` failing under exact equality
+with a 34-nines rounding artifact.
+
 **back-reference** — In a receipt-graph, a recursive call points back to the
 same node rather than re-expanding. The no-duplicate-edges rule turns
 well-foundedness into a graph property and brings the postcondition along
