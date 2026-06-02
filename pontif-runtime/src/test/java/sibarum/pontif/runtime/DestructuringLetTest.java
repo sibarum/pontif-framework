@@ -38,7 +38,7 @@ class DestructuringLetTest {
                 first + third
                 """);
         assertFalse(r.isError(), () -> "got: " + r.text());
-        assertEquals("8", r.text());  // inv() = Ternion(5,0,3); 5 + 3
+        assertEquals("8.0", r.text());  // inv() = Ternion(5,0,3); 5 + 3, Decimal display
     }
 
     @Test

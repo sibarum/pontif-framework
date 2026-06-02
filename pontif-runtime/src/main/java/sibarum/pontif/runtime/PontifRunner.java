@@ -63,6 +63,9 @@ public final class PontifRunner {
 
     private static String formatValue(Object value) {
         if (value == null) return "null";
+        if (value instanceof java.math.BigDecimal d) {
+            return sibarum.pontif.core.Decimals.display(d);
+        }
         return value.toString();
     }
 

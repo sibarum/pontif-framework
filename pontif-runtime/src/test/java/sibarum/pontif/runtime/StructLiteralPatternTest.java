@@ -36,7 +36,7 @@ class StructLiteralPatternTest {
                 Ternion(2,0,5).inv().w
                 """);
         assertFalse(r.isError(), () -> "got: " + r.text());
-        assertEquals("3", r.text());  // w = z+1 = 2+1
+        assertEquals("3.0", r.text());  // w = z+1 = 2+1; Decimal always shows its point
     }
 
     @Test

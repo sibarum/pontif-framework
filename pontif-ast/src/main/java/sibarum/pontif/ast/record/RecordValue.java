@@ -66,7 +66,11 @@ public final class RecordValue {
         boolean first = true;
         for (Map.Entry<String, Object> e : members.entrySet()) {
             if (!first) sb.append(", ");
-            sb.append(e.getKey()).append(": ").append(e.getValue());
+            Object v = e.getValue();
+            String rendered = v instanceof java.math.BigDecimal d
+                    ? sibarum.pontif.core.Decimals.display(d)
+                    : String.valueOf(v);
+            sb.append(e.getKey()).append(": ").append(rendered);
             first = false;
         }
         return sb.append("}").toString();

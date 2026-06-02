@@ -63,7 +63,7 @@ class DecimalPromotionTest {
                 Pos(1).v
                 """);
         assertFalse(r.isError(), () -> "expected promotion + narrow pass, got: " + r.text());
-        assertEquals("1", r.text());
+        assertEquals("1.0", r.text());
     }
 
     @Test
@@ -91,6 +91,16 @@ class DecimalPromotionTest {
         // The accepted gotcha, pinned: x/2 truncates, x/2.0 divides exactly.
         assertEquals("3", run("7 / 2").text());
         assertEquals("3.5", run("7 / 2.0").text());
+    }
+
+    @Test
+    void decimalDisplay_plainWithPoint_zerosNormalized() {
+        // Decimal always displays with its decimal point (visually distinct
+        // from Int), zeros normalize regardless of accumulated scale, and
+        // non-zero trailing scale is preserved (it's information).
+        assertEquals("10.0", run("10.0 / 1.0").text());
+        assertEquals("0.0", run("1.5 * 0.0").text());
+        assertEquals("1.80", run("1.2 * 1.5").text());
     }
 
     @Test
