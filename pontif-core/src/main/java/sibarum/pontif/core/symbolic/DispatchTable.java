@@ -45,10 +45,21 @@ public final class DispatchTable {
         return direct;
     }
 
+    /**
+     * "method" for a {@code Type.name}-keyed dispatch name (instance/static
+     * method mangling), "function" for a bare name. Module FQNs
+     * ({@code mod/Type.name}) are stripped before the check.
+     */
+    private static String declarationKind(String name) {
+        String simple = name.substring(name.lastIndexOf('/') + 1);
+        return simple.indexOf('.') >= 0 ? "method" : "function";
+    }
+
     private DispatchResult resolveDirect(String name, List<SymExpr> arguments, Simplifier simplifier) {
         List<FunctionDecl> candidates = declarations.getOrDefault(name, List.of());
         if (candidates.isEmpty()) {
-            return DispatchResult.noMatch("No declarations registered for '" + name + "'");
+            return DispatchResult.noMatch(
+                    "No " + declarationKind(name) + " named '" + name + "' is declared");
         }
         // Working copy: see resolveTraitFallback's "compileCall + trait promotion" wrapper below.
 
@@ -68,7 +79,7 @@ public final class DispatchTable {
 
         if (matching.isEmpty()) {
             return DispatchResult.noMatch(
-                    "No matching declaration of '" + name + "' for the given arguments");
+                    "No matching " + declarationKind(name) + " '" + name + "' for the given arguments");
         }
 
         List<MatchingCandidate> mostSpecific = new ArrayList<>();

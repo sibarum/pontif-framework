@@ -67,21 +67,50 @@ class DecimalPromotionTest {
     }
 
     @Test
-    void mixedIntValueAndDecimal_isClearErrorWithOrigin() {
-        // An Int VALUE (not a literal at a Decimal boundary) meeting a Decimal
-        // is not auto-promoted — and the error must be a Pontif error with an
-        // origin (file/line), never a raw ClassCastException.
+    void mixedIntValueAndDecimal_promotesToDecimal() {
+        // `Decimal op Int` promotes the Int — the lossless direction of the
+        // embedding, agreeing with the static sort (mixed arithmetic is typed
+        // Decimal). James's call, 2026-06-02.
         RunResult r = run("""
                 function f(x:Int):Decimal -> x + 1.5
                 f(1)
                 """);
-        assertTrue(r.isError(), "mixed Int value/Decimal arithmetic should error");
-        assertTrue(r.text().contains("mixed"),
-                () -> "expected the mixed-operand message, got: " + r.text());
-        assertFalse(r.text().contains("ClassCastException"),
-                () -> "raw Java exception leaked: " + r.text());
-        assertTrue(r.origin().isPresent() || r.text().contains("t.ptf"),
-                () -> "error should carry an origin (file/line); got: " + r.text()
-                        + " origin=" + r.origin());
+        assertFalse(r.isError(), () -> "mixed arithmetic should promote, got: " + r.text());
+        assertEquals("2.5", r.text());
+    }
+
+    @Test
+    void mixedComparison_andEquality_promote() {
+        assertEquals("true", run("1 < 1.5").text());
+        // Numeric equality across the tower: 1 == 1.0.
+        assertEquals("true", run("1 == 1.0").text());
+    }
+
+    @Test
+    void intDivisionStaysTruncating_decimalLiteralFlipsIt() {
+        // The accepted gotcha, pinned: x/2 truncates, x/2.0 divides exactly.
+        assertEquals("3", run("7 / 2").text());
+        assertEquals("3.5", run("7 / 2.0").text());
+    }
+
+    @Test
+    void dispatchFailure_namesMethodVsFunction() {
+        // Method-keyed dispatch failures say "method"; bare names say "function".
+        RunResult method = run("""
+                struct Box(v:Int)
+                method Box.get():Int -> self.v
+                Box(1).get(99)
+                """);
+        assertTrue(method.isError());
+        assertTrue(method.text().contains("No matching method"),
+                () -> "expected method wording, got: " + method.text());
+
+        RunResult function = run("""
+                function f(x:Int):Int -> x
+                f(1, 2)
+                """);
+        assertTrue(function.isError());
+        assertTrue(function.text().contains("No matching function"),
+                () -> "expected function wording, got: " + function.text());
     }
 }

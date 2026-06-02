@@ -24,10 +24,9 @@ public final class Div extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
-            requireBothDecimal(leftValue, rightValue, "/");
-            BigDecimal r = (BigDecimal) rightValue;
+            BigDecimal r = asDecimal(rightValue, "/");
             if (r.signum() == 0) throw new RuntimeCheckException("Decimal division by zero");
-            return ((BigDecimal) leftValue).divide(r, MathContext.DECIMAL128);
+            return asDecimal(leftValue, "/").divide(r, MathContext.DECIMAL128);
         }
         long r = (Long) rightValue;
         if (r == 0L) throw new RuntimeCheckException("Integer division by zero");

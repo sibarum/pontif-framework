@@ -17,8 +17,7 @@ public final class Mul extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
-            requireBothDecimal(leftValue, rightValue, "*");
-            return ((BigDecimal) leftValue).multiply((BigDecimal) rightValue);
+            return asDecimal(leftValue, "*").multiply(asDecimal(rightValue, "*"));
         }
         return (Long) leftValue * (Long) rightValue;
     }

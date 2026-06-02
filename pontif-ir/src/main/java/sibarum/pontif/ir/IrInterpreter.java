@@ -142,20 +142,12 @@ public final class IrInterpreter {
         Object l = eval(op.left(), env, module);
         Object r = eval(op.right(), env, module);
         // Decimal operands use BigDecimal arithmetic and compareTo-based
-        // comparison/equality, so 2.0 == 2.00. Mixed Int/Decimal operands are a
-        // clear error, not a ClassCastException — Int VALUES aren't auto-promoted
-        // (literals at Decimal-declared boundaries are, by DecimalPromotion).
+        // comparison/equality, so 2.0 == 2.00. `Decimal op Int` promotes the Int
+        // to Decimal — the lossless direction of the embedding, matching the
+        // static sort (inferMaximalSort already types mixed arithmetic Decimal).
+        // Non-numeric operands meeting a Decimal stay a clear error.
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
-            if (!(l instanceof BigDecimal) || !(r instanceof BigDecimal)) {
-                throw new RuntimeCheckException(
-                        "Operator '" + symbol(op.op()) + "' applied to mixed "
-                                + runtimeTypeName(l) + "/" + runtimeTypeName(r) + " operands — "
-                                + "Int values aren't auto-promoted in arithmetic. Write the "
-                                + "literal as a decimal (1 -> 1.0), or store it in a "
-                                + "Decimal-declared field/binding so it promotes.",
-                        op.origin());
-            }
-            return evalDecimalBinOp(op.op(), (BigDecimal) l, (BigDecimal) r);
+            return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op));
         }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
@@ -178,6 +170,21 @@ public final class IrInterpreter {
             case AND -> (Boolean) l && (Boolean) r;
             case OR -> (Boolean) l || (Boolean) r;
         };
+    }
+
+    /**
+     * Coerces an operand of decimal arithmetic to BigDecimal. Int promotes —
+     * the lossless direction ({@code Int → Decimal} embeds exactly; the reverse
+     * stays forbidden). Anything else is a clear, origin-carrying error.
+     */
+    private static BigDecimal asDecimal(Object v, IrExpr.BinOp op) {
+        if (v instanceof BigDecimal d) return d;
+        if (v instanceof Long n) return BigDecimal.valueOf(n);
+        if (v instanceof Integer n) return BigDecimal.valueOf(n);
+        throw new RuntimeCheckException(
+                "Operator '" + symbol(op.op()) + "' applied to " + runtimeTypeName(v)
+                        + " and Decimal operands — only Int promotes to Decimal.",
+                op.origin());
     }
 
     /** Surface symbol for an operator, for error messages. */

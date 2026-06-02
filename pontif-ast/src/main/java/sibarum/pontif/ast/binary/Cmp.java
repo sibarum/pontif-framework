@@ -26,8 +26,7 @@ public final class Cmp extends BinaryOp {
     @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
-            requireBothDecimal(leftValue, rightValue, op.name());
-            int c = ((BigDecimal) leftValue).compareTo((BigDecimal) rightValue);
+            int c = asDecimal(leftValue, op.name()).compareTo(asDecimal(rightValue, op.name()));
             return switch (op) {
                 case LT -> c < 0;
                 case LE -> c <= 0;

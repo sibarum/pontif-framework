@@ -30,21 +30,20 @@ public abstract class BinaryOp extends PontifNode {
     protected abstract Object combine(Object leftValue, Object rightValue);
 
     /**
-     * Guards the decimal branch of a subclass's {@link #combine}: when either
-     * operand is a {@code BigDecimal}, both must be — mixed Int/Decimal
-     * operands are a clear, origin-carrying error rather than a
-     * {@code ClassCastException}. (Int literals at Decimal-declared boundaries
-     * are promoted at compile time; Int <em>values</em> are not.)
+     * Coerces an operand of a subclass's decimal branch to BigDecimal. Int
+     * promotes — the lossless direction of the embedding ({@code Decimal op
+     * Int} is Decimal, matching the static sort); anything else meeting a
+     * Decimal is a clear, origin-carrying error rather than a
+     * {@code ClassCastException}.
      */
-    protected final void requireBothDecimal(Object left, Object right, String symbol) {
-        if (!(left instanceof BigDecimal) || !(right instanceof BigDecimal)) {
-            throw new RuntimeCheckException(
-                    "Operator '" + symbol + "' applied to mixed " + typeName(left) + "/"
-                            + typeName(right) + " operands — Int values aren't auto-promoted "
-                            + "in arithmetic. Write the literal as a decimal (1 -> 1.0), or "
-                            + "store it in a Decimal-declared field/binding so it promotes.",
-                    origin());
-        }
+    protected final BigDecimal asDecimal(Object v, String symbol) {
+        if (v instanceof BigDecimal d) return d;
+        if (v instanceof Long n) return BigDecimal.valueOf(n);
+        if (v instanceof Integer n) return BigDecimal.valueOf(n);
+        throw new RuntimeCheckException(
+                "Operator '" + symbol + "' applied to " + typeName(v)
+                        + " and Decimal operands — only Int promotes to Decimal.",
+                origin());
     }
 
     private static String typeName(Object v) {
