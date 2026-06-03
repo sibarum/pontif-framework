@@ -28,6 +28,10 @@ The framework ships:
 - A **return-verification gate** — a declared return refinement is
   proven (by the receipt-graph engine, or by an in-source `proof`) or
   the program is rejected.
+- A **conservation gate** — per-function dataflow ledgers with named
+  algorithmic properties (`proof translate = Lossless()`); a drop,
+  duplication, or untraceable flow the proof doesn't account for
+  rejects the program (`requires std.conservation`).
 - A Truffle lowering and an `IrInterpreter` (`pontif-runtime`).
 - A playground for editing and running snippets (`pontif-playground`).
 
@@ -174,6 +178,69 @@ function area(s:[Circle|Rect]):Decimal -> match s {
 area(Rect(3.0, 4.0))   # → 12.00
 ```
 
+## Conservation receipts
+
+The receipt graph proves what values **are**; the conservation ledger
+proves where they **went**. Every function gets a compile-time dataflow
+ledger — which input attributes were *consulted* by branches, *combined*
+into derived values, *emitted* into outputs, or silently dropped — and
+`proof` statements assert algorithmic properties over it. A failing
+assertion is a compile error:
+
+```pontif
+requires std.conservation.{Lossless}
+
+struct Source(name:Int, age:Int, email:Int)
+struct Target(fullName:Int, years:Int, contact:Int)
+
+function translate(s:Source):Target ->
+  {fullName = s.name, years = s.age + 1, contact = s.email}
+
+proof translate = Lossless()       # every Source attribute provably reaches Target
+
+translate(Source(1, 2, 3)).years   # → 3
+```
+
+Delete `contact` from `Target` and the same program **rejects** — and the
+error *is* the receipt (abridged):
+
+```
+Conservation proof for 'translate' failed: 's_0.email' is UNTOUCHED …
+  branch (unconditional):
+    emit:    s_0.name -> r_0.fullName   [verbatim]
+    combine: s_0.age + 1 -> d_1
+    emit:    d_1 -> r_0.years   [derived]
+    classification:
+      s_0.email        UNTOUCHED (no flow into any output)
+```
+
+Dropping data on purpose is fine — *declared*: `proof translate =
+LosslessExcept(s.email)` makes the lossy version compile, and then fails
+the moment someone fixes the translation (the declaration is stale) —
+proofs track the code in both directions.
+
+Conservation composes with the rest of the grid. A tuple swap is a
+fan-in-free, fan-out-free verbatim placement, which is structurally
+invertible — so reversibility is a *witnessed corollary*, not a feature:
+
+```pontif
+requires std.conservation.{Reversible}
+
+function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
+  match p { [(a, b)] -> (b, a) }
+
+proof swap = Reversible()          # bijective rewiring — invertibility witnessed
+
+let [(x, y)] = swap((1, true)) y   # → 1
+```
+
+The ledger obeys the same honesty law as everything else: flow it can't
+trace is **OPAQUE**, and no conservation assertion ever passes over it —
+honest ignorance fails closed. Properties ship as values
+(`std.conservation`) on the same `proof` statement as algebraic
+`Leaf`/`Split` proofs — one statement, two ledgers, the proposition's
+vocabulary picks which. See `docs/conservation-receipts.md`.
+
 Every snippet above is pinned by `ReadmeSnippetTest` — the README
 compiles. See `docs/alternative-syntax.ptf` for the canonical reference,
 `docs/glossary.md` for terms, and `docs/backward-language-design.md` for
@@ -191,7 +258,8 @@ whole language is one big syntactic sugar for it).
 | `pontif-defaults` | Canonical rule-set factories for the simplifier — `DefaultRules.production()` and `DefaultRules.full()`. Owns `BoundAnalysisRules`, the in-simplifier wrapper over `BoundAnalysis.discharge`, gated to abstain on non-integer values. |
 | `pontif-parser` | Two parsers sharing the same IR: a stable S-expression parser (`Parser`) for tests / reference, and the canonical alt-syntax parser (`AltParser`) for user-written Pontif code — including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort — the routing *is* the discreteness boundary. In-source `proof` declarations supply the hard cases. |
-| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification gate, and interpreter / Truffle in a single flow. `ReceiptGraphReport` produces a reviewable text rendering of a program's receipt-graph plus per-branch discharge outcomes. |
+| `pontif-conservation` | The conservation ledger — per-function dataflow provenance (`ConservationDrafter`: consult / combine / emit events per branch, recursion by-reference, untraceable flow marked OPAQUE), queries (`ConservationQueries`: lossless, the verbatim-bijection reversibility witness, duplication, branch quantifiers — all fail-closed), the named-property binder (`ConservationProofs`, the `std.conservation` vocabulary), and the text reading (`ConservationLedgerPrinter`). |
+| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers. |
 | `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, lambdas, match. |
 
@@ -215,7 +283,24 @@ Capabilities that work end-to-end in alt syntax:
   overloading (`+ - * / % < <= > >= == !=`), static / 0-arg bare access
 - **Pattern matching where patterns are sorts** — refinements, struct
   refinements, bare types, destructure with renames, per-field
-  narrowing, positional literal fields, partial patterns
+  narrowing, positional literal fields, `_` slot discards (positional
+  patterns are arity-total — subset patterns are rejected as lying by
+  omission)
+- **The aggregate grid** — one substrate, two knobs: tuples `(1, true)`
+  (anonymous positional, destructure-only components), dictionaries
+  `{a = 1}` (anonymous by-name), and `.{}` named decomposition unifying
+  `requires` / `exports` / `let d.{a, b -> bee}` with inline `->` rename
+- **The claim rule** — a declared type name bites: anonymous literals
+  promote at assertion positions (`let p:Point = {x=1, y=2}` is checked
+  construction), re-badging is rejected (`Vec` never passes as a
+  same-shaped `Point`), questions never coerce (`match`, `==`), and
+  native equality follows matching
+- **Conservation receipts** — a per-function compile-time dataflow
+  ledger (consult / combine / emit, per branch; untraceable flow is
+  OPAQUE and fails closed) with named properties (`Lossless`,
+  `Reversible`, `NoDuplication`, `LosslessExcept`) asserted via
+  `proof f = …` and gated at compile time; reviewable
+  `*.conservation.txt` reports via `ConservationReport`
 - **Destructuring `let`** (expression and top level), irrefutability
   proven
 - **Compile-time match totality, enforced as the conservation rule** —

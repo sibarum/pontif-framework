@@ -112,4 +112,75 @@ class ReadmeSnippetTest {
         assertEquals(0, new java.math.BigDecimal("12")
                 .compareTo((java.math.BigDecimal) result));
     }
+
+    // --- Conservation receipts (need the linker + gates: PontifCompiler path) ---
+
+    private final PontifCompiler compiler = new PontifCompiler();
+    private final PontifRunner runner = new PontifRunner();
+
+    private String runGated(String src) {
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "readme.ptf");
+        org.junit.jupiter.api.Assertions.assertInstanceOf(
+                PontifCompiler.CompileResult.Compiled.class, r,
+                () -> "expected compile success; got: "
+                        + ((PontifCompiler.CompileResult.Failed) r).error().text());
+        return runner.run(r, PontifRunner.Engine.INTERPRETER).text();
+    }
+
+    @Test
+    void readmeConservationSnippet_losslessTranslationCompilesAndRuns() {
+        assertEquals("3", runGated("""
+                requires std.conservation.{Lossless}
+
+                struct Source(name:Int, age:Int, email:Int)
+                struct Target(fullName:Int, years:Int, contact:Int)
+
+                function translate(s:Source):Target ->
+                  {fullName = s.name, years = s.age + 1, contact = s.email}
+
+                proof translate = Lossless()
+
+                translate(Source(1, 2, 3)).years
+                """));
+    }
+
+    @Test
+    void readmeConservationSnippet_droppedAttributeRejects_withTheReceipt() {
+        // The README's "delete contact from Target" direction: the same proof
+        // now fails, and the error carries the ledger.
+        PontifCompiler.CompileResult r = compiler.compileAlt("""
+                requires std.conservation.{Lossless}
+
+                struct Source(name:Int, age:Int, email:Int)
+                struct Target(fullName:Int, years:Int)
+
+                function translate(s:Source):Target ->
+                  {fullName = s.name, years = s.age + 1}
+
+                proof translate = Lossless()
+
+                translate(Source(1, 2, 3)).years
+                """, "readme.ptf");
+        org.junit.jupiter.api.Assertions.assertInstanceOf(
+                PontifCompiler.CompileResult.Failed.class, r);
+        String err = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        org.junit.jupiter.api.Assertions.assertTrue(
+                err.contains("Conservation proof") && err.contains("translate"), () -> err);
+        org.junit.jupiter.api.Assertions.assertTrue(err.contains("UNTOUCHED"), () -> err);
+        org.junit.jupiter.api.Assertions.assertTrue(err.contains("s_0.email"), () -> err);
+    }
+
+    @Test
+    void readmeConservationSnippet_swapWitnessesReversibility() {
+        assertEquals("1", runGated("""
+                requires std.conservation.{Reversible}
+
+                function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
+                  match p { [(a, b)] -> (b, a) }
+
+                proof swap = Reversible()
+
+                let [(x, y)] = swap((1, true)) y
+                """));
+    }
 }
