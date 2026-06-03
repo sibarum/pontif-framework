@@ -50,12 +50,19 @@ public final class RecordValue {
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof RecordValue r && members.equals(r.members);
+        // Equality follows matching ("if it wouldn't match, it's not equal"):
+        // the claim is part of the value, so Point{x:1} != {x:1} and two
+        // same-shape differently-named structs are unequal. Anonymous values
+        // (null typeName) compare by content. Native equality only — user
+        // `==` overloads are ordinary dispatch and never consult this.
+        return o instanceof RecordValue r
+                && Objects.equals(typeName, r.typeName)
+                && members.equals(r.members);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(members);
+        return Objects.hash(typeName, members);
     }
 
     @Override

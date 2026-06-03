@@ -226,18 +226,24 @@ class StructuralSortTest {
     }
 
     @Test
-    void byReferenceStructs_resolveStructurallyViaRegistry() throws Exception {
-        // Bare named sorts Sort.of("Big")/Sort.of("Small") resolve to their
-        // structural definitions via the registry, so width subtyping works on
-        // nominal references — not just on inlined structural sorts.
+    void byReferenceStructs_declaredNamesDoNotCrossImply() throws Exception {
+        // The claim rule: a DECLARED name is implied only by itself. Big's
+        // shape contains Small's, but Big-ness is not Small-ness — implying a
+        // registered nominal from a same-shaped other nominal is re-badging
+        // (the sort-level face of passing a Vec where a Point is required).
+        // Width subtyping survives where it's honest: against ANONYMOUS
+        // shapes (struct ⊑ anonymous, the directional rule).
         Sort big = Sort.structural("Big", Map.of(
                 "name", Sort.of("String"),
                 "age", Sort.of("Int")));
         Sort small = Sort.structural("Small", Map.of(
                 "name", Sort.of("String")));
         Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Big", big, "Small", small));
-        assertTrue(Refinements.imply(Sort.of("Big"), Sort.of("Small"), withReg).isPassed(),
-                "{name, age} should imply {name} through registry resolution");
+        assertFalse(Refinements.imply(Sort.of("Big"), Sort.of("Small"), withReg).isPassed(),
+                "Big must NOT imply the declared nominal Small — that's re-badging");
+        Sort anonymousShape = Sort.structural("_record", Map.of("name", Sort.of("String")));
+        assertTrue(Refinements.imply(Sort.of("Big"), anonymousShape, withReg).isPassed(),
+                "Big still satisfies the anonymous {name} shape — struct ⊑ anonymous, width OK");
     }
 
     @Test

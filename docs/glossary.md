@@ -58,6 +58,23 @@ the base may be omitted in a bracket-form refinement: `match (x:Int) { [@<0]
 -> ... }` has the base `Int` inferred. Required to be explicit when context
 is ambiguous (union scrutinee, top-level function return, etc.).
 
+**claim** — A value's type name, as established at construction. The claim rule
+(derived by the **no-lie law**): *construction is where claims are made;
+matching is where they're tested; nothing in between invents one.* A
+**declared** name bites — a sort naming a registered nominal type accepts only
+values claiming exactly that type (no re-badging: a `Vec` never passes as a
+same-shaped `Point`), and a question position (`match`, `==`) never coerces.
+An anonymous literal at an **assertion** position (`let p:Point = {x=1,y=2}`, a
+typed param, a return) is *not* a lie — the user asserts the type right there,
+so it's checked construction with the redundant name elided (the
+`AggregatePromotion` pass stamps it; missing/extra fields are compile errors).
+Sentinel names (`_record`, `_tuple`) and inline shape-labels (unregistered)
+stay shape-only — nothing nominal exists to falsely claim. Anonymous sorts
+accept named values (struct ⊑ **aggregate**, the directional rule), with
+positional (`_tuple`) sorts additionally arity-exact. Native `==` follows
+matching ("if it wouldn't match, it's not equal"); user `==` overloads are
+ordinary dispatch the kernel never consults.
+
 **coherence rule (orphan rule)** — A trait impl `impl Trait for Type` may be
 declared only in the module owning `Trait` or `Type`, never a third module
 owning neither. Borrowed from Rust; closes the type-piracy hole Pontif's global

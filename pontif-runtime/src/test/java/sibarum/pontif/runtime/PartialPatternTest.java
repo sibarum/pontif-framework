@@ -21,11 +21,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       (which binds only the fields listed in the pattern), this means
  *       partial destructuring is already supported — no underscore-wildcard
  *       syntax needed for the "I want to ignore a field" case.</li>
- *   <li>The struct name in a pattern is cosmetic — match success is
- *       determined entirely by field shape. {@code (struct AnyName (x Int))}
- *       matches anything with a compatible {@code x} field, regardless of
- *       the value's declared sort name. See the related TODO for nominal-vs-
- *       structural identity.</li>
+ *   <li>An <b>inline</b> struct name in a pattern is a shape label — match
+ *       success for these is determined entirely by field shape.
+ *       {@code (struct AnyName (x Int))} matches anything with a compatible
+ *       {@code x} field. <b>Resolved by the claim rule (Slice 3):</b> a name
+ *       bites iff it's a DECLARED nominal type (in the struct registry);
+ *       inline S-expr structural sorts are never registered, so their labels
+ *       stay cosmetic — there is no nominal type to falsely claim. Declared
+ *       names are tested in {@code ClaimRuleTest}.</li>
  * </ol>
  */
 class PartialPatternTest {

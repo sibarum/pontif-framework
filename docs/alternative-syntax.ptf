@@ -331,5 +331,16 @@ function nested(p:Point):Int -> match p {
 # Tuple components are destructure-only: no value-level `t._0` (only `@._0`
 # inside a refinement predicate).
 #
+# THE CLAIM RULE — construction makes claims, matching tests them:
+#   let p:Point = {x = 1, y = 2}        # OK — the annotation asserts Point;
+#                                       # checked construction, name elided
+#   f({x = 1, y = 2})                   # OK when f's param is Point-typed
+#   f(Vec(1, 2))                        # REJECTED when f wants Point — a Vec's
+#                                       # claim is never silently re-badged
+#   match d { [Point] -> ... }          # a QUESTION: an anonymous d answers no;
+#                                       # only constructed Points answer yes
+#   Point(1, 2) == {x = 1, y = 2}       # false — equality follows matching;
+#                                       # coerce earlier (let / typed argument)
+#
 # Block expression — pure delimiter, useful for multi-let bodies:
 #   { let a = 1 let b = 2 a + b }      # evaluates to 3

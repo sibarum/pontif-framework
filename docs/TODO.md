@@ -608,11 +608,29 @@ something false. Every rule below was derived by that filter.
   **Parked from Slice 2:** exports rename (`exports @.{factorial -> fac}`,
   public ≠ internal name) — needs a public→internal mapping in the export
   tables; parser rejects it with a pointer.
-- **Slice 3 (parked):** make a present type name a real nominal narrowing
-  (`satisfiesStructural` honors `recordTypeName`; today it's ignored — duck
-  typing). Equality follows ("if it wouldn't match, it's not equal"). This is
-  where **coercion** (the honest escape hatch) plugs in. Tuples don't need it
-  (positional `_N` keys never collide with named fields).
+- **Slice 3 (LANDED 2026-06-03): the claim rule.** *Construction is where
+  claims are made; matching is where they're tested; nothing in between
+  invents one.* Two phases:
+  - **AggregatePromotion** (DecimalPromotion's sibling, ordered before it):
+    anonymous literals are stamped at ASSERTION boundaries — let annotations,
+    struct-typed params, returns — `let p:Point = {x=1,y=2}` is checked
+    construction with the redundant name elided (member coercions like 1→1.0
+    ride DecimalPromotion; missing/extra field = compile error; ambiguous
+    overload target = compile error). Only REGISTRY-DECLARED structs are
+    construction targets; inline structural sorts are shape requirements.
+    `findStructByFieldSet` retired — shape never christens.
+  - **Kernel claim rule** (`Refinements`): a name bites **iff declared**
+    (struct registry). Re-badging rejected (`f(Vec(1,2))` where `f(p:Point)`),
+    question positions never coerce (`match d { [Point] -> … }` is *no* for an
+    anonymous d; `Point{…} != {…}`), `_tuple` sorts are arity-EXACT (the
+    `f((1,true,99))` width hole closed), refined bases gate on the claim
+    before their predicate (a matching claim IS a shape proof, thanks to
+    construction totality). Anonymous sorts still accept named values
+    (struct ⊑ anonymous) and inline/unregistered shape-labels stay cosmetic —
+    which is why the migration was ONE test rewrite. Native `==` carries the
+    claim; user `==` overloads untouched. Tripwires: `ClaimRuleTest`.
+  - **Coercion dissolved as a feature**: the implicit half IS the promotion
+    pass; the explicit bridge is decompose+construct (`let d.{x,y} Point(x,y)`).
 - **Parked also:** arrays (homogeneous positional), deep selectors `@(…)`.
 - **Deferred:** dedicated S-expr `(tuple …)` sugar — alt syntax is canonical and
   the IR (records) is fully exercised; add if/when the reference surface needs it.

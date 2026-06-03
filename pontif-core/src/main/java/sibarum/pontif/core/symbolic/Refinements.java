@@ -81,6 +81,17 @@ public final class Refinements {
         return resolved != null ? resolved : sort;
     }
 
+    /**
+     * True when {@code name} is a DECLARED nominal type — present in the
+     * module's struct registry. The claim rule keys on this: declared names
+     * bite; sentinel names ({@code _record}, {@code _tuple}, {@code _}) and
+     * inline shape-labels (S-expr structural sorts never registered) stay
+     * shape-only, because there is no nominal type to falsely claim.
+     */
+    private static boolean isDeclaredName(String name, Simplifier simplifier) {
+        return name != null && simplifier.registry().containsKey(name);
+    }
+
     public static ProofResult satisfies(SymExpr value, Sort sort, Simplifier simplifier) {
         // Resolve a nominal struct reference to its definition so its shape is
         // checked. Terminates by the finite value even on a recursive type:
@@ -100,6 +111,19 @@ public final class Refinements {
         }
         if (!sort.isRefined()) {
             return ProofResult.passed();
+        }
+        // Refined-by-name claim gate: `[Point:@.x > @.y]` asserts Point-ness
+        // before its predicate. When the refined base is a DECLARED type and
+        // the value is a record, the claim must match — and thanks to
+        // construction totality, a matching claim IS a shape proof, so no
+        // structural re-walk is needed. Primitive/trait/unregistered bases
+        // keep the existing predicate-only behavior.
+        if (isDeclaredName(sort.name(), simplifier)
+                && simplifier.simplify(value) instanceof SymExpr.Record(var ignored, String claimed)
+                && !sort.name().equals(claimed)) {
+            return ProofResult.failed(
+                    "Value " + (claimed == null ? "makes no type claim" : "claims '" + claimed + "'")
+                            + " but the refined sort requires the declared type '" + sort.name() + "'");
         }
         SymExpr substituted = Substitute.applySelf(sort.predicate(), value);
         SymExpr simplified = simplifier.simplify(substituted);
@@ -156,6 +180,35 @@ public final class Refinements {
             }
             return ProofResult.failed(
                     "Value " + simplifiedValue + " is not a record; cannot satisfy structural sort " + sort);
+        }
+
+        // The claim rule: a DECLARED name bites. A sort named with a registered
+        // nominal type accepts only values claiming exactly that type —
+        // matching TESTS claims; it never invents one (claims are made at
+        // construction, via promotion at assertion boundaries). Sentinel and
+        // unregistered (inline shape-label) names stay shape-only, and an
+        // anonymous sort still accepts named values (struct ⊑ anonymous — the
+        // directional rule). Positional sorts ("_tuple") are additionally
+        // arity-EXACT: width is honest for by-name projection but is
+        // lying-by-omission for positional slots.
+        if ("_tuple".equals(sort.name())) {
+            if (!"_tuple".equals(recordTypeName)) {
+                return ProofResult.failed(
+                        "Value " + simplifiedValue + " is not a tuple; cannot satisfy positional sort " + sort);
+            }
+            if (members.size() != sort.members().size()) {
+                return ProofResult.failed(
+                        "Tuple arity mismatch: value has " + members.size()
+                                + " component(s) but the sort requires exactly "
+                                + sort.members().size() + " — positional sorts take no width");
+            }
+        } else if (isDeclaredName(sort.name(), simplifier)) {
+            if (!sort.name().equals(recordTypeName)) {
+                return ProofResult.failed(
+                        "Value " + (recordTypeName == null ? "makes no type claim" : "claims '" + recordTypeName + "'")
+                                + " but the sort requires the declared type '" + sort.name()
+                                + "' — a name is satisfied only by values constructed as that type");
+            }
         }
 
         // Build map of (member name → simplified sibling-invariant) for each refined member.
@@ -303,6 +356,28 @@ public final class Refinements {
 
     private static ProofResult implyStructural(Sort tighter, Sort looser, Simplifier simplifier,
                                                Coinduction.Assumed assumed) {
+        // The claim rule, sort-vs-sort (see satisfiesStructural): a looser sort
+        // naming a DECLARED type is implied only by a sort of the same name; a
+        // looser positional sort ("_tuple") requires a tuple of the SAME arity;
+        // a looser anonymous/label-named sort accepts any tighter shape (width
+        // OK — by-name projection honesty, and struct ⊑ anonymous).
+        if ("_tuple".equals(looser.name())) {
+            if (!"_tuple".equals(tighter.name())) {
+                return ProofResult.failed(
+                        "Sort " + tighter + " is not a tuple sort; cannot imply positional " + looser);
+            }
+            if (tighter.members().size() != looser.members().size()) {
+                return ProofResult.failed(
+                        "Tuple arity mismatch: " + tighter.members().size() + " vs "
+                                + looser.members().size() + " — positional sorts take no width");
+            }
+        } else if (isDeclaredName(looser.name(), simplifier)
+                && !looser.name().equals(tighter.name())) {
+            return ProofResult.failed(
+                    "Sort '" + tighter.name() + "' does not imply the declared type '"
+                            + looser.name() + "' — names are satisfied only by the type itself");
+        }
+
         // Coinductive guard: subsumption on equi-recursive structs is a greatest
         // fixed point. Revisiting a (tighter, looser) name pair already on the
         // path means it's the hypothesis discharging itself — assume it holds and

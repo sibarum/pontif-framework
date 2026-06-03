@@ -14,7 +14,10 @@ import java.util.Map;
 
 public final class IrCompiler {
 
-    private final Simplifier simplifier;
+    // Non-final: compile() re-wires it with the module's struct registry so
+    // every consumer of simplifier() (Truffle lowering included) sees the
+    // declared-type names the kernel's claim rule keys on.
+    private Simplifier simplifier;
 
     public IrCompiler(Simplifier simplifier) {
         this.simplifier = simplifier;
@@ -48,6 +51,19 @@ public final class IrCompiler {
         // ambiguity at compile time. Unknown cases (kernel can't decide) pass
         // through; runtime dispatch ambiguity remains the safety net for those.
         OverloadOverlap.check(resolved);
+
+        // Nominal struct registry: name → compiled structural Sort, for both the
+        // alias name and the struct's own name (see TypeRegistry). Lets the
+        // runtime/dispatch resolve a by-reference struct sort to its shape on
+        // demand — and tells the kernel's claim rule which names are DECLARED
+        // (a name bites iff it's registered). Built before function compilation
+        // and wired into the simplifier so the Truffle path's MatchNodes carry
+        // it too, not just the IrInterpreter path.
+        Map<String, Sort> structRegistry = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort.Structural> e : TypeRegistry.collect(resolved).entrySet()) {
+            structRegistry.put(e.getKey(), compileSort(e.getValue()));
+        }
+        this.simplifier = this.simplifier.withRegistry(structRegistry);
 
         DispatchTable dispatch = new DispatchTable();
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
@@ -95,15 +111,6 @@ public final class IrCompiler {
         }
 
         registerSortsInExpr(resolved.main(), compiledSorts);
-
-        // Nominal struct registry: name → compiled structural Sort, for both the
-        // alias name and the struct's own name (see TypeRegistry). Lets the
-        // runtime/dispatch resolve a by-reference struct sort to its shape on
-        // demand — the Sort-layer counterpart of the IR-layer struct registry.
-        Map<String, Sort> structRegistry = new LinkedHashMap<>();
-        for (Map.Entry<String, IrSort.Structural> e : TypeRegistry.collect(resolved).entrySet()) {
-            structRegistry.put(e.getKey(), compileSort(e.getValue()));
-        }
 
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
