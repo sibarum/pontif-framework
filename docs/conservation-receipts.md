@@ -53,6 +53,9 @@ with an optional filter expression.
 
 # See Also
 
+- **conservation-algebra.md** — the classification ontology, DERIVED from the
+  sealed IR rather than hypothesized (circular design); draft pending red-pen.
+  The v1 event taxonomy below is the hypothesized version it supersedes.
 - provenance semirings
 - reversibility-as-conservation-corollary; witnessing that the dataflow is a fan-in/fan-out-free composition of bijective primitives is an invertibility witness, structurally, which lines up with reversible-computing theory
 - conservation facts as propositions other proofs can consume
