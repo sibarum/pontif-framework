@@ -27,6 +27,13 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
+        // Stamp anonymous aggregate literals with the struct name the context
+        // asserts (let annotations, struct-typed params, return positions) —
+        // checked construction with the redundant name elided. Runs BEFORE
+        // DecimalPromotion so a stamped record's Decimal members then get
+        // their literal promotion too.
+        resolved = AggregatePromotion.rewrite(resolved);
+
         // Promote Int literals to Decimal where the declared sort says Decimal
         // (struct members, let bindings) — a lossless embedding. Runs here so
         // both single-file and linked compiles get it.

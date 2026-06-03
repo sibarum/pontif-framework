@@ -874,7 +874,13 @@ public final class AltParser {
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferredSort);
+            // An anonymous aggregate ("_record") against a declared name is the
+            // promotion sugar, not a mismatch — `let p:Point = {x=1, y=2}` is
+            // checked construction with the redundant name elided.
+            // AggregatePromotion stamps and validates it at IR time (it also
+            // sees imported structs this parser can't).
             if (declaredBase != null && inferredBase != null
+                    && !inferredBase.equals("_record")
                     && !declaredBase.equals(inferredBase)) {
                 throw new ParseException(
                         "let '" + name + "' declared as " + declaredSort
@@ -883,9 +889,16 @@ public final class AltParser {
                         start.origin());
             }
         }
-        declaredTopLevelLets.put(name, inferredSort);
+        // Promotion case: the declared sort IS the binding's sort (the value's
+        // anonymous shape gets stamped at IR time); otherwise keep the tighter
+        // inferred narrowing as before.
+        IrSort binding = declaredSort != null
+                && "_record".equals(baseSortName(inferredSort))
+                ? declaredSort
+                : inferredSort;
+        declaredTopLevelLets.put(name, binding);
         return new IrStmt.FunctionDecl(
-                name, List.of(), inferredSort, value, start.origin());
+                name, List.of(), binding, value, start.origin());
     }
 
     /**
@@ -949,14 +962,13 @@ public final class AltParser {
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     memberSorts.put(e.getKey(), inferMaximalSort(e.getValue()));
                 }
-                // A tuple literal carries the "_tuple" sentinel — preserve it
-                // so the inferred sort stays a tuple (positional anonymous
-                // aggregate) rather than collapsing to "_record" or matching a
-                // declared struct by field set.
-                String matchedName = findStructByFieldSet(r.members().keySet());
-                String name = TUPLE_SENTINEL.equals(r.typeName())
-                        ? TUPLE_SENTINEL
-                        : matchedName != null ? matchedName : "_record";
+                // The record's own claim is the inferred name: a named struct
+                // stays itself, a tuple stays "_tuple", and an anonymous record
+                // stays "_record" — NEVER christened after a same-shaped struct
+                // (that was findStructByFieldSet, retired by the claim rule:
+                // names come from declared assertions via AggregatePromotion,
+                // not from shape guessing).
+                String name = r.typeName() != null ? r.typeName() : "_record";
                 yield new IrSort.Structural(name, memberSorts, r.origin());
             }
             case IrExpr.FieldAccess fa -> {
@@ -1010,23 +1022,6 @@ public final class AltParser {
         };
     }
 
-    /**
-     * Looks up a declared struct by exact field-set match. Returns the struct
-     * name if exactly one declared struct has that field set, else null
-     * (zero or multiple matches — in the multi-match case the inferred sort
-     * stays anonymous and the user can disambiguate with an explicit
-     * {@code let X:Foo = ...}).
-     */
-    private String findStructByFieldSet(Set<String> fieldSet) {
-        String found = null;
-        for (Map.Entry<String, IrSort.Structural> e : declaredStructs.entrySet()) {
-            if (e.getValue().members().keySet().equals(fieldSet)) {
-                if (found != null) return null;  // ambiguous
-                found = e.getKey();
-            }
-        }
-        return found;
-    }
 
     // --- Struct declarations ---
     // Form: `struct Name(field:Sort, field:Sort, ...)`
@@ -2172,7 +2167,10 @@ public final class AltParser {
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferred);
+            // "_record" against a declared name is the promotion sugar (see
+            // parseLet) — AggregatePromotion stamps and validates at IR time.
             if (declaredBase != null && inferredBase != null
+                    && !inferredBase.equals("_record")
                     && !declaredBase.equals(inferredBase)) {
                 throw new ParseException(
                         "let '" + name + "' declared as " + declaredSort
@@ -2181,9 +2179,13 @@ public final class AltParser {
                         start.origin());
             }
         }
+        IrSort binding = declaredSort != null
+                && "_record".equals(baseSortName(inferred))
+                ? declaredSort
+                : inferred;
         IrSort prevBinding = currentScope.get(name);
         boolean hadPrev = currentScope.containsKey(name);
-        currentScope.put(name, inferred);
+        currentScope.put(name, binding);
         IrExpr body;
         try {
             body = parseExpr();
@@ -2191,7 +2193,7 @@ public final class AltParser {
             if (hadPrev) currentScope.put(name, prevBinding);
             else currentScope.remove(name);
         }
-        return new IrExpr.LetIn(name, inferred, value, body, start.origin());
+        return new IrExpr.LetIn(name, binding, value, body, start.origin());
     }
 
     /**
