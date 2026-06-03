@@ -97,8 +97,12 @@ public final class NameResolver {
             throws CompileException {
         if (t.indexOf('/') >= 0 || PRIMITIVES.contains(t)) return t;
         if (table.typeOwners(t).contains(m)) return ModuleSymbolTable.fqn(m, t);
-        String src = table.importSource(m, t);
-        if (src != null) return ModuleSymbolTable.fqn(src, t);
+        ModuleSymbolTable.ImportedName imported = table.importedName(m, t);
+        // FQN via the REMOTE name — see resolveCallName; a renamed type import
+        // (`requires geo.{Point -> Pt}`) resolves local Pt to geo/Point.
+        if (imported != null) {
+            return ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
+        }
         int dot = t.indexOf('.');
         if (dot > 0 && table.requiredModules(m).contains(t.substring(0, dot))) {
             return ModuleSymbolTable.fqn(t.substring(0, dot), t.substring(dot + 1));
@@ -157,8 +161,13 @@ public final class NameResolver {
     static String resolveCallName(String n, String m, ModuleSymbolTable table) {
         if (n.indexOf('/') >= 0) return n;  // already an FQN
         if (table.moduleDeclaresFunction(m, n)) return ModuleSymbolTable.fqn(m, n);
-        String src = table.importSource(m, n);
-        if (src != null) return ModuleSymbolTable.fqn(src, n);
+        ModuleSymbolTable.ImportedName imported = table.importedName(m, n);
+        // The FQN uses the REMOTE name — the symbol as the source module
+        // declares it. The local name is just how this module refers to it
+        // (they differ only under a `name -> alias` rename).
+        if (imported != null) {
+            return ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
+        }
         int dot = n.indexOf('.');
         if (dot > 0) {
             String prefix = n.substring(0, dot);

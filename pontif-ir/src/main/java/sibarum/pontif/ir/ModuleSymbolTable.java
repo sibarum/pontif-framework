@@ -23,19 +23,26 @@ import java.util.Set;
  */
 public final class ModuleSymbolTable {
 
+    /**
+     * Where an imported local name came from: the source module and the
+     * symbol's name THERE ({@code remoteName} differs from the local name
+     * only under a {@code name -> alias} rename).
+     */
+    public record ImportedName(String sourceModule, String remoteName) {}
+
     /** function/method/operator local key → modules declaring it. */
     private final Map<String, Set<String>> functionOwners;
     /** type name (struct / trait / alias) → modules declaring it. */
     private final Map<String, Set<String>> typeOwners;
-    /** module → (imported local name → source module), from {@code requires}. */
-    private final Map<String, Map<String, String>> imports;
+    /** module → (imported local name → source + remote name), from {@code requires}. */
+    private final Map<String, Map<String, ImportedName>> imports;
     /** module → exported local names, from {@code exports @.{…}}. */
     private final Map<String, Set<String>> exports;
 
     private ModuleSymbolTable(
             Map<String, Set<String>> functionOwners,
             Map<String, Set<String>> typeOwners,
-            Map<String, Map<String, String>> imports,
+            Map<String, Map<String, ImportedName>> imports,
             Map<String, Set<String>> exports) {
         this.functionOwners = functionOwners;
         this.typeOwners = typeOwners;
@@ -55,7 +62,7 @@ public final class ModuleSymbolTable {
     public static ModuleSymbolTable build(Map<String, IrModule> modules) {
         Map<String, Set<String>> fns = new LinkedHashMap<>();
         Map<String, Set<String>> types = new LinkedHashMap<>();
-        Map<String, Map<String, String>> imp = new LinkedHashMap<>();
+        Map<String, Map<String, ImportedName>> imp = new LinkedHashMap<>();
         Map<String, Set<String>> exp = new LinkedHashMap<>();
 
         for (Map.Entry<String, IrModule> e : modules.entrySet()) {
@@ -80,8 +87,12 @@ public final class ModuleSymbolTable {
                         }
                     }
                     case IrStmt.Requires r -> {
-                        for (String name : r.names()) {
-                            imp.get(module).put(name, r.targetModule());
+                        for (IrStmt.RequireEntry entry : r.entries()) {
+                            // Keyed by the LOCAL name (how this module refers to
+                            // it); the value remembers where it lives and what
+                            // it's called there.
+                            imp.get(module).put(entry.localName(),
+                                    new ImportedName(r.targetModule(), entry.remoteName()));
                         }
                     }
                     case IrStmt.Exports ex -> {
@@ -118,12 +129,26 @@ public final class ModuleSymbolTable {
 
     /** Source module a {@code requires}-imported name in {@code module} came from, or null. */
     public String importSource(String module, String localKey) {
+        ImportedName in = imports.getOrDefault(module, Map.of()).get(localKey);
+        return in == null ? null : in.sourceModule();
+    }
+
+    /**
+     * The full import record (source module + remote name) for a
+     * {@code requires}-imported local name, or null. The remote name differs
+     * from {@code localKey} only under a {@code name -> alias} rename.
+     */
+    public ImportedName importedName(String module, String localKey) {
         return imports.getOrDefault(module, Map.of()).get(localKey);
     }
 
     /** Modules {@code module} pulls in via {@code requires} (the import sources). */
     public Set<String> requiredModules(String module) {
-        return Set.copyOf(imports.getOrDefault(module, Map.of()).values());
+        Set<String> sources = new LinkedHashSet<>();
+        for (ImportedName in : imports.getOrDefault(module, Map.of()).values()) {
+            sources.add(in.sourceModule());
+        }
+        return Set.copyOf(sources);
     }
 
     /** Is {@code localKey} listed in {@code module}'s {@code exports}? */

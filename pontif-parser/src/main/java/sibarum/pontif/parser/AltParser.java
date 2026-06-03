@@ -354,9 +354,9 @@ public final class AltParser {
     private IrStmt parseRequires() throws ParseException {
         AltToken start = expectKeyword("requires");
         String target = parseDottedName();
-        List<String> names = parseDotBraceSymbolList();
+        List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
         AltToken last = tokens.get(pos - 1);
-        return new IrStmt.Requires(target, names, start.spanTo(last));
+        return new IrStmt.Requires(target, entries, start.spanTo(last));
     }
 
     private IrStmt parseExports() throws ParseException {
@@ -370,26 +370,210 @@ public final class AltParser {
             // the names; the qualifier itself is unused until re-exports land.
             parseDottedName();
         }
-        List<String> names = parseDotBraceSymbolList();
+        List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
+        List<String> names = new ArrayList<>(entries.size());
+        for (IrStmt.RequireEntry entry : entries) {
+            if (!entry.remoteName().equals(entry.localName())) {
+                // Exports rename (public name != internal name) needs a
+                // public→internal mapping in the export tables — parked.
+                throw new ParseException(
+                        "Exports rename ('" + entry.remoteName() + " -> "
+                                + entry.localName() + "') is not yet supported — "
+                                + "an exports list takes plain names for now",
+                        start.origin());
+            }
+            names.add(entry.localName());
+        }
         AltToken last = tokens.get(pos - 1);
         return new IrStmt.Exports(names, self, start.spanTo(last));
     }
 
-    /** Parses the {@code .{name, name, ...}} list tail into its symbol names. */
-    private List<String> parseDotBraceSymbolList() throws ParseException {
+    /**
+     * Parses the {@code .{entry, entry, ...}} decomposition tail. Each entry is
+     * {@code name} (shorthand: same name in the receiving context) or
+     * {@code name -> alias} (rename: LHS is the name where the symbol already
+     * lives, RHS is its name here — the arrow reads "becomes", uniformly with
+     * match arms and function bodies).
+     */
+    private List<IrStmt.RequireEntry> parseDotBraceEntryList() throws ParseException {
         expect(AltToken.Kind.DOT);
         expect(AltToken.Kind.LBRACE);
-        List<String> names = new ArrayList<>();
+        List<IrStmt.RequireEntry> entries = new ArrayList<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) {
                 expect(AltToken.Kind.COMMA);
             }
-            names.add(expect(AltToken.Kind.IDENT).text());
+            String remote = expect(AltToken.Kind.IDENT).text();
+            String local = remote;
+            if (peek().kind() == AltToken.Kind.ARROW) {
+                consume();
+                local = expect(AltToken.Kind.IDENT).text();
+            }
+            entries.add(new IrStmt.RequireEntry(remote, local));
             first = false;
         }
         expect(AltToken.Kind.RBRACE);
-        return names;
+        return entries;
+    }
+
+    /**
+     * Expression-level by-name decomposition let: {@code let SOURCE.{entry, …}
+     * BODY} — the value consumer of the {@code .{}} payload ({@code requires}
+     * and {@code exports} are the module consumers). Each entry is an
+     * abbreviated let: {@code let p.{name -> u, age} BODY} desugars to
+     * {@code let u = p.name let age = p.age BODY}. By-name reads are
+     * <em>projections</em>, so partial is honest — there is no totality rule
+     * (that's positional-only) — but an unknown key is a lie, rejected when the
+     * source's sort is statically known. Positional keys ({@code _0 …}) are
+     * rejected: tuples are destructure-only.
+     */
+    private IrExpr parseDictDecompositionLetExpr(AltToken start, AltToken sourceTok)
+            throws ParseException {
+        List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
+        if (entries.isEmpty()) {
+            throw new ParseException(
+                    "Empty decomposition '.{}' binds nothing", start.origin());
+        }
+        String source = sourceTok.text();
+        boolean scoped = currentScope.containsKey(source);
+        IrSort sourceSort = scoped
+                ? currentScope.get(source)
+                : declaredTopLevelLets.containsKey(source)
+                        ? declaredTopLevelLets.get(source)
+                        : declaredFunctionReturns.get(source);
+        // Params/locals are frame Vars; top-level lets and 0-arg functions
+        // resolve through 0-arg dispatch Calls (the same routing bare
+        // references get in rewriteTopLevelLetAccess).
+        IrExpr sourceRef = scoped
+                ? new IrExpr.Var(source, sourceTok.origin())
+                : (declaredTopLevelLets.containsKey(source)
+                        || declaredFunctionReturns.containsKey(source))
+                        ? new IrExpr.Call(source, List.of(), sourceTok.origin())
+                        : new IrExpr.Var(source, sourceTok.origin());
+        validateDecompositionEntries(entries, sourceSort, source, start);
+
+        // Bind the locals for body parsing; restore the scope afterwards.
+        Map<String, IrSort> shadowed = new LinkedHashMap<>();
+        java.util.Set<String> introduced = new java.util.LinkedHashSet<>();
+        for (IrStmt.RequireEntry entry : entries) {
+            if (currentScope.containsKey(entry.localName())) {
+                shadowed.put(entry.localName(), currentScope.get(entry.localName()));
+            } else {
+                introduced.add(entry.localName());
+            }
+            currentScope.put(entry.localName(), memberSortFor(sourceSort, entry.remoteName()));
+        }
+        IrExpr body;
+        try {
+            body = parseExpr();
+        } finally {
+            for (IrStmt.RequireEntry entry : entries) {
+                if (introduced.contains(entry.localName())) {
+                    currentScope.remove(entry.localName());
+                } else {
+                    currentScope.put(entry.localName(), shadowed.get(entry.localName()));
+                }
+            }
+        }
+        // Wrap in reverse so the first entry becomes the outermost let.
+        IrExpr result = body;
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            IrStmt.RequireEntry entry = entries.get(i);
+            result = new IrExpr.LetIn(
+                    entry.localName(),
+                    memberSortFor(sourceSort, entry.remoteName()),
+                    new IrExpr.FieldAccess(sourceRef, entry.remoteName(), start.origin()),
+                    result,
+                    start.origin());
+        }
+        return result;
+    }
+
+    /**
+     * Top-level by-name decomposition let: {@code let SOURCE.{entry, …}} — one
+     * 0-arg accessor declaration per binder reading {@code SOURCE.key} (the
+     * by-name twin of the positional top-level destructure; no match wrapper
+     * needed — a by-name projection is honest-partial, and key existence is the
+     * only obligation, checked statically when the source's sort is known).
+     */
+    private IrStmt parseDictDecompositionLetTop(AltToken start, String source)
+            throws ParseException {
+        List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
+        if (entries.isEmpty()) {
+            throw new ParseException(
+                    "Empty decomposition '.{}' binds nothing", start.origin());
+        }
+        IrSort sourceSort = declaredTopLevelLets.containsKey(source)
+                ? declaredTopLevelLets.get(source)
+                : declaredFunctionReturns.get(source);
+        if (sourceSort == null) {
+            throw new ParseException(
+                    "Decomposition source '" + source
+                            + "' is not a declared let or 0-arg function",
+                    start.origin());
+        }
+        validateDecompositionEntries(entries, sourceSort, source, start);
+        IrStmt first = null;
+        for (IrStmt.RequireEntry entry : entries) {
+            IrSort memberSort = memberSortFor(sourceSort, entry.remoteName());
+            IrExpr accessor = new IrExpr.FieldAccess(
+                    new IrExpr.Call(source, List.of(), start.origin()),
+                    entry.remoteName(), start.origin());
+            declaredTopLevelLets.put(entry.localName(), memberSort);
+            IrStmt decl = new IrStmt.FunctionDecl(
+                    entry.localName(), List.of(), memberSort, accessor, start.origin());
+            if (first == null) {
+                first = decl;
+            } else {
+                pendingTopLevelDecls.add(decl);
+            }
+        }
+        return first;
+    }
+
+    /** The source's member sort for {@code key}, or the {@code "_"} placeholder. */
+    private static IrSort memberSortFor(IrSort sourceSort, String key) {
+        if (sourceSort instanceof IrSort.Structural ss) {
+            IrSort member = ss.members().get(key);
+            if (member != null) return member;
+        }
+        return IrSort.named("_");
+    }
+
+    /**
+     * Honesty checks shared by both decomposition-let levels: positional keys
+     * (and tuple sources) are destructure-only; an unknown key against a
+     * statically-known structural source is a lie; duplicate local binders
+     * collide.
+     */
+    private void validateDecompositionEntries(
+            List<IrStmt.RequireEntry> entries, IrSort sourceSort, String source, AltToken start)
+            throws ParseException {
+        boolean tupleSource = sourceSort instanceof IrSort.Structural ss
+                && TUPLE_SENTINEL.equals(ss.name());
+        java.util.Set<String> locals = new java.util.HashSet<>();
+        for (IrStmt.RequireEntry entry : entries) {
+            if (tupleSource || isPositionalKey(entry.remoteName())) {
+                throw new ParseException(
+                        "Tuple components are destructure-only — use a positional pattern "
+                                + "`let [(a, _, ...)] = " + source
+                                + "` instead of by-name decomposition",
+                        start.origin());
+            }
+            if (sourceSort instanceof IrSort.Structural ss
+                    && !ss.members().containsKey(entry.remoteName())) {
+                throw new ParseException(
+                        "'" + source + "' has no member '" + entry.remoteName()
+                                + "'; available: " + ss.members().keySet(),
+                        start.origin());
+            }
+            if (!locals.add(entry.localName())) {
+                throw new ParseException(
+                        "Duplicate binder '" + entry.localName() + "' in decomposition",
+                        start.origin());
+            }
+        }
     }
 
     // --- Function declarations ---
@@ -643,6 +827,9 @@ public final class AltParser {
             return parseDestructuringLetTop(start);
         }
         String name = parseDottedName();
+        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
+            return parseDictDecompositionLetTop(start, name);
+        }
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
@@ -1591,6 +1778,34 @@ public final class AltParser {
         return pos > 0 && tokens.get(pos - 1).line() == t.line();
     }
 
+    /**
+     * Anonymous by-name aggregate (dictionary) literal: {@code {a = 1, b = 2}}
+     * — the by-name sibling of the tuple literal. Lowers to an anonymous
+     * {@link IrExpr.Record} (null typeName), the same shape the S-expr
+     * {@code (record …)} form produces; rides the record substrate with no new
+     * node. Free-form: no completeness obligation (there is no named type to be
+     * complete <em>of</em>). Duplicate keys are rejected.
+     */
+    private IrExpr parseDictLiteral() throws ParseException {
+        AltToken open = expect(AltToken.Kind.LBRACE);
+        Map<String, IrExpr> members = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            AltToken key = expect(AltToken.Kind.IDENT);
+            if (members.containsKey(key.text())) {
+                throw new ParseException(
+                        "Duplicate key '" + key.text() + "' in dictionary literal",
+                        key.origin());
+            }
+            expect(AltToken.Kind.EQUALS);
+            members.put(key.text(), parseExpr());
+            first = false;
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        return new IrExpr.Record(null, members, open.spanTo(close));
+    }
+
     /** True for a tuple positional key — {@code _0}, {@code _1}, … (underscore + digits). */
     private static boolean isPositionalKey(String name) {
         if (name.length() < 2 || name.charAt(0) != '_') return false;
@@ -1942,6 +2157,9 @@ public final class AltParser {
             throw new ParseException(
                     "Cannot bind keyword '" + name + "' as a let-name",
                     nameTok.origin());
+        }
+        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
+            return parseDictDecompositionLetExpr(start, nameTok);
         }
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
@@ -2384,6 +2602,13 @@ public final class AltParser {
                 yield inner;
             }
             case LBRACE -> {
+                // Dictionary literal `{a = 1, b = 2}` vs block `{ EXPR }`: an
+                // `IDENT =` head can't start a block expression (`=` isn't an
+                // expression operator), so one token of lookahead disambiguates.
+                if (peek(1).kind() == AltToken.Kind.IDENT
+                        && peek(2).kind() == AltToken.Kind.EQUALS) {
+                    yield parseDictLiteral();
+                }
                 // Block expression: `{ EXPR }`. A pure delimiter — the block
                 // evaluates to its inner expression with no new semantics.
                 // Useful for giving multi-let chains an explicit closing

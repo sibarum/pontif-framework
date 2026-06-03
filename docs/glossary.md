@@ -70,9 +70,26 @@ nothing: `[Point(a, _)]`, `[(a, _, c)]`. It is what keeps a positional pattern
 component — more honest than naming an unused binder. Generalizes the `[_]`
 default-arm marker from the whole value to one slot.
 
-**dictionary** — The anonymous by-name **aggregate**: `{a=1, b=2}` — a struct
-with the type name (and behavior) turned off. *(Planned — Slice 2; the named
-form `Point{x=1}` already exists as by-name construction.)*
+**decomposition (`.{}`)** — Pontif's one named-decomposition operation: "from
+X, take {these}." Three consumers, one payload: `requires math.{min, max}`,
+`exports @.{factorial}`, and `let person.{name, age}`. Deliberate forethought —
+the requires/exports syntax was designed (project day 3) to *be* dictionary
+decomposition, because imports/exports ARE destructuring. An entry renames
+inline with `->` ("becomes", the same arrow as match arms/function bodies):
+`requires math.{min -> minimum}`, `let person.{name -> username}` — LHS is the
+name where the symbol already lives, RHS its name in the receiving context.
+Each entry is an abbreviated let. By-name reads are *projections*
+(partial-honest); an unknown key against a statically-known source is a lie and
+is rejected; positional keys are excluded (tuples are destructure-only). Not a
+value: `.{}` always binds into a receiving context. *(Exports rename — public ≠
+internal name — is parked.)*
+
+**dictionary** — The anonymous by-name **aggregate**: `{a = 1, b = 2}` — a
+struct with the type name (and behavior) turned off; the by-name sibling of the
+tuple, riding the same record substrate with no dedicated node. Free-form at
+construction (no completeness obligation — there's no named type to be complete
+*of*; the named `Point{x=1}` form is total by construction). Fields read by name
+(`d.a`) or by **decomposition** (`let d.{a, b -> bee}`).
 
 **dispatch unification** — The planned effort (`docs/dispatch-unification.md`)
 to put every dispatched call on the **one shared resolution engine**

@@ -255,7 +255,8 @@ class ModuleSystemTest {
                 f(10)
                 """);
         String err = assertLinkRejected(src, "app");
-        assertTrue(err.contains("imports 'f' from both"), () -> err);
+        assertTrue(err.contains("imports 'f' as both 'a/f' and 'b/f'"), () -> err);
+        assertTrue(err.contains("rename one"), () -> err);
     }
 
     @Test
@@ -312,5 +313,100 @@ class ModuleSystemTest {
         src.put("lib", "module lib\nfunction f(x:Int):Int -> x\n0");
         String err = assertLinkRejected(src, "nope");
         assertTrue(err.contains("Unknown entry module 'nope'"), () -> err);
+    }
+
+    // --- `.{}` decomposition rename (`remote -> local`) ---
+
+    @Test
+    void requiresRename_resolvesUnderLocalName() {
+        // `inc -> increment`: the importer calls `increment`, the FQN is lib/inc.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("lib", """
+                module lib
+                exports @.{inc}
+                function inc(x:Int):Int -> x + 1
+                """);
+        src.put("app", """
+                module app
+                requires lib.{inc -> increment}
+                increment(41)
+                """);
+        assertEquals("42", runProject(src, "app").text());
+    }
+
+    @Test
+    void requiresRename_privacyCheckedOnRemoteName() {
+        // Renaming doesn't smuggle a private name past the export check — the
+        // check runs against the REMOTE name.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("lib", """
+                module lib
+                exports @.{other}
+                function other(x:Int):Int -> x
+                function secret(x:Int):Int -> x + 1
+                """);
+        src.put("app", """
+                module app
+                requires lib.{secret -> s}
+                s(41)
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("does not export 'secret'"), () -> err);
+    }
+
+    @Test
+    void requiresRename_fixesTwoModuleCollision() {
+        // Both libs export `min`; renaming one side resolves the ambiguity that
+        // importing both as `min` would raise.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("alpha", """
+                module alpha
+                exports @.{min}
+                function min(x:Int):Int -> x
+                """);
+        src.put("beta", """
+                module beta
+                exports @.{min}
+                function min(x:Int):Int -> x + 100
+                """);
+        src.put("app", """
+                module app
+                requires alpha.{min}
+                requires beta.{min -> betaMin}
+                min(1) + betaMin(1)
+                """);
+        assertEquals("102", runProject(src, "app").text());
+    }
+
+    @Test
+    void requiresRename_renamedTypeImport_constructsAndReads() {
+        // A renamed TYPE import: local `Pt` resolves to geo/Point through the
+        // same remote-name FQN rule; construction + field access work.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point}
+                struct Point(x:Int, y:Int)
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point -> Pt}
+                Pt(7, 9).x
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
+    void exportsRename_isRejectedWithClearMessage() {
+        // Exports rename (public != internal name) is parked — needs a
+        // public->internal mapping in the export tables.
+        sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                sibarum.pontif.parser.ParseException.class,
+                () -> AltParser.parseModule("""
+                        module lib
+                        exports @.{inc -> increment}
+                        function inc(x:Int):Int -> x + 1
+                        """, "lib.ptf"));
+        assertTrue(ex.getMessage().contains("Exports rename"), () -> ex.getMessage());
     }
 }

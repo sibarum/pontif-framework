@@ -35,7 +35,8 @@ public final class ModuleImportCheck {
             throws CompileException {
         for (Map.Entry<String, IrModule> e : modules.entrySet()) {
             String module = e.getKey();
-            // local imported name → source module already seen (for ambiguity).
+            // local imported name → provider FQN (source/remote) already seen
+            // (for ambiguity).
             Map<String, String> seen = new LinkedHashMap<>();
             for (IrStmt stmt : e.getValue().statements()) {
                 if (!(stmt instanceof IrStmt.Requires r)) continue;
@@ -45,28 +46,38 @@ public final class ModuleImportCheck {
                             "module '" + module + "' requires unknown module '" + source + "'",
                             r.origin());
                 }
-                for (String name : r.names()) {
-                    boolean declared = table.functionOwners(name).contains(source)
-                            || table.typeOwners(name).contains(source);
+                for (IrStmt.RequireEntry entry : r.entries()) {
+                    // Declaration + export checks run against the REMOTE name —
+                    // the name as the source module knows it. A rename changes
+                    // only what the importer calls it, never what is visible.
+                    String remote = entry.remoteName();
+                    boolean declared = table.functionOwners(remote).contains(source)
+                            || table.typeOwners(remote).contains(source);
                     if (!declared) {
                         throw new CompileException(
-                                "module '" + source + "' declares no name '" + name
+                                "module '" + source + "' declares no name '" + remote
                                         + "' to import (required by '" + module + "')",
                                 r.origin());
                     }
-                    if (!table.isExported(source, name)) {
+                    if (!table.isExported(source, remote)) {
                         throw new CompileException(
-                                "module '" + source + "' does not export '" + name
+                                "module '" + source + "' does not export '" + remote
                                         + "' (no `exports` clause lists it; required by '"
                                         + module + "')",
                                 r.origin());
                     }
-                    String prior = seen.put(name, source);
-                    if (prior != null && !prior.equals(source)) {
+                    // The ambiguity check stays keyed on the LOCAL name — two
+                    // imports may bring the same remote name as long as their
+                    // local names differ; that's exactly what rename is for. A
+                    // local name bound twice to different providers (different
+                    // module OR different remote name) is ambiguous.
+                    String provider = ModuleSymbolTable.fqn(source, remote);
+                    String prior = seen.put(entry.localName(), provider);
+                    if (prior != null && !prior.equals(provider)) {
                         throw new CompileException(
-                                "module '" + module + "' imports '" + name
-                                        + "' from both '" + prior + "' and '" + source
-                                        + "' — ambiguous; qualify the call or drop one import",
+                                "module '" + module + "' imports '" + entry.localName()
+                                        + "' as both '" + prior + "' and '" + provider
+                                        + "' — ambiguous; rename one (`name -> alias`) or qualify the call",
                                 r.origin());
                     }
                 }

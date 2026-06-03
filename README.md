@@ -141,6 +141,8 @@ The pattern vocabulary, all composable:
 | `[Ternion(z, _, w)]` | `_` discards a slot — occupies it, binds nothing |
 | `(1, true)` / `[(Int, Bool)]` | tuple — anonymous positional aggregate (value / sort) |
 | `[(a, b)]` / `[(a, _, c)]` | tuple destructure — positional binders; `_` discards a slot |
+| `{a = 1, b = 2}` | dictionary — anonymous by-name aggregate |
+| `let d.{a, b -> bee}` | by-name decomposition — same `.{}` as `requires`/`exports`; `->` renames |
 
 - A literal field **binds nothing** — no accidental shadowing of an
   outer name you never wrote.

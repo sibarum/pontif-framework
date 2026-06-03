@@ -590,9 +590,24 @@ something false. Every rule below was derived by that filter.
   the door is "name it." The ugliness of positional `@._N` is the same signal in
   syntactic form. (This was briefly mis-scoped as "Slice 1.5 deferred"; it is not
   a tuple feature at all.)
-- **Slice 2 (parked):** dictionaries — anonymous `{a=1}` construction + `{a, c}`
-  / `{x=px}` by-name *projection* destructure (by-name reads are partial-honest;
-  reuse the existing brace by-name construction path).
+- **Slice 2 (LANDED 2026-06-03):** dictionaries + `.{}` named decomposition.
+  Dict literal `{a = 1, b = 2}` = anonymous by-name aggregate on the record
+  substrate (null typeName, same as S-expr `(record …)`; `IDENT =` lookahead
+  splits it from blocks). `.{}` unified as ONE payload with three consumers —
+  `requires` / `exports` / `let SOURCE.{…}` — exactly as designed on day 3
+  (imports/exports ARE destructuring). Inline rename `key -> alias` (`->` =
+  "becomes", the language's one arrow; LHS = name where it lives, RHS = name in
+  the receiving context; rejected: positional-zip rename, `as`, `=>`). FQNs
+  resolve via the REMOTE name (`requires math.{min -> minimum}` → `math/min`);
+  export/privacy checks run on the remote name; ambiguity is keyed on the local
+  name (rename is the collision fix). By-name reads are projections
+  (partial-honest); unknown key against a statically-known source = compile
+  error; positional keys/tuple sources excluded (destructure-only). NOT a value
+  — `.{}` always binds (projection-expression rejected: one syntax, one
+  semantic). Tests: `DictTest`, `ModuleSystemTest` rename cases.
+  **Parked from Slice 2:** exports rename (`exports @.{factorial -> fac}`,
+  public ≠ internal name) — needs a public→internal mapping in the export
+  tables; parser rejects it with a pointer.
 - **Slice 3 (parked):** make a present type name a real nominal narrowing
   (`satisfiesStructural` honors `recordTypeName`; today it's ignored — duck
   typing). Equality follows ("if it wouldn't match, it's not equal"). This is

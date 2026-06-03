@@ -32,8 +32,16 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
         return new Proof(functionName, proofTree, Origin.NONE);
     }
 
+    /** Same-name entries (no renames) — the common shorthand form. */
     static Requires requires(String targetModule, List<String> names) {
-        return new Requires(targetModule, names, Origin.NONE);
+        return new Requires(
+                targetModule,
+                names.stream().map(n -> new RequireEntry(n, n)).toList(),
+                Origin.NONE);
+    }
+
+    static Requires requiresEntries(String targetModule, List<RequireEntry> entries) {
+        return new Requires(targetModule, entries, Origin.NONE);
     }
 
     static Exports exports(List<String> names, boolean self) {
@@ -122,17 +130,42 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
     }
 
     /**
-     * Import declaration: {@code requires a.b.{name, name, …}} — pulls the named
-     * symbols from module {@code targetModule} (a dotted module name) into this
-     * module's scope. Consumed by the module loader/linker and the name
-     * resolver; inert when a single file is compiled on its own.
+     * One {@code .{…}} decomposition entry: {@code remoteName} is the symbol's
+     * name where it already lives (the source module), {@code localName} is its
+     * name in the receiving context. The shorthand form {@code min} is
+     * {@code (min, min)}; the rename form {@code min -> minimum} is
+     * {@code (min, minimum)} — the arrow reads "becomes", uniformly with match
+     * arms and function bodies.
      */
-    record Requires(String targetModule, List<String> names, Origin origin) implements IrStmt {
+    record RequireEntry(String remoteName, String localName) {
+        public RequireEntry {
+            if (remoteName == null || remoteName.isEmpty()) {
+                throw new IllegalArgumentException("RequireEntry remoteName must be non-empty");
+            }
+            if (localName == null || localName.isEmpty()) {
+                throw new IllegalArgumentException("RequireEntry localName must be non-empty");
+            }
+        }
+    }
+
+    /**
+     * Import declaration: {@code requires a.b.{name, name -> alias, …}} — pulls
+     * the named symbols from module {@code targetModule} (a dotted module name)
+     * into this module's scope, each optionally renamed. Consumed by the module
+     * loader/linker and the name resolver; inert when a single file is compiled
+     * on its own.
+     */
+    record Requires(String targetModule, List<RequireEntry> entries, Origin origin) implements IrStmt {
         public Requires {
             if (targetModule == null || targetModule.isEmpty()) {
                 throw new IllegalArgumentException("Requires targetModule must be non-empty");
             }
-            names = List.copyOf(names);
+            entries = List.copyOf(entries);
+        }
+
+        /** The local (receiving-context) names, in declaration order. */
+        public List<String> localNames() {
+            return entries.stream().map(RequireEntry::localName).toList();
         }
     }
 

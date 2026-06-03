@@ -69,10 +69,24 @@
 #    top-level function return, etc.):
 #         function foo():[Int:@>0]         # required, not [@>0]
 #
-# 7. MODULE LISTS USE `.{ ... }`.  Brackets are reserved for sorts:
+# 7. `.{ ... }` IS NAMED DECOMPOSITION — one payload, three consumers.
+#    Brackets are reserved for sorts; `.{}` reads "from X, take {these}".
+#    Imports, exports, and by-name value destructure are the SAME operation:
 #         requires math.{min, max, avg, floor}
 #         exports  @.{factorial, isEven, isOdd, sign}
-#    Reads as "from X, take {these}".
+#         let person.{name, age}               # binds name, age from person
+#    An entry renames inline with `->` ("becomes" — the same arrow as match
+#    arms and function bodies). LHS = the name where the symbol already
+#    lives; RHS = its name in the receiving context:
+#         requires math.{min -> minimum, max}
+#         let person.{name -> username, age}
+#    (Exports rename is parked — public!=internal naming needs an export-side
+#    mapping; the parser rejects it with a pointer.)
+#    By-name reads are PROJECTIONS: taking a subset is honest (unlike
+#    positional patterns, which must be arity-total — naming a key claims
+#    only "there is one"). An unknown key is a lie and is rejected when the
+#    source's sort is statically known. Tuples are excluded: positional
+#    components are destructure-only.
 #
 # 8. MATCH IS TOTAL.  Every match must cover every possible value of the
 #    scrutinee's sort — no undefined behavior.  The compiler proves the
@@ -308,6 +322,8 @@ function nested(p:Point):Int -> match p {
 #   Point{x=1, y=2}                    # by-name construction
 #   Point{y=2, x=1}                    # by-name, free order (canonicalized)
 #   (1, true)                          # tuple — anonymous positional aggregate (arity >= 2)
+#   {a = 1, b = true}                  # dictionary — anonymous by-name aggregate
+#   let d.{a, b -> bee}                # by-name decomposition: binds a, bee from d
 #
 # A positional `(...)` pattern is arity-total — it must account for every slot
 # (`_` discards one). Subset patterns like [Point(x)] are rejected (lying by

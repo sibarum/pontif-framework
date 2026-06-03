@@ -65,7 +65,7 @@ class AltParserIntegrationTest {
         sibarum.pontif.ir.IrStmt.Requires req =
                 (sibarum.pontif.ir.IrStmt.Requires) m.statements().get(0);
         assertEquals("math", req.targetModule());
-        assertEquals(java.util.List.of("min", "max", "avg", "floor"), req.names());
+        assertEquals(java.util.List.of("min", "max", "avg", "floor"), req.localNames());
         assertTrue(m.statements().get(1) instanceof sibarum.pontif.ir.IrStmt.Exports);
         sibarum.pontif.ir.IrStmt.Exports exp =
                 (sibarum.pontif.ir.IrStmt.Exports) m.statements().get(1);
