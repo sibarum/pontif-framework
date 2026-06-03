@@ -8,7 +8,7 @@
         <artifactId>pontif-framework</artifactId>
         <version>1.0-SNAPSHOT</version>
     </parent>
-    <artifactId>pontif-runtime</artifactId>
+    <artifactId>pontif-conservation</artifactId>
 
     <dependencies>
         <dependency>
@@ -18,22 +18,6 @@
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-ir</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-parser</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-receipts</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-conservation</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-defaults</artifactId>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

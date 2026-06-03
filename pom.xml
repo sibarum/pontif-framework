@@ -16,6 +16,7 @@
         <module>pontif-predicates</module>
         <module>pontif-defaults</module>
         <module>pontif-receipts</module>
+        <module>pontif-conservation</module>
         <module>pontif-parser</module>
         <module>pontif-runtime</module>
         <module>pontif-demo</module>
@@ -67,6 +68,11 @@
             <dependency>
                 <groupId>sibarum.pontif</groupId>
                 <artifactId>pontif-predicates</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.pontif</groupId>
+                <artifactId>pontif-conservation</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

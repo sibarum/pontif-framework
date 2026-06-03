@@ -632,6 +632,21 @@ something false. Every rule below was derived by that filter.
   - **Coercion dissolved as a feature**: the implicit half IS the promotion
     pass; the explicit bridge is decompose+construct (`let d.{x,y} Point(x,y)`).
 - **Parked also:** arrays (homogeneous positional), deep selectors `@(…)`.
+
+**Conservation receipts (docs/conservation-receipts.md) — Slice 1 LANDED.**
+The second ledger: dataflow provenance per function (`pontif-conservation`),
+drafted "in a similar fashion as the receipt graph" (call-instance renaming,
+branch-per-arm with guards, by-reference calls). Event taxonomy: consult /
+combine / emit (names provisional). OPAQUE = honest ignorance, fail-closed.
+Queries programmatic for now (lossless, verbatimBijection = reversibility
+witness, duplicated, branch quantifiers); reports → `*.conservation.txt`.
+**Sequenced:** (1) query/proof surface — designed AFTER the printed ledgers
+are reviewed; (2) callee-summary substitution (via-call flow becomes
+provable); (3) sorting (blocked on arrays); (4) cross-ledger propositions;
+(5) `~=` member-wise lift for aggregates (agreed design: claim-aware,
+Decimals.approxEqual at Decimal leaves, == elsewhere; ~= stays
+NON-overloadable — a user tolerance would be a forged receipt; delete the
+Ternion `==`-as-approx overload when it lands).
 - **Deferred:** dedicated S-expr `(tuple …)` sugar — alt syntax is canonical and
   the IR (records) is fully exercised; add if/when the reference surface needs it.
 
