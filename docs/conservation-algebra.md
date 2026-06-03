@@ -58,14 +58,16 @@ they **populate metadata onto other nodes** of the graph.
 | `FieldAccess` | path selection — decorates an edge with the projected path |
 | `SelfRef` | typing-level; outside the runtime ledger |
 
-**Unplaced (PROPOSAL, ruling needed):** `Lambda` as Construction (it
-constructs a closure; captured free variables are construction inputs) and
-`Apply` as Computation — resolved when the target lambda is known, otherwise
-the algebra's one genuinely **residual** case. OPAQUE thereby stops being a
-category and becomes a location: unresolved application/call, nothing else.
-(The v1 ledger marked nested construction, nested discrimination, and capture
-as OPAQUE — among the most traceable forms in the language. Vocabulary
-poverty, not ignorance.)
+**`Lambda` / `Apply` (RULED: skipped for now — a can of worms).** Both are
+**residual** in the current cut: a lambda or an application anywhere in a
+flow marks that flow untraceable, fail-closed, same as v1. The eventual
+placement (closure-as-construction-of-captures, known-target application as a
+resolved computation) is sketched in the history but deliberately not part of
+this algebra until first-class functions earn their slice. OPAQUE is thereby
+a location, not a category: lambdas, applications, unresolved calls — nothing
+else. (The v1 ledger also marked nested construction and nested
+discrimination as OPAQUE — among the most traceable forms in the language.
+That was vocabulary poverty, not ignorance, and the re-cut traces them.)
 
 # Combination, stratified
 
@@ -174,19 +176,17 @@ thresholds (rung names: ruling needed):
 - **`Lossless` (RULED):** reserved for the cross-ledger property (algebraic +
   conservation combined — last on the list); the shipping dataflow-only
   property is misnamed and will be renamed.
+- **`Lambda`/`Apply` (RULED):** skipped — residual, fail-closed, until
+  first-class functions earn their own slice.
 
 # Open rulings (red-pen targets)
 
-1. **`Lambda` / `Apply` placement** — proposal above (Construction /
-   Computation-with-residual); needs a ruling.
-2. **The humbler property's name** (`NothingDropped` / `FullyConsumed` /
+1. **The humbler property's name** (`NothingDropped` / `FullyConsumed` /
    `AllInputsFlow` / …) and the rung names of the threshold ladder.
-3. **Does measurement count as "use"?** Equivariance ("every output depends
+2. **Does measurement count as "use"?** Equivariance ("every output depends
    on every input") plausibly wants threshold 4 to count; conservation does
    not. Two different quantifiers over the same roles.
-4. **Capture/release depth for the re-cut**: trace through known-lambda
-   application, or keep capture-as-leaf initially.
-5. **Whether this method note belongs in `backward-language-design.md`** as
+3. **Whether this method note belongs in `backward-language-design.md`** as
    the circular generalization, or stays here as the worked instance.
 
 # See Also
