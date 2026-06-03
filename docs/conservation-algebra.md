@@ -32,32 +32,40 @@ compile, and any *future* IR variant breaks that switch until someone declares
 what it conserves. The theory audits the language; the language type-checks
 the theory. Backward theory design; circular language design.
 
-# The correspondence
+# The correspondence (RULED: three node kinds + metadata)
 
-One stance per sealed `IrExpr` variant. "Content-carrying" means the input
-content itself moves; "measurement" means content is collapsed to relational
-information (bits).
+The mirror is a **homomorphism, not an isomorphism**: every sealed form maps
+somewhere (the totality guarantee stands — the drafting switch stays
+exhaustive, no default), but forms with the same conservation effect share a
+node kind, and forms with *no* conservation effect are not nodes at all —
+they **populate metadata onto other nodes** of the graph.
 
-| IrExpr form | State | Conservation character |
+**The graph has exactly three node kinds:**
+
+| Node kind | IR forms | Conservation character |
 | --- | --- | --- |
-| `Lit` / `Dec` / `Bool` | **introduction** | a constant enters the flow; carries no input content |
-| `Var` | **reference** | identity flow of a binding; content-preserving |
-| `FieldAccess` | **projection** | path narrowing (`p` → `p.x`); content-preserving on the projected path |
-| `LetIn` | **binding** | names a flow; the sequence point; content-preserving |
-| `Record` | **construction** | fan-in of flows into named/positional slots — projection's inverse; content-preserving per slot |
-| `BinOp` | **combination** | stratified by the `Op` enum — see below |
-| `Match` | **discrimination** | a measurement selects a branch; per-branch flows |
-| `Call` | **composition** | flow crosses a function boundary; behavior = the callee's summary, by reference (no-duplicate-edges) |
-| `Lambda` | **capture** | free variables are packaged into a closure — *delayed* flow; a definite state, not ignorance |
-| `Apply` | **release** | captured flow is applied. Known target: traceable through the capture. Unknown target: the algebra's one genuinely residual case |
-| `SelfRef` | **(typing-level)** | the refinement subject; no runtime flow — outside the runtime ledger |
+| **Computation** | `BinOp`; **resolved** `Call` | content is operated on. Stratified by op class (below); a resolved call's behavior is the callee's summary, by reference (no-duplicate-edges) |
+| **Branch** | `Match`; **dispatch sites** (overloaded calls) | a measurement selects a continuation. Matchers and dispatches are the same act — discrimination — differing only in guard vocabulary: match guards are predicates, dispatch guards are *narrowings*. (Consistent with the match/dispatch distinction elsewhere: ordered-overlapping vs unordered-disjoint — but both discriminate.) |
+| **Construction** | `Record`; **function returns** | content is placed into slots. A return IS a construction site — the output (`r_0`, or `r_0.<slot>` per member) is constructed, even for scalars. Emission is not a separate concept; it is construction of the result |
 
-OPAQUE thereby stops being a category and becomes a *location*: at most,
-release-of-unknown. Honest ignorance survives, pinned to the one place the
-algebra cannot decide — never as a catch-all absorbing what the vocabulary
-forgot to name. (The v1 ledger marked nested construction, nested
-discrimination, and capture as OPAQUE. All three are among the most traceable
-forms in the language. That was vocabulary poverty, not ignorance.)
+**Metadata (not nodes — they don't affect conservation; they decorate):**
+
+| IR form | Decorates |
+| --- | --- |
+| `Lit` / `Dec` / `Bool` | a constant operand on a Computation/Construction node |
+| `Var` | naming — resolves to an edge between nodes |
+| `LetIn` | binding — names an edge; the sequence point |
+| `FieldAccess` | path selection — decorates an edge with the projected path |
+| `SelfRef` | typing-level; outside the runtime ledger |
+
+**Unplaced (PROPOSAL, ruling needed):** `Lambda` as Construction (it
+constructs a closure; captured free variables are construction inputs) and
+`Apply` as Computation — resolved when the target lambda is known, otherwise
+the algebra's one genuinely **residual** case. OPAQUE thereby stops being a
+category and becomes a location: unresolved application/call, nothing else.
+(The v1 ledger marked nested construction, nested discrimination, and capture
+as OPAQUE — among the most traceable forms in the language. Vocabulary
+poverty, not ignorance.)
 
 # Combination, stratified
 
@@ -102,9 +110,20 @@ query predicates — derived, never stored.
 
 # Properties, restated over the algebra
 
+**RULED: the name `Lossless` is reserved.** A category called "lossless" must
+cover ALL lossless cases — and true losslessness (the output determines the
+input) requires the **algebraic and conservation ledgers combined**: `x`
+emitted as `x + 5` is lossless *algebraically*, which the dataflow shape alone
+can't certify. That is the cross-ledger-propositions slice — deliberately last
+on the list. Until it exists, no dataflow-only property wears the name; the
+trivial all-verbatim case it could honestly cover is uninteresting. The
+shipping `std.conservation` property currently named `Lossless()` is therefore
+misnamed and gets renamed at the re-cut (candidates for the humbler
+"everything reaches an output" property: `NothingDropped`, `FullyConsumed`,
+`AllInputsFlow` — ruling needed).
+
 The role ladder stratifies "the content reached the output" into named
-thresholds (RULING NEEDED on which name attaches where — this dissolves the
-"Lossless over-claims" problem by making the choice explicit):
+thresholds (rung names: ruling needed):
 
 1. **flows-verbatim** — reference/projection/construction chain only.
 2. **flows-recoverable** — chain may include combinations, every step
@@ -114,8 +133,12 @@ thresholds (RULING NEEDED on which name attaches where — this dissolves the
 4. **measured-only** — one bit of relational information survives.
 5. **absent** — no role at all.
 
-- *Nothing-dropped* (née `Lossless`): every atom ≥ threshold 3, every branch.
+- *Nothing-dropped* (the property formerly misnamed `Lossless`): every atom
+  ≥ threshold 3, every branch.
 - *Content-conserved* (stronger candidate): every atom ≥ threshold 2.
+- **`Lossless` (reserved, cross-ledger)**: every atom recoverable from the
+  output — thresholds 1–2 certified by dataflow alone, threshold 3 cases
+  promoted when the algebraic ledger proves the combination invertible.
 - *NoDuplication*: verbatim-emission multiplicity ≤ 1 per atom.
 - *Intentional erasure* (`LosslessExcept`): declared atoms ≤ threshold 4;
   all others per the chosen lossless threshold. Stale-proof rule unchanged.
@@ -143,16 +166,25 @@ thresholds (RULING NEEDED on which name attaches where — this dissolves the
 5. Properties restated per the threshold ladder; multi-branch `Reversible`
    becomes a theorem application instead of a refusal.
 
+# Rulings so far
+
+- **Node kinds (RULED):** Computation (operations + resolved calls), Branch
+  (matchers + dispatches), Construction (constructors + function returns);
+  everything else is metadata on nodes/edges, not a node.
+- **`Lossless` (RULED):** reserved for the cross-ledger property (algebraic +
+  conservation combined — last on the list); the shipping dataflow-only
+  property is misnamed and will be renamed.
+
 # Open rulings (red-pen targets)
 
-1. **All state names** — including the original consult/combine/emit, which
-   may survive as the display names of derived views.
-2. **The lossless threshold**: which rung (≥3 influence vs ≥2 recoverable)
-   gets the headline name, and what the other is called.
+1. **`Lambda` / `Apply` placement** — proposal above (Construction /
+   Computation-with-residual); needs a ruling.
+2. **The humbler property's name** (`NothingDropped` / `FullyConsumed` /
+   `AllInputsFlow` / …) and the rung names of the threshold ladder.
 3. **Does measurement count as "use"?** Equivariance ("every output depends
    on every input") plausibly wants threshold 4 to count; conservation does
    not. Two different quantifiers over the same roles.
-4. **Capture/release depth for the next slice**: trace through known-lambda
+4. **Capture/release depth for the re-cut**: trace through known-lambda
    application, or keep capture-as-leaf initially.
 5. **Whether this method note belongs in `backward-language-design.md`** as
    the circular generalization, or stays here as the worked instance.
