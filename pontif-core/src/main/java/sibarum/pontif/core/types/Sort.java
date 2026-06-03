@@ -118,6 +118,19 @@ public record Sort(
             return name;
         }
         if (members != null) {
+            // Tuples (the "_tuple" sentinel) are anonymous positional
+            // aggregates — render them as `(A, B)` from their _0.._n members
+            // rather than `_tuple{_0: A, _1: B}`.
+            if ("_tuple".equals(name)) {
+                StringBuilder sb = new StringBuilder("(");
+                boolean first = true;
+                for (Sort member : members.values()) {
+                    if (!first) sb.append(", ");
+                    sb.append(member);
+                    first = false;
+                }
+                return sb.append(")").toString();
+            }
             StringBuilder sb = new StringBuilder(name).append("{");
             boolean first = true;
             for (Map.Entry<String, Sort> e : members.entrySet()) {

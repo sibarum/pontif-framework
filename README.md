@@ -138,10 +138,18 @@ The pattern vocabulary, all composable:
 | `[Ternion(a, b, c)]` | destructure — binds fields (positional renames allowed) |
 | `[Ternion(z, n:[@==0], w)]` | bind **and** narrow a field |
 | `[Ternion(z, 0, w)]` | positional literal — constrain the field, bind nothing |
-| `[Ternion(a)]` | partial — subset semantics; unlisted fields ignored |
+| `[Ternion(z, _, w)]` | `_` discards a slot — occupies it, binds nothing |
+| `(1, true)` / `[(Int, Bool)]` | tuple — anonymous positional aggregate (value / sort) |
+| `[(a, b)]` / `[(a, _, c)]` | tuple destructure — positional binders; `_` discards a slot |
 
 - A literal field **binds nothing** — no accidental shadowing of an
   outer name you never wrote.
+- A **positional** `(...)` pattern wears the constructor's clothes, so it
+  must account for **every** slot — a subset like `[Ternion(a)]` is
+  *lying by omission* and is rejected. Discard the slots you don't want
+  with `_` (`[Ternion(a, _, _)]`), or focus by name with a refinement
+  (`[Ternion:@.n==0]`), which makes no false completeness claim. The same
+  arity-total rule governs tuples.
 - **Destructuring `let`** works at both expression level and top level,
   and the pattern must be *provably irrefutable*: a bare destructure is
   total by construction; a narrowed pattern is accepted only when the

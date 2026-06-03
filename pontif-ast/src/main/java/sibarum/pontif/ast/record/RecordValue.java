@@ -60,9 +60,13 @@ public final class RecordValue {
 
     @Override
     public String toString() {
+        // Tuples (the "_tuple" sentinel) are anonymous positional aggregates —
+        // render `(1, true)` from their _0.._n members rather than
+        // `_tuple{_0: 1, _1: true}`.
+        boolean tuple = "_tuple".equals(typeName);
         StringBuilder sb = new StringBuilder();
-        if (typeName != null) sb.append(typeName);
-        sb.append("{");
+        if (typeName != null && !tuple) sb.append(typeName);
+        sb.append(tuple ? "(" : "{");
         boolean first = true;
         for (Map.Entry<String, Object> e : members.entrySet()) {
             if (!first) sb.append(", ");
@@ -70,9 +74,13 @@ public final class RecordValue {
             String rendered = v instanceof java.math.BigDecimal d
                     ? sibarum.pontif.core.Decimals.display(d)
                     : String.valueOf(v);
-            sb.append(e.getKey()).append(": ").append(rendered);
+            if (tuple) {
+                sb.append(rendered);
+            } else {
+                sb.append(e.getKey()).append(": ").append(rendered);
+            }
             first = false;
         }
-        return sb.append("}").toString();
+        return sb.append(tuple ? ")" : "}").toString();
     }
 }

@@ -45,14 +45,15 @@ public final class SortChecker {
      * use {@link IrSort.Function} (with explicit param + return shapes),
      * not a placeholder Named sort.
      *
-     * <p>{@code "_"} and {@code "_record"} are internal sentinels produced
-     * by parser desugars (match-destructure scrutinee placeholder,
-     * anonymous-record inference fallback). They aren't user-typable but
+     * <p>{@code "_"}, {@code "_record"}, and {@code "_tuple"} are internal
+     * sentinels produced by parser desugars (match-destructure scrutinee
+     * placeholder, anonymous by-name record inference fallback, and anonymous
+     * positional aggregate / tuple, respectively). They aren't user-typable but
      * leak into the IR and must validate.
      */
     private static final Set<String> PRIMITIVE_SORT_NAMES = Set.of(
             "Int", "Bool", "Decimal",
-            "_", "_record");
+            "_", "_record", "_tuple");
 
     private SortChecker() {}
 

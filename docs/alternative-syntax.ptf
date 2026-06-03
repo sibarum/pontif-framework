@@ -298,11 +298,22 @@ function nested(p:Point):Int -> match p {
 #   [Point(x:[Int:@>0], y)]            # mixed: constrain x, bind y
 #   [Function(Int, Int):Int]           # function sort, anonymous params
 #   [Function(x:Int):[Int:x+1]]        # function sort, named (dependent)
+#   [(Int, Bool)]                      # tuple sort — anonymous positional aggregate
+#   [([Int:@>0], Bool)]                # tuple with a refined component
+#   [(a, b)]                           # tuple destructure (binds a, b)
+#   [(a, _, c)]                        # tuple destructure with a `_` discard
 #
 # Value-level (struct construction) — NOT in brackets:
 #   Point(1, 2)                        # positional construction
 #   Point{x=1, y=2}                    # by-name construction
 #   Point{y=2, x=1}                    # by-name, free order (canonicalized)
+#   (1, true)                          # tuple — anonymous positional aggregate (arity >= 2)
+#
+# A positional `(...)` pattern is arity-total — it must account for every slot
+# (`_` discards one). Subset patterns like [Point(x)] are rejected (lying by
+# omission); focus on one field by name with a refinement [Point:@.x>0] instead.
+# Tuple components are destructure-only: no value-level `t._0` (only `@._0`
+# inside a refinement predicate).
 #
 # Block expression — pure delimiter, useful for multi-let bodies:
 #   { let a = 1 let b = 2 a + b }      # evaluates to 3

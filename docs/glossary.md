@@ -20,6 +20,22 @@ allowed in sort position — narrows and predicates stay exact; the proof layer
 never forgives. Motivated by `t * t.inv() == one` failing under exact equality
 with a 34-nines rounding artifact.
 
+**aggregate** — The single substrate behind structs, tuples, and dictionaries:
+an ordered `name → value` map (`RecordValue` / `IrSort.Structural`). Two
+orthogonal knobs distinguish the surface forms — **bracket = access face**
+(positional `( )` vs by-name `{ }`) and **type-name = nominal toggle**:
+
+|            | positional `( )`   | by-name `{ }`        |
+| ---------- | ------------------ | -------------------- |
+| anonymous  | tuple `(1, 2)`     | dictionary `{a=1}`   |
+| named      | `Point(1, 2)`      | `Point{x=1}`         |
+
+A named sort claims "this **is** a `Point`"; an anonymous sort claims only its
+shape. Tuples/dictionaries are the anonymous cells; structs are the same cells
+with the name (and behavior) turned on. Tuples are stored with positional keys
+`_0 .. _n` under the reserved `_tuple` sentinel (the positional sibling of the
+`_record` sentinel).
+
 **back-reference** — In a receipt-graph, a recursive call points back to the
 same node rather than re-expanding. The no-duplicate-edges rule turns
 well-foundedness into a graph property and brings the postcondition along
@@ -47,6 +63,16 @@ declared only in the module owning `Trait` or `Type`, never a third module
 owning neither. Borrowed from Rust; closes the type-piracy hole Pontif's global
 trait registry would otherwise open under multi-dispatch. Enforced at link time
 (`CoherenceCheck`) over fully-qualified type names. See **module**.
+
+**discard (`_`)** — In a positional pattern, `_` occupies a slot and binds
+nothing: `[Point(a, _)]`, `[(a, _, c)]`. It is what keeps a positional pattern
+*arity-total* (see **positional totality**) while honestly declining a
+component — more honest than naming an unused binder. Generalizes the `[_]`
+default-arm marker from the whole value to one slot.
+
+**dictionary** — The anonymous by-name **aggregate**: `{a=1, b=2}` — a struct
+with the type name (and behavior) turned off. *(Planned — Slice 2; the named
+form `Point{x=1}` already exists as by-name construction.)*
 
 **dispatch unification** — The planned effort (`docs/dispatch-unification.md`)
 to put every dispatched call on the **one shared resolution engine**
@@ -99,6 +125,15 @@ Used at every level — params, refinements, struct fields, function returns.
 Chosen over "has type" / "is of sort" because it's descriptive and reads
 left-to-right with the operator.
 
+**no-lie law** — Pontif's overriding design constraint: the language is never
+allowed to assert something false. The grain of the substrate is followed
+(leniency is welcome where it's honest), *except* where leniency would let the
+system lie — there honesty wins. The sharp edge of information conservation
+(a lie fabricates information). Design procedure: is the substrate lenient
+here? then, does that leniency lie? — lenient+honest ⇒ allow, lenient+dishonest
+⇒ fence. It *derives* rules rather than choosing them (e.g. **positional
+totality**, the named-vs-anonymous matching split).
+
 **notary** — Pontif's built-in receipt-graph verifier. Three independent
 verifications: (1) a graph exists, (2) a receipt-graph's skeleton
 matches what the drafter produces from the same source, (3) a
@@ -116,6 +151,15 @@ produce receipts. Pontif won't audit it; if it has a bug, expect runtime
 errors. Examples: Z3, custom solvers, AI provers, hand-written receipts.
 From Pontif's perspective the name is precise, not metaphorical — oracles
 are opaque sources of trusted-by-fiat results.
+
+**positional totality** — A positional `( )` pattern must account for every
+slot of what it destructures — a subset like `[Ternion(a)]` (3-field struct) or
+`[(a, b)]` on a 3-tuple is *lying by omission* and is rejected. The constructor
+wouldn't let you omit, and the pattern wears the constructor's clothes. Discard
+unwanted slots with `_` (see **discard**) or focus by name with a refinement
+`[T:@.field …]`, which makes no false completeness claim. This is
+no-erase-no-duplicate (the conservation rule) made syntactic — derived by the
+**no-lie law**, not chosen.
 
 **proof** — A hand-authored, in-source discharge for a declared return
 refinement the built-in engine can't prove on its own:
@@ -177,6 +221,17 @@ when the value's concrete type satisfies the trait. (This redirect is slated to
 collapse into ordinary mechanism-2 receiver-sort resolution under **dispatch
 unification**, Phase 3.) See
 `docs/traits.md` for the full design.
+
+**tuple** — The anonymous positional **aggregate**: value `(1, true)`, sort
+`[(Int, Bool)]`, destructure `[(a, b)]` / `[(a, _, c)]`. A struct with the type
+name (and behavior) turned off; stored with positional keys `_0 .. _n` under the
+`_tuple` sentinel, so it rides the record substrate with no dedicated node.
+Components are **destructure-only** — there is no value-level `t._0` (only `@._0`
+inside a sort refinement). Arity ≥ 2. Positional patterns obey **positional
+totality**. A tuple carries only *independent* per-component constraints
+(`[([Int:@>0], Bool)]`); a constraint that *relates* components (`_0 > _1`) is
+rejected by design — a relationship is a named concept (a struct, fields by
+name: `[Interval:@.lo <= @.hi]`), not anonymous data.
 
 **`Type`** — Pontif's kind name for the sort-of-sorts. A trait sort
 has kind `Type`. The syntactic form `Type{methodName:FunctionSort, ...}`

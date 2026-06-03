@@ -49,6 +49,15 @@ import java.util.Set;
  */
 public final class AltParser {
 
+    /**
+     * Reserved sentinel name for anonymous positional aggregates (tuples) —
+     * the positional sibling of the {@code "_record"} sentinel used for
+     * anonymous by-name records. Tuple members are keyed positionally
+     * ({@code _0 .. _n}); the name marks the aggregate as a tuple for display
+     * and keeps tuples from being mistaken for a declared struct.
+     */
+    static final String TUPLE_SENTINEL = "_tuple";
+
     /** Keywords are recognized by text at parse time, not by token kind. */
     private static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
@@ -140,6 +149,17 @@ public final class AltParser {
      */
     private final Map<IrSort, Map<String, String>> destructureRenames =
             new java.util.IdentityHashMap<>();
+
+    /**
+     * True while parsing a destructure/match <em>pattern</em> (as opposed to a
+     * type annotation). Tuples — unlike structs — have no declared type to
+     * disambiguate sort-elements from binder-elements, so the tuple-sort parser
+     * ({@link #parseTupleSortBody}) consults this flag: when set, {@code (a, b)}
+     * elements are positional binders / {@code _} discards; when clear, they are
+     * component sorts. Set around the pattern-parse calls in {@link #parseMatch},
+     * {@link #parseDestructuringLetExpr}, and {@link #parseDestructuringLetTop}.
+     */
+    private boolean parsingTuplePattern = false;
 
     /**
      * Top-level let-bindings declared so far, keyed by their (possibly dotted)
@@ -742,11 +762,15 @@ public final class AltParser {
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     memberSorts.put(e.getKey(), inferMaximalSort(e.getValue()));
                 }
+                // A tuple literal carries the "_tuple" sentinel — preserve it
+                // so the inferred sort stays a tuple (positional anonymous
+                // aggregate) rather than collapsing to "_record" or matching a
+                // declared struct by field set.
                 String matchedName = findStructByFieldSet(r.members().keySet());
-                yield new IrSort.Structural(
-                        matchedName != null ? matchedName : "_record",
-                        memberSorts,
-                        r.origin());
+                String name = TUPLE_SENTINEL.equals(r.typeName())
+                        ? TUPLE_SENTINEL
+                        : matchedName != null ? matchedName : "_record";
+                yield new IrSort.Structural(name, memberSorts, r.origin());
             }
             case IrExpr.FieldAccess fa -> {
                 IrSort baseSort = inferMaximalSort(fa.base());
@@ -1010,6 +1034,16 @@ public final class AltParser {
         AltToken open = expect(AltToken.Kind.LBRACKET);
         AltToken first = peek();
 
+        // Tuple sort: `[(S0, S1, ...)]` — an anonymous positional aggregate.
+        // A leading `(` here is unambiguous (the contextual `[pred]` form below
+        // never starts with `(`). Lowers onto the record substrate as a
+        // structural sort named "_tuple" with positional keys _0.._n.
+        if (first.kind() == AltToken.Kind.LPAREN) {
+            IrSort tuple = parseTupleSortBody(open);
+            expect(AltToken.Kind.RBRACKET);
+            return tuple;
+        }
+
         // Contextual form: `[pred]` — no base, take from contextualBaseStack
         // (pushed by parseMatch when the scrutinee has an inferable sort).
         if (first.kind() != AltToken.Kind.IDENT
@@ -1093,6 +1127,110 @@ public final class AltParser {
 
         // Bare name — `Int`, `Bool`, etc.
         return new IrSort.Named(baseTok.text(), baseTok.origin());
+    }
+
+    /**
+     * Parses a tuple sort/pattern body {@code (E0, E1, ...)} — the enclosing
+     * {@code [} is already consumed (passed as {@code open}); the {@code (} is
+     * the current token. In a <b>type</b> position each element is a sort; in a
+     * destructure/match <b>pattern</b> (signalled by {@link #parsingTuplePattern})
+     * each element is a positional binder ident or {@code _} discard. Either
+     * way the result is a structural sort named {@code "_tuple"} with positional
+     * keys {@code _0 .. _n}. For patterns, binder names go into
+     * {@link #destructureRenames} and {@code _} discards into
+     * {@link #literalConstrainedFields} (the "occupies the slot, binds nothing"
+     * set, verdict C), and member sorts are left as the {@code "_"} placeholder
+     * to be resolved from the scrutinee. Arity must be >= 2.
+     */
+    /**
+     * Parses a match/destructure pattern — a sort, but with
+     * {@link #parsingTuplePattern} set so a tuple {@code (a, b)} reads its
+     * elements as positional binders / {@code _} discards rather than as
+     * component sorts. Restores the flag afterwards (patterns don't nest a
+     * tuple-pattern inside a component in Slice 1).
+     */
+    private IrSort parsePattern() throws ParseException {
+        boolean prev = parsingTuplePattern;
+        parsingTuplePattern = true;
+        try {
+            return parseSort();
+        } finally {
+            parsingTuplePattern = prev;
+        }
+    }
+
+    /**
+     * Verdict B for tuples: a tuple destructure pattern must match the
+     * scrutinee's arity exactly — a pattern with fewer slots would silently
+     * drop components (lying by omission), which the structural matcher's
+     * width-subtyping would otherwise allow. Checked only when the scrutinee's
+     * tuple arity is statically known; an unknown scrutinee sort can't be
+     * checked here and falls to the runtime matcher.
+     */
+    private void checkTupleArity(IrExpr scrutinee, IrSort pattern) throws ParseException {
+        if (!(pattern instanceof IrSort.Structural sp) || !TUPLE_SENTINEL.equals(sp.name())) {
+            return;
+        }
+        if (inferMaximalSort(scrutinee) instanceof IrSort.Structural ss
+                && TUPLE_SENTINEL.equals(ss.name())
+                && ss.members().size() != sp.members().size()) {
+            throw new ParseException(
+                    "Tuple pattern has " + sp.members().size() + " slot(s) but the value is a "
+                            + ss.members().size() + "-tuple — a positional pattern must match every "
+                            + "slot; use '_' to discard the unwanted ones (e.g. [(a, _, c)]).",
+                    sp.origin());
+        }
+    }
+
+    private IrSort parseTupleSortBody(AltToken open) throws ParseException {
+        expect(AltToken.Kind.LPAREN);
+        Map<String, IrSort> members = new LinkedHashMap<>();
+        java.util.Set<String> discards = new java.util.LinkedHashSet<>();
+        Map<String, String> renames = new LinkedHashMap<>();
+        int index = 0;
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RPAREN) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            String key = "_" + index;
+            if (parsingTuplePattern) {
+                AltToken binder = expect(AltToken.Kind.IDENT);
+                members.put(key, IrSort.named("_"));  // sort resolved from scrutinee
+                if (binder.text().equals("_")) {
+                    discards.add(key);                // verdict C: explicit discard
+                } else {
+                    renames.put(key, binder.text());
+                }
+            } else {
+                members.put(key, parseSort());        // type position: a real sort
+            }
+            index++;
+            first = false;
+        }
+        expect(AltToken.Kind.RPAREN);
+        if (peek().kind() == AltToken.Kind.COLON) {
+            // A tuple takes no whole-aggregate predicate — by design, not by
+            // omission. An independent per-component constraint belongs in
+            // place ([([Int:@>0], Bool)]). A constraint that *relates* two
+            // components is a relationship, and a relationship is a named
+            // concept: that's a struct, with fields referred to by name
+            // ([Interval:@.lo <= @.hi]). Tuples are for unrelated data.
+            throw new ParseException(
+                    "A tuple sort takes no whole-aggregate predicate. Constrain a component "
+                            + "in place — [([Int:@>0], Bool)]. If the components are related by an "
+                            + "invariant, that relationship is a named concept — use a struct and "
+                            + "refer to fields by name, e.g. [Interval:@.lo <= @.hi].",
+                    peek().origin());
+        }
+        if (members.size() < 2) {
+            throw new ParseException(
+                    "A tuple needs at least two components; got " + members.size()
+                            + " — use the value directly rather than a 1-tuple",
+                    open.origin());
+        }
+        IrSort.Structural tuple = new IrSort.Structural(TUPLE_SENTINEL, members, open.origin());
+        if (!discards.isEmpty()) literalConstrainedFields.put(tuple, discards);
+        if (!renames.isEmpty()) destructureRenames.put(tuple, renames);
+        return tuple;
     }
 
     /**
@@ -1242,6 +1380,35 @@ public final class AltParser {
                 continue;
             }
             AltToken fieldName = expect(AltToken.Kind.IDENT);
+            if (fieldName.text().equals("_")) {
+                // Verdict C: positional discard — occupies the slot (so the
+                // pattern stays arity-total) but binds nothing. Recorded in
+                // literalFieldsOut, the "constrain/occupy but don't bind" set
+                // the destructure desugar skips.
+                IrSort.Structural decl = declaredStructs.get(typeName);
+                if (decl == null) {
+                    throw new ParseException(
+                            "A '_' discard inside [" + typeName + "(...)] requires '"
+                                    + typeName + "' to be declared before this point",
+                            fieldName.origin());
+                }
+                List<String> order = new ArrayList<>(decl.members().keySet());
+                if (clauseIndex >= order.size()) {
+                    throw new ParseException(
+                            "Too many fields for struct '" + typeName + "' ("
+                                    + order.size() + " declared)", fieldName.origin());
+                }
+                String posField = order.get(clauseIndex);
+                if (members.containsKey(posField)) {
+                    throw new ParseException(
+                            "Field '" + posField + "' is given both by name and by position in ["
+                                    + typeName + "(...)]", fieldName.origin());
+                }
+                members.put(posField, decl.members().get(posField));
+                literalFieldsOut.add(posField);
+                first = false;
+                continue;
+            }
             IrSort fieldSort;
             if (peek().kind() == AltToken.Kind.COLON) {
                 consume();  // COLON
@@ -1282,6 +1449,21 @@ public final class AltParser {
             }
             members.put(fieldName.text(), fieldSort);
             first = false;
+        }
+        // Verdict B: a positional `(...)` pattern wears the constructor's
+        // clothes, so it must account for every field — a subset like
+        // [Ternion(a)] is lying by omission. Enforced in pattern context only;
+        // a partial field-sort *type* (e.g. [Point(x:[Int:@>0])]) is honest
+        // narrowing, not a pattern, so it's left alone.
+        IrSort.Structural decl = declaredStructs.get(typeName);
+        if (parsingTuplePattern && decl != null && members.size() < decl.members().size()) {
+            throw new ParseException(
+                    "Pattern [" + typeName + "(...)] lists " + members.size() + " of "
+                            + decl.members().size() + " fields — a positional pattern must account "
+                            + "for every field. Use '_' to discard the unwanted ones "
+                            + "(e.g. [" + typeName + "(a, _, _)]) or focus by name with a refinement "
+                            + "[" + typeName + ":@.field …].",
+                    typeOrigin);
         }
         return members;
     }
@@ -1382,6 +1564,7 @@ public final class AltParser {
         if (typeName == null
                 || typeName.equals("_")
                 || typeName.equals("_record")
+                || typeName.equals(TUPLE_SENTINEL)
                 || typeName.equals("Int")
                 || typeName.equals("Bool")
                 || typeName.equals("Decimal")
@@ -1408,6 +1591,15 @@ public final class AltParser {
         return pos > 0 && tokens.get(pos - 1).line() == t.line();
     }
 
+    /** True for a tuple positional key — {@code _0}, {@code _1}, … (underscore + digits). */
+    private static boolean isPositionalKey(String name) {
+        if (name.length() < 2 || name.charAt(0) != '_') return false;
+        for (int i = 1; i < name.length(); i++) {
+            if (!Character.isDigit(name.charAt(i))) return false;
+        }
+        return true;
+    }
+
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
         IrExpr expr = parsePrimary();
         // Postfix: .IDENT (field access), (args) (positional call or struct
@@ -1417,6 +1609,19 @@ public final class AltParser {
             if (t.kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
                 consume();  // DOT
                 AltToken name = consume();
+                // Destructure-only: a positional key (_0, _1, …) can't be read
+                // off a value expression. The only positional projection allowed
+                // is `@._N` inside a sort's refinement predicate (base is the
+                // SelfRef `@`); a tuple component is otherwise reached only by
+                // destructuring. This keeps tuples honest — no silent component
+                // extraction that bypasses the arity-total pattern.
+                if (isPositionalKey(name.text()) && !(expr instanceof IrExpr.SelfRef)) {
+                    throw new ParseException(
+                            "Tuple components are destructure-only — '." + name.text()
+                                    + "' can't be read off a value; bind it with "
+                                    + "`let [(...)] = …` or a match pattern.",
+                            t.origin());
+                }
                 expr = new IrExpr.FieldAccess(expr, name.text(), t.origin());
             } else if (t.kind() == AltToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
                 AltToken open = consume();
@@ -1484,7 +1689,8 @@ public final class AltParser {
     private String methodNameForReceiver(IrExpr receiver, String field) {
         IrSort receiverSort = inferMaximalSort(receiver);
         String typeName = baseSortName(receiverSort);
-        if (typeName == null || typeName.equals("_") || typeName.equals("_record")) {
+        if (typeName == null || typeName.equals("_") || typeName.equals("_record")
+                || typeName.equals(TUPLE_SENTINEL)) {
             return null;
         }
         String methodName = typeName + "." + field;
@@ -1672,9 +1878,10 @@ public final class AltParser {
      * compile fails, directing the user to a real match.
      */
     private IrExpr parseDestructuringLetExpr(AltToken start) throws ParseException {
-        IrSort pattern = parseSort();
+        IrSort pattern = parsePattern();
         expect(AltToken.Kind.EQUALS);
         IrExpr value = parseExpr();
+        checkTupleArity(value, pattern);
         IrExpr body = parseExpr();
         return desugarStructuralDestructure(
                 value,
@@ -1692,7 +1899,7 @@ public final class AltParser {
      * exactly like plain lets).
      */
     private IrStmt parseDestructuringLetTop(AltToken start) throws ParseException {
-        IrSort pattern = parseSort();
+        IrSort pattern = parsePattern();
         if (!(pattern instanceof IrSort.Structural sp)) {
             throw new ParseException(
                     "A top-level destructuring let needs a struct pattern — "
@@ -1701,6 +1908,7 @@ public final class AltParser {
         }
         expect(AltToken.Kind.EQUALS);
         IrExpr value = parseExpr();
+        checkTupleArity(value, sp);
         String synthetic = "__destructure$" + (syntheticCounter++);
         IrSort valueSort = inferMaximalSort(value);
         declaredTopLevelLets.put(synthetic, valueSort);
@@ -1815,7 +2023,8 @@ public final class AltParser {
                             new IrSort.Named("__default_placeholder", underscore.origin()),
                             result));
                 } else {
-                    IrSort pattern = parseSort();
+                    IrSort pattern = parsePattern();
+                    checkTupleArity(scrutinee, pattern);
                     expect(AltToken.Kind.ARROW);
                     IrExpr result = parseExpr();
                     branches.add(new IrExpr.MatchBranch(pattern, result));
@@ -2097,6 +2306,21 @@ public final class AltParser {
         return args;
     }
 
+    /**
+     * Builds a tuple literal: a {@link IrExpr.Record} carrying the reserved
+     * {@code "_tuple"} sentinel name and positional keys {@code _0 .. _n}.
+     * Tuples are anonymous positional aggregates — the positional sibling of
+     * the {@code "_record"} sentinel — so they ride the existing record
+     * substrate with no dedicated IR node.
+     */
+    private IrExpr buildTupleLiteral(List<IrExpr> elems, Origin origin) {
+        Map<String, IrExpr> members = new LinkedHashMap<>();
+        for (int i = 0; i < elems.size(); i++) {
+            members.put("_" + i, elems.get(i));
+        }
+        return new IrExpr.Record(TUPLE_SENTINEL, members, origin);
+    }
+
     private IrExpr parsePrimary() throws ParseException {
         AltToken t = peek();
         return switch (t.kind()) {
@@ -2138,8 +2362,24 @@ public final class AltParser {
                 yield new IrExpr.Var(nameTok.text(), nameTok.origin());
             }
             case LPAREN -> {
-                consume();
+                AltToken lp = consume();
                 IrExpr inner = parseExpr();
+                if (peek().kind() == AltToken.Kind.COMMA) {
+                    // Tuple literal: (e0, e1, ...) — an anonymous positional
+                    // aggregate. Lowers onto the record substrate as a Record
+                    // with the reserved "_tuple" sentinel name and positional
+                    // keys _0.._n (the sibling of the "_record" sentinel). No
+                    // new IR node: everything downstream consumes it as a
+                    // structural record. Arity >= 2; `(x)` stays grouping.
+                    List<IrExpr> elems = new ArrayList<>();
+                    elems.add(inner);
+                    while (peek().kind() == AltToken.Kind.COMMA) {
+                        consume();
+                        elems.add(parseExpr());
+                    }
+                    expect(AltToken.Kind.RPAREN);
+                    yield buildTupleLiteral(elems, lp.origin());
+                }
                 expect(AltToken.Kind.RPAREN);
                 yield inner;
             }

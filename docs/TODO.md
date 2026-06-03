@@ -537,11 +537,70 @@ Wanted forms:
   namespaces (Capital vs lowercase, as all examples assume)? If yes, a leading
   identifier is classified *lexically* before any scope lookup.
 
-**"Scenario 2" restriction (no tuples yet).** A bare free-name match predicate
+**"Scenario 2" restriction.** A bare free-name match predicate
 `match x { [y>0] -> … }` has no referent without tuples/deconstruction to
-introduce `y` — it's a **hard error** until tuples land (confirmed rejected by
-test). Names in match arms come only from constructor deconstruction;
-return-refinement names come only from the parameter list.
+introduce `y` — it's a **hard error** (confirmed rejected by test). Names in
+match arms come only from constructor deconstruction; return-refinement names
+come only from the parameter list. *(Tuples have now landed — see below — so the
+"until tuples land" prerequisite is met; enabling the bare free-name form on top
+of tuple deconstruction is a separate follow-on, still not implemented.)*
+
+**Aggregates: the grid (Slice 1 — tuples — LANDED 2026-06-02).** Structs,
+tuples, and dictionaries are one substrate (an ordered `name → value` map).
+Two orthogonal knobs: **bracket = access face** (positional `( )` vs by-name
+`{ }`), **type-name = nominal toggle**.
+
+|           | positional `( )` | by-name `{ }`      |
+| --------- | ---------------- | ------------------ |
+| anonymous | tuple `(1,2)`    | dictionary `{a=1}` |
+| named     | `Point(1,2)`     | `Point{x=1}`       |
+
+Governing law: **Pontif isn't allowed to lie** (sharp edge of conservation) —
+follow the substrate's lenient grain *except* where leniency would assert
+something false. Every rule below was derived by that filter.
+
+- **Slice 1 (done):** tuples = anonymous positional aggregate on the record
+  substrate (sentinel `_tuple`, positional keys `_0.._n`; no new IR/runtime
+  node). Literal `(1, true)`, sort `[(Int, Bool)]` (+ per-component refinement),
+  destructure `[(a, b)]` / `[(a, _, c)]`. Verdict **B** positional totality and
+  verdict **C** the `_` slot discard apply uniformly to structs *and* tuples
+  (partial positional patterns like `[Ternion(a)]` are now rejected; was the
+  README:141 "subset" lie). Components are destructure-only (no value `t._0`).
+  Tests in `pontif-runtime` `TupleTest`. *(Note: the dedicated `IrSort.Tuple`
+  variant the early plan floated was dropped — tuples are an anonymous
+  `IrSort.Structural`, the `_record` sibling, reusing all satisfaction /
+  narrowing / dispatch / runtime machinery unchanged.)*
+- **No `TupleDischarge` needed:** tuple components route through the existing
+  per-member `Refinements` path by their own component sort — Int via the
+  integer path, Decimal via the dense path — exactly as struct fields do.
+  *(Finding: return-position component refinements are not compile-enforced for
+  ANY aggregate today — `function mk():[S(x:[Int:@>0])] -> S(-1)` is accepted for
+  structs too. Tuples mirror structs; closing that is the aggregate-wide
+  "make refinements bite" work below, not a tuple concern.)*
+- **Cross-component invariants — a BOUNDARY, not a missing feature.** A
+  whole-tuple predicate `[(Int, Int):@._0 > @._1]` is rejected by design. A
+  per-component constraint refines one datum's own property (still unrelated
+  data); a constraint *relating* two components binds them into a single concept
+  — and a concept held together by an invariant has earned a name. So a
+  relationship belongs on a **named** struct, fields referred to by name
+  (`[Interval:@.lo <= @.hi]`), never on an anonymous tuple. The substrate
+  enforces this consistently: cross-component is unreachable at the whole-tuple
+  level (no combined structural+predicate sort) *and* at the per-component level
+  (a component's `@` is that component, not the tuple) — one wall, one door, and
+  the door is "name it." The ugliness of positional `@._N` is the same signal in
+  syntactic form. (This was briefly mis-scoped as "Slice 1.5 deferred"; it is not
+  a tuple feature at all.)
+- **Slice 2 (parked):** dictionaries — anonymous `{a=1}` construction + `{a, c}`
+  / `{x=px}` by-name *projection* destructure (by-name reads are partial-honest;
+  reuse the existing brace by-name construction path).
+- **Slice 3 (parked):** make a present type name a real nominal narrowing
+  (`satisfiesStructural` honors `recordTypeName`; today it's ignored — duck
+  typing). Equality follows ("if it wouldn't match, it's not equal"). This is
+  where **coercion** (the honest escape hatch) plugs in. Tuples don't need it
+  (positional `_N` keys never collide with named fields).
+- **Parked also:** arrays (homogeneous positional), deep selectors `@(…)`.
+- **Deferred:** dedicated S-expr `(tuple …)` sugar — alt syntax is canonical and
+  the IR (records) is fully exercised; add if/when the reference surface needs it.
 
 **Confirmed known gaps (now test-pinned):** `!` boolean negation parses but
 can't lower (no `Not` op, F2); inline alt lambda `(x:Int)->…` not parseable
