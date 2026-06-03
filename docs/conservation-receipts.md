@@ -31,6 +31,26 @@ This is especially true for algorithms transforming immutable data structures, w
 2. It doesn't affect from where a function may be called or what it may return.
 3. Install any logic into the runtime.
 
+# Querying Conservation Receipts
+
+NOTE: WIP, currently over-engineered
+
+**Refined Wildcard:** An automated destructuring macro that recursively walks the struct graph (with the no duplicate edges rule)
+and collects every matching struct/attribute into a named array.
+
+**Select Inputs:** Refined wildcards over the argument tuple
+
+**Select Output:** Refined wildcards over the return
+
+**Select Classifications:** Verbatim, derived, branch/flow, untouched, translated, opaque
+
+**Filter Expression:** A boolean expression of refined wildcard references and comparisons.
+
+**Full Query:** At least one select of inputs, outputs, and/or classifications with a modifier (AND/OR)
+with an optional filter expression.
+
+**Assertion:** A simple true or false, or a branch merge (all branches, zero branches, at least one branch)
+
 # See Also
 
 - provenance semirings
@@ -73,7 +93,32 @@ translate(s_0: Source) -> r_0: Target
 flows — the compile gate, demonstrated. `swap((a, b) -> (b, a))` passes
 `verbatimBijection`: reversibility witnessed without arrays.
 
-**Next slices:** the query/proof surface (designed from the printed data);
-callee-summary substitution (so `via-call` flow becomes provable); sorting
-(needs arrays); cross-ledger propositions (conservation facts consumed by
-algebraic proofs).
+**Slice 2 landed: the assertion surface and the real gate.** Zero new syntax:
+properties ship as values in the builtin module **`std.conservation`**
+(`Lossless()`, `Reversible()`, `NoDuplication()`, `LosslessExcept(s.email)` —
+names provisional), attached with the existing `proof f = …` statement. One
+proof statement, two ledgers — the tree's head vocabulary picks which
+(`Leaf`/`Split` → the algebraic notary, conservation heads → this ledger), so
+"conservation facts as propositions" is literal. A failing assertion is a
+compile error whose body includes the printed ledger node — **the error IS the
+receipt**. Assertions are re-evaluated against the freshly-drafted ledger on
+every compile: `LosslessExcept(s.email)` makes the lossy translation compile
+(the drop is declared) and FAILS once the drop disappears — stale-proof
+protection, exactly as promised above. Fail-closed throughout: opaque or
+call-mediated flow never certifies, but programs with no conservation proofs
+pay nothing.
+
+```
+requires std.conservation.{Lossless}
+...
+proof translate = Lossless()      # compile error until every Source attribute flows
+```
+
+The selector/filter property-DEFINITION language remains deliberately deferred
+until real property definitions demand it; the named-property library is the
+assertion surface.
+
+**Next slices:** callee-summary substitution (so `via-call` flow becomes
+provable); the property-definition language (when needed); sorting (needs
+arrays); cross-ledger propositions (conservation facts consumed by algebraic
+proofs); vocabulary review (event + property names are provisional).

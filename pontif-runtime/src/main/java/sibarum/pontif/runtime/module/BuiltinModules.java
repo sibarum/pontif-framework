@@ -32,12 +32,16 @@ public final class BuiltinModules {
     /** The proof-authoring builtin module's name. */
     public static final String STD_PROOF = "std.proof";
 
+    /** The conservation-property builtin module's name. */
+    public static final String STD_CONSERVATION = "std.conservation";
+
     private BuiltinModules() {}
 
     /** All builtin modules, by name. */
     public static Map<String, IrModule> all() {
         Map<String, IrModule> mods = new LinkedHashMap<>();
         mods.put(STD_PROOF, stdProof());
+        mods.put(STD_CONSERVATION, stdConservation());
         return mods;
     }
 
@@ -68,5 +72,37 @@ public final class BuiltinModules {
 
         return new IrModule(STD_PROOF,
                 List.of(exports, leaf, split, singletons), IrExpr.lit(0));
+    }
+
+    /**
+     * The conservation-property vocabulary (names provisional): assertions
+     * over the conservation ledger, attached with the same {@code proof f = …}
+     * statement as algebraic proofs — the tree's head picks the ledger.
+     * {@code ConservationProofs} (pontif-conservation) recognizes these by
+     * local name; the trees are never evaluated.
+     */
+    private static IrModule stdConservation() {
+        // struct Lossless() / Reversible() / NoDuplication() — 0-arg properties.
+        IrStmt lossless = IrStmt.typeAlias(
+                "Lossless", IrSort.structural("Lossless", new LinkedHashMap<>()));
+        IrStmt reversible = IrStmt.typeAlias(
+                "Reversible", IrSort.structural("Reversible", new LinkedHashMap<>()));
+        IrStmt noDuplication = IrStmt.typeAlias(
+                "NoDuplication", IrSort.structural("NoDuplication", new LinkedHashMap<>()));
+
+        // struct LosslessExcept(dropped:_) — intentional erasure; the argument
+        // is an unevaluated attribute expression over the target's params
+        // (e.g. s.email), so its declared sort is the "_" placeholder.
+        Map<String, IrSort> exceptFields = new LinkedHashMap<>();
+        exceptFields.put("dropped", IrSort.named("_"));
+        IrStmt losslessExcept = IrStmt.typeAlias(
+                "LosslessExcept", IrSort.structural("LosslessExcept", exceptFields));
+
+        IrStmt exports = IrStmt.exports(
+                List.of("Lossless", "Reversible", "NoDuplication", "LosslessExcept"), true);
+
+        return new IrModule(STD_CONSERVATION,
+                List.of(exports, lossless, reversible, noDuplication, losslessExcept),
+                IrExpr.lit(0));
     }
 }

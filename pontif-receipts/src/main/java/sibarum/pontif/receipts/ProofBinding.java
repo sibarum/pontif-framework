@@ -53,11 +53,28 @@ public final class ProofBinding {
      * {@code graph}. Never throws — translation failures become problems.
      */
     public static Result bind(IrModule module, ReceiptGraph graph) {
+        return bind(module, graph, java.util.Set.of());
+    }
+
+    /**
+     * As {@link #bind(IrModule, ReceiptGraph)}, but proof trees whose head
+     * constructor's local name is in {@code foreignHeads} are skipped entirely
+     * (no problem emitted) — they are propositions about a different ledger
+     * (e.g. conservation receipts), bound by that ledger's own binder. The one
+     * {@code proof} statement carries both vocabularies; the head picks the
+     * ledger.
+     */
+    public static Result bind(IrModule module, ReceiptGraph graph,
+            java.util.Set<String> foreignHeads) {
         Map<String, IrStmt.Proof> proofDecls = new LinkedHashMap<>();
         Map<String, IrStmt.FunctionDecl> fnDecls = new LinkedHashMap<>();
         List<String> problems = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.Proof p) {
+                String head = headLocalName(p.proofTree());
+                if (head != null && foreignHeads.contains(head)) {
+                    continue;  // another ledger's proposition
+                }
                 if (proofDecls.put(p.functionName(), p) != null) {
                     problems.add("Duplicate proof for '" + p.functionName()
                             + "' — at most one proof per function.");
@@ -114,5 +131,21 @@ public final class ProofBinding {
             }
         }
         return new Result(proofs, problems);
+    }
+
+    /**
+     * The proof tree's head constructor as a local name (FQN module prefix
+     * stripped) — a linked tree is a {@code Record} with an FQN'd type name;
+     * a bare-file tree may still be a {@code Call}. Null when headless.
+     */
+    private static String headLocalName(sibarum.pontif.ir.IrExpr tree) {
+        String name = switch (tree) {
+            case sibarum.pontif.ir.IrExpr.Record r -> r.typeName();
+            case sibarum.pontif.ir.IrExpr.Call c -> c.functionName();
+            default -> null;
+        };
+        if (name == null) return null;
+        int slash = name.lastIndexOf('/');
+        return slash >= 0 ? name.substring(slash + 1) : name;
     }
 }

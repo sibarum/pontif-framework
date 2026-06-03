@@ -640,13 +640,21 @@ branch-per-arm with guards, by-reference calls). Event taxonomy: consult /
 combine / emit (names provisional). OPAQUE = honest ignorance, fail-closed.
 Queries programmatic for now (lossless, verbatimBijection = reversibility
 witness, duplicated, branch quantifiers); reports → `*.conservation.txt`.
-**Sequenced:** (1) query/proof surface — designed AFTER the printed ledgers
-are reviewed; (2) callee-summary substitution (via-call flow becomes
-provable); (3) sorting (blocked on arrays); (4) cross-ledger propositions;
-(5) `~=` member-wise lift for aggregates (agreed design: claim-aware,
-Decimals.approxEqual at Decimal leaves, == elsewhere; ~= stays
-NON-overloadable — a user tolerance would be a forged receipt; delete the
-Ternion `==`-as-approx overload when it lands).
+**Slice 2 LANDED — the assertion surface:** `std.conservation` builtin
+(Lossless/Reversible/NoDuplication/LosslessExcept — names provisional) on the
+existing `proof f = …` statement; the tree's head picks the ledger
+(ProofBinding skips foreign heads); the conservation gate in PontifCompiler
+re-evaluates every assertion per compile, error body = the printed ledger
+node. Stale-proof protection pinned (LosslessExcept pair in
+ConservationGateTest). Selector/filter property-DEFINITION language stays
+deferred until real definitions demand it.
+**Sequenced:** (1) callee-summary substitution (via-call flow becomes
+provable); (2) property-definition language (when needed); (3) sorting
+(blocked on arrays); (4) cross-ledger propositions; (5) vocabulary review —
+event + property names are provisional; (6) `~=` member-wise lift for
+aggregates (agreed design: claim-aware, Decimals.approxEqual at Decimal
+leaves, == elsewhere; ~= stays NON-overloadable — a user tolerance would be a
+forged receipt; delete the Ternion `==`-as-approx overload when it lands).
 - **Deferred:** dedicated S-expr `(tuple …)` sugar — alt syntax is canonical and
   the IR (records) is fully exercised; add if/when the reference surface needs it.
 

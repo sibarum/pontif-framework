@@ -227,7 +227,62 @@ public final class PontifCompiler {
         if (unprovable.isPresent()) {
             return new CompileResult.Failed(RunResult.error(unprovable.get()));
         }
+        // Conservation gate: the dataflow sibling of the return gate. A
+        // `proof f = Lossless()`-style assertion (std.conservation vocabulary)
+        // is re-evaluated against the freshly-drafted conservation ledger on
+        // every compile; a failing assertion is a hard error whose body
+        // includes the printed ledger node — the error IS the receipt.
+        // Programs with no conservation proofs pay nothing.
+        Optional<String> conservation = firstFailedConservation(module);
+        if (conservation.isPresent()) {
+            return new CompileResult.Failed(RunResult.error(conservation.get()));
+        }
         return new CompileResult.Compiled(new CompiledProgram(compiled, compiler, simplifier, sourceName));
+    }
+
+    /**
+     * The first conservation assertion the ledger refuses to certify, as an
+     * error message — or empty when there are no conservation proofs, every
+     * assertion holds, or the program falls outside the conservation drafter's
+     * scope (abstain, mirroring the return gate's policy). Fail-closed at the
+     * assertion level: untraceable (opaque) or call-mediated flow never
+     * certifies, but a program without conservation proofs is never punished
+     * for being untraceable.
+     */
+    private static Optional<String> firstFailedConservation(IrModule module) {
+        sibarum.pontif.conservation.ConservationProofs.Result bound =
+                sibarum.pontif.conservation.ConservationProofs.bind(module);
+        if (!bound.problems().isEmpty()) {
+            return Optional.of(bound.problems().get(0));
+        }
+        if (bound.assertions().isEmpty()) {
+            return Optional.empty();
+        }
+        sibarum.pontif.conservation.ConservationLedger ledger;
+        try {
+            ledger = sibarum.pontif.conservation.ConservationDrafter.draft(
+                    AliasResolver.resolve(module));
+        } catch (Exception | StackOverflowError e) {
+            // Assertions exist but the ledger can't draft — that's a refusal
+            // to certify, not an abstention: a conservation proof must never
+            // pass un-checked.
+            return Optional.of("Conservation proofs could not be checked — the ledger "
+                    + "failed to draft: " + e.getMessage());
+        }
+        for (Map.Entry<String, sibarum.pontif.conservation.ConservationProofs.Assertion> e
+                : bound.assertions().entrySet()) {
+            var node = ledger.node(e.getKey());
+            if (node.isEmpty()) {
+                return Optional.of("Conservation proof for '" + e.getKey()
+                        + "' has no ledger node — is it a function declaration?");
+            }
+            Optional<String> failure = sibarum.pontif.conservation.ConservationProofs
+                    .evaluate(e.getKey(), e.getValue(), node.get());
+            if (failure.isPresent()) {
+                return failure;
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -258,7 +313,10 @@ public final class PontifCompiler {
         // Bind in-source proofs to obligations (shared with ReceiptGraphReport so
         // the two views agree). Any binding problem — unknown/overloaded/orphaned/
         // multi-branch target, duplicate, untranslatable tree — is a hard error.
-        ProofBinding.Result bound = ProofBinding.bind(module, graph);
+        // Conservation-headed trees are another ledger's propositions — skipped
+        // here, bound by firstFailedConservation instead.
+        ProofBinding.Result bound = ProofBinding.bind(module, graph,
+                sibarum.pontif.conservation.ConservationProofs.HEAD_NAMES);
         if (!bound.problems().isEmpty()) {
             return Optional.of(bound.problems().get(0));
         }
