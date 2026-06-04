@@ -648,10 +648,15 @@ re-evaluates every assertion per compile, error body = the printed ledger
 node. Stale-proof protection pinned (LosslessExcept pair in
 ConservationGateTest). Selector/filter property-DEFINITION language stays
 deferred until real definitions demand it.
-**Sequenced:** (1) callee-summary substitution (via-call flow becomes
-provable); (2) property-definition language (when needed); (3) sorting
-(blocked on arrays); (4) cross-ledger propositions; (5) vocabulary review —
-event + property names are provisional; (6) `~=` member-wise lift for
+**Re-cut + composition LANDED** (conservation-algebra.md ratified +
+implemented): three node kinds + metadata edges, exhaustive drafter (no
+default case), role multisets, sort-aware DataConservative (capacity law;
+Lossless reserved for cross-ledger), summaries substituting over the call
+DAG, dispatch-as-Branch for overloaded callees, recursion residual.
+**Sequenced:** (1) recursion fixpoint + collection atom model (sorting needs
+both); (2) multi-branch Reversible via the exit-assertion theorem; (3)
+property-definition language (when real definitions demand it); (4)
+cross-ledger Lossless; (5) `~=` member-wise lift for
 aggregates (agreed design: claim-aware, Decimals.approxEqual at Decimal
 leaves, == elsewhere; ~= stays NON-overloadable — a user tolerance would be a
 forged receipt; delete the Ternion `==`-as-approx overload when it lands).

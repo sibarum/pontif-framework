@@ -158,7 +158,78 @@ class ConservationReportTest {
         assertTrue(text.contains("UNTOUCHED"), () -> text);
     }
 
-    // --- the located ignorance: calls (until composition), recursion (after) ---
+    // --- composition: callee summaries substitute over the call DAG ---
+
+    @Test
+    void helperDelegation_composes_andCertifies() throws Exception {
+        // The point of composition: real code calls helpers. inc's summary
+        // (years' content reaches the result) substitutes at translate's call
+        // site, and DataConservative certifies end-to-end.
+        String src = """
+                struct Source(name:Int, age:Int, email:Int)
+                struct Target(fullName:Int, years:Int, contact:Int)
+                function inc(years:Int):Int -> years + 1
+                function translate(s:Source):Target ->
+                  {fullName = s.name, years = inc(s.age), contact = s.email}
+                translate(Source(1, 2, 3))
+                """;
+        ConservationGraph translate =
+                graph(ledger("translate-composed", src), "translate");
+        assertTrue(ConservationQueries.dataConservative(translate).isEmpty(),
+                () -> ConservationQueries.dataConservative(translate).orElse(""));
+    }
+
+    @Test
+    void lossyHelper_composesTheLossIntoTheCaller() throws Exception {
+        // The helper ignores its second parameter — the caller's atom is
+        // dropped INSIDE the callee, and composition surfaces it.
+        String src = """
+                struct Source(name:Int, age:Int, email:Int)
+                struct Target(fullName:Int, years:Int, contact:Int)
+                function first(a:Int, b:Int):Int -> a
+                function translate(s:Source):Target ->
+                  {fullName = s.name, years = first(s.age, s.email), contact = s.name}
+                translate(Source(1, 2, 3))
+                """;
+        ConservationGraph translate =
+                graph(ledger("translate-lossy-helper", src), "translate");
+        assertTrue(ConservationQueries.dataConservative(translate).isPresent(),
+                "s.email dies inside first(a, b) -> a — composition must surface it");
+    }
+
+    @Test
+    void calleeBranchingSpend_creditsTheCallersBool() throws Exception {
+        // pick branches on its Bool on every path; the caller's Bool is
+        // therefore spent — credited through the summary.
+        String src = """
+                function pick(b:Bool):Int -> match b {
+                  [@==true] -> 1
+                  _ -> 2
+                }
+                function wrap(flag:Bool):Int -> pick(flag)
+                wrap(true)
+                """;
+        ConservationGraph wrap = graph(ledger("wrap-bool", src), "wrap");
+        assertTrue(ConservationQueries.dataConservative(wrap).isEmpty(),
+                () -> ConservationQueries.dataConservative(wrap).orElse(""));
+    }
+
+    @Test
+    void overloadedCallee_branchesOverCandidates() throws Exception {
+        // Dispatch-as-Branch: each overload is an arm; the property must hold
+        // on every arm. One conserving + one dropping overload -> fails.
+        String src = """
+                function h(x:[Int:@>0], y:Int):Int -> x + y
+                function h(x:[Int:0], y:Int):Int -> y
+                function g(a:Int, b:Int):Int -> h(a, b)
+                g(1, 2)
+                """;
+        ConservationGraph g = graph(ledger("overloaded", src), "g");
+        assertTrue(ConservationQueries.dataConservative(g).isPresent(),
+                "the [Int:0] overload drops x — some dispatch arm loses a");
+    }
+
+    // --- the located ignorance: recursion (until the fixpoint slice) ---
 
     @Test
     void recursion_staysResidual_andFailsClosed() throws Exception {

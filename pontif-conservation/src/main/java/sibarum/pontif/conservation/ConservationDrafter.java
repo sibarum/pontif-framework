@@ -45,19 +45,113 @@ public final class ConservationDrafter {
 
     public static Ledger draft(IrModule module) throws CompileException {
         Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
-        List<ConservationGraph> graphs = new ArrayList<>();
+
+        // Composition over the call DAG: functions draft in topological order
+        // so call sites substitute their callees' summaries (by reference —
+        // never re-expanded). Cycle members' recursive calls stay residual:
+        // the fixpoint is a later slice.
+        Map<String, List<IrStmt.FunctionDecl>> byName = new LinkedHashMap<>();
+        List<IrStmt.FunctionDecl> decls = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                graphs.add(draftFunction(fd, structs));
+                byName.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
+                decls.add(fd);
             }
         }
+        Map<String, Set<String>> callees = new LinkedHashMap<>();
+        for (IrStmt.FunctionDecl fd : decls) {
+            Set<String> called = new HashSet<>();
+            collectCallNames(fd.body(), called);
+            called.retainAll(byName.keySet());
+            callees.merge(fd.name(), called, (a, b) -> { a.addAll(b); return a; });
+        }
+
+        Map<String, ConservationSummary> summaries = new HashMap<>();
+        Map<String, ConservationGraph> drafted = new LinkedHashMap<>();
+        // Kahn-style: draft a function once every callee (other than itself)
+        // is summarized; whatever never becomes ready is in a cycle — draft it
+        // anyway, with its unsummarized calls residual.
+        Set<String> done = new HashSet<>();
+        boolean progress = true;
+        while (progress) {
+            progress = false;
+            for (IrStmt.FunctionDecl fd : decls) {
+                String key = declKey(fd);
+                if (done.contains(key)) continue;
+                Set<String> needed = callees.getOrDefault(fd.name(), Set.of());
+                boolean ready = needed.stream().allMatch(n ->
+                        n.equals(fd.name()) || summaries.containsKey(n));
+                if (!ready) continue;
+                ConservationGraph graph = draftFunction(fd, structs, byName, summaries);
+                drafted.put(key, graph);
+                // Overloads share a name; the shared summary must be the
+                // conservative MUST-merge — v1: only summarize unambiguous
+                // names (callers of overloaded names get per-candidate arms
+                // instead, so no summary is needed).
+                if (byName.get(fd.name()).size() == 1) {
+                    summaries.put(fd.name(), ConservationSummary.of(graph));
+                }
+                done.add(key);
+                progress = true;
+            }
+        }
+        for (IrStmt.FunctionDecl fd : decls) {  // cycle members
+            String key = declKey(fd);
+            if (!done.contains(key)) {
+                drafted.put(key, draftFunction(fd, structs, byName, summaries));
+            }
+        }
+        // Preserve source order.
+        List<ConservationGraph> graphs = new ArrayList<>();
+        for (IrStmt.FunctionDecl fd : decls) graphs.add(drafted.get(declKey(fd)));
         return new Ledger(graphs);
     }
 
+    private static String declKey(IrStmt.FunctionDecl fd) {
+        return fd.name() + "#" + System.identityHashCode(fd);
+    }
+
+    private static void collectCallNames(IrExpr expr, Set<String> out) {
+        switch (expr) {
+            case IrExpr.Call c -> {
+                out.add(c.functionName());
+                for (IrExpr a : c.args()) collectCallNames(a, out);
+            }
+            case IrExpr.BinOp op -> {
+                collectCallNames(op.left(), out);
+                collectCallNames(op.right(), out);
+            }
+            case IrExpr.LetIn l -> {
+                collectCallNames(l.value(), out);
+                collectCallNames(l.body(), out);
+            }
+            case IrExpr.Match m -> {
+                collectCallNames(m.scrutinee(), out);
+                for (IrExpr.MatchBranch b : m.branches()) collectCallNames(b.result(), out);
+            }
+            case IrExpr.Record r -> {
+                for (IrExpr v : r.members().values()) collectCallNames(v, out);
+            }
+            case IrExpr.FieldAccess fa -> collectCallNames(fa.base(), out);
+            case IrExpr.Apply app -> {
+                collectCallNames(app.fn(), out);
+                for (IrExpr a : app.args()) collectCallNames(a, out);
+            }
+            case IrExpr.Lambda lam -> collectCallNames(lam.body(), out);
+            case IrExpr.Lit l -> { }
+            case IrExpr.Dec d -> { }
+            case IrExpr.Bool b -> { }
+            case IrExpr.Var v -> { }
+            case IrExpr.SelfRef s -> { }
+        };
+    }
+
     private static ConservationGraph draftFunction(
-            IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs)
+            IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs,
+            Map<String, List<IrStmt.FunctionDecl>> declsByName,
+            Map<String, ConservationSummary> summaries)
             throws CompileException {
-        Ctx ctx = new Ctx(structs);
+        Ctx ctx = new Ctx(structs, declsByName, summaries);
         List<TypedAtom> inputs = new ArrayList<>();
         StringBuilder params = new StringBuilder();
         for (IrParam p : fd.params()) {
@@ -85,9 +179,17 @@ public final class ConservationDrafter {
         final Map<String, SymExpr> rename = new HashMap<>();
         final Map<String, FlowNode> nodes = new LinkedHashMap<>();
         final Map<String, IrSort.Structural> structs;
+        final Map<String, List<IrStmt.FunctionDecl>> declsByName;
+        final Map<String, ConservationSummary> summaries;
         int counter = 1;
 
-        Ctx(Map<String, IrSort.Structural> structs) { this.structs = structs; }
+        Ctx(Map<String, IrSort.Structural> structs,
+                Map<String, List<IrStmt.FunctionDecl>> declsByName,
+                Map<String, ConservationSummary> summaries) {
+            this.structs = structs;
+            this.declsByName = declsByName;
+            this.summaries = summaries;
+        }
 
         String add(FlowNode node) {
             nodes.put(node.id(), node);
@@ -260,14 +362,47 @@ public final class ConservationDrafter {
                 ctx.add(new FlowNode.Construction(id, claimOf(r), slots));
                 yield new Flow.FromNode(id);
             }
-            // The located ignorance — exactly the ruled residuals.
+            // Calls compose: a summarized callee substitutes by reference
+            // (no-duplicate-edges); an overloaded callee is dispatch-as-Branch
+            // over its candidates; an unsummarized callee (recursion, unknown)
+            // is the located ignorance.
             case IrExpr.Call c -> {
-                List<AttributePath> touches = new ArrayList<>();
-                for (IrExpr a : c.args()) {
-                    touches.addAll(touchesOf(draftValue(a, ctx), ctx));
+                List<Flow> argFlows = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) argFlows.add(draftValue(a, ctx));
+                List<IrStmt.FunctionDecl> candidates =
+                        ctx.declsByName.getOrDefault(c.functionName(), List.of());
+                if (candidates.size() == 1
+                        && ctx.summaries.containsKey(c.functionName())) {
+                    yield substituteCall(c.functionName(),
+                            ctx.summaries.get(c.functionName()),
+                            candidates.get(0), argFlows, ctx);
                 }
-                yield new Flow.Residual(
-                        "call '" + c.functionName() + "' (composition pending)", touches);
+                if (candidates.size() > 1) {
+                    // Dispatch-as-Branch: one arm per candidate (each its own
+                    // summary substitution); properties quantify over arms.
+                    // Candidates draft with nested calls residual — guards
+                    // against mutual recursion through overloads; conservative
+                    // and terminating.
+                    List<Arm> arms = new ArrayList<>();
+                    for (IrStmt.FunctionDecl candidate : candidates) {
+                        ConservationGraph g = draftFunction(
+                                candidate, ctx.structs, Map.of(), Map.of());
+                        ConservationSummary s = ConservationSummary.of(g);
+                        arms.add(new Arm("overload " + candidate.name(),
+                                substituteCall(c.functionName(), s, candidate,
+                                        argFlows, ctx)));
+                    }
+                    String id = ctx.freshId("br");
+                    ctx.add(new FlowNode.Branch(id, List.of(), arms));
+                    yield new Flow.FromNode(id);
+                }
+                List<AttributePath> touches = new ArrayList<>();
+                for (Flow a : argFlows) touches.addAll(touchesOf(a, ctx));
+                String why = candidates.isEmpty()
+                        ? "call '" + c.functionName() + "' (unresolved)"
+                        : "call '" + c.functionName()
+                                + "' (recursive — fixpoint is a later slice)";
+                yield new Flow.Residual(why, touches);
             }
             case IrExpr.Lambda lam ->
                     new Flow.Residual("lambda (ruled residual)", freeTouches(lam, ctx));
@@ -276,6 +411,86 @@ public final class ConservationDrafter {
             case IrExpr.SelfRef s ->
                     new Flow.Residual("self (typing-level)", List.of());
         };
+    }
+
+    /**
+     * Substitutes a callee's {@link ConservationSummary} at a call site. The
+     * call becomes a Computation ("via callee") whose inputs are the caller
+     * flows for exactly the callee atoms whose content reaches the result
+     * (CONTENT relation; BIT relations pass through a measurement wrapper so
+     * the chain class stays honest). Callee-internal branching spend is
+     * credited via a single-arm Branch whose discriminants are the spent
+     * args' flows — dispatch-as-Branch, literally. Residual-touched callee
+     * atoms make the corresponding caller flow residual (fail-closed).
+     */
+    private static Flow substituteCall(
+            String callee, ConservationSummary summary,
+            IrStmt.FunctionDecl decl, List<Flow> argFlows, Ctx ctx) {
+        // callee param root (e.g. "s_0") -> caller arg flow, positionally.
+        Map<String, Flow> argByRoot = new LinkedHashMap<>();
+        for (int i = 0; i < decl.params().size() && i < argFlows.size(); i++) {
+            argByRoot.put(decl.params().get(i).name() + "_0", argFlows.get(i));
+        }
+
+        List<Flow> contentInputs = new ArrayList<>();
+        List<Flow> spentFlows = new ArrayList<>();
+        for (AttributePath atom : summary.inputAtoms()) {
+            Flow callerFlow = projectThrough(argByRoot.get(atom.root()), atom, ctx);
+            if (callerFlow == null) continue;
+            if (summary.residualTouched().contains(atom) || summary.anyPathPoisoned()) {
+                contentInputs.add(new Flow.Residual(
+                        "via '" + callee + "' (residual inside callee)",
+                        touchesOf(callerFlow, ctx)));
+                continue;
+            }
+            switch (summary.relations().get(atom)) {
+                case CONTENT -> contentInputs.add(callerFlow);
+                case BIT -> {
+                    String mid = ctx.freshId("c");
+                    ctx.add(new FlowNode.Computation(mid, "bit via " + callee,
+                            OpClass.MEASUREMENT, Recoverability.MEASUREMENT_BIT,
+                            List.of(callerFlow)));
+                    contentInputs.add(new Flow.FromNode(mid));
+                }
+                case NONE -> { }
+            }
+            if (summary.spentEverywhere().contains(atom)) {
+                spentFlows.add(callerFlow);
+            }
+        }
+        if (summary.anyPathPoisoned()) {
+            return new Flow.Residual("via '" + callee + "' (callee untraceable)",
+                    argFlows.stream().flatMap(f -> touchesOf(f, ctx).stream()).toList());
+        }
+        String id = ctx.freshId("c");
+        ctx.add(new FlowNode.Computation(id, "via " + callee,
+                OpClass.ARITHMETIC, Recoverability.DEGRADED, contentInputs));
+        Flow result = new Flow.FromNode(id);
+        if (!spentFlows.isEmpty()) {
+            // Credit the callee's universal branching spend at the call site.
+            String bid = ctx.freshId("br");
+            ctx.add(new FlowNode.Branch(bid, spentFlows,
+                    List.of(new Arm("via " + callee, result))));
+            result = new Flow.FromNode(bid);
+        }
+        return result;
+    }
+
+    /** Projects a caller arg flow down to a callee atom's path segments. */
+    private static Flow projectThrough(Flow argFlow, AttributePath calleeAtom, Ctx ctx) {
+        if (argFlow == null) return null;
+        Flow current = argFlow;
+        for (String segment : calleeAtom.segments()) {
+            current = switch (current) {
+                case Flow.Verbatim v -> new Flow.Verbatim(v.path().child(segment));
+                case Flow.FromNode n when ctx.nodes.get(n.nodeId())
+                        instanceof FlowNode.Construction c
+                        && c.slots().containsKey(segment) -> c.slots().get(segment);
+                // Whole-flow fallback: the atom's content is within it.
+                default -> current;
+            };
+        }
+        return current;
     }
 
     /** Over-approximated atoms reachable through a flow (for residual touch sets). */

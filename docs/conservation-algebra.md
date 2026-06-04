@@ -177,17 +177,25 @@ the narrowing system.)
   iff its operands survive. Until implemented, `Reversible` fails closed on
   multi-branch nodes.
 
-# Consequences for the implementation (deferred until ratified)
+# Consequences for the implementation — IMPLEMENTED
 
-1. Event vocabulary re-cut to mirror the forms; the drafter's switch goes
-   exhaustive — no default case, by construction and forever.
-2. Nested construction, nested discrimination, and capture become traced;
-   OPAQUE shrinks to release-of-unknown.
-3. Combination events gain op-class + recoverability verdicts (from the
-   linear kernel's existing knowledge).
-4. Per-atom role multisets; fates demoted to views.
-5. Properties restated per the threshold ladder; multi-branch `Reversible`
-   becomes a theorem application instead of a refusal.
+1. ✔ The graph model mirrors the ruling (Flow edges + the three FlowNode
+   kinds); the drafter's switches are exhaustive — no default case, by
+   construction and forever.
+2. ✔ Nested construction and nested discrimination trace; residual flow is
+   exactly lambdas, applications, and unresolved/recursive calls.
+3. ✔ Computations carry op-class + recoverability verdicts.
+4. ✔ Per-atom, per-branch-path role multisets (`ConservationRoles`); fates
+   demoted to display views.
+5. ✔ `DataConservative` shipped sort-aware per the capacity law
+   (`std.conservation`); multi-branch `Reversible` still refuses — the
+   exit-assertion theorem is the named follow-up.
+6. ✔ **Composition** (beyond the original list): per-function
+   `ConservationSummary` (MUST relations) substitutes at call sites over the
+   call DAG in topological order; overloaded callees are dispatch-as-Branch
+   over their candidates; callee-internal branching spend is credited at the
+   call site via a single-arm Branch's discriminants; recursion stays
+   residual until the fixpoint slice.
 
 # Rulings so far
 

@@ -55,13 +55,20 @@ public final class ConservationLedgerPrinter {
 
     private static void renderNode(FlowNode node, StringBuilder sb) {
         switch (node) {
-            case FlowNode.Computation c -> sb.append("  ").append(pad(c.id() + ":", 7))
-                    .append(c.inputs().stream().map(Flow::render)
-                            .collect(Collectors.joining(" " + c.op() + " ")))
-                    .append("   [").append(c.opClass().name().toLowerCase())
-                    .append(", ").append(c.recoverability().name()
-                            .toLowerCase().replace('_', '-'))
-                    .append("]\n");
+            case FlowNode.Computation c -> {
+                // Binary operators render infix; composed/unary computations
+                // ("via callee") render call-style.
+                String body = c.inputs().size() == 2 && c.op().length() <= 2
+                        ? c.inputs().stream().map(Flow::render)
+                                .collect(Collectors.joining(" " + c.op() + " "))
+                        : c.op() + "(" + c.inputs().stream().map(Flow::render)
+                                .collect(Collectors.joining(", ")) + ")";
+                sb.append("  ").append(pad(c.id() + ":", 7)).append(body)
+                  .append("   [").append(c.opClass().name().toLowerCase())
+                  .append(", ").append(c.recoverability().name()
+                          .toLowerCase().replace('_', '-'))
+                  .append("]\n");
+            }
             case FlowNode.Branch b -> {
                 sb.append("  ").append(pad(b.id() + ":", 7)).append("branch");
                 if (!b.discriminants().isEmpty()) {

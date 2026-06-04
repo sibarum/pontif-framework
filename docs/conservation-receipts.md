@@ -121,7 +121,19 @@ The selector/filter property-DEFINITION language remains deliberately deferred
 until real property definitions demand it; the named-property library is the
 assertion surface.
 
-**Next slices:** callee-summary substitution (so `via-call` flow becomes
-provable); the property-definition language (when needed); sorting (needs
-arrays); cross-ledger propositions (conservation facts consumed by algebraic
-proofs); vocabulary review (event + property names are provisional).
+**Re-cut + composition landed.** The ledger is rebuilt as the ratified
+algebra (`conservation-algebra.md`): three node kinds + metadata edges,
+exhaustive over the sealed IR (no default case — the compiler is the
+taxonomy's standing completeness proof), per-branch-path role multisets, the
+sort-aware `DataConservative` under the capacity law (`Lossless` stays
+reserved for the cross-ledger property), and **composition over the call
+DAG**: callee summaries substitute at call sites, overloaded callees are
+dispatch-as-Branch over candidates, callee-internal branching spend credits
+the caller's atoms, and recursion stays residual (fail-closed) until the
+fixpoint slice. Real helper-delegating code now certifies end-to-end; a
+helper that drops its argument surfaces the loss in the caller.
+
+**Next slices:** recursion fixpoint + the collection atom model (the sorting
+case needs both — element-quantified atoms over arrays); multi-branch
+`Reversible` via the exit-assertion theorem; the property-definition language
+(when real definitions demand it); cross-ledger `Lossless`.
