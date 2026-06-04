@@ -1,105 +1,102 @@
 package sibarum.pontif.conservation;
 
-import sibarum.pontif.conservation.ConservationLedger.ConservationBranch;
-import sibarum.pontif.conservation.ConservationLedger.ConservationNode;
-import sibarum.pontif.conservation.ConservationLedger.NamedSort;
-import sibarum.pontif.conservation.ConservationQueries.InputFate;
+import sibarum.pontif.conservation.ConservationGraph.Ledger;
+import sibarum.pontif.conservation.ConservationGraph.TypedAtom;
+import sibarum.pontif.conservation.ConservationRoles.PathRoles;
+import sibarum.pontif.conservation.FlowNode.Arm;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Renders a {@link ConservationLedger} as reviewable text — the deliverable
- * James reads to design the query surface. Event lines preserve order
- * (sequence is load-bearing); the per-branch classification block is the
- * derived reading queries are built from. UNTOUCHED is shouted: it's the
- * silent-loss candidate. OPAQUE is shouted too: honest ignorance, on which
- * every conservation assertion fails closed.
+ * Renders a conservation graph as reviewable text: the node table (the three
+ * ruled kinds, with op-class/recoverability verdicts as metadata), then the
+ * per-path classification — fates demoted to derived display views over the
+ * role multisets. UNTOUCHED and residuals still shout.
  */
 public final class ConservationLedgerPrinter {
 
     private ConservationLedgerPrinter() {}
 
-    public static String print(ConservationLedger ledger) {
-        return ledger.nodes().stream()
+    public static String print(Ledger ledger) {
+        return ledger.graphs().stream()
                 .map(ConservationLedgerPrinter::printNode)
                 .collect(Collectors.joining("\n"));
     }
 
-    public static String printNode(ConservationNode node) {
+    public static String printNode(ConservationGraph graph) {
         StringBuilder sb = new StringBuilder();
-        sb.append(node.functionName()).append('(')
-          .append(node.params().stream()
-                  .map(p -> p.name() + ": " + p.sortRendering())
-                  .collect(Collectors.joining(", ")))
-          .append(") -> r_0: ").append(node.returnRendering()).append('\n');
-        sb.append("  inputs:  ").append(renderPaths(node.inputs())).append('\n');
-        sb.append("  outputs: ").append(renderPaths(node.outputs())).append('\n');
-        for (ConservationBranch branch : node.branches()) {
-            printBranch(node, branch, sb);
+        sb.append(graph.functionName()).append('(').append(graph.paramsRendering())
+          .append(") -> r_0: ").append(graph.returnRendering()).append('\n');
+        sb.append("  inputs:  ").append(graph.inputs().stream()
+                .map(a -> a.path() + capacityTag(a))
+                .collect(Collectors.joining(", "))).append('\n');
+        sb.append("  outputs: ").append(graph.outputs().stream()
+                .map(AttributePath::toString)
+                .collect(Collectors.joining(", "))).append('\n');
+
+        for (FlowNode node : graph.nodes().values()) {
+            renderNode(node, sb);
+        }
+        sb.append("  result:  ").append(graph.result().render()).append('\n');
+
+        List<PathRoles> paths = ConservationRoles.of(graph);
+        for (PathRoles path : paths) {
+            sb.append("  classification");
+            if (!path.label.isEmpty()) sb.append(" [").append(path.label).append(']');
+            sb.append(":\n");
+            for (TypedAtom atom : graph.inputs()) {
+                sb.append("    ").append(pad(atom.path().toString(), 16)).append(' ')
+                  .append(ConservationQueries.fateView(path, atom)).append('\n');
+            }
         }
         return sb.toString();
     }
 
-    private static void printBranch(
-            ConservationNode node, ConservationBranch branch, StringBuilder sb) {
-        String header = branch.guard().map(g -> "[" + renderGuard(g) + "]")
-                .orElseGet(() -> branch.patternNote().orElse("unconditional"));
-        sb.append("  branch (").append(header).append("):\n");
-        for (Event event : branch.events()) {
-            sb.append("    ").append(renderEvent(event)).append('\n');
-        }
-        sb.append("    classification:\n");
-        for (AttributePath atom : node.inputs()) {
-            InputFate fate = ConservationQueries.fateOf(branch, atom);
-            sb.append("      ").append(pad(atom.toString(), 16)).append(' ')
-              .append(renderFate(fate)).append('\n');
+    private static void renderNode(FlowNode node, StringBuilder sb) {
+        switch (node) {
+            case FlowNode.Computation c -> sb.append("  ").append(pad(c.id() + ":", 7))
+                    .append(c.inputs().stream().map(Flow::render)
+                            .collect(Collectors.joining(" " + c.op() + " ")))
+                    .append("   [").append(c.opClass().name().toLowerCase())
+                    .append(", ").append(c.recoverability().name()
+                            .toLowerCase().replace('_', '-'))
+                    .append("]\n");
+            case FlowNode.Branch b -> {
+                sb.append("  ").append(pad(b.id() + ":", 7)).append("branch");
+                if (!b.discriminants().isEmpty()) {
+                    sb.append(" on ").append(b.discriminants().stream()
+                            .map(Flow::render).collect(Collectors.joining(", ")));
+                } else {
+                    sb.append(" (irrefutable)");
+                }
+                sb.append('\n');
+                for (Arm arm : b.arms()) {
+                    sb.append("           [").append(arm.label()).append("] -> ")
+                      .append(arm.result().render()).append('\n');
+                }
+            }
+            case FlowNode.Construction c -> sb.append("  ").append(pad(c.id() + ":", 7))
+                    .append("construct ").append(c.claim()).append(" { ")
+                    .append(c.slots().entrySet().stream()
+                            .map(e -> e.getKey() + " <- " + e.getValue().render())
+                            .collect(Collectors.joining(", ")))
+                    .append(" }\n");
         }
     }
 
-    private static String renderEvent(Event event) {
-        return switch (event) {
-            case Event.Consult c -> "consult: " + renderPaths(c.subjects()) + "   (guard)";
-            case Event.Combine c -> "combine: "
-                    + c.operands().stream().map(Provenance::render)
-                            .collect(Collectors.joining(" " + c.op() + " "))
-                    + " -> " + c.id();
-            case Event.Emit e -> "emit:    " + e.source().render() + " -> " + e.target()
-                    + switch (e.source()) {
-                        case Provenance.Path p -> "   [verbatim]";
-                        case Provenance.Derived d -> "   [derived]";
-                        case Provenance.Constant k -> "   [constant]";
-                        case Provenance.CallResult c -> "   [call result — untraced]";
-                        case Provenance.Opaque o -> "   [OPAQUE]";
-                    };
-            case Event.Call c -> "call:    " + c.target() + "("
-                    + c.args().stream().map(Provenance::render)
-                            .collect(Collectors.joining(", "))
-                    + ") -> " + c.id() + "   (by reference; summary substitution is a later slice)";
-            case Event.Opaque o -> "OPAQUE:  " + o.reason()
-                    + (o.touched().isEmpty()
-                            ? "   (untraceable — poisons the whole branch)"
-                            : "   touches " + renderPaths(o.touched()));
-        };
-    }
-
-    private static String renderFate(InputFate fate) {
-        return switch (fate) {
-            case EMITTED_VERBATIM -> "emitted-verbatim";
-            case FLOWS_DERIVED -> "flows-derived";
-            case VIA_CALL -> "via-call (unproven in v1)";
-            case CONSULTED_ONLY -> "consulted-only (content not in output)";
-            case UNTOUCHED -> "UNTOUCHED (no flow into any output)";
-            case OPAQUE -> "OPAQUE (untraceable in v1)";
+    private static String capacityTag(TypedAtom atom) {
+        return switch (atom.capacity()) {
+            case BIT -> " [bit]";
+            case NUMERIC, OTHER -> "";
         };
     }
 
     /**
-     * Compact infix rendering for guard predicates (the shapes guards take:
-     * comparisons, conjunctions, paths, literals). Falls back to toString for
-     * anything else — guards are display-only here.
+     * Compact infix rendering for guard predicates — shared with the drafter's
+     * arm labels.
      */
-    private static String renderGuard(sibarum.pontif.core.symbolic.SymExpr e) {
+    public static String renderGuard(sibarum.pontif.core.symbolic.SymExpr e) {
         return switch (e) {
             case sibarum.pontif.core.symbolic.SymExpr.Var v -> v.name();
             case sibarum.pontif.core.symbolic.SymExpr.Lit l -> String.valueOf(l.value());
@@ -122,10 +119,6 @@ public final class ConservationLedgerPrinter {
                     renderGuard(fa.base()) + "." + fa.fieldName();
             default -> e.toString();
         };
-    }
-
-    private static String renderPaths(List<AttributePath> paths) {
-        return paths.stream().map(AttributePath::toString).collect(Collectors.joining(", "));
     }
 
     private static String pad(String s, int width) {

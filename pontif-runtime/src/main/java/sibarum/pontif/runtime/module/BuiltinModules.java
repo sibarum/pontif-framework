@@ -82,27 +82,32 @@ public final class BuiltinModules {
      * local name; the trees are never evaluated.
      */
     private static IrModule stdConservation() {
-        // struct Lossless() / Reversible() / NoDuplication() — 0-arg properties.
-        IrStmt lossless = IrStmt.typeAlias(
-                "Lossless", IrSort.structural("Lossless", new LinkedHashMap<>()));
+        // struct DataConservative() / Reversible() / NoDuplication() — 0-arg
+        // properties. ("Lossless" is RESERVED for the cross-ledger property —
+        // see docs/conservation-algebra.md.)
+        IrStmt dataConservative = IrStmt.typeAlias(
+                "DataConservative", IrSort.structural("DataConservative", new LinkedHashMap<>()));
         IrStmt reversible = IrStmt.typeAlias(
                 "Reversible", IrSort.structural("Reversible", new LinkedHashMap<>()));
         IrStmt noDuplication = IrStmt.typeAlias(
                 "NoDuplication", IrSort.structural("NoDuplication", new LinkedHashMap<>()));
 
-        // struct LosslessExcept(dropped:_) — intentional erasure; the argument
-        // is an unevaluated attribute expression over the target's params
-        // (e.g. s.email), so its declared sort is the "_" placeholder.
+        // struct DataConservativeExcept(dropped:_) — intentional erasure; the
+        // argument is an unevaluated attribute expression over the target's
+        // params (e.g. s.email), so its declared sort is the "_" placeholder.
         Map<String, IrSort> exceptFields = new LinkedHashMap<>();
         exceptFields.put("dropped", IrSort.named("_"));
-        IrStmt losslessExcept = IrStmt.typeAlias(
-                "LosslessExcept", IrSort.structural("LosslessExcept", exceptFields));
+        IrStmt dataConservativeExcept = IrStmt.typeAlias(
+                "DataConservativeExcept",
+                IrSort.structural("DataConservativeExcept", exceptFields));
 
         IrStmt exports = IrStmt.exports(
-                List.of("Lossless", "Reversible", "NoDuplication", "LosslessExcept"), true);
+                List.of("DataConservative", "Reversible", "NoDuplication",
+                        "DataConservativeExcept"), true);
 
         return new IrModule(STD_CONSERVATION,
-                List.of(exports, lossless, reversible, noDuplication, losslessExcept),
+                List.of(exports, dataConservative, reversible, noDuplication,
+                        dataConservativeExcept),
                 IrExpr.lit(0));
     }
 }

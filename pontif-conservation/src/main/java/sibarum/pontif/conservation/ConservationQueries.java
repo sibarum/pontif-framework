@@ -1,209 +1,182 @@
 package sibarum.pontif.conservation;
 
-import sibarum.pontif.conservation.ConservationLedger.ConservationBranch;
-import sibarum.pontif.conservation.ConservationLedger.ConservationNode;
+import sibarum.pontif.conservation.ConservationGraph.Capacity;
+import sibarum.pontif.conservation.ConservationGraph.TypedAtom;
+import sibarum.pontif.conservation.ConservationRoles.PathRoles;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Predicate;
+import java.util.Optional;
 
 /**
- * Programmatic queries over the conservation ledger — the v1 of the
- * query-assert paradigm, deliberately Java-level: the surface proof syntax is
- * designed AFTER the printed data has been reviewed. Every query fails closed
- * on {@link Event.Opaque} and on flow that only reaches a {@link Event.Call}
- * (callee summaries are a later slice): what cannot be traced cannot be
- * asserted conserved.
+ * Conservation properties over the graph's roles, per the ratified algebra.
+ * Everything fails closed on residual flow — what cannot be traced cannot be
+ * certified — and the headline property is sort-aware under the capacity law:
+ * measurement counts as conservation exactly when it exhausts the measured
+ * content.
  */
 public final class ConservationQueries {
 
     private ConservationQueries() {}
 
-    /** What became of one input atom within one branch. */
-    public enum InputFate {
-        /** Reached an output verbatim (itself or via a covering whole-aggregate emission). */
-        EMITTED_VERBATIM,
-        /** Reached an output through one or more {@link Event.Combine}s. */
-        FLOWS_DERIVED,
-        /** Flowed into a call — unproven in v1 (fail-closed). */
-        VIA_CALL,
-        /** Consulted by the branch's guard but its content reached no output. */
-        CONSULTED_ONLY,
-        /** No event touches it — the silent-loss candidate. */
-        UNTOUCHED,
-        /** Inside an untraceable region — honest ignorance, fails everything. */
-        OPAQUE
-    }
-
-    public static InputFate fateOf(ConservationBranch branch, AttributePath atom) {
-        Flow flow = Flow.of(branch);
-        if (flow.opaqueAll || flow.opaqueTouched.stream().anyMatch(p -> p.covers(atom))) {
-            return InputFate.OPAQUE;
-        }
-        if (flow.verbatimEmits.stream().anyMatch(p -> p.covers(atom))) {
-            return InputFate.EMITTED_VERBATIM;
-        }
-        if (flow.derivedEmittedOperands.stream().anyMatch(p -> p.covers(atom))) {
-            return InputFate.FLOWS_DERIVED;
-        }
-        if (flow.callArgPaths.stream().anyMatch(p -> p.covers(atom))) {
-            return InputFate.VIA_CALL;
-        }
-        if (flow.consulted.stream().anyMatch(p -> p.covers(atom))) {
-            return InputFate.CONSULTED_ONLY;
-        }
-        return InputFate.UNTOUCHED;
+    /**
+     * Data-Conservative: per branch-path, every Int/Decimal input atom flows
+     * (verbatim or derived, content-class) into the return; every Bool atom
+     * flows OR is spent in branching (its whole content is one bit); other
+     * sorts follow the numeric rule. Empty = holds; otherwise the first
+     * violation, named.
+     */
+    public static Optional<String> dataConservative(ConservationGraph graph) {
+        return dataConservativeExcept(graph, null);
     }
 
     /**
-     * Every input atom reaches an output (verbatim or derived) in EVERY
-     * branch. Fails closed on opaque regions and call-mediated flow.
+     * As {@link #dataConservative}, with atoms covered by {@code dropped}
+     * (when non-null) REQUIRED to carry no content into the return — the
+     * declared, stale-checked intentional erasure. Being spent in branching
+     * is permitted for dropped atoms (consultation isn't presence).
      */
-    public static boolean lossless(ConservationNode node) {
-        return everyBranch(node, branch -> node.inputs().stream().allMatch(atom -> {
-            InputFate fate = fateOf(branch, atom);
-            return fate == InputFate.EMITTED_VERBATIM || fate == InputFate.FLOWS_DERIVED;
-        }));
+    public static Optional<String> dataConservativeExcept(
+            ConservationGraph graph, AttributePath dropped) {
+        if (dropped != null
+                && graph.inputs().stream().noneMatch(a -> dropped.covers(a.path()))) {
+            return Optional.of("'" + dropped + "' names no input attribute of this function");
+        }
+        for (PathRoles path : ConservationRoles.of(graph)) {
+            if (path.poisoned) {
+                return Optional.of(onPath(path, "untraceable flow ("
+                        + path.residuals.get(0).reason() + ") — nothing certifies"));
+            }
+            for (TypedAtom atom : graph.inputs()) {
+                if (dropped != null && dropped.covers(atom.path())) {
+                    if (ConservationRoles.hasAnyFlow(path, atom.path())) {
+                        return Optional.of(onPath(path, "'" + atom.path()
+                                + "' is declared dropped but flows into the return — "
+                                + "the proof is stale; update or remove it"));
+                    }
+                    continue;
+                }
+                if (ConservationRoles.feedsResidual(path, atom.path())) {
+                    return Optional.of(onPath(path, "'" + atom.path()
+                            + "' feeds untraceable flow — cannot certify"));
+                }
+                boolean ok = switch (atom.capacity()) {
+                    case NUMERIC, OTHER ->
+                            ConservationRoles.hasContentFlow(path, atom.path());
+                    case BIT -> ConservationRoles.hasAnyFlow(path, atom.path())
+                            || ConservationRoles.spentInBranching(path, atom.path());
+                };
+                if (!ok) {
+                    String detail = atom.capacity() == Capacity.BIT
+                            ? "neither flows into the return nor is spent in branching"
+                            : ConservationRoles.hasAnyFlow(path, atom.path())
+                                    ? "reaches the return only as a measurement bit — "
+                                            + "content does not"
+                                    : ConservationRoles.spentInBranching(path, atom.path())
+                                            ? "is only consulted by branching — its content "
+                                                    + "never reaches the return"
+                                            : "is UNTOUCHED — no flow into the return";
+                    return Optional.of(onPath(path, "'" + atom.path() + "' " + detail));
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     /**
-     * The reversibility witness: in every branch, dataflow is a fan-in-free,
-     * fan-out-free placement of inputs into outputs — no combination, no
-     * calls, no opaque regions; every input emitted verbatim exactly once;
-     * every output single-sourced. A bijective rewiring is structurally
-     * invertible.
+     * The reversibility witness: a verbatim bijective placement. Multi-arm
+     * branches refuse (the derived exit-assertion rule — discriminants
+     * conserved + guards partition — is a named follow-up); single-arm
+     * branches are irrefutable destructures and pass through.
      */
-    public static boolean verbatimBijection(ConservationNode node) {
-        return everyBranch(node, branch -> {
-            for (Event e : branch.events()) {
-                if (e instanceof Event.Combine || e instanceof Event.Call
-                        || e instanceof Event.Opaque) {
-                    return false;
-                }
+    public static Optional<String> reversible(ConservationGraph graph) {
+        for (FlowNode node : graph.nodes().values()) {
+            if (node instanceof FlowNode.Branch b && b.arms().size() > 1) {
+                return Optional.of("multi-branch functions are not yet certifiable as "
+                        + "reversible (the join must be re-discriminable — a later slice)");
             }
-            Flow flow = Flow.of(branch);
-            for (AttributePath atom : node.inputs()) {
-                if (flow.verbatimEmits.stream().filter(p -> p.covers(atom)).count() != 1) {
-                    return false;
-                }
-            }
-            for (AttributePath out : node.outputs()) {
-                if (flow.emitTargets.stream().filter(t -> t.covers(out)).count() != 1) {
-                    return false;
-                }
-            }
-            return true;
-        });
-    }
-
-    /** Some input atom's content is emitted more than once in some branch. */
-    public static boolean duplicated(ConservationNode node) {
-        return !noBranch(node, branch -> {
-            Flow flow = Flow.of(branch);
-            return node.inputs().stream().anyMatch(atom ->
-                    flow.verbatimEmits.stream().filter(p -> p.covers(atom)).count() > 1);
-        });
-    }
-
-    /** The input atoms no event touches in {@code branch} — the silent-loss list. */
-    public static List<AttributePath> untouched(ConservationNode node, ConservationBranch branch) {
-        return node.inputs().stream()
-                .filter(atom -> fateOf(branch, atom) == InputFate.UNTOUCHED)
-                .toList();
-    }
-
-    // --- branch quantifiers ("no branch does X", "every branch does Y") ---
-
-    public static boolean everyBranch(ConservationNode node, Predicate<ConservationBranch> test) {
-        return node.branches().stream().allMatch(test);
-    }
-
-    public static boolean noBranch(ConservationNode node, Predicate<ConservationBranch> test) {
-        return node.branches().stream().noneMatch(test);
-    }
-
-    /**
-     * Per-branch flow summary, derived from the event list. The derived-flow
-     * closure chases {@link Event.Combine} chains: an operand path "reaches an
-     * output" when some emitted derived id's transitive operand set covers it.
-     */
-    static final class Flow {
-        final List<AttributePath> verbatimEmits = new ArrayList<>();
-        final List<AttributePath> emitTargets = new ArrayList<>();
-        final List<AttributePath> derivedEmittedOperands = new ArrayList<>();
-        final List<AttributePath> callArgPaths = new ArrayList<>();
-        final List<AttributePath> consulted = new ArrayList<>();
-        final List<AttributePath> opaqueTouched = new ArrayList<>();
-        boolean opaqueAll = false;
-
-        static Flow of(ConservationBranch branch) {
-            Flow flow = new Flow();
-            // derived id -> directly contributing operand paths + derived deps.
-            Map<String, List<AttributePath>> derivedPaths = new HashMap<>();
-            Map<String, List<String>> derivedDeps = new HashMap<>();
-            Set<String> emittedDerived = new HashSet<>();
-            for (Event e : branch.events()) {
-                switch (e) {
-                    case Event.Consult c -> flow.consulted.addAll(c.subjects());
-                    case Event.Combine c -> {
-                        List<AttributePath> paths = new ArrayList<>();
-                        List<String> deps = new ArrayList<>();
-                        for (Provenance operand : c.operands()) {
-                            if (operand instanceof Provenance.Path p) paths.add(p.path());
-                            if (operand instanceof Provenance.Derived d) deps.add(d.id());
-                            if (operand instanceof Provenance.Opaque o) flow.opaqueAll = true;
-                        }
-                        derivedPaths.put(c.id(), paths);
-                        derivedDeps.put(c.id(), deps);
-                    }
-                    case Event.Emit em -> {
-                        flow.emitTargets.add(em.target());
-                        switch (em.source()) {
-                            case Provenance.Path p -> flow.verbatimEmits.add(p.path());
-                            case Provenance.Derived d -> emittedDerived.add(d.id());
-                            case Provenance.Opaque o -> flow.opaqueAll = true;
-                            default -> { /* Constant / CallResult: no input flow proven */ }
-                        }
-                    }
-                    case Event.Call c -> {
-                        for (Provenance arg : c.args()) {
-                            if (arg instanceof Provenance.Path p) flow.callArgPaths.add(p.path());
-                            if (arg instanceof Provenance.Derived d) {
-                                // Paths feeding a call-bound derived chain flow into the call.
-                                collectClosure(d.id(), derivedPaths, derivedDeps, flow.callArgPaths);
-                            }
-                        }
-                    }
-                    case Event.Opaque o -> {
-                        if (o.touched().isEmpty()) {
-                            flow.opaqueAll = true;  // can't even over-approximate
-                        } else {
-                            flow.opaqueTouched.addAll(o.touched());
-                        }
-                    }
-                }
-            }
-            for (String id : emittedDerived) {
-                collectClosure(id, derivedPaths, derivedDeps, flow.derivedEmittedOperands);
-            }
-            return flow;
-        }
-
-        private static void collectClosure(
-                String id, Map<String, List<AttributePath>> derivedPaths,
-                Map<String, List<String>> derivedDeps, List<AttributePath> out) {
-            Set<String> seen = new HashSet<>();
-            List<String> stack = new ArrayList<>(List.of(id));
-            while (!stack.isEmpty()) {
-                String current = stack.remove(stack.size() - 1);
-                if (!seen.add(current)) continue;
-                out.addAll(derivedPaths.getOrDefault(current, List.of()));
-                stack.addAll(derivedDeps.getOrDefault(current, List.of()));
+            if (node instanceof FlowNode.Computation) {
+                return Optional.of("dataflow includes computation — "
+                        + "not a verbatim placement");
             }
         }
+        List<PathRoles> paths = ConservationRoles.of(graph);
+        for (PathRoles path : paths) {
+            if (path.poisoned || !path.residuals.isEmpty()) {
+                return Optional.of(onPath(path, "untraceable flow — cannot certify"));
+            }
+            for (TypedAtom atom : graph.inputs()) {
+                int count = ConservationRoles.verbatimFlowCount(path, atom.path());
+                if (count != 1) {
+                    return Optional.of(onPath(path, "'" + atom.path() + "' is placed "
+                            + count + "× (a bijection places every input exactly once)"));
+                }
+            }
+        }
+        // Output side: every constructed slot must itself be verbatim (or a
+        // nested all-verbatim construction) — single-sourced by construction.
+        return verbatimSlots(graph.result(), graph);
+    }
+
+    private static Optional<String> verbatimSlots(Flow flow, ConservationGraph graph) {
+        return switch (flow) {
+            case Flow.Verbatim v -> Optional.empty();
+            case Flow.Constant c -> Optional.of(
+                    "an output slot is constant-sourced — not a bijective placement");
+            case Flow.Residual r -> Optional.of("untraceable output flow");
+            case Flow.FromNode n -> switch (graph.node(n.nodeId())) {
+                case FlowNode.Construction c -> {
+                    for (Flow slot : c.slots().values()) {
+                        Optional<String> bad = verbatimSlots(slot, graph);
+                        if (bad.isPresent()) yield bad;
+                    }
+                    yield Optional.empty();
+                }
+                case FlowNode.Branch b -> {
+                    for (FlowNode.Arm arm : b.arms()) {
+                        Optional<String> bad = verbatimSlots(arm.result(), graph);
+                        if (bad.isPresent()) yield bad;
+                    }
+                    yield Optional.empty();
+                }
+                case FlowNode.Computation c -> Optional.of(
+                        "an output slot is computed — not a verbatim placement");
+            };
+        };
+    }
+
+    /** Some input atom's content is verbatim-placed more than once on some path. */
+    public static boolean duplicated(ConservationGraph graph) {
+        for (PathRoles path : ConservationRoles.of(graph)) {
+            for (TypedAtom atom : graph.inputs()) {
+                if (ConservationRoles.verbatimFlowCount(path, atom.path()) > 1) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Derived display projection of an atom's roles on one path (fates as views). */
+    public static String fateView(PathRoles path, TypedAtom atom) {
+        if (path.poisoned) return "RESIDUAL (path untraceable)";
+        if (ConservationRoles.feedsResidual(path, atom.path())) {
+            return "feeds-residual (cannot certify)";
+        }
+        boolean content = ConservationRoles.hasContentFlow(path, atom.path());
+        boolean any = ConservationRoles.hasAnyFlow(path, atom.path());
+        boolean spent = ConservationRoles.spentInBranching(path, atom.path());
+        int verbatim = ConservationRoles.verbatimFlowCount(path, atom.path());
+        if (verbatim > 1) return "placed " + verbatim + "× (duplicated)";
+        if (verbatim == 1 && !spent) return "flows-verbatim";
+        if (verbatim == 1) return "flows-verbatim + spent-in-branching";
+        if (content) return spent ? "flows-derived + spent-in-branching" : "flows-derived";
+        if (any) return "measurement-bit only" + (spent ? " + spent-in-branching" : "");
+        if (spent) return "spent-in-branching (content not in return)";
+        return "UNTOUCHED (no flow into the return)";
+    }
+
+    private static String onPath(PathRoles path, String message) {
+        return path.label.isEmpty() ? message
+                : message + "  [path: " + path.label + "]";
     }
 }

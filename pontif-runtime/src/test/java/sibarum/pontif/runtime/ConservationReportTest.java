@@ -1,8 +1,8 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.conservation.ConservationLedger;
-import sibarum.pontif.conservation.ConservationLedger.ConservationNode;
+import sibarum.pontif.conservation.ConservationGraph;
+import sibarum.pontif.conservation.ConservationGraph.Ledger;
 import sibarum.pontif.conservation.ConservationQueries;
 import sibarum.pontif.runtime.ConservationReport.Result;
 
@@ -13,17 +13,18 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Conservation receipts, Slice 1 — the ledger, its reading, and the gate
- * demonstrated programmatically. Each demo writes a reviewable
- * {@code target/conservation/<name>.conservation.txt} artifact (the
- * see-the-data-first deliverable the query surface will be designed from)
- * and asserts the query outcomes that would gate compilation.
+ * The conservation graph per the ratified algebra
+ * ({@code docs/conservation-algebra.md}): three node kinds + metadata edges,
+ * roles-not-fates, the sort-aware {@code DataConservative} under the capacity
+ * law, residual flow as the located ignorance (lambdas, applications,
+ * unresolved calls). Each demo writes a reviewable
+ * {@code target/conservation/<name>.conservation.txt} artifact.
  */
 class ConservationReportTest {
 
     private static final Path OUT = Path.of("target", "conservation");
 
-    private ConservationLedger ledger(String name, String src) throws Exception {
+    private Ledger ledger(String name, String src) throws Exception {
         ConservationReport.writeReport(OUT, name, src, name + ".ptf");
         Result r = ConservationReport.fromAltSource(src, name + ".ptf");
         assertInstanceOf(Result.Generated.class, r,
@@ -31,11 +32,16 @@ class ConservationReportTest {
         return ((Result.Generated) r).ledger();
     }
 
-    private ConservationNode node(ConservationLedger ledger, String fn) {
-        return ledger.node(fn).orElseThrow(() -> new AssertionError("no node for " + fn));
+    private ConservationGraph graph(Ledger ledger, String fn) {
+        return ledger.graph(fn).orElseThrow(() -> new AssertionError("no graph for " + fn));
     }
 
-    // --- 1+2: symbolic translation — the lossless gate ---
+    private String print(String src) {
+        Result r = ConservationReport.fromAltSource(src, "t.ptf");
+        return ((Result.Generated) r).text();
+    }
+
+    // --- translation: the DataConservative gate ---
 
     private static final String LOSSY = """
             struct Source(name:Int, age:Int, email:Int)
@@ -53,26 +59,23 @@ class ConservationReportTest {
             """;
 
     @Test
-    void lossyTranslation_failsLossless_andTheLedgerShowsTheDrop() throws Exception {
-        ConservationLedger ledger = ledger("translate-lossy", LOSSY);
-        ConservationNode translate = node(ledger, "translate");
-        assertFalse(ConservationQueries.lossless(translate),
-                "s.email never flows into Target — the silent loss must fail the gate");
-        // The printed reading names the loss.
-        Result r = ConservationReport.fromAltSource(LOSSY, "t.ptf");
-        String text = ((Result.Generated) r).text();
+    void lossyTranslation_failsDataConservative_andTheGraphShowsTheDrop() throws Exception {
+        ConservationGraph translate = graph(ledger("translate-lossy", LOSSY), "translate");
+        assertTrue(ConservationQueries.dataConservative(translate).isPresent(),
+                "s.email never flows into Target — the silent loss must fail");
+        String text = print(LOSSY);
         assertTrue(text.contains("s_0.email") && text.contains("UNTOUCHED"),
                 () -> "expected the drop to be visible:\n" + text);
     }
 
     @Test
-    void fixedTranslation_passesLossless() throws Exception {
-        ConservationNode translate = node(ledger("translate-fixed", FIXED), "translate");
-        assertTrue(ConservationQueries.lossless(translate),
-                "every Source attribute reaches Target (verbatim or derived)");
+    void fixedTranslation_passesDataConservative() throws Exception {
+        ConservationGraph translate = graph(ledger("translate-fixed", FIXED), "translate");
+        assertTrue(ConservationQueries.dataConservative(translate).isEmpty(),
+                () -> ConservationQueries.dataConservative(translate).orElse(""));
     }
 
-    // --- 3: swap — the reversibility witness, no arrays needed ---
+    // --- swap: the reversibility witness ---
 
     @Test
     void swap_witnessesReversibility() throws Exception {
@@ -81,17 +84,31 @@ class ConservationReportTest {
                   match p { [(a, b)] -> (b, a) }
                 swap((1, true))
                 """;
-        ConservationNode swap = node(ledger("swap", src), "swap");
-        assertTrue(ConservationQueries.verbatimBijection(swap),
-                "fan-in-free, fan-out-free verbatim placement — structurally invertible");
-        assertTrue(ConservationQueries.lossless(swap));
+        ConservationGraph swap = graph(ledger("swap", src), "swap");
+        assertTrue(ConservationQueries.reversible(swap).isEmpty(),
+                () -> ConservationQueries.reversible(swap).orElse(""));
+        assertTrue(ConservationQueries.dataConservative(swap).isEmpty());
         assertFalse(ConservationQueries.duplicated(swap));
     }
 
-    // --- 4: branching — consulted-only vs emitted, per branch ---
+    // --- the capacity law: Bool spent in branching conserves; Int doesn't ---
 
     @Test
-    void clamp_branchQuantifiers() throws Exception {
+    void boolSpentInBranching_isDataConservative() throws Exception {
+        String src = """
+                function pick(b:Bool):Int -> match b {
+                  [@==true] -> 1
+                  _ -> 2
+                }
+                pick(true)
+                """;
+        ConservationGraph pick = graph(ledger("pick-bool", src), "pick");
+        assertTrue(ConservationQueries.dataConservative(pick).isEmpty(),
+                "a Bool's whole content is one bit — branching on it spends all of it");
+    }
+
+    @Test
+    void intSpentOnlyInBranching_isNotDataConservative() throws Exception {
         String src = """
                 function clamp(x:Int):Int -> match x {
                   [@>0] -> x
@@ -99,17 +116,12 @@ class ConservationReportTest {
                 }
                 clamp(5)
                 """;
-        ConservationNode clamp = node(ledger("clamp", src), "clamp");
-        // The positive branch conserves x; the floor branch only consults it.
-        assertFalse(ConservationQueries.lossless(clamp),
-                "not every branch carries x's content to the output");
-        assertFalse(ConservationQueries.duplicated(clamp));
-        assertTrue(ConservationQueries.everyBranch(clamp,
-                        b -> ConservationQueries.untouched(clamp, b).isEmpty()),
-                "x is touched (emitted or consulted) in every branch — never silently ignored");
+        ConservationGraph clamp = graph(ledger("clamp", src), "clamp");
+        assertTrue(ConservationQueries.dataConservative(clamp).isPresent(),
+                "an Int branched on yields one bit of many — not conservation");
     }
 
-    // --- 5: duplication is caught ---
+    // --- duplication breaks the bijection ---
 
     @Test
     void duplication_breaksTheBijection() throws Exception {
@@ -118,29 +130,48 @@ class ConservationReportTest {
                   match p { [(a, _)] -> (a, a) }
                 dup((1, true))
                 """;
-        ConservationNode dup = node(ledger("dup", src), "dup");
-        assertTrue(ConservationQueries.duplicated(dup), "a emitted into both slots");
-        assertFalse(ConservationQueries.verbatimBijection(dup));
+        ConservationGraph dup = graph(ledger("dup", src), "dup");
+        assertTrue(ConservationQueries.duplicated(dup));
+        assertTrue(ConservationQueries.reversible(dup).isPresent());
     }
 
-    // --- 6: opaque honesty — the ledger never over-claims ---
+    // --- the headline flip: nested destructure/discrimination now TRACES ---
 
     @Test
-    void untraceableFlow_failsClosed() throws Exception {
-        // A nested match in value position is untraced in v1 — the ledger says
-        // OPAQUE and refuses to certify conservation, rather than guessing.
+    void nestedMatch_isTraced_notOpaque() throws Exception {
+        // v1 marked this OPAQUE (vocabulary poverty). The algebra traces it:
+        // the inner match is a Branch node, and DataConservative now fails on
+        // the MERITS — x is untouched on the else-path — with the
+        // classification visible instead of a shrug.
         String src = """
                 function f(x:Int, y:Int):Int ->
                   let inner = match y { [@>0] -> x
                   _ -> 0 }
                   inner + y
                 """;
-        ConservationLedger ledger = ledger("opaque", src);
-        ConservationNode f = node(ledger, "f");
-        assertFalse(ConservationQueries.lossless(f),
-                "untraceable flow must never pass a conservation assertion");
-        String text = ((ConservationReport.Result.Generated)
-                ConservationReport.fromAltSource(src, "t.ptf")).text();
-        assertTrue(text.contains("OPAQUE"), () -> "expected honest ignorance:\n" + text);
+        ConservationGraph f = graph(ledger("nested", src), "f");
+        String text = print(src);
+        assertFalse(text.contains("RESIDUAL") || text.contains("untraceable"),
+                () -> "nested discrimination must trace:\n" + text);
+        assertTrue(ConservationQueries.dataConservative(f).isPresent(),
+                "x is dropped on the else path — an honest failure, not ignorance");
+        assertTrue(text.contains("UNTOUCHED"), () -> text);
+    }
+
+    // --- the located ignorance: calls (until composition), recursion (after) ---
+
+    @Test
+    void recursion_staysResidual_andFailsClosed() throws Exception {
+        String src = """
+                function fact(n:Int):Int -> match n {
+                  [@==0] -> 1
+                  _ -> n * fact(n - 1)
+                }
+                fact(3)
+                """;
+        ConservationGraph fact = graph(ledger("fact", src), "fact");
+        assertTrue(ConservationQueries.dataConservative(fact).isPresent(),
+                "flow through an unresolved call never certifies");
+        assertTrue(print(src).contains("?("), () -> print(src));
     }
 }

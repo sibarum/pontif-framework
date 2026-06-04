@@ -1,8 +1,5 @@
 package sibarum.pontif.conservation;
 
-import sibarum.pontif.conservation.ConservationLedger.ConservationBranch;
-import sibarum.pontif.conservation.ConservationLedger.ConservationNode;
-import sibarum.pontif.conservation.ConservationQueries.InputFate;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
@@ -15,34 +12,32 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The conservation half of the proof surface: binds {@code proof f = …}
- * statements whose tree head is a {@code std.conservation} property
- * constructor, and evaluates the bound assertions against the drafted
- * {@link ConservationLedger}. The sibling of the receipts module's
- * {@code ProofBinding}/{@code RefinementProof} pair — one {@code proof}
- * statement, two ledgers, the head's vocabulary picks which.
+ * The conservation half of the proof surface, restated over the ratified
+ * algebra: binds {@code proof f = …} statements whose tree head is a
+ * {@code std.conservation} property constructor, and evaluates the bound
+ * assertions against the drafted {@link ConservationGraph}s. One {@code proof}
+ * statement, two ledgers — the head's vocabulary picks which.
  *
- * <p>Unlike algebraic proofs, conservation assertions need NO refined return
- * sort and accept multi-branch targets — branch quantification lives inside
- * the property (e.g. losslessness is an every-branch claim by definition).
- *
- * <p>Property names are provisional pending vocabulary review.
+ * <p>The headline property is {@code DataConservative} (the name `Lossless`
+ * is RESERVED for the cross-ledger algebraic+conservation property): every
+ * Int/Decimal input atom flows into the return; every Bool atom flows or is
+ * spent in branching — the capacity law.
  */
 public final class ConservationProofs {
 
     private ConservationProofs() {}
 
     /** The property-constructor local names this binder claims. */
-    public static final Set<String> HEAD_NAMES =
-            Set.of("Lossless", "Reversible", "NoDuplication", "LosslessExcept");
+    public static final Set<String> HEAD_NAMES = Set.of(
+            "DataConservative", "Reversible", "NoDuplication", "DataConservativeExcept");
 
-    /** The named conservation properties — the v1 assertion library. */
+    /** The named conservation properties. */
     public sealed interface Assertion {
-        record Lossless() implements Assertion {}
+        record DataConservative() implements Assertion {}
         record Reversible() implements Assertion {}
         record NoDuplication() implements Assertion {}
-        /** Intentional erasure: everything reaches output EXCEPT {@code dropped}, which must not. */
-        record LosslessExcept(AttributePath dropped) implements Assertion {}
+        /** Intentional erasure: everything conserved EXCEPT {@code dropped}, which must not flow. */
+        record DataConservativeExcept(AttributePath dropped) implements Assertion {}
     }
 
     public record Result(Map<String, Assertion> assertions, List<String> problems) {
@@ -59,9 +54,9 @@ public final class ConservationProofs {
     }
 
     /**
-     * Binds every conservation-headed {@code proof} statement to its target
-     * function. Never throws — malformed trees become problems. No
-     * refined-return or single-branch requirement (contrast ProofBinding).
+     * Binds every conservation-headed {@code proof} statement. Never throws —
+     * malformed trees become problems. No refined-return or single-branch
+     * requirement (branch quantification lives inside the properties).
      */
     public static Result bind(IrModule module) {
         Map<String, IrStmt.FunctionDecl> fns = new LinkedHashMap<>();
@@ -94,32 +89,26 @@ public final class ConservationProofs {
         return new Result(assertions, problems);
     }
 
-    /**
-     * Interprets one (unevaluated) property tree. {@code LosslessExcept}'s
-     * argument is an attribute expression over the target's params
-     * ({@code s.email}), interpreted to the ledger's call-instance path
-     * ({@code s_0.email}) — the same param-renaming convention as the drafter.
-     */
     private static Assertion interpret(IrExpr tree, IrStmt.FunctionDecl target) {
         String head = headLocalName(tree);
         List<IrExpr> args = argumentsOf(tree);
         return switch (head) {
-            case "Lossless" -> new Assertion.Lossless();
+            case "DataConservative" -> new Assertion.DataConservative();
             case "Reversible" -> new Assertion.Reversible();
             case "NoDuplication" -> new Assertion.NoDuplication();
-            case "LosslessExcept" -> {
+            case "DataConservativeExcept" -> {
                 if (args.size() != 1) {
                     throw new IllegalArgumentException(
-                            "LosslessExcept takes exactly one dropped attribute (got "
+                            "DataConservativeExcept takes exactly one dropped attribute (got "
                                     + args.size() + ")");
                 }
-                yield new Assertion.LosslessExcept(attributePathOf(args.get(0), target));
+                yield new Assertion.DataConservativeExcept(
+                        attributePathOf(args.get(0), target));
             }
             default -> throw new IllegalArgumentException("unknown property '" + head + "'");
         };
     }
 
-    /** A {@code Var}/{@code FieldAccess} chain over a param → its ledger path. */
     private static AttributePath attributePathOf(IrExpr expr, IrStmt.FunctionDecl target) {
         if (expr instanceof IrExpr.Var v) {
             boolean isParam = target.params().stream()
@@ -137,82 +126,26 @@ public final class ConservationProofs {
                 "expected an attribute expression over a parameter (e.g. s.email)");
     }
 
-    // --- evaluation ---------------------------------------------------------
-
     /**
-     * Evaluates an assertion against its function's ledger node. Empty =
-     * proven; otherwise a failure message ending with the printed node — the
-     * error IS the receipt. Fail-closed throughout: opaque or call-mediated
-     * flow never certifies.
+     * Evaluates an assertion against its function's graph. Empty = proven;
+     * otherwise a failure message ending with the printed graph — the error
+     * IS the receipt. Fail-closed on residual flow throughout.
      */
     public static Optional<String> evaluate(
-            String functionName, Assertion assertion, ConservationNode node) {
+            String functionName, Assertion assertion, ConservationGraph graph) {
         Optional<String> failure = switch (assertion) {
-            case Assertion.Lossless a -> ConservationQueries.lossless(node)
-                    ? Optional.empty()
-                    : firstFateViolation(node, Set.of(
-                            InputFate.EMITTED_VERBATIM, InputFate.FLOWS_DERIVED), null);
-            case Assertion.Reversible a -> ConservationQueries.verbatimBijection(node)
-                    ? Optional.empty()
-                    : Optional.of("dataflow is not a verbatim bijection "
-                            + "(combination, duplication, drop, or untraceable flow present)");
-            case Assertion.NoDuplication a -> ConservationQueries.duplicated(node)
-                    ? Optional.of("an input attribute's content is emitted more than once")
+            case Assertion.DataConservative a ->
+                    ConservationQueries.dataConservative(graph);
+            case Assertion.DataConservativeExcept a ->
+                    ConservationQueries.dataConservativeExcept(graph, a.dropped());
+            case Assertion.Reversible a -> ConservationQueries.reversible(graph);
+            case Assertion.NoDuplication a -> ConservationQueries.duplicated(graph)
+                    ? Optional.of("an input attribute's content is placed more than once")
                     : Optional.empty();
-            case Assertion.LosslessExcept a -> evaluateLosslessExcept(node, a.dropped());
         };
         return failure.map(reason -> "Conservation proof for '" + functionName
-                + "' failed: " + reason + "\n\n" + ConservationLedgerPrinter.printNode(node));
-    }
-
-    /**
-     * Intentional erasure, both directions: every atom NOT covered by
-     * {@code dropped} must reach an output in every branch, and every atom
-     * covered by it must NOT — if the drop disappears, the proof is stale and
-     * fails (future changes to the algorithm are protected).
-     */
-    private static Optional<String> evaluateLosslessExcept(
-            ConservationNode node, AttributePath dropped) {
-        boolean coversAnything = node.inputs().stream().anyMatch(dropped::covers);
-        if (!coversAnything) {
-            return Optional.of("'" + dropped + "' names no input attribute of this function");
-        }
-        for (ConservationBranch branch : node.branches()) {
-            for (AttributePath atom : node.inputs()) {
-                InputFate fate = ConservationQueries.fateOf(branch, atom);
-                if (dropped.covers(atom)) {
-                    if (fate == InputFate.EMITTED_VERBATIM || fate == InputFate.FLOWS_DERIVED) {
-                        return Optional.of("'" + atom + "' is declared dropped but now flows "
-                                + "into the output — the proof is stale; update or remove it");
-                    }
-                    if (fate == InputFate.OPAQUE) {
-                        return Optional.of("'" + atom + "' is inside untraceable flow — "
-                                + "cannot certify the declared drop");
-                    }
-                } else if (fate != InputFate.EMITTED_VERBATIM
-                        && fate != InputFate.FLOWS_DERIVED) {
-                    return Optional.of("'" + atom + "' does not reach the output ("
-                            + fate + ") and is not in the declared-dropped set");
-                }
-            }
-        }
-        return Optional.empty();
-    }
-
-    /** First lossless violation, for the diagnostic line. */
-    private static Optional<String> firstFateViolation(
-            ConservationNode node, Set<InputFate> allowed, AttributePath except) {
-        for (ConservationBranch branch : node.branches()) {
-            for (AttributePath atom : node.inputs()) {
-                if (except != null && except.covers(atom)) continue;
-                InputFate fate = ConservationQueries.fateOf(branch, atom);
-                if (!allowed.contains(fate)) {
-                    return Optional.of("'" + atom + "' is " + fate
-                            + " in some branch — every input must reach the output");
-                }
-            }
-        }
-        return Optional.of("losslessness does not hold");
+                + "' failed: " + reason + "\n\n"
+                + ConservationLedgerPrinter.printNode(graph));
     }
 
     private static String headLocalName(IrExpr tree) {

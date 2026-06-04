@@ -51,9 +51,9 @@ class ConservationGateTest {
     @Test
     void lossyTranslation_failsTheGate_withTheReceiptInTheError() {
         String err = compileError("""
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
                 """ + LOSSY_TRANSLATE + """
-                proof translate = Lossless()
+                proof translate = DataConservative()
                 translate(Source(1, 2, 3)).years
                 """);
         assertTrue(err.contains("Conservation proof"), () -> err);
@@ -64,9 +64,9 @@ class ConservationGateTest {
     @Test
     void fixedTranslation_passesTheGate_andRuns() {
         assertEquals("3", runOk("""
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
                 """ + FIXED_TRANSLATE + """
-                proof translate = Lossless()
+                proof translate = DataConservative()
                 translate(Source(1, 2, 3)).years
                 """));
     }
@@ -101,9 +101,9 @@ class ConservationGateTest {
     @Test
     void declaredDrop_makesTheLossyTranslationCompile() {
         assertEquals("3", runOk("""
-                requires std.conservation.{LosslessExcept}
+                requires std.conservation.{DataConservativeExcept}
                 """ + LOSSY_TRANSLATE + """
-                proof translate = LosslessExcept(s.email)
+                proof translate = DataConservativeExcept(s.email)
                 translate(Source(1, 2, 3)).years
                 """));
     }
@@ -111,9 +111,9 @@ class ConservationGateTest {
     @Test
     void fixingTheDrop_makesTheDeclarationStale_andFails() {
         String err = compileError("""
-                requires std.conservation.{LosslessExcept}
+                requires std.conservation.{DataConservativeExcept}
                 """ + FIXED_TRANSLATE + """
-                proof translate = LosslessExcept(s.email)
+                proof translate = DataConservativeExcept(s.email)
                 translate(Source(1, 2, 3)).years
                 """);
         assertTrue(err.contains("stale"), () -> err);
@@ -125,11 +125,11 @@ class ConservationGateTest {
     void algebraicAndConservationProofs_coexist() {
         assertEquals("3", runOk("""
                 requires std.proof.{Leaf, Split}
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
                 """ + FIXED_TRANSLATE + """
                 function f(x:Int):[Int:@>=0] -> x*(x-1)
                 proof f = Split(x>=1, Leaf(), Leaf())
-                proof translate = Lossless()
+                proof translate = DataConservative()
                 translate(Source(1, 2, 3)).years
                 """));
     }
@@ -139,8 +139,8 @@ class ConservationGateTest {
     @Test
     void proofForUnknownFunction_isRejected() {
         String err = compileError("""
-                requires std.conservation.{Lossless}
-                proof nothere = Lossless()
+                requires std.conservation.{DataConservative}
+                proof nothere = DataConservative()
                 0
                 """);
         assertTrue(err.contains("unknown function"), () -> err);
@@ -149,27 +149,47 @@ class ConservationGateTest {
     @Test
     void nonPathArgument_isRejected() {
         String err = compileError("""
-                requires std.conservation.{LosslessExcept}
+                requires std.conservation.{DataConservativeExcept}
                 """ + LOSSY_TRANSLATE + """
-                proof translate = LosslessExcept(1 + 1)
+                proof translate = DataConservativeExcept(1 + 1)
                 0
                 """);
         assertTrue(err.contains("attribute expression"), () -> err);
     }
 
-    // --- opaque honesty at the gate ---
+    // --- residual honesty at the gate: the located ignorance never certifies ---
 
     @Test
-    void untraceableFlow_neverCertifies() {
+    void residualFlow_neverCertifies() {
+        // Recursion stays residual (the fixpoint is a later slice) — flow
+        // through it can never pass a conservation assertion.
         String err = compileError("""
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
+                function fact(n:Int):Int -> match n {
+                  [@==0] -> 1
+                  _ -> n * fact(n - 1)
+                }
+                proof fact = DataConservative()
+                fact(3)
+                """);
+        assertTrue(err.contains("Conservation proof"), () -> err);
+    }
+
+    @Test
+    void nestedDiscrimination_nowTraced_failsOnTheMerits() {
+        // v1 called this OPAQUE; the algebra traces it. It still fails — x is
+        // genuinely dropped on the else path — but the error now names the
+        // honest reason instead of shrugging.
+        String err = compileError("""
+                requires std.conservation.{DataConservative}
                 function f(x:Int, y:Int):Int ->
                   let inner = match y { [@>0] -> x
                   _ -> 0 }
                   inner + y
-                proof f = Lossless()
+                proof f = DataConservative()
                 f(1, 2)
                 """);
         assertTrue(err.contains("Conservation proof"), () -> err);
+        assertTrue(err.contains("x_0"), () -> err);
     }
 }

@@ -1,8 +1,11 @@
 package sibarum.pontif.conservation;
 
-import sibarum.pontif.conservation.ConservationLedger.ConservationBranch;
-import sibarum.pontif.conservation.ConservationLedger.ConservationNode;
-import sibarum.pontif.conservation.ConservationLedger.NamedSort;
+import sibarum.pontif.conservation.ConservationGraph.Capacity;
+import sibarum.pontif.conservation.ConservationGraph.Ledger;
+import sibarum.pontif.conservation.ConservationGraph.TypedAtom;
+import sibarum.pontif.conservation.FlowNode.Arm;
+import sibarum.pontif.conservation.FlowNode.OpClass;
+import sibarum.pontif.conservation.FlowNode.Recoverability;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.ir.CompileException;
@@ -18,254 +21,344 @@ import sibarum.pontif.ir.TypeRegistry;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
- * Drafts the {@link ConservationLedger} from an {@link IrModule} — the
- * dataflow sibling of the receipt-graph {@code Drafter}, and deliberately
- * built "in a similar fashion": stateless single pass, parameters renamed to
- * call-instance form ({@code n} → {@code n_0}), the result rooted at
- * {@code r_0}, one branch per top-level match arm with the arm's refinement
- * predicate as the guard, and calls recorded by reference, never re-expanded
- * (the no-duplicate-edges rule).
+ * Drafts the conservation graph per {@code docs/conservation-algebra.md} —
+ * the taxonomy DERIVED from the sealed IR, not hypothesized over it. The
+ * expression switches below are exhaustive with <b>no default case</b>: the
+ * compiler itself proves the taxonomy total, and any future {@code IrExpr}
+ * variant must declare what it conserves before this module compiles again.
  *
- * <p>No reasoning happens here — only transcription of dataflow events.
- * Anything the walk cannot trace becomes an {@link Event.Opaque}: honest
- * ignorance, on which every conservation query fails closed.
- *
- * <p>Draft from the same resolved module the receipt graph drafts from
- * (post-link, post-alias, post-promotion) so aggregate literals carry their
- * claims and canonical field order.
+ * <p>Three node kinds (Computation / Branch / Construction); everything else
+ * is metadata on flows. Residual flows — lambdas, applications, unresolved
+ * calls (and recursive calls, until the fixpoint slice) — are the located
+ * ignorance, carrying their over-approximated touch sets so queries fail
+ * closed on exactly the right atoms.
  */
 public final class ConservationDrafter {
 
     private ConservationDrafter() {}
 
-    public static ConservationLedger draft(IrModule module) throws CompileException {
+    public static Ledger draft(IrModule module) throws CompileException {
         Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
-        List<ConservationNode> nodes = new ArrayList<>();
+        List<ConservationGraph> graphs = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                nodes.add(draftFunction(fd, structs));
+                graphs.add(draftFunction(fd, structs));
             }
         }
-        return new ConservationLedger(nodes);
+        return new Ledger(graphs);
     }
 
-    private static ConservationNode draftFunction(
+    private static ConservationGraph draftFunction(
             IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs)
             throws CompileException {
-        // Params renamed to call-instance form; the provenance environment is
-        // keyed by the ORIGINAL binder names the body uses.
-        List<NamedSort> params = new ArrayList<>(fd.params().size());
-        Map<String, Provenance> env = new HashMap<>();
-        Map<String, SymExpr> renameBindings = new HashMap<>();
-        List<AttributePath> inputs = new ArrayList<>();
+        Ctx ctx = new Ctx(structs);
+        List<TypedAtom> inputs = new ArrayList<>();
+        StringBuilder params = new StringBuilder();
         for (IrParam p : fd.params()) {
             String varName = p.name() + "_0";
-            params.add(new NamedSort(varName, renderSort(p.sort())));
-            env.put(p.name(), new Provenance.Path(AttributePath.of(varName)));
-            renameBindings.put(p.name(), SymExpr.var(varName));
+            if (params.length() > 0) params.append(", ");
+            params.append(varName).append(": ").append(renderSort(p.sort()));
+            ctx.env.put(p.name(), new Flow.Verbatim(AttributePath.of(varName)));
+            ctx.rename.put(p.name(), SymExpr.var(varName));
             flatten(AttributePath.of(varName), p.sort(), structs, new HashSet<>(), inputs);
         }
-
         List<AttributePath> outputs = new ArrayList<>();
-        flatten(AttributePath.of("r_0"), fd.returnSort(), structs, new HashSet<>(), outputs);
+        List<TypedAtom> outputAtoms = new ArrayList<>();
+        flatten(AttributePath.of("r_0"), fd.returnSort(), structs, new HashSet<>(), outputAtoms);
+        for (TypedAtom a : outputAtoms) outputs.add(a.path());
 
-        int[] derivedCounter = {1};
-        List<ConservationBranch> branches = fd.body() instanceof IrExpr.Match match
-                ? draftMatchBranches(match, env, renameBindings, derivedCounter)
-                : List.of(draftBranch(fd.body(), Optional.empty(), Optional.empty(),
-                        env, derivedCounter));
-
-        return new ConservationNode(
-                fd.name(), params, renderSort(fd.returnSort()), inputs, outputs, branches);
+        Flow result = draftTail(fd.body(), ctx);
+        return new ConservationGraph(
+                fd.name(), params.toString(), renderSort(fd.returnSort()),
+                inputs, outputs, ctx.nodes, result);
     }
 
-    private static List<ConservationBranch> draftMatchBranches(
-            IrExpr.Match match, Map<String, Provenance> env,
-            Map<String, SymExpr> renameBindings, int[] derivedCounter)
-            throws CompileException {
-        // The scrutinee's attribute paths are what a discriminating arm consults.
-        List<AttributePath> scrutineePaths =
-                pathsOf(provenanceOfPure(match.scrutinee(), env));
+    /** Per-function drafting context: env, nodes, counters, guard renaming. */
+    private static final class Ctx {
+        final Map<String, Flow> env = new HashMap<>();
+        final Map<String, SymExpr> rename = new HashMap<>();
+        final Map<String, FlowNode> nodes = new LinkedHashMap<>();
+        final Map<String, IrSort.Structural> structs;
+        int counter = 1;
 
-        List<ConservationBranch> branches = new ArrayList<>(match.branches().size());
-        for (IrExpr.MatchBranch arm : match.branches()) {
-            Optional<SymExpr> guard = Optional.empty();
-            Optional<String> patternNote = Optional.empty();
-            boolean discriminates = false;
-            if (arm.pattern() instanceof IrSort.Refined refined) {
+        Ctx(Map<String, IrSort.Structural> structs) { this.structs = structs; }
+
+        String add(FlowNode node) {
+            nodes.put(node.id(), node);
+            return node.id();
+        }
+
+        String freshId(String kind) { return kind + "_" + (counter++); }
+    }
+
+    /**
+     * Tail position: the result is CONSTRUCTED (returns are construction).
+     * A record tail becomes the return-construction directly (slots keyed
+     * {@code r_0.<member>}); a match tail becomes a Branch whose arms
+     * recursively construct; anything else constructs the single {@code r_0}
+     * slot.
+     */
+    private static Flow draftTail(IrExpr expr, Ctx ctx) throws CompileException {
+        return switch (expr) {
+            case IrExpr.LetIn l -> {
+                Flow value = draftValue(l.value(), ctx);
+                Flow prev = ctx.env.put(l.name(), value);
+                Flow result = draftTail(l.body(), ctx);
+                if (prev != null) ctx.env.put(l.name(), prev); else ctx.env.remove(l.name());
+                yield result;
+            }
+            case IrExpr.Match m -> draftBranch(m, ctx, true);
+            case IrExpr.Record r -> {
+                Map<String, Flow> slots = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> member : r.members().entrySet()) {
+                    slots.put("r_0." + member.getKey(), draftValue(member.getValue(), ctx));
+                }
+                String id = ctx.freshId("ret");
+                ctx.add(new FlowNode.Construction(id, claimOf(r), slots));
+                yield new Flow.FromNode(id);
+            }
+            // Every other form constructs the single r_0 slot. Listed
+            // explicitly — no default — so a new IrExpr variant must take a
+            // stance here before this compiles.
+            case IrExpr.Lit ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Dec ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Bool ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Var ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.SelfRef ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.BinOp ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Call ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Lambda ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Apply ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.FieldAccess ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+        };
+    }
+
+    private static Flow wrapReturn(Flow value, Ctx ctx) {
+        String id = ctx.freshId("ret");
+        Map<String, Flow> slots = new LinkedHashMap<>();
+        slots.put("r_0", value);
+        ctx.add(new FlowNode.Construction(id, "return", slots));
+        return new Flow.FromNode(id);
+    }
+
+    /** A Match anywhere — tail or value position — is a Branch node. */
+    private static Flow draftBranch(IrExpr.Match m, Ctx ctx, boolean tail)
+            throws CompileException {
+        Flow scrutinee = draftValue(m.scrutinee(), ctx);
+        boolean discriminates = m.branches().stream().anyMatch(
+                arm -> isRefutable(arm.pattern()));
+        List<Flow> discriminants = discriminates ? List.of(scrutinee) : List.of();
+
+        List<Arm> arms = new ArrayList<>(m.branches().size());
+        for (IrExpr.MatchBranch arm : m.branches()) {
+            String label = armLabel(arm.pattern(), m.scrutinee(), ctx);
+            Flow result = tail ? draftTail(arm.result(), ctx)
+                               : draftValue(arm.result(), ctx);
+            arms.add(new Arm(label, result));
+        }
+        String id = ctx.freshId("br");
+        ctx.add(new FlowNode.Branch(id, discriminants, arms));
+        return new Flow.FromNode(id);
+    }
+
+    private static boolean isRefutable(IrSort pattern) {
+        return switch (pattern) {
+            case IrSort.Refined r -> true;
+            case IrSort.Named n -> !n.name().equals("_");
+            case IrSort.Structural s ->
+                    !"_tuple".equals(s.name()) && !"_record".equals(s.name());
+            default -> false;
+        };
+    }
+
+    private static String armLabel(IrSort pattern, IrExpr scrutinee, Ctx ctx) {
+        try {
+            if (pattern instanceof IrSort.Refined refined) {
                 SymExpr predicate = Substitute.apply(
-                        IrCompiler.compileSymExpr(refined.predicate()), renameBindings);
-                SymExpr scrutinee = Substitute.apply(
-                        IrCompiler.compileSymExpr(stripToVarOrSelf(match.scrutinee())),
-                        renameBindings);
-                guard = Optional.of(Substitute.applySelf(predicate, scrutinee));
-                discriminates = true;
-            } else if (arm.pattern() instanceof IrSort.Named named
-                    && !named.name().equals("_")) {
-                // A bare named pattern is a claim test — discrimination too.
-                patternNote = Optional.of("pattern: " + named.name());
-                discriminates = true;
-            } else if (arm.pattern() instanceof IrSort.Structural sp
-                    && !"_tuple".equals(sp.name()) && !"_record".equals(sp.name())) {
-                // A named structural destructure pattern also claims; bare
-                // tuple/record destructures are irrefutable — no discrimination.
-                patternNote = Optional.of("pattern: " + sp.name() + "(…)");
+                        IrCompiler.compileSymExpr(refined.predicate()), ctx.rename);
+                SymExpr scrut = Substitute.apply(
+                        IrCompiler.compileSymExpr(scrutinee), ctx.rename);
+                return ConservationLedgerPrinter.renderGuard(
+                        Substitute.applySelf(predicate, scrut));
             }
-
-            List<Event> events = new ArrayList<>();
-            if (discriminates && !scrutineePaths.isEmpty()) {
-                events.add(new Event.Consult(scrutineePaths));
-            }
-            ConservationBranch branch = draftBranch(
-                    arm.result(), guard, patternNote, env, derivedCounter);
-            List<Event> all = new ArrayList<>(events);
-            all.addAll(branch.events());
-            branches.add(new ConservationBranch(guard, patternNote, all));
+        } catch (CompileException ignored) {
+            // fall through to the structural label
         }
-        return branches;
-    }
-
-    /** Match scrutinees may be wrapped expressions; the guard binds @ to the value itself. */
-    private static IrExpr stripToVarOrSelf(IrExpr scrutinee) {
-        return scrutinee;
-    }
-
-    private static ConservationBranch draftBranch(
-            IrExpr body, Optional<SymExpr> guard, Optional<String> patternNote,
-            Map<String, Provenance> env, int[] derivedCounter)
-            throws CompileException {
-        List<Event> events = new ArrayList<>();
-        walkToTail(body, new HashMap<>(env), events, derivedCounter);
-        return new ConservationBranch(guard, patternNote, events);
+        return switch (pattern) {
+            case IrSort.Named n -> n.name().equals("_") ? "_" : "pattern: " + n.name();
+            case IrSort.Structural s -> "_tuple".equals(s.name()) ? "(…)"
+                    : "_record".equals(s.name()) ? "{…}" : s.name() + "(…)";
+            default -> "arm";
+        };
     }
 
     /**
-     * Walks let-chains extending the provenance environment, then emits the
-     * tail expression into the output slots.
+     * Value position. Exhaustive over the sealed IR — the standing
+     * completeness proof; the residual cases are exactly the algebra's ruled
+     * ones: lambda, application, unresolved call.
      */
-    private static void walkToTail(
-            IrExpr expr, Map<String, Provenance> env,
-            List<Event> events, int[] derivedCounter) {
-        if (expr instanceof IrExpr.LetIn let) {
-            Provenance value = provenanceOf(let.value(), env, events, derivedCounter);
-            env.put(let.name(), value);
-            walkToTail(let.body(), env, events, derivedCounter);
-            return;
-        }
-        emitTail(expr, env, events, derivedCounter);
-    }
-
-    /** The branch tail flows into the result: per-member for an aggregate literal, whole otherwise. */
-    private static void emitTail(
-            IrExpr tail, Map<String, Provenance> env,
-            List<Event> events, int[] derivedCounter) {
-        if (tail instanceof IrExpr.Record r) {
-            AttributePath result = AttributePath.of("r_0");
-            for (Map.Entry<String, IrExpr> member : r.members().entrySet()) {
-                Provenance source = provenanceOf(member.getValue(), env, events, derivedCounter);
-                events.add(new Event.Emit(source, result.child(member.getKey())));
-            }
-            return;
-        }
-        Provenance source = provenanceOf(tail, env, events, derivedCounter);
-        events.add(new Event.Emit(source, AttributePath.of("r_0")));
-    }
-
-    /**
-     * The provenance of a value expression, recording {@link Event.Combine}
-     * and {@link Event.Call} events as it goes. Untraceable forms yield
-     * {@link Provenance.Opaque} and an {@link Event.Opaque} over-approximating
-     * the touched paths via free-variable analysis.
-     */
-    private static Provenance provenanceOf(
-            IrExpr expr, Map<String, Provenance> env,
-            List<Event> events, int[] derivedCounter) {
+    private static Flow draftValue(IrExpr expr, Ctx ctx) throws CompileException {
         return switch (expr) {
-            case IrExpr.Lit l -> new Provenance.Constant(String.valueOf(l.value()));
-            case IrExpr.Dec d -> new Provenance.Constant(d.value().toPlainString());
-            case IrExpr.Bool b -> new Provenance.Constant(String.valueOf(b.value()));
-            case IrExpr.Var v -> env.getOrDefault(
-                    v.name(), new Provenance.Opaque("unbound '" + v.name() + "'"));
-            case IrExpr.FieldAccess fa -> {
-                Provenance base = provenanceOf(fa.base(), env, events, derivedCounter);
-                yield base instanceof Provenance.Path p
-                        ? new Provenance.Path(p.path().child(fa.fieldName()))
-                        : new Provenance.Opaque("field access on " + base.render());
+            // Metadata: constants, naming, binding, path selection.
+            case IrExpr.Lit l -> new Flow.Constant(String.valueOf(l.value()));
+            case IrExpr.Dec d -> new Flow.Constant(d.value().toPlainString());
+            case IrExpr.Bool b -> new Flow.Constant(String.valueOf(b.value()));
+            case IrExpr.Var v -> {
+                Flow bound = ctx.env.get(v.name());
+                yield bound != null ? bound
+                        : new Flow.Residual("unbound '" + v.name() + "'", List.of());
             }
+            case IrExpr.LetIn l -> {
+                Flow value = draftValue(l.value(), ctx);
+                Flow prev = ctx.env.put(l.name(), value);
+                Flow result = draftValue(l.body(), ctx);
+                if (prev != null) ctx.env.put(l.name(), prev); else ctx.env.remove(l.name());
+                yield result;
+            }
+            case IrExpr.FieldAccess fa -> {
+                Flow base = draftValue(fa.base(), ctx);
+                yield switch (base) {
+                    case Flow.Verbatim v -> new Flow.Verbatim(v.path().child(fa.fieldName()));
+                    // Projection through a known construction is exact: the
+                    // slot's own flow (path-selection metadata collapsing).
+                    case Flow.FromNode n when ctx.nodes.get(n.nodeId())
+                            instanceof FlowNode.Construction c
+                            && c.slots().containsKey(fa.fieldName()) ->
+                            c.slots().get(fa.fieldName());
+                    case Flow.Residual r -> r;
+                    default -> new Flow.Residual(
+                            "projection '." + fa.fieldName() + "' on a computed value",
+                            touchesOf(base, ctx));
+                };
+            }
+            // Computation.
             case IrExpr.BinOp op -> {
-                Provenance left = provenanceOf(op.left(), env, events, derivedCounter);
-                Provenance right = provenanceOf(op.right(), env, events, derivedCounter);
-                String id = "d_" + (derivedCounter[0]++);
-                events.add(new Event.Combine(List.of(left, right), opSymbol(op.op()), id));
-                yield new Provenance.Derived(id);
+                Flow left = draftValue(op.left(), ctx);
+                Flow right = draftValue(op.right(), ctx);
+                String id = ctx.freshId("c");
+                ctx.add(new FlowNode.Computation(
+                        id, opSymbol(op.op()), opClass(op.op()),
+                        recoverability(op.op(), left, right), List.of(left, right)));
+                yield new Flow.FromNode(id);
             }
+            // Discrimination — nested matches are TRACED (they were the v1
+            // ledger's false OPAQUEs).
+            case IrExpr.Match m -> draftBranch(m, ctx, false);
+            // Construction in value position.
+            case IrExpr.Record r -> {
+                Map<String, Flow> slots = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> member : r.members().entrySet()) {
+                    slots.put(member.getKey(), draftValue(member.getValue(), ctx));
+                }
+                String id = ctx.freshId("k");
+                ctx.add(new FlowNode.Construction(id, claimOf(r), slots));
+                yield new Flow.FromNode(id);
+            }
+            // The located ignorance — exactly the ruled residuals.
             case IrExpr.Call c -> {
-                List<Provenance> args = new ArrayList<>(c.args().size());
+                List<AttributePath> touches = new ArrayList<>();
                 for (IrExpr a : c.args()) {
-                    args.add(provenanceOf(a, env, events, derivedCounter));
+                    touches.addAll(touchesOf(draftValue(a, ctx), ctx));
                 }
-                String id = "c_" + (derivedCounter[0]++);
-                events.add(new Event.Call(c.functionName(), args, id));
-                yield new Provenance.CallResult(id);
+                yield new Flow.Residual(
+                        "call '" + c.functionName() + "' (composition pending)", touches);
             }
-            case IrExpr.LetIn let -> {
-                // A let in value position: trace it like a body prefix.
-                Provenance value = provenanceOf(let.value(), env, events, derivedCounter);
-                Map<String, Provenance> inner = new HashMap<>(env);
-                inner.put(let.name(), value);
-                yield provenanceOf(let.body(), inner, events, derivedCounter);
-            }
-            // Nested constructions, lambdas, applications, nested matches,
-            // and the refinement subject are untraceable in v1.
-            default -> {
-                List<AttributePath> touched = new ArrayList<>();
-                for (String free : IrFreeVars.freeVars(expr)) {
-                    if (env.get(free) instanceof Provenance.Path p) touched.add(p.path());
-                }
-                String reason = expr.getClass().getSimpleName().toLowerCase() + " (untraced in v1)";
-                events.add(new Event.Opaque(reason, touched));
-                yield new Provenance.Opaque(reason);
-            }
+            case IrExpr.Lambda lam ->
+                    new Flow.Residual("lambda (ruled residual)", freeTouches(lam, ctx));
+            case IrExpr.Apply app ->
+                    new Flow.Residual("application (ruled residual)", freeTouches(app, ctx));
+            case IrExpr.SelfRef s ->
+                    new Flow.Residual("self (typing-level)", List.of());
         };
     }
 
-    /** Pure variant for the scrutinee — no events recorded, paths only. */
-    private static Provenance provenanceOfPure(IrExpr expr, Map<String, Provenance> env) {
-        return switch (expr) {
-            case IrExpr.Var v -> env.getOrDefault(
-                    v.name(), new Provenance.Opaque("unbound '" + v.name() + "'"));
-            case IrExpr.FieldAccess fa -> {
-                Provenance base = provenanceOfPure(fa.base(), env);
-                yield base instanceof Provenance.Path p
-                        ? new Provenance.Path(p.path().child(fa.fieldName()))
-                        : new Provenance.Opaque("field access on " + base.render());
+    /** Over-approximated atoms reachable through a flow (for residual touch sets). */
+    private static List<AttributePath> touchesOf(Flow flow, Ctx ctx) {
+        List<AttributePath> out = new ArrayList<>();
+        collectTouches(flow, ctx, new HashSet<>(), out);
+        return out;
+    }
+
+    private static void collectTouches(
+            Flow flow, Ctx ctx, Set<String> seen, List<AttributePath> out) {
+        switch (flow) {
+            case Flow.Verbatim v -> out.add(v.path());
+            case Flow.Residual r -> out.addAll(r.touches());
+            case Flow.Constant c -> { }
+            case Flow.FromNode n -> {
+                if (!seen.add(n.nodeId())) return;
+                switch (ctx.nodes.get(n.nodeId())) {
+                    case FlowNode.Computation c -> {
+                        for (Flow f : c.inputs()) collectTouches(f, ctx, seen, out);
+                    }
+                    case FlowNode.Construction c -> {
+                        for (Flow f : c.slots().values()) collectTouches(f, ctx, seen, out);
+                    }
+                    case FlowNode.Branch b -> {
+                        for (Flow f : b.discriminants()) collectTouches(f, ctx, seen, out);
+                        for (Arm a : b.arms()) collectTouches(a.result(), ctx, seen, out);
+                    }
+                }
             }
-            default -> new Provenance.Opaque("non-path scrutinee");
+        }
+    }
+
+    private static List<AttributePath> freeTouches(IrExpr expr, Ctx ctx) {
+        List<AttributePath> out = new ArrayList<>();
+        for (String free : IrFreeVars.freeVars(expr)) {
+            if (ctx.env.get(free) instanceof Flow.Verbatim v) out.add(v.path());
+        }
+        return out;
+    }
+
+    private static String claimOf(IrExpr.Record r) {
+        return r.typeName() == null ? "_record" : r.typeName();
+    }
+
+    // --- op classification per the algebra ---
+
+    private static OpClass opClass(IrExpr.Op op) {
+        return switch (op) {
+            case ADD, SUB, MUL, DIV, MOD -> OpClass.ARITHMETIC;
+            case LT, LE, GT, GE, EQ, NE, APPROX -> OpClass.MEASUREMENT;
+            case AND, OR -> OpClass.LOGICAL;
         };
     }
 
-    private static List<AttributePath> pathsOf(Provenance provenance) {
-        return provenance instanceof Provenance.Path p ? List.of(p.path()) : List.of();
+    private static Recoverability recoverability(IrExpr.Op op, Flow left, Flow right) {
+        return switch (op) {
+            case ADD, SUB -> Recoverability.RECOVERABLE;
+            case MUL -> nonzeroConstant(left) || nonzeroConstant(right)
+                    ? Recoverability.RECOVERABLE : Recoverability.DEGRADED;
+            // Individually lossy; the joint /+% identity is a cross-node fact
+            // (a later refinement). Conservative verdict here.
+            case DIV, MOD -> Recoverability.DEGRADED;
+            case LT, LE, GT, GE, EQ, NE, APPROX -> Recoverability.MEASUREMENT_BIT;
+            case AND, OR -> Recoverability.DEGRADED;
+        };
     }
 
-    /**
-     * Flattens a declared sort into its attribute atoms under {@code root},
-     * recursing through registered struct definitions and inline structural
-     * sorts (tuples included — their members are the {@code _N} slots).
-     * Recursive types terminate via the visited-name set: a back-edge field
-     * stays a whole-attribute leaf.
-     */
+    private static boolean nonzeroConstant(Flow flow) {
+        if (!(flow instanceof Flow.Constant c)) return false;
+        try {
+            return new java.math.BigDecimal(c.rendering()).signum() != 0;
+        } catch (NumberFormatException nf) {
+            return false;
+        }
+    }
+
+    // --- atoms + capacity (DECLARED base sorts only — never inferred) ---
+
     private static void flatten(
             AttributePath root, IrSort sort,
             Map<String, IrSort.Structural> structs, Set<String> visiting,
-            List<AttributePath> out) {
+            List<TypedAtom> out) {
         IrSort.Structural structural = switch (sort) {
             case IrSort.Structural s -> s;
             case IrSort.Named n -> structs.get(n.name());
@@ -273,7 +366,7 @@ public final class ConservationDrafter {
             default -> null;
         };
         if (structural == null || visiting.contains(structural.name())) {
-            out.add(root);
+            out.add(new TypedAtom(root, capacityOf(sort)));
             return;
         }
         visiting.add(structural.name());
@@ -281,6 +374,17 @@ public final class ConservationDrafter {
             flatten(root.child(member.getKey()), member.getValue(), structs, visiting, out);
         }
         visiting.remove(structural.name());
+    }
+
+    private static Capacity capacityOf(IrSort sort) {
+        String base = switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            default -> null;
+        };
+        if ("Bool".equals(base)) return Capacity.BIT;
+        if ("Int".equals(base) || "Decimal".equals(base)) return Capacity.NUMERIC;
+        return Capacity.OTHER;
     }
 
     private static String opSymbol(IrExpr.Op op) {

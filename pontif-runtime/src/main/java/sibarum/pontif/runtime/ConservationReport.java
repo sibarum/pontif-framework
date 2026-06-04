@@ -1,7 +1,7 @@
 package sibarum.pontif.runtime;
 
 import sibarum.pontif.conservation.ConservationDrafter;
-import sibarum.pontif.conservation.ConservationLedger;
+import sibarum.pontif.conservation.ConservationGraph.Ledger;
 import sibarum.pontif.conservation.ConservationLedgerPrinter;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.CompileException;
@@ -26,7 +26,7 @@ public final class ConservationReport {
     private ConservationReport() {}
 
     public sealed interface Result permits Result.Generated, Result.Failed {
-        record Generated(String text, ConservationLedger ledger) implements Result {}
+        record Generated(String text, Ledger ledger) implements Result {}
         record Failed(String error) implements Result {}
     }
 
@@ -41,7 +41,7 @@ public final class ConservationReport {
         try {
             IrModule linked = ModuleLinker.combineSingle(parsed);
             IrModule resolved = AliasResolver.resolve(linked);
-            ConservationLedger ledger = ConservationDrafter.draft(resolved);
+            Ledger ledger = ConservationDrafter.draft(resolved);
             String text = "# Conservation ledger: " + sourceName + "\n\n"
                     + ConservationLedgerPrinter.print(ledger);
             return new Result.Generated(text, ledger);

@@ -258,7 +258,7 @@ public final class PontifCompiler {
         if (bound.assertions().isEmpty()) {
             return Optional.empty();
         }
-        sibarum.pontif.conservation.ConservationLedger ledger;
+        sibarum.pontif.conservation.ConservationGraph.Ledger ledger;
         try {
             ledger = sibarum.pontif.conservation.ConservationDrafter.draft(
                     AliasResolver.resolve(module));
@@ -271,13 +271,13 @@ public final class PontifCompiler {
         }
         for (Map.Entry<String, sibarum.pontif.conservation.ConservationProofs.Assertion> e
                 : bound.assertions().entrySet()) {
-            var node = ledger.node(e.getKey());
-            if (node.isEmpty()) {
+            var graph = ledger.graph(e.getKey());
+            if (graph.isEmpty()) {
                 return Optional.of("Conservation proof for '" + e.getKey()
-                        + "' has no ledger node — is it a function declaration?");
+                        + "' has no ledger entry — is it a function declaration?");
             }
             Optional<String> failure = sibarum.pontif.conservation.ConservationProofs
-                    .evaluate(e.getKey(), e.getValue(), node.get());
+                    .evaluate(e.getKey(), e.getValue(), graph.get());
             if (failure.isPresent()) {
                 return failure;
             }

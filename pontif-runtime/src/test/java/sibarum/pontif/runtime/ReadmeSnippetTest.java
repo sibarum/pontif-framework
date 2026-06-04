@@ -128,9 +128,9 @@ class ReadmeSnippetTest {
     }
 
     @Test
-    void readmeConservationSnippet_losslessTranslationCompilesAndRuns() {
+    void readmeConservationSnippet_conservativeTranslationCompilesAndRuns() {
         assertEquals("3", runGated("""
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
 
                 struct Source(name:Int, age:Int, email:Int)
                 struct Target(fullName:Int, years:Int, contact:Int)
@@ -138,7 +138,7 @@ class ReadmeSnippetTest {
                 function translate(s:Source):Target ->
                   {fullName = s.name, years = s.age + 1, contact = s.email}
 
-                proof translate = Lossless()
+                proof translate = DataConservative()
 
                 translate(Source(1, 2, 3)).years
                 """));
@@ -149,7 +149,7 @@ class ReadmeSnippetTest {
         // The README's "delete contact from Target" direction: the same proof
         // now fails, and the error carries the ledger.
         PontifCompiler.CompileResult r = compiler.compileAlt("""
-                requires std.conservation.{Lossless}
+                requires std.conservation.{DataConservative}
 
                 struct Source(name:Int, age:Int, email:Int)
                 struct Target(fullName:Int, years:Int)
@@ -157,7 +157,7 @@ class ReadmeSnippetTest {
                 function translate(s:Source):Target ->
                   {fullName = s.name, years = s.age + 1}
 
-                proof translate = Lossless()
+                proof translate = DataConservative()
 
                 translate(Source(1, 2, 3)).years
                 """, "readme.ptf");

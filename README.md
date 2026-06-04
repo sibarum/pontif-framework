@@ -29,7 +29,7 @@ The framework ships:
   proven (by the receipt-graph engine, or by an in-source `proof`) or
   the program is rejected.
 - A **conservation gate** — per-function dataflow ledgers with named
-  algorithmic properties (`proof translate = Lossless()`); a drop,
+  algorithmic properties (`proof translate = DataConservative()`); a drop,
   duplication, or untraceable flow the proof doesn't account for
   rejects the program (`requires std.conservation`).
 - A Truffle lowering and an `IrInterpreter` (`pontif-runtime`).
@@ -188,7 +188,7 @@ into derived values, *emitted* into outputs, or silently dropped — and
 assertion is a compile error:
 
 ```pontif
-requires std.conservation.{Lossless}
+requires std.conservation.{DataConservative}
 
 struct Source(name:Int, age:Int, email:Int)
 struct Target(fullName:Int, years:Int, contact:Int)
@@ -196,7 +196,7 @@ struct Target(fullName:Int, years:Int, contact:Int)
 function translate(s:Source):Target ->
   {fullName = s.name, years = s.age + 1, contact = s.email}
 
-proof translate = Lossless()       # every Source attribute provably reaches Target
+proof translate = DataConservative()       # every Source attribute provably reaches Target
 
 translate(Source(1, 2, 3)).years   # → 3
 ```
@@ -206,16 +206,16 @@ error *is* the receipt (abridged):
 
 ```
 Conservation proof for 'translate' failed: 's_0.email' is UNTOUCHED …
-  branch (unconditional):
-    emit:    s_0.name -> r_0.fullName   [verbatim]
-    combine: s_0.age + 1 -> d_1
-    emit:    d_1 -> r_0.years   [derived]
-    classification:
-      s_0.email        UNTOUCHED (no flow into any output)
+  c_1:   s_0.age + 1   [arithmetic, recoverable]
+  ret_2: construct { r_0.fullName <- s_0.name, r_0.years <- c_1 }
+  classification:
+    s_0.name         flows-verbatim
+    s_0.age          flows-derived
+    s_0.email        UNTOUCHED (no flow into the return)
 ```
 
 Dropping data on purpose is fine — *declared*: `proof translate =
-LosslessExcept(s.email)` makes the lossy version compile, and then fails
+DataConservativeExcept(s.email)` makes the lossy version compile, and then fails
 the moment someone fixes the translation (the declaration is stale) —
 proofs track the code in both directions.
 
@@ -258,7 +258,7 @@ whole language is one big syntactic sugar for it).
 | `pontif-defaults` | Canonical rule-set factories for the simplifier — `DefaultRules.production()` and `DefaultRules.full()`. Owns `BoundAnalysisRules`, the in-simplifier wrapper over `BoundAnalysis.discharge`, gated to abstain on non-integer values. |
 | `pontif-parser` | Two parsers sharing the same IR: a stable S-expression parser (`Parser`) for tests / reference, and the canonical alt-syntax parser (`AltParser`) for user-written Pontif code — including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort — the routing *is* the discreteness boundary. In-source `proof` declarations supply the hard cases. |
-| `pontif-conservation` | The conservation ledger — per-function dataflow provenance (`ConservationDrafter`: consult / combine / emit events per branch, recursion by-reference, untraceable flow marked OPAQUE), queries (`ConservationQueries`: lossless, the verbatim-bijection reversibility witness, duplication, branch quantifiers — all fail-closed), the named-property binder (`ConservationProofs`, the `std.conservation` vocabulary), and the text reading (`ConservationLedgerPrinter`). |
+| `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation with op-class + recoverability verdicts, Branch, Construction) with metadata on flow edges; `ConservationDrafter` (exhaustive over `IrExpr`, no default case — the standing completeness proof), `ConservationRoles` (per-branch-path role multisets; fates demoted to views), `ConservationQueries` (the sort-aware `DataConservative` under the capacity law, the `Reversible` verbatim-bijection witness, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers. |
 | `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, lambdas, match. |
@@ -296,11 +296,13 @@ Capabilities that work end-to-end in alt syntax:
   same-shaped `Point`), questions never coerce (`match`, `==`), and
   native equality follows matching
 - **Conservation receipts** — a per-function compile-time dataflow
-  ledger (consult / combine / emit, per branch; untraceable flow is
-  OPAQUE and fails closed) with named properties (`Lossless`,
-  `Reversible`, `NoDuplication`, `LosslessExcept`) asserted via
-  `proof f = …` and gated at compile time; reviewable
-  `*.conservation.txt` reports via `ConservationReport`
+  graph derived from the sealed IR (`docs/conservation-algebra.md`:
+  Computation / Branch / Construction nodes, metadata on edges,
+  per-branch-path role multisets; residual flow — lambdas, applications,
+  unresolved calls — fails closed) with named properties
+  (`DataConservative` under the sort-aware capacity law, `Reversible`,
+  `NoDuplication`, `DataConservativeExcept`) asserted via `proof f = …`
+  and gated at compile time; reviewable `*.conservation.txt` reports
 - **Destructuring `let`** (expression and top level), irrefutability
   proven
 - **Compile-time match totality, enforced as the conservation rule** —
