@@ -17,6 +17,7 @@ import sibarum.dasum.gui.core.input.HoverState;
 import sibarum.dasum.gui.core.input.InputState;
 import sibarum.dasum.gui.core.input.ScrollStates;
 import sibarum.dasum.gui.core.input.ScrollbarController;
+import sibarum.dasum.gui.core.input.TabsController;
 import sibarum.dasum.gui.core.input.TextInputController;
 import sibarum.dasum.gui.core.input.TextStates;
 import sibarum.dasum.gui.core.layout.HitTest;
@@ -26,6 +27,7 @@ import sibarum.dasum.gui.core.layout.LayoutResult;
 import sibarum.dasum.gui.core.layout.PixelRect;
 import sibarum.dasum.gui.core.layout.Render;
 import sibarum.dasum.gui.core.overlay.OverlayStack;
+import sibarum.dasum.gui.core.reactive.Property;
 import sibarum.dasum.gui.core.render.Batcher;
 import sibarum.dasum.gui.core.render.Color;
 import sibarum.dasum.gui.core.render.DrawCommand;
@@ -45,6 +47,7 @@ import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.pontif.playground.generated.Icons;
+import sibarum.pontif.runtime.ConservationReport;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
@@ -83,9 +86,12 @@ public final class App {
     private static final List<FileDialog.Filter> PTF_FILTERS = List.of(
             FileDialog.Filter.of("Pontif source", "ptf"),
             FileDialog.Filter.of("All files", "*"));
-    private static final List<FileDialog.Filter> RECEIPTS_FILTERS = List.of(
-            FileDialog.Filter.of("Receipt-graph report", "txt"),
-            FileDialog.Filter.of("All files", "*"));
+
+    /** Index of the Receipts tab in the main tab strip (Editor = 0). */
+    private static final int REPORT_TAB = 1;
+
+    /** ASCII divider between the two report sections — the mono atlas is ASCII-only. */
+    private static final String REPORT_DIVIDER = "=".repeat(72);
 
     private static final float WHEEL_PIXELS_PER_STEP = 40f;
 
@@ -98,6 +104,7 @@ public final class App {
     // tree (rebuilding would break identity-keyed state).
     private static Component.Text codeText;
     private static Component.Text filenameLabel;
+    private static Component.Text reportText;
 
     // Hoisted so file-dialog button handlers can reach it. Lifetime is
     // bounded by main()'s try-with-resources; handlers only fire while the
@@ -134,7 +141,7 @@ public final class App {
                 FontGroups.register(FontGroup.of(Icon.DEFAULT_FONT_GROUP,   iconsAtlas,   iconsTexture));
 
                 Status.setDefaultMessage(
-                    "Pontif Playground — edit code, press Run.  Click here to view the event log.",
+                    "Pontif Playground — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.",
                     Variant.DEFAULT);
                 Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
@@ -193,11 +200,10 @@ public final class App {
     }
 
     private static Component buildUi() {
-        Component runBtn      = Themed.button("Run",      Em.of(5f), Variant.PRIMARY,  0, App::onRunClicked);
-        Component receiptsBtn = Themed.button("Receipts", Em.of(7f), Variant.INFO,     0, App::onReceiptsClicked);
-        Component openBtn     = Themed.button("Open",     Em.of(5f), Variant.DEFAULT,  0, App::onOpenClicked);
-        Component saveBtn     = Themed.button("Save",     Em.of(5f), Variant.DEFAULT,  0, App::onSaveClicked);
-        Component saveAsBtn   = Themed.button("Save As",  Em.of(6f), Variant.DEFAULT,  0, App::onSaveAsClicked);
+        Component runBtn    = Themed.iconButton(Icons.PLAY,     "Run",     Em.of(6f),   Variant.PRIMARY, 0, App::onRunClicked);
+        Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
+        Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
+        Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, "Save As", Em.of(7.5f), Variant.DEFAULT, 0, App::onSaveAsClicked);
 
         filenameLabel = new Component.Text(
             UNTITLED_LABEL, FontGroups.DEFAULT, Em.of(0.9f), LABEL_FG,
@@ -208,22 +214,50 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, receiptsBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
+            List.of(runBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
             false, 0);
 
-        // Editable code editor — monospace, accepts tab, wraps to its pane width.
+        // Editable code editor — monospace, accepts tab, wraps to its pane
+        // width, with a logical-line number gutter.
         codeText = new Component.Text(
             DEFAULT_CODE, MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
             null, null, Em.of(0.5f),
             null, false,
-            true, true, true, true, 1);
+            true, true, true, true, 1).withLineNumbers(true);
 
         Component codePane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
+
+        // Read-only combined proof-graph view (receipt graph + conservation
+        // ledger). Selectable so text can be copied out; regenerated from the
+        // current editor source every time the tab is activated, so it can
+        // never go stale.
+        reportText = new Component.Text(
+            "", MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
+            null, null, Em.of(0.5f),
+            null, false,
+            true, true, false, false, 1);
+
+        Component reportPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, reportText, false, 1);
+
+        Property<Integer> activeTab = new Property<>(0);
+        activeTab.subscribe(i -> {
+            if (i != null && i == REPORT_TAB) regenerateReports();
+        });
+
+        Component tabs = Themed.tabs(
+            null, null, Em.of(2.2f), Em.of(1f), Em.ZERO,
+            Em.of(0.95f),
+            List.of(
+                new Component.Tabs.TabPanel("Editor",   codePane),
+                new Component.Tabs.TabPanel("Receipts", reportPane)),
+            activeTab,
+            Variant.PRIMARY
+        ).withFlexGrow(1);
 
         return new Component.Flex(
             null, null, Em.of(0.5f), FRAME_BG,
             Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.of(0.5f),
-            List.of(toolbar, codePane),
+            List.of(toolbar, tabs),
             false, 0);
     }
 
@@ -250,48 +284,31 @@ public final class App {
     }
 
     /**
-     * Drafts the receipt-graph for the current editor source, flashes the
-     * full report into the status log (click the ribbon to read it), then
-     * offers a save dialog to write it to disk. Drafting is bounded
-     * transcription + sign-analysis discharge — fast and terminating, so
-     * (unlike Run) it's fine on the GLFW main thread, which the FileDialog
-     * requires anyway.
+     * Drafts both proof graphs for the current editor source and fills the
+     * Receipts tab with the combined text: receipt graph (sorts) first, then
+     * the conservation ledger, separated by a divider — both report texts
+     * self-title. Failures print as the section body, so a parse error is
+     * visible in both sections rather than silently emptying the tab.
+     * Drafting is bounded transcription + discharge — fast and terminating,
+     * so it's fine on the GLFW main thread (this runs from the tab-switch
+     * callback).
      */
-    private static void onReceiptsClicked() {
+    private static void regenerateReports() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
 
-        ReceiptGraphReport.Result result = ReceiptGraphReport.fromAltSource(code, sourceName);
-        if (result instanceof ReceiptGraphReport.Result.Generated generated) {
-            String report = generated.text();
-            Status.log(
-                "Receipt-graph drafted for " + sourceName + " — click to view; save dialog follows.",
-                report, Variant.SUCCESS);
-            FileDialog.save(window, RECEIPTS_FILTERS, dialogStartPath(), receiptsDefaultName(sourceName))
-                .ifPresent(path -> {
-                    try {
-                        Files.writeString(path, report, StandardCharsets.UTF_8);
-                        Status.success("Wrote receipt-graph report to " + path.getFileName());
-                    } catch (IOException e) {
-                        Status.error("Error writing " + path.getFileName() + ": " + e.getMessage(),
-                                path.toString());
-                    }
-                });
-        } else {
-            String error = ((ReceiptGraphReport.Result.Failed) result).error();
-            Status.error("Receipt-graph: " + error.split("\\R", 2)[0], error);
-        }
-    }
-
-    private static String receiptsDefaultName(String sourceName) {
-        String base = sourceName;
-        if (base.endsWith(".ptf")) {
-            base = base.substring(0, base.length() - ".ptf".length());
-        }
-        if (base.isBlank() || base.equals("<editor>")) {
-            base = "untitled";
-        }
-        return base + ".receipts.txt";
+        String receipts = switch (ReceiptGraphReport.fromAltSource(code, sourceName)) {
+            case ReceiptGraphReport.Result.Generated g -> g.text();
+            case ReceiptGraphReport.Result.Failed f ->
+                    "# Receipt-graph report: " + sourceName + "\n\n" + f.error() + "\n";
+        };
+        String conservation = switch (ConservationReport.fromAltSource(code, sourceName)) {
+            case ConservationReport.Result.Generated g -> g.text();
+            case ConservationReport.Result.Failed f ->
+                    "# Conservation ledger: " + sourceName + "\n\n" + f.error() + "\n";
+        };
+        TextStates.setContent(reportText,
+                receipts + "\n" + REPORT_DIVIDER + "\n\n" + conservation);
     }
 
     // --- File operations: must run on the GLFW main thread (FileDialog requirement). ---
@@ -381,6 +398,9 @@ public final class App {
             if (key == Glfw.GLFW_KEY_ENTER     && TextInputController.onEnter())         return;
             if (key == Glfw.GLFW_KEY_TAB       && TextInputController.onTab())           return;
             if (TextInputController.onKey(key, shift, ctrl)) return;
+            // Tab strip: Left/Right/Home/End cycle tabs, but only when a Tabs
+            // component holds focus — a focused editor still wins above.
+            if (TabsController.onKey(key)) return;
 
             if (key == Glfw.GLFW_KEY_ESCAPE && action == Glfw.GLFW_PRESS) {
                 if (OverlayStack.isActive()) {
@@ -426,6 +446,7 @@ public final class App {
             cursors.setShape(cursorShapeFor(hit));
 
             TextInputController.onCursorMove(hit, x, y);
+            TabsController.onCursorMove(x, y);
         });
 
         GlfwCallbacks.setMouseButtonListener((win, button, action, mods) -> {
@@ -460,6 +481,13 @@ public final class App {
                     TextInputController.onMouseDown(hit, InputState.mouseX(), InputState.mouseY(), shift);
                     return;
                 }
+                // Tab cells aren't components (TabsController synthesizes their
+                // geometry at render time) — same treatment as scrollbar thumbs.
+                // After the overlay block, so a modal still captures the press.
+                if (TabsController.onMouseDown(InputState.mouseX(), InputState.mouseY())) {
+                    pressTarget = null;
+                    return;
+                }
                 Component hovered = HoverState.hovered();
                 pressTarget = hovered;
                 if (hovered != null) FocusState.set(hovered);
@@ -490,6 +518,7 @@ public final class App {
                 HoverState.clear();
                 TextStates.clearAllHoverCarets();
                 ScrollbarController.clearHover();
+                TabsController.clearHover();
                 cursors.setShape(CursorManager.CursorShape.ARROW);
                 Invalidator.invalidate();
             }

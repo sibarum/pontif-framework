@@ -43,6 +43,21 @@ public record ConservationSummary(
         NONE
     }
 
+    /**
+     * The optimistic fixpoint seed — lattice top: every atom's content
+     * reaches the result, every atom is spent in branching, nothing is
+     * residual. The inductive hypothesis for a cycle member's own calls
+     * (the self-referential case of no-duplicate-edges); Kleene iteration
+     * only ever descends from here, so the converged summary never claims
+     * more than the body proves under the assumption.
+     */
+    public static ConservationSummary seed(String functionName, List<AttributePath> atoms) {
+        Map<AttributePath, Relation> relations = new LinkedHashMap<>();
+        for (AttributePath atom : atoms) relations.put(atom, Relation.CONTENT);
+        return new ConservationSummary(functionName, atoms, relations,
+                new HashSet<>(atoms), Set.of(), false);
+    }
+
     public static ConservationSummary of(ConservationGraph graph) {
         List<PathRoles> paths = ConservationRoles.of(graph);
         Map<AttributePath, Relation> relations = new LinkedHashMap<>();

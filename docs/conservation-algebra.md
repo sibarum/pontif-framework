@@ -195,8 +195,18 @@ the narrowing system.)
    `ConservationSummary` (MUST relations) substitutes at call sites over the
    call DAG in topological order; overloaded callees are dispatch-as-Branch
    over their candidates; callee-internal branching spend is credited at the
-   call site via a single-arm Branch's discriminants; recursion stays
-   residual until the fixpoint slice.
+   call site via a single-arm Branch's discriminants.
+7. ✔ **Recursion** (the fixpoint slice): cycle members' summaries are the
+   Kleene fixpoint from the optimistic seed, so a recursive call substitutes
+   its own function's converged summary by reference — the self-referential
+   case of no-duplicate-edges. Recursive *overloaded* names stay
+   dispatch-as-Branch with no further expansion (residual inside the arms,
+   honestly labeled).
+8. ✔ **No-Halt** (`NoHalt`): the divergence fact — *this function provably
+   never completes* — detected by a module-wide greatest fixpoint over the
+   ledger's branch-paths and printed beside the classifications (a `no-halt:`
+   line per claimed function; per-path markers). A fact, not a property
+   verdict: what the gate and the certificates do with it is an open ruling.
 
 # Rulings so far
 
@@ -211,6 +221,39 @@ the narrowing system.)
 - **`Data-Conservative` (RULED):** the headline dataflow property, sort-aware
   per the capacity law (numerics must reach the return; Bools may instead be
   spent in branching). Also rules measurement-as-use, sort-wise.
+- **No-Halt (RULED — the detector; verdict consumption still open):** the
+  complement of the recursion fixpoint. The fixpoint assumes completion and
+  checks what follows; No-Halt proves completion impossible — together they
+  are the two halves of the partial-correctness reading. Detector: a
+  module-wide greatest fixpoint — D starts as all unambiguous functions;
+  repeatedly remove any function having a branch-path with no call-to-D and
+  no verbatim self re-entry; the stable D provably never halts. Sound by
+  infinite descent under pure, strict evaluation; callers of never-halting
+  functions inherit the fact for free. *Verbatim re-entry* is the per-path
+  fact feeding it: a direct self-call passing the params unchanged (any
+  permutation — the orbit is finite) makes that path divergent even when a
+  base path grounds the function. The boundary, worn in the name: this
+  decides only a sound corner of *non*-halting — silence is "no claim",
+  never "halts"; termination is never proven (factorial's descent is
+  arithmetic — receipt-graph territory, a cross-ledger follow-up); calls in
+  dead flow (an unused `let`) are invisible from the result — a pinned miss.
+  Open ruling: what the property verdicts and the gate do with the fact
+  (print-only today; vacuity-annotated certificates and the receipt-graph IH
+  refusal are the candidates — decided after reading printed ledgers).
+- **Recursion (RULED):** per-cycle Kleene fixpoint over summaries, seeded
+  optimistically (every atom CONTENT, every atom spent, nothing residual) —
+  the inductive hypothesis "assume the recursive call conserves, check the
+  body under that assumption," exactly the receipt graph's IH brought to the
+  conservation ledger. Every iteration step is monotone-decreasing in the
+  finite summary lattice (relations degrade, spends drop, residuals grow),
+  so it converges without widening; a round cap exists only as a loud
+  monotonicity tripwire, never a silent fallback. The reading is
+  **partial-correctness**: a conservation claim quantifies over *completed
+  evaluations*, so an ungrounded loop (`f(n) -> f(n)`) certifies vacuously —
+  a run that never completes has nothing to violate. The receipt graph
+  already accepts the same reading (its notary discharges `r_0 >= 1` for an
+  ungrounded loop via the IH); the two ledgers stay consistent about what a
+  claim asserts.
 
 # Open rulings (red-pen targets)
 

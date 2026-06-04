@@ -605,8 +605,24 @@ something false. Every rule below was derived by that filter.
   error; positional keys/tuple sources excluded (destructure-only). NOT a value
   — `.{}` always binds (projection-expression rejected: one syntax, one
   semantic). Tests: `DictTest`, `ModuleSystemTest` rename cases.
-  **Parked from Slice 2:** exports rename (`exports @.{factorial -> fac}`,
-  public ≠ internal name) — needs a public→internal mapping in the export
+  **Unparked (design RULED, James 2026-06-04): exports just accept a
+  dictionary.** The export surface IS a dictionary — a dictionary literally
+  IS the public→internal mapping the parked item asked for. Key = public
+  name, value = reference into the module namespace. Rename falls out
+  (`exports {fac = factorial}` — plain `=`, per the same-day ruling that `=`
+  stays in literals); surface uniqueness falls out (keys are unique — the
+  substrate's shape is the rule); the shipped `exports @.{factorial, isEven}`
+  survives as a dictionary EXPRESSION (namespace decomposition selecting
+  those keys). Final duality: imports = destructure (`->` introduces the
+  local name), exports = construction (the key introduces the public name).
+  `<-` retreats to the future property-definition language's asserted
+  placements (the conservation printer's construction arrow). v1 fence:
+  export-dictionary values are NAMES only (a name exports its overload set;
+  types ride along) — arbitrary expressions fail closed (declaration-at-the-
+  surface is a different feature, ruled separately if ever). Implementation
+  needs: exports list → map in the linker; import resolution looks up public
+  key → internal decl; privacy checks key on the public name. Superseded
+  sketches: `exports @.{factorial -> fac}`,
   tables; parser rejects it with a pointer.
 - **Slice 3 (LANDED 2026-06-03): the claim rule.** *Construction is where
   claims are made; matching is where they're tested; nothing in between
@@ -652,11 +668,30 @@ deferred until real definitions demand it.
 implemented): three node kinds + metadata edges, exhaustive drafter (no
 default case), role multisets, sort-aware DataConservative (capacity law;
 Lossless reserved for cross-ledger), summaries substituting over the call
-DAG, dispatch-as-Branch for overloaded callees, recursion residual.
-**Sequenced:** (1) recursion fixpoint + collection atom model (sorting needs
-both); (2) multi-branch Reversible via the exit-assertion theorem; (3)
-property-definition language (when real definitions demand it); (4)
-cross-ledger Lossless; (5) `~=` member-wise lift for
+DAG, dispatch-as-Branch for overloaded callees.
+**Recursion fixpoint LANDED:** per-cycle Kleene fixpoint over summaries,
+optimistic seed (the IH), monotone-decreasing/no-widening, loud round-cap
+tripwire; partial-correctness ruling (claims quantify over completed
+evaluations — ungrounded loops certify vacuously) documented in
+conservation-algebra.md. Rode along: the Kahn readiness fix (callers of
+overloaded names are not cycle members; no more false "recursive" labels)
+and cycle-member summaries (non-cycle callers compose through converged
+summaries). Recursive overloaded names stay dispatch-as-Branch, out of scope.
+**No-Halt LANDED (NoHalt, James's name):** the divergence fact — module-wide
+gfp over branch-paths (no grounding path / verbatim self re-entry incl.
+permutations / every path calls a never-halting fn); caller propagation free;
+`no-halt:` line + per-path markers in the printed ledger; sound corner of
+non-halting only (silence ≠ halts; termination never proven; unused-let
+calls a pinned miss; overloads excluded). Fact only — verdict consumption is
+the open ruling.
+**Sequenced:** (1) the No-Halt consumption ruling (vacuity-annotated
+certificates / gate behavior / receipt-graph IH refusal — the first
+cross-ledger proposition; after James reads printed ledgers); (2) collection
+atom model (the sorting case needs it — element-quantified atoms over
+arrays); (3) multi-branch Reversible via the
+exit-assertion theorem; (4)
+property-definition language (when real definitions demand it); (5)
+cross-ledger Lossless; (6) `~=` member-wise lift for
 aggregates (agreed design: claim-aware, Decimals.approxEqual at Decimal
 leaves, == elsewhere; ~= stays NON-overloadable — a user tolerance would be a
 forged receipt; delete the Ternion `==`-as-approx overload when it lands).
@@ -668,6 +703,19 @@ can't lower (no `Not` op, F2); inline alt lambda `(x:Int)->…` not parseable
 (F3). **Fixed this session:** `let` redefinition now reports "'n' is already
 defined" instead of the generic overload-overlap message (`OverloadOverlap`
 special-cases zero-arg overloads).
+
+**Division in body position (fixed):** `/` and `%` in a function BODY now
+hoist in the receipts Drafter like calls (operator calls, per dispatch
+unification): fresh result var, UNREFINED sort — no false IH can attach, the
+rest of the body keeps its receipts, and the receipt-graph report no longer
+dies wholesale on a file like ternion.ptf. The predicate-position fence is
+untouched (the kernel stays linear). PINNED TIGHTENING (ReturnGateTest): a
+refined return over a divided body used to compile via abstention (drafting
+threw); it now drafts and is honestly rejected as unprovable — weaken the
+return or drop the narrowing. Hoisted var's base follows the
+Int-promotes-to-Decimal ruling from param sorts; pattern-binding operands
+fall back to bare Int (same fallback as calls — a display-sort gap to close
+with pattern-env plumbing, someday).
 
 ## Traits — follow-on work
 

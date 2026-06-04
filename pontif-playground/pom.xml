@@ -107,7 +107,7 @@
                             <icons>
                                 <manifest>${project.basedir}/fonts/lucide/info.json</manifest>
                                 <manifestFormat>lucide</manifestFormat>
-                                <glyphList>play, square, folder, save, file, x</glyphList>
+                                <glyphList>play, square, folder, save, file, x, save-all</glyphList>
                                 <generatedSourcesDir>${project.build.directory}/generated-sources/dasum-msdf</generatedSourcesDir>
                                 <packageName>sibarum.pontif.playground.generated</packageName>
                                 <className>Icons</className>

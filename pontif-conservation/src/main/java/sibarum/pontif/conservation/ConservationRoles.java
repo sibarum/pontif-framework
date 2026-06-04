@@ -31,6 +31,10 @@ public final class ConservationRoles {
         public final List<ResidualFact> residuals = new ArrayList<>();
         /** A residual with an empty touch set — nothing on this path certifies. */
         public boolean poisoned = false;
+        /** Callees evaluated on this path (resolved calls only) — NoHalt's input. */
+        public final List<String> callees = new ArrayList<>();
+        /** A verbatim self re-entry is evaluated on this path — it never halts. */
+        public boolean verbatimReentry = false;
 
         PathRoles(String label) { this.label = label; }
 
@@ -42,6 +46,8 @@ public final class ConservationRoles {
             next.spentInBranching.addAll(spentInBranching);
             next.residuals.addAll(residuals);
             next.poisoned = poisoned;
+            next.callees.addAll(callees);
+            next.verbatimReentry = verbatimReentry;
             return next;
         }
     }
@@ -100,6 +106,13 @@ public final class ConservationRoles {
             }
             case Flow.FromNode n -> {
                 FlowNode node = graph.node(n.nodeId());
+                ConservationGraph.CallFact call = graph.callFacts().get(n.nodeId());
+                if (call != null) {
+                    for (PathRoles p : paths) {
+                        p.callees.add(call.callee());
+                        p.verbatimReentry |= call.verbatimReentry();
+                    }
+                }
                 return switch (node) {
                     case FlowNode.Computation c -> {
                         List<PathRoles> current = paths;
@@ -118,10 +131,15 @@ public final class ConservationRoles {
                     }
                     case FlowNode.Branch b -> {
                         // Discriminants are SPENT on every arm's path; each
-                        // arm forks the accumulators.
+                        // arm forks the accumulators. Calls evaluated inside
+                        // the discriminants land on every arm too.
                         List<AttributePath> spent = new ArrayList<>();
+                        List<String> discriminantCallees = new ArrayList<>();
+                        boolean[] discriminantReentry = {false};
                         for (Flow d : b.discriminants()) {
                             collectPaths(d, graph, new HashSet<>(), spent);
+                            collectCalls(d, graph, new HashSet<>(),
+                                    discriminantCallees, discriminantReentry);
                         }
                         List<PathRoles> forked = new ArrayList<>();
                         for (Arm arm : b.arms()) {
@@ -130,6 +148,8 @@ public final class ConservationRoles {
                             for (PathRoles p : paths) {
                                 PathRoles fork = p.copy(armLabel);
                                 fork.spentInBranching.addAll(spent);
+                                fork.callees.addAll(discriminantCallees);
+                                fork.verbatimReentry |= discriminantReentry[0];
                                 armPaths.add(fork);
                             }
                             forked.addAll(walk(arm.result(), graph, chain, armPaths));
@@ -160,6 +180,53 @@ public final class ConservationRoles {
                     case FlowNode.Branch b -> {
                         for (Flow f : b.discriminants()) collectPaths(f, graph, seen, out);
                         for (Arm a : b.arms()) collectPaths(a.result(), graph, seen, out);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Calls provably evaluated through a flow — MUST, not MAY, because NoHalt
+     * is a positive claim: an over-collected call would let a divergence
+     * verdict rest on a call that some path never makes. So a nested
+     * multi-arm Branch contributes only its discriminants (always evaluated);
+     * its arms are arm-dependent and skipped — a miss, never a false claim.
+     * Single-arm branches are irrefutable: the arm always evaluates.
+     */
+    private static void collectCalls(
+            Flow flow, ConservationGraph graph, Set<String> seen,
+            List<String> callees, boolean[] reentry) {
+        switch (flow) {
+            case Flow.Verbatim v -> { }
+            case Flow.Constant c -> { }
+            case Flow.Residual r -> { }
+            case Flow.FromNode n -> {
+                if (!seen.add(n.nodeId())) return;
+                ConservationGraph.CallFact call = graph.callFacts().get(n.nodeId());
+                if (call != null) {
+                    callees.add(call.callee());
+                    reentry[0] |= call.verbatimReentry();
+                }
+                switch (graph.node(n.nodeId())) {
+                    case FlowNode.Computation c -> {
+                        for (Flow f : c.inputs()) {
+                            collectCalls(f, graph, seen, callees, reentry);
+                        }
+                    }
+                    case FlowNode.Construction c -> {
+                        for (Flow f : c.slots().values()) {
+                            collectCalls(f, graph, seen, callees, reentry);
+                        }
+                    }
+                    case FlowNode.Branch b -> {
+                        for (Flow f : b.discriminants()) {
+                            collectCalls(f, graph, seen, callees, reentry);
+                        }
+                        if (b.arms().size() == 1) {
+                            collectCalls(b.arms().get(0).result(), graph, seen,
+                                    callees, reentry);
+                        }
                     }
                 }
             }

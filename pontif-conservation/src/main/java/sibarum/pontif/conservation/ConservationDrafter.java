@@ -35,11 +35,23 @@ import java.util.Set;
  *
  * <p>Three node kinds (Computation / Branch / Construction); everything else
  * is metadata on flows. Residual flows — lambdas, applications, unresolved
- * calls (and recursive calls, until the fixpoint slice) — are the located
- * ignorance, carrying their over-approximated touch sets so queries fail
- * closed on exactly the right atoms.
+ * calls — are the located ignorance, carrying their over-approximated touch
+ * sets so queries fail closed on exactly the right atoms. Recursive calls are
+ * no longer residual: cycle members' summaries are computed as a Kleene
+ * fixpoint from the optimistic seed (the inductive hypothesis), so a
+ * recursive call substitutes its own function's converged summary — the
+ * self-referential case of no-duplicate-edges.
  */
 public final class ConservationDrafter {
+
+    /**
+     * Backstop on Kleene rounds. The lattice argument bounds rounds by the
+     * total atom count (each productive round makes at least one strict
+     * descent; each atom can descend at most a handful of times), so hitting
+     * this cap means monotonicity broke — fail loudly, never fall back to a
+     * residual that would silently degrade verdicts.
+     */
+    private static final int FIXPOINT_ROUND_CAP = 64;
 
     private ConservationDrafter() {}
 
@@ -48,8 +60,10 @@ public final class ConservationDrafter {
 
         // Composition over the call DAG: functions draft in topological order
         // so call sites substitute their callees' summaries (by reference —
-        // never re-expanded). Cycle members' recursive calls stay residual:
-        // the fixpoint is a later slice.
+        // never re-expanded). Cycle members' summaries are the Kleene
+        // fixpoint from the optimistic seed — the recursive call substitutes
+        // the function's own converged summary, the self-referential case of
+        // no-duplicate-edges.
         Map<String, List<IrStmt.FunctionDecl>> byName = new LinkedHashMap<>();
         List<IrStmt.FunctionDecl> decls = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
@@ -69,8 +83,9 @@ public final class ConservationDrafter {
         Map<String, ConservationSummary> summaries = new HashMap<>();
         Map<String, ConservationGraph> drafted = new LinkedHashMap<>();
         // Kahn-style: draft a function once every callee (other than itself)
-        // is summarized; whatever never becomes ready is in a cycle — draft it
-        // anyway, with its unsummarized calls residual.
+        // is summarized — or overloaded, since overloaded call sites are
+        // dispatch-as-Branch and need no summary. Whatever never becomes
+        // ready is in a cycle (or blocked behind one).
         Set<String> done = new HashSet<>();
         boolean progress = true;
         while (progress) {
@@ -79,8 +94,11 @@ public final class ConservationDrafter {
                 String key = declKey(fd);
                 if (done.contains(key)) continue;
                 Set<String> needed = callees.getOrDefault(fd.name(), Set.of());
+                // No self-exemption: a directly-recursive function is its own
+                // cycle and belongs to the fixpoint below.
                 boolean ready = needed.stream().allMatch(n ->
-                        n.equals(fd.name()) || summaries.containsKey(n));
+                        summaries.containsKey(n)
+                        || byName.getOrDefault(n, List.of()).size() > 1);
                 if (!ready) continue;
                 ConservationGraph graph = draftFunction(fd, structs, byName, summaries);
                 drafted.put(key, graph);
@@ -95,11 +113,50 @@ public final class ConservationDrafter {
                 progress = true;
             }
         }
-        for (IrStmt.FunctionDecl fd : decls) {  // cycle members
-            String key = declKey(fd);
-            if (!done.contains(key)) {
-                drafted.put(key, draftFunction(fd, structs, byName, summaries));
+        // The fixpoint: whatever Kahn couldn't finish is a cycle member (or a
+        // caller blocked behind one). Seed each unambiguous one at lattice
+        // top — the inductive hypothesis "assume the recursive call
+        // conserves" — then re-draft and re-summarize until nothing changes.
+        // Every step is monotone-decreasing in the finite summary lattice
+        // (relations degrade, spends drop, residuals grow), so this
+        // terminates without widening; the conservation claim it converges
+        // to quantifies over completed evaluations (the partial-correctness
+        // ruling, docs/conservation-algebra.md).
+        List<IrStmt.FunctionDecl> cycleMembers = new ArrayList<>();
+        for (IrStmt.FunctionDecl fd : decls) {
+            if (!done.contains(declKey(fd))) cycleMembers.add(fd);
+        }
+        for (IrStmt.FunctionDecl fd : cycleMembers) {
+            if (byName.get(fd.name()).size() == 1) {
+                summaries.put(fd.name(), ConservationSummary.seed(fd.name(),
+                        inputAtomsOf(fd, structs).stream().map(TypedAtom::path).toList()));
             }
+        }
+        int round = 0;
+        boolean changed = !cycleMembers.isEmpty();
+        while (changed) {
+            changed = false;
+            if (++round > FIXPOINT_ROUND_CAP) {
+                throw new IllegalStateException("conservation fixpoint exceeded "
+                        + FIXPOINT_ROUND_CAP + " rounds over " + cycleMembers.size()
+                        + " cycle members — the summary lattice is not"
+                        + " monotone-decreasing (a drafter monotonicity bug)");
+            }
+            for (IrStmt.FunctionDecl fd : cycleMembers) {
+                if (byName.get(fd.name()).size() != 1) continue;
+                ConservationSummary next = ConservationSummary.of(
+                        draftFunction(fd, structs, byName, summaries));
+                if (!next.equals(summaries.get(fd.name()))) {
+                    summaries.put(fd.name(), next);
+                    changed = true;
+                }
+            }
+        }
+        // The authoritative graphs: one draft against the converged
+        // summaries (intermediate rounds are discarded — no optimistic-seed
+        // nodes leak into artifacts).
+        for (IrStmt.FunctionDecl fd : cycleMembers) {
+            drafted.put(declKey(fd), draftFunction(fd, structs, byName, summaries));
         }
         // Preserve source order.
         List<ConservationGraph> graphs = new ArrayList<>();
@@ -146,13 +203,32 @@ public final class ConservationDrafter {
         };
     }
 
+    /** Flattened input atoms for a declaration — shared by drafting and the fixpoint seed. */
+    private static List<TypedAtom> inputAtomsOf(
+            IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs) {
+        List<TypedAtom> inputs = new ArrayList<>();
+        for (IrParam p : fd.params()) {
+            flatten(AttributePath.of(p.name() + "_0"), p.sort(), structs,
+                    new HashSet<>(), inputs);
+        }
+        return inputs;
+    }
+
     private static ConservationGraph draftFunction(
             IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs,
             Map<String, List<IrStmt.FunctionDecl>> declsByName,
             Map<String, ConservationSummary> summaries)
             throws CompileException {
-        Ctx ctx = new Ctx(structs, declsByName, summaries);
-        List<TypedAtom> inputs = new ArrayList<>();
+        return draftFunction(fd, structs, declsByName, summaries, false);
+    }
+
+    private static ConservationGraph draftFunction(
+            IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structs,
+            Map<String, List<IrStmt.FunctionDecl>> declsByName,
+            Map<String, ConservationSummary> summaries, boolean inDispatchArm)
+            throws CompileException {
+        Ctx ctx = new Ctx(fd, structs, declsByName, summaries, inDispatchArm);
+        List<TypedAtom> inputs = inputAtomsOf(fd, structs);
         StringBuilder params = new StringBuilder();
         for (IrParam p : fd.params()) {
             String varName = p.name() + "_0";
@@ -160,7 +236,6 @@ public final class ConservationDrafter {
             params.append(varName).append(": ").append(renderSort(p.sort()));
             ctx.env.put(p.name(), new Flow.Verbatim(AttributePath.of(varName)));
             ctx.rename.put(p.name(), SymExpr.var(varName));
-            flatten(AttributePath.of(varName), p.sort(), structs, new HashSet<>(), inputs);
         }
         List<AttributePath> outputs = new ArrayList<>();
         List<TypedAtom> outputAtoms = new ArrayList<>();
@@ -170,7 +245,7 @@ public final class ConservationDrafter {
         Flow result = draftTail(fd.body(), ctx);
         return new ConservationGraph(
                 fd.name(), params.toString(), renderSort(fd.returnSort()),
-                inputs, outputs, ctx.nodes, result);
+                inputs, outputs, ctx.nodes, ctx.callFacts, result);
     }
 
     /** Per-function drafting context: env, nodes, counters, guard renaming. */
@@ -178,17 +253,23 @@ public final class ConservationDrafter {
         final Map<String, Flow> env = new HashMap<>();
         final Map<String, SymExpr> rename = new HashMap<>();
         final Map<String, FlowNode> nodes = new LinkedHashMap<>();
+        final Map<String, ConservationGraph.CallFact> callFacts = new LinkedHashMap<>();
+        final IrStmt.FunctionDecl enclosing;
         final Map<String, IrSort.Structural> structs;
         final Map<String, List<IrStmt.FunctionDecl>> declsByName;
         final Map<String, ConservationSummary> summaries;
+        /** Drafting a dispatch-as-Branch candidate: no re-entry, no summaries. */
+        final boolean inDispatchArm;
         int counter = 1;
 
-        Ctx(Map<String, IrSort.Structural> structs,
+        Ctx(IrStmt.FunctionDecl enclosing, Map<String, IrSort.Structural> structs,
                 Map<String, List<IrStmt.FunctionDecl>> declsByName,
-                Map<String, ConservationSummary> summaries) {
+                Map<String, ConservationSummary> summaries, boolean inDispatchArm) {
+            this.enclosing = enclosing;
             this.structs = structs;
             this.declsByName = declsByName;
             this.summaries = summaries;
+            this.inDispatchArm = inDispatchArm;
         }
 
         String add(FlowNode node) {
@@ -375,22 +456,23 @@ public final class ConservationDrafter {
                         && ctx.summaries.containsKey(c.functionName())) {
                     yield substituteCall(c.functionName(),
                             ctx.summaries.get(c.functionName()),
-                            candidates.get(0), argFlows, ctx);
+                            candidates.get(0), argFlows,
+                            verbatimSelfReentry(c.functionName(), argFlows, ctx), ctx);
                 }
-                if (candidates.size() > 1) {
+                if (candidates.size() > 1 && !ctx.inDispatchArm) {
                     // Dispatch-as-Branch: one arm per candidate (each its own
                     // summary substitution); properties quantify over arms.
-                    // Candidates draft with nested calls residual — guards
-                    // against mutual recursion through overloads; conservative
-                    // and terminating.
+                    // Candidates draft with no summaries and no further
+                    // dispatch expansion — guards against mutual recursion
+                    // through overloads; conservative and terminating.
                     List<Arm> arms = new ArrayList<>();
                     for (IrStmt.FunctionDecl candidate : candidates) {
-                        ConservationGraph g = draftFunction(
-                                candidate, ctx.structs, Map.of(), Map.of());
+                        ConservationGraph g = draftFunction(candidate,
+                                ctx.structs, ctx.declsByName, Map.of(), true);
                         ConservationSummary s = ConservationSummary.of(g);
                         arms.add(new Arm("overload " + candidate.name(),
                                 substituteCall(c.functionName(), s, candidate,
-                                        argFlows, ctx)));
+                                        argFlows, false, ctx)));
                     }
                     String id = ctx.freshId("br");
                     ctx.add(new FlowNode.Branch(id, List.of(), arms));
@@ -398,10 +480,16 @@ public final class ConservationDrafter {
                 }
                 List<AttributePath> touches = new ArrayList<>();
                 for (Flow a : argFlows) touches.addAll(touchesOf(a, ctx));
+                // Post-fixpoint, every unambiguous name is summarized before
+                // its callers' final draft; what's left is genuinely outside
+                // the slice — say which.
                 String why = candidates.isEmpty()
                         ? "call '" + c.functionName() + "' (unresolved)"
-                        : "call '" + c.functionName()
-                                + "' (recursive — fixpoint is a later slice)";
+                        : candidates.size() > 1
+                                ? "call '" + c.functionName()
+                                        + "' (overload within dispatch arm — out of scope)"
+                                : "call '" + c.functionName()
+                                        + "' (summary unavailable in dispatch arm)";
                 yield new Flow.Residual(why, touches);
             }
             case IrExpr.Lambda lam ->
@@ -423,9 +511,37 @@ public final class ConservationDrafter {
      * args' flows — dispatch-as-Branch, literally. Residual-touched callee
      * atoms make the corresponding caller flow residual (fail-closed).
      */
+    /**
+     * Verbatim self re-entry: a direct self-call whose every argument is the
+     * unmodified content of one of the enclosing function's own params, each
+     * param appearing exactly once (a permutation counts — the orbit is
+     * finite, so pure re-entry revisits a prior state). Flow-based, not
+     * syntactic: {@code let y = x in f(y)} is caught; a rebinding through any
+     * computation is not. Sound under pure, strict evaluation.
+     */
+    private static boolean verbatimSelfReentry(
+            String callee, List<Flow> argFlows, Ctx ctx) {
+        if (!callee.equals(ctx.enclosing.name())) return false;
+        List<IrParam> params = ctx.enclosing.params();
+        if (argFlows.size() != params.size()) return false;
+        Set<String> roots = new HashSet<>();
+        for (Flow f : argFlows) {
+            if (!(f instanceof Flow.Verbatim v) || !v.path().segments().isEmpty()) {
+                return false;
+            }
+            roots.add(v.path().root());
+        }
+        if (roots.size() != params.size()) return false;
+        for (IrParam p : params) {
+            if (!roots.contains(p.name() + "_0")) return false;
+        }
+        return true;
+    }
+
     private static Flow substituteCall(
             String callee, ConservationSummary summary,
-            IrStmt.FunctionDecl decl, List<Flow> argFlows, Ctx ctx) {
+            IrStmt.FunctionDecl decl, List<Flow> argFlows,
+            boolean verbatimReentry, Ctx ctx) {
         // callee param root (e.g. "s_0") -> caller arg flow, positionally.
         Map<String, Flow> argByRoot = new LinkedHashMap<>();
         for (int i = 0; i < decl.params().size() && i < argFlows.size(); i++) {
@@ -465,6 +581,7 @@ public final class ConservationDrafter {
         String id = ctx.freshId("c");
         ctx.add(new FlowNode.Computation(id, "via " + callee,
                 OpClass.ARITHMETIC, Recoverability.DEGRADED, contentInputs));
+        ctx.callFacts.put(id, new ConservationGraph.CallFact(callee, verbatimReentry));
         Flow result = new Flow.FromNode(id);
         if (!spentFlows.isEmpty()) {
             // Credit the callee's universal branching spend at the call site.

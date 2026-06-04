@@ -1,0 +1,27 @@
+struct Ternion(z:Decimal, n:Decimal, w:Decimal)
+
+let Ternion.erasure = Ternion(0,0,0)
+let Ternion.one = Ternion(0,1,0)
+let Ternion.zero = Ternion(1,0,0)
+let Ternion.residue = Ternion(0,0,1)
+
+function +(left:Ternion, right:Ternion):Ternion ->
+  Ternion(left.z+right.z, left.n+right.n, left.w+right.w)
+
+function *(left:Ternion, right:Ternion):Ternion ->
+  let z = left.z*right.z + left.z*right.n + left.n*right.z
+  let n = left.n*right.n + left.z*right.w + left.w*right.z
+  let w = left.w*right.w + left.w*right.n + left.n*right.w
+  let incz = left.n == 0 & right.n == 0
+  Ternion(z, n, w)
+
+method Ternion.inv():Ternion ->
+  match self {
+    [Ternion(z,0,w)] -> Ternion(w, 0, z+1)
+    [Ternion(z,n,w)] -> Ternion(w, 1/n, z)
+  }
+  
+function /(left:Ternion, right:Ternion):Ternion ->
+	  left * right.inv()
+
+

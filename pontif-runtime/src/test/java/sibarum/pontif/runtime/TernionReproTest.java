@@ -25,5 +25,18 @@ class TernionReproTest {
         } catch (Exception e) {
             System.out.println("THREW: " + e.getClass().getName() + ": " + e.getMessage());
         }
+        // The playground's Receipts tab exercises BOTH report paths — test them too.
+        switch (ReceiptGraphReport.fromAltSource(src, "ternion.ptf")) {
+            case ReceiptGraphReport.Result.Generated g ->
+                    System.out.println("receiptGraph=OK");
+            case ReceiptGraphReport.Result.Failed f ->
+                    System.out.println("receiptGraph FAILED: " + f.error());
+        }
+        switch (ConservationReport.fromAltSource(src, "ternion.ptf")) {
+            case ConservationReport.Result.Generated g ->
+                    System.out.println("conservation=OK");
+            case ConservationReport.Result.Failed f ->
+                    System.out.println("conservation FAILED: " + f.error());
+        }
     }
 }

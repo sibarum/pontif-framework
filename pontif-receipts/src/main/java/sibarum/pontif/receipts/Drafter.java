@@ -233,6 +233,31 @@ public final class Drafter {
                 calls.add(new CallRef(c.functionName(), argBindings, new Var(varName, returnSort)));
                 yield IrExpr.var(varName);
             }
+            // Division/remainder are outside the linear kernel the body
+            // equation feeds — hoist the operation like a call (under
+            // dispatch unification it IS one: an operator call). The result
+            // var's sort is UNREFINED, so the receipts simply claim nothing
+            // about the divided value and no inductive hypothesis can attach;
+            // the rest of the body keeps its receipts instead of the whole
+            // function refusing to draft. Deliberately NOT resolved through
+            // resolveCallReturnSort: name-based inference on "/" could pick a
+            // user overload (e.g. a struct's own division) and fabricate a
+            // wrong narrowing — the base sort comes from the operands, per
+            // the Int-promotes-to-Decimal ruling.
+            case IrExpr.BinOp op when op.op() == IrExpr.Op.DIV
+                    || op.op() == IrExpr.Op.MOD -> {
+                IrExpr left = hoistCalls(op.left(), renameBindings, ctx, callCounter, calls);
+                IrExpr right = hoistCalls(op.right(), renameBindings, ctx, callCounter, calls);
+                String varName = "r_" + (callCounter[0]++);
+                List<SymExpr> argBindings = List.of(
+                        Substitute.apply(IrCompiler.compileSymExpr(left), renameBindings),
+                        Substitute.apply(IrCompiler.compileSymExpr(right), renameBindings));
+                String opName = op.op() == IrExpr.Op.DIV ? "/" : "%";
+                Sort base = Sort.of(involvesDecimal(left, ctx) || involvesDecimal(right, ctx)
+                        ? "Decimal" : "Int");
+                calls.add(new CallRef(opName, argBindings, new Var(varName, base)));
+                yield IrExpr.var(varName);
+            }
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(),
                     hoistCalls(op.left(), renameBindings, ctx, callCounter, calls),
@@ -257,6 +282,30 @@ public final class Drafter {
             // Leaves and forms not yet call-hoisted (Apply/Lambda/Match nested
             // in a body equation are rare; transcribed as-is for now).
             default -> expr;
+        };
+    }
+
+    /**
+     * Whether an expression's value is Decimal-sorted, for the hoisted
+     * division's result-var base: any Decimal operand promotes (the
+     * Int-promotes-to-Decimal ruling). Conservative — unknown shapes read
+     * as Int, matching the existing bare-Int call fallback.
+     */
+    private static boolean involvesDecimal(IrExpr expr, InferenceContext ctx) {
+        return switch (expr) {
+            case IrExpr.Dec d -> true;
+            case IrExpr.Var v -> {
+                IrSort sort = ctx.typeEnv().get(v.name());
+                String base = switch (sort) {
+                    case IrSort.Named n -> n.name();
+                    case IrSort.Refined r -> r.name();
+                    case null, default -> null;
+                };
+                yield "Decimal".equals(base);
+            }
+            case IrExpr.BinOp op ->
+                    involvesDecimal(op.left(), ctx) || involvesDecimal(op.right(), ctx);
+            default -> false;
         };
     }
 

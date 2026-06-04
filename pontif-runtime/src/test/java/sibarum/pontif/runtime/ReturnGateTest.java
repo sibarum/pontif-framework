@@ -61,4 +61,31 @@ class ReturnGateTest {
                 "module m\nfunction add(a:Int, b:Int):Int -> a + b\nadd(2, 3)", "add.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r);
     }
+
+    @Test
+    void divisionInBody_bareReturn_compilesAndDrafts() {
+        // Division hoists as an operator call (unrefined result var) instead
+        // of refusing to draft — a body that divides is ordinary code; the
+        // receipts simply claim nothing about the divided value.
+        CompileResult r = compiler.compileAlt(
+                "module m\nfunction half(x:Int):Int -> x / 2\nhalf(8)", "half.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "division in a bare-return body must compile; got " + r);
+    }
+
+    @Test
+    void divisionInBody_refinedReturn_isHonestlyRejected_notAbstained() {
+        // PINNED TIGHTENING: before the division hoist, drafting THREW on
+        // '/' and the gate abstained — this program compiled with its
+        // declared [Int:@>=0] unverified (incidental leniency from a crash).
+        // Now the body drafts, the divided value is unconstrained, and the
+        // gate rejects the unprovable claim — the no-lie law applied: weaken
+        // the declared return or drop the narrowing.
+        CompileResult r = compiler.compileAlt(
+                "module m\nfunction f(x:[Int:@>=0]):[Int:@>=0] -> x / 2\nf(8)", "div-gate.ptf");
+        CompileResult.Failed f =
+                assertInstanceOf(CompileResult.Failed.class, r, "expected a compile rejection");
+        assertTrue(f.error().text().contains("Cannot prove the declared return refinement"),
+                () -> "unexpected gate message: " + f.error().text());
+    }
 }

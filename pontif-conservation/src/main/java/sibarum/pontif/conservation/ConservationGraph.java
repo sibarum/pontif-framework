@@ -18,13 +18,25 @@ public record ConservationGraph(
         List<TypedAtom> inputs,
         List<AttributePath> outputs,
         Map<String, FlowNode> nodes,
+        Map<String, CallFact> callFacts,
         Flow result) {
 
     public ConservationGraph {
         inputs = List.copyOf(inputs);
         outputs = List.copyOf(outputs);
         nodes = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(nodes));
+        callFacts = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(callFacts));
     }
+
+    /**
+     * Call-site metadata keyed by the substituted "via" Computation node's id:
+     * which function the node stands for, and whether the call is a verbatim
+     * self re-entry (every argument is the unmodified content of one of the
+     * enclosing function's own params — a permutation counts; the orbit is
+     * finite, so re-entry revisits). The identity carrier for {@link NoHalt} —
+     * the op label's "via <callee>" stays display-only.
+     */
+    public record CallFact(String callee, boolean verbatimReentry) {}
 
     /**
      * An input atom with its content capacity, read from the DECLARED base

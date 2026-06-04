@@ -39,7 +39,9 @@ with the name (and behavior) turned on. Tuples are stored with positional keys
 **back-reference** — In a receipt-graph, a recursive call points back to the
 same node rather than re-expanding. The no-duplicate-edges rule turns
 well-foundedness into a graph property and brings the postcondition along
-as an inductive hypothesis automatically.
+as an inductive hypothesis automatically. The conservation ledger's recursion
+fixpoint is the same move on the second ledger: the recursive call
+substitutes its own function's converged summary by reference.
 
 **backward language design** — Pontif's construction method
 (`docs/backward-language-design.md`): implement from the execution layer
@@ -103,10 +105,12 @@ node kinds — **Computation** (operations + resolved calls, op-classed with
 recoverability verdicts), **Branch** (matchers + dispatches — discrimination),
 **Construction** (constructors + function returns) — with metadata (constants,
 naming, binding, projection) on flow edges. Per-branch-path *role multisets*
-per input atom; residual flow (lambdas, applications, unresolved/recursive
-calls) is the located ignorance every query fails closed on. Properties attach
+per input atom; residual flow (lambdas, applications, unresolved calls) is
+the located ignorance every query fails closed on. Properties attach
 via the same `proof f = …` statement as algebraic proofs (`std.conservation`);
-callee summaries compose over the call DAG. Not a sort, never narrows, nothing
+callee summaries compose over the call DAG, and a cycle's summaries are the
+Kleene fixpoint from the optimistic seed — recursion traces instead of
+staying residual (ruling in `conservation-algebra.md`). Not a sort, never narrows, nothing
 in the runtime: receipts are for auditors, sorts are for callers.
 
 **Data-Conservative** — The headline conservation property, sort-aware under
@@ -200,6 +204,20 @@ system lie — there honesty wins. The sharp edge of information conservation
 here? then, does that leniency lie? — lenient+honest ⇒ allow, lenient+dishonest
 ⇒ fence. It *derives* rules rather than choosing them (e.g. **positional
 totality**, the named-vs-anonymous matching split).
+
+**NoHalt** — The conservation ledger's divergence fact: *this function
+provably never completes*. A module-wide greatest fixpoint over the ledger's
+branch-paths: keep exactly the functions whose every branch-path contains a
+call into the kept set or a verbatim self re-entry (the params passed
+unchanged, any permutation — the orbit is finite). Sound by infinite descent
+under pure, strict evaluation; callers of never-halting functions inherit the
+fact. The complement of the recursion fixpoint's inductive hypothesis: "if it
+completes, it conserves" / "it cannot complete." Decides only a sound corner
+of *non*-halting — silence is no claim, never a halting verdict, and
+termination is never proven (that descent is arithmetic — receipt-graph
+territory). Printed as a `no-halt:` line and per-path markers; a fact, not a
+property verdict — its consumption (vacuity-annotated certificates, the
+receipt-graph IH) is an open ruling.
 
 **notary** — Pontif's built-in receipt-graph verifier. Three independent
 verifications: (1) a graph exists, (2) a receipt-graph's skeleton

@@ -6,6 +6,8 @@ import sibarum.pontif.conservation.ConservationRoles.PathRoles;
 import sibarum.pontif.conservation.FlowNode.Arm;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -19,12 +21,25 @@ public final class ConservationLedgerPrinter {
     private ConservationLedgerPrinter() {}
 
     public static String print(Ledger ledger) {
+        Map<String, String> noHalt = NoHalt.of(ledger);
         return ledger.graphs().stream()
-                .map(ConservationLedgerPrinter::printNode)
+                .map(g -> printNode(g, noHalt.get(g.functionName()), noHalt.keySet()))
                 .collect(Collectors.joining("\n"));
     }
 
     public static String printNode(ConservationGraph graph) {
+        return printNode(graph, null, Set.of());
+    }
+
+    /**
+     * {@code noHaltWitness} is the function-level No-Halt sentence (null = no
+     * claim); {@code neverHalting} is the ledger-wide never-halting set, so
+     * per-path markers can also name calls into it. The single-graph overload
+     * passes the empty set — verbatim re-entry markers are graph-local and
+     * still show.
+     */
+    public static String printNode(ConservationGraph graph,
+            String noHaltWitness, Set<String> neverHalting) {
         StringBuilder sb = new StringBuilder();
         sb.append(graph.functionName()).append('(').append(graph.paramsRendering())
           .append(") -> r_0: ").append(graph.returnRendering()).append('\n');
@@ -39,11 +54,18 @@ public final class ConservationLedgerPrinter {
             renderNode(node, sb);
         }
         sb.append("  result:  ").append(graph.result().render()).append('\n');
+        if (noHaltWitness != null) {
+            sb.append("  no-halt: ").append(noHaltWitness).append('\n');
+        }
 
         List<PathRoles> paths = ConservationRoles.of(graph);
         for (PathRoles path : paths) {
             sb.append("  classification");
             if (!path.label.isEmpty()) sb.append(" [").append(path.label).append(']');
+            if (NoHalt.pathDiverges(path, neverHalting)) {
+                sb.append(" — never halts (").append(NoHalt.pathWitness(
+                        path, graph.functionName(), neverHalting)).append(')');
+            }
             sb.append(":\n");
             for (TypedAtom atom : graph.inputs()) {
                 sb.append("    ").append(pad(atom.path().toString(), 16)).append(' ')

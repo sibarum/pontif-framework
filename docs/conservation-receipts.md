@@ -134,11 +134,33 @@ sort-aware `DataConservative` under the capacity law (`Lossless` stays
 reserved for the cross-ledger property), and **composition over the call
 DAG**: callee summaries substitute at call sites, overloaded callees are
 dispatch-as-Branch over candidates, callee-internal branching spend credits
-the caller's atoms, and recursion stays residual (fail-closed) until the
-fixpoint slice. Real helper-delegating code now certifies end-to-end; a
+the caller's atoms. Real helper-delegating code now certifies end-to-end; a
 helper that drops its argument surfaces the loss in the caller.
 
-**Next slices:** recursion fixpoint + the collection atom model (the sorting
-case needs both — element-quantified atoms over arrays); multi-branch
-`Reversible` via the exit-assertion theorem; the property-definition language
-(when real definitions demand it); cross-ledger `Lossless`.
+**Recursion fixpoint landed.** Cycle members' summaries are computed as a
+per-cycle Kleene fixpoint from the optimistic seed (the inductive
+hypothesis), so recursive and mutually recursive functions get honest
+ledgers and verdicts — `fact` now fails `DataConservative` on the merits
+(the base path spends `n` on one branching bit and returns a constant), not
+on located ignorance. The ruling, including the partial-correctness reading
+(claims quantify over completed evaluations; ungrounded loops certify
+vacuously), is in `conservation-algebra.md`. Recursive overloaded names stay
+dispatch-as-Branch, out of scope.
+
+**No-Halt landed.** The divergence fact: a module-wide greatest fixpoint
+over the ledger's branch-paths proves some functions never complete (no
+grounding path; verbatim self re-entry; every path calls a never-halting
+function), printed as a `no-halt:` line and per-path markers. The vacuous
+certificate no longer stands silent — the ungrounded loop still certifies
+`DataConservative` (the partial-correctness ruling) but the ledger names the
+divergence beside it. A fact, not a verdict change: how certificates, the
+gate, and the receipt graph's inductive hypothesis consume it is the open
+ruling, decided after reading printed ledgers. Ruling and limits in
+`conservation-algebra.md`.
+
+**Next slices:** the No-Halt consumption ruling (vacuity-annotated
+certificates? receipt-graph IH refusal — the first cross-ledger
+proposition?); the collection atom model (the sorting case needs it —
+element-quantified atoms over arrays); multi-branch `Reversible` via the
+exit-assertion theorem; the property-definition language (when real
+definitions demand it); cross-ledger `Lossless`.
