@@ -124,8 +124,7 @@ misnamed and gets renamed at the re-cut (candidates for the humbler
 "everything reaches an output" property: `NothingDropped`, `FullyConsumed`,
 `AllInputsFlow` — ruling needed).
 
-The role ladder stratifies "the content reached the output" into named
-thresholds (rung names: ruling needed):
+The role ladder stratifies "the content reached the output":
 
 1. **flows-verbatim** — reference/projection/construction chain only.
 2. **flows-recoverable** — chain may include combinations, every step
@@ -135,12 +134,34 @@ thresholds (rung names: ruling needed):
 4. **measured-only** — one bit of relational information survives.
 5. **absent** — no role at all.
 
-- *Nothing-dropped* (the property formerly misnamed `Lossless`): every atom
-  ≥ threshold 3, every branch.
-- *Content-conserved* (stronger candidate): every atom ≥ threshold 2.
-- **`Lossless` (reserved, cross-ledger)**: every atom recoverable from the
+**RULED: `Data-Conservative`** — the headline dataflow-only property,
+**sort-aware**. The governing law: *measurement counts as conservation
+exactly when it exhausts the measured content*, and an atom's content
+capacity is a fact the sort system already knows.
+
+- Every `Int` or `Decimal` input atom reaches the return — verbatim or in a
+  computation of a derived value in the return (thresholds 1–3: influence,
+  not recoverability — which is precisely what the dataflow ledger alone can
+  honestly certify, and why the name claims consumption, not losslessness).
+- Every `Bool` input atom reaches the return the same way, **or is spent in
+  branching logic** (threshold 4 suffices): a Bool's entire content is one
+  bit, so a branch consumes all of it. Nothing was dropped.
+- Atoms of other sorts default to the numeric rule (content-bearing;
+  measurement does not exhaust them) — the conservative direction.
+- Every branch; fail-closed on residual flow, as always.
+
+This also rules the measurement-as-use question *sort-wise* rather than
+globally — capacity accounting, not a flat yes/no. (Future hook, deliberately
+not taken now: a narrowed `[Int:0|1]` is also ~one bit; sort-aware capacity
+could eventually read refinements, not just bases — conservation consuming
+the narrowing system.)
+
+- **`Lossless` (reserved, cross-ledger)**: every atom *recoverable* from the
   output — thresholds 1–2 certified by dataflow alone, threshold 3 cases
   promoted when the algebraic ledger proves the combination invertible.
+- The shipping `std.conservation` property renames `Lossless()` →
+  `DataConservative()` at the re-cut (with the sort-aware Bool clause);
+  `LosslessExcept` follows (`DataConservativeExcept`, or a better coinage).
 - *NoDuplication*: verbatim-emission multiplicity ≤ 1 per atom.
 - *Intentional erasure* (`LosslessExcept`): declared atoms ≤ threshold 4;
   all others per the chosen lossless threshold. Stale-proof rule unchanged.
@@ -178,16 +199,19 @@ thresholds (rung names: ruling needed):
   property is misnamed and will be renamed.
 - **`Lambda`/`Apply` (RULED):** skipped — residual, fail-closed, until
   first-class functions earn their own slice.
+- **`Data-Conservative` (RULED):** the headline dataflow property, sort-aware
+  per the capacity law (numerics must reach the return; Bools may instead be
+  spent in branching). Also rules measurement-as-use, sort-wise.
 
 # Open rulings (red-pen targets)
 
-1. **The humbler property's name** (`NothingDropped` / `FullyConsumed` /
-   `AllInputsFlow` / …) and the rung names of the threshold ladder.
-2. **Does measurement count as "use"?** Equivariance ("every output depends
-   on every input") plausibly wants threshold 4 to count; conservation does
-   not. Two different quantifiers over the same roles.
-3. **Whether this method note belongs in `backward-language-design.md`** as
+1. **Rung display names** for the threshold ladder (minor — they surface in
+   reports and diagnostics, not in `std.conservation`).
+2. **Whether this method note belongs in `backward-language-design.md`** as
    the circular generalization, or stays here as the worked instance.
+3. *(Confirm)* Bool + derived flow counts (assumed yes — Bools gain the
+   branching road in addition to, not instead of, the flow roads); "Float"
+   read as `Decimal`.
 
 # See Also
 
