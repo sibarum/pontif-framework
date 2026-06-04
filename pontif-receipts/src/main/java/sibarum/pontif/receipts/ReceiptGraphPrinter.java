@@ -142,6 +142,7 @@ public final class ReceiptGraphPrinter {
             case SymExpr.Lit l -> Long.toString(l.value());
             case SymExpr.Frac f -> f.num() + "/" + f.denom();
             case SymExpr.Dec d -> d.value().toPlainString();
+            case SymExpr.Chr c -> "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'";
             case SymExpr.Bool b -> Boolean.toString(b.value());
             case SymExpr.Self s -> "@";
             // Sub is encoded as Add(l, Mul(-1, r)) by the IR compiler — render

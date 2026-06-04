@@ -191,6 +191,7 @@ public final class NameResolver {
         return switch (e) {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
+            case IrExpr.Chr c -> c;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

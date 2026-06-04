@@ -14,6 +14,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         // Atoms
         INTEGER,    // 42, -3
         DECIMAL,    // 3.14, -0.5 — BigDecimal literals (digits '.' digits)
+        CHAR,       // 'a', '\n' — text is the RESOLVED character (escapes decoded)
         IDENT,      // foo, Point, factorial — keywords are recognized at parse time
 
         // Brackets

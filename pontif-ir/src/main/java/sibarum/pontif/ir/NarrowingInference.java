@@ -73,6 +73,8 @@ public final class NarrowingInference {
             // No value-level narrowing for decimals (integer-only engine);
             // the bare Decimal sort is all we know.
             case IrExpr.Dec d -> IrSort.named("Decimal");
+            // Same for chars in the value slice — bare Char.
+            case IrExpr.Chr c -> IrSort.named("Char");
             case IrExpr.Bool b -> boolSingleton(b.value());
             case IrExpr.Var v -> ctx.typeEnv().get(v.name());
             case IrExpr.LetIn let -> {
@@ -309,6 +311,7 @@ public final class NarrowingInference {
                             .allMatch(v -> selfAccessesAreOnlyField(v, targetField));
             case IrExpr.Lit ignored -> true;
             case IrExpr.Dec ignored -> true;
+            case IrExpr.Chr ignored -> true;
             case IrExpr.Bool ignored -> true;
             case IrExpr.Var ignored -> true;
         };
@@ -381,6 +384,7 @@ public final class NarrowingInference {
             }
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
+            case IrExpr.Chr c -> c;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
@@ -452,6 +456,7 @@ public final class NarrowingInference {
             }
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
+            case IrExpr.Chr c -> c;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
         };

@@ -65,6 +65,10 @@ public final class BoundAnalysisRules {
         return switch (expr) {
             case SymExpr.Frac unused -> true;
             case SymExpr.Dec unused -> true;
+            // Chars abstain for now. Char IS discrete (code points are
+            // integers), so the narrows slice may legitimately admit Chr to
+            // integer reasoning — this gate is where that ruling lands.
+            case SymExpr.Chr unused -> true;
             case SymExpr.Lit unused -> false;
             case SymExpr.Bool unused -> false;
             case SymExpr.Var unused -> false;

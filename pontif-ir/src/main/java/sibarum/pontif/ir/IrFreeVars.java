@@ -18,6 +18,7 @@ public final class IrFreeVars {
         switch (expr) {
             case IrExpr.Lit l -> {}
             case IrExpr.Dec d -> {}
+            case IrExpr.Chr c -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {

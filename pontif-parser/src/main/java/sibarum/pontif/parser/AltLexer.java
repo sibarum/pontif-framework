@@ -86,6 +86,14 @@ public final class AltLexer {
                 continue;
             }
 
+            // Character literal: 'a', '\n' — one code point between single
+            // quotes. The token's free today because Pontif has no unary
+            // minus, so '<-'-style ambiguities don't exist for quotes either.
+            if (c == '\'') {
+                tokens.add(readChar(startLine, startCol));
+                continue;
+            }
+
             // Operator (including '-' when not a sign, '=', '->')
             if (OP_START_CHARS.contains(c)) {
                 tokens.add(readOperator(startLine, startCol));
@@ -112,9 +120,63 @@ public final class AltLexer {
         if (tokens.isEmpty()) return false;
         AltToken last = tokens.get(tokens.size() - 1);
         return switch (last.kind()) {
-            case INTEGER, DECIMAL, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
+            case INTEGER, DECIMAL, CHAR, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
             default -> false;
         };
+    }
+
+    /**
+     * Reads a character literal: one code point (surrogate pairs welcome —
+     * the full Unicode range, not just the BMP) or one escape from the v1
+     * set ({@code \n \t \' \\}) between single quotes. The token text is the
+     * RESOLVED character, so the parser just reads {@code codePointAt(0)}.
+     */
+    private AltToken readChar(int startLine, int startCol) throws ParseException {
+        advance(); // opening quote
+        if (pos >= src.length()) {
+            throw new ParseException("Unterminated character literal",
+                    Origin.at(source, startLine, startCol));
+        }
+        char c = src.charAt(pos);
+        if (c == '\'') {
+            throw new ParseException("Empty character literal — '' names no character",
+                    Origin.at(source, startLine, startCol));
+        }
+        String resolved;
+        if (c == '\\') {
+            advance();
+            if (pos >= src.length()) {
+                throw new ParseException("Unterminated character literal",
+                        Origin.at(source, startLine, startCol));
+            }
+            char esc = src.charAt(pos);
+            resolved = switch (esc) {
+                case 'n' -> "\n";
+                case 't' -> "\t";
+                case '\'' -> "'";
+                case '\\' -> "\\";
+                default -> throw new ParseException(
+                        "Unknown escape '\\" + esc + "' in character literal — "
+                                + "the escapes are \\n \\t \\' \\\\",
+                        Origin.at(source, startLine, startCol));
+            };
+            advance();
+        } else {
+            int codePoint = src.codePointAt(pos);
+            resolved = new String(Character.toChars(codePoint));
+            advance();
+            if (Character.charCount(codePoint) == 2) {
+                advance(); // the low surrogate
+            }
+        }
+        if (pos >= src.length() || src.charAt(pos) != '\'') {
+            throw new ParseException(
+                    "Unterminated character literal — expected closing ' "
+                            + "(a character literal holds exactly one character)",
+                    Origin.at(source, startLine, startCol));
+        }
+        advance(); // closing quote
+        return new AltToken(AltToken.Kind.CHAR, resolved, source, startLine, startCol);
     }
 
     /**

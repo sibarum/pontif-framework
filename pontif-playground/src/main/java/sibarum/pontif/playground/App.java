@@ -20,6 +20,7 @@ import sibarum.dasum.gui.core.input.ScrollbarController;
 import sibarum.dasum.gui.core.input.TabsController;
 import sibarum.dasum.gui.core.input.TextInputController;
 import sibarum.dasum.gui.core.input.TextStates;
+import sibarum.dasum.gui.core.input.TextStyleStates;
 import sibarum.dasum.gui.core.layout.HitTest;
 import sibarum.dasum.gui.core.layout.LatestLayout;
 import sibarum.dasum.gui.core.layout.Layout;
@@ -224,6 +225,14 @@ public final class App {
             null, null, Em.of(0.5f),
             null, false,
             true, true, true, true, 1).withLineNumbers(true);
+
+        // Live syntax highlighting: recompute foreground spans from scratch
+        // on every content change (keystroke, file open), plus one initial
+        // publish so the default content is colored before the first edit.
+        // Registered against codeText's final identity (after withLineNumbers).
+        TextStates.onContentChange(codeText, content ->
+            TextStyleStates.setForeground(codeText, AltHighlighter.highlight(content)));
+        TextStyleStates.setForeground(codeText, AltHighlighter.highlight(DEFAULT_CODE));
 
         Component codePane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
 

@@ -704,6 +704,22 @@ can't lower (no `Not` op, F2); inline alt lambda `(x:Int)->…` not parseable
 defined" instead of the generic overload-overlap message (`OverloadOverlap`
 special-cases zero-arg overloads).
 
+**Char LANDED (value slice — James's sequencing: "character first, then" —
+String arrives later as the first Char COLLECTION, on the same collection
+atom model sorting waits for).** The fourth scalar via the Decimal playbook:
+`'a'`/`'\n'` literals (full Unicode incl. astral; escapes `\n \t \' \\`),
+CharValue runtime type (never conflated with Int), code-point ordering +
+equality on both backends (Truffle BinaryOp gained an acceptsChar guard),
+literal field patterns (`[Key('a')]` → `[Char:@=='a']`, decided by
+CMP_CHR_CHR), capacity NUMERIC (one bit of ~21 spent in branching), constants
+in both ledgers. Fences: chars order and compare — they don't compute (no
+arithmetic); NO Char/Int tower (mixed comparisons fail closed); `ord`/`chr`
+conversion pair deferred (a bijection — future Reversible witness).
+**Follow-up slice — Char narrows:** Char IS discrete (unlike Decimal), so
+`[Char:@=='a']` singletons and code-point ranges (`[Char:@>='a' & @<='z']`)
+may legitimately route through integer discharge; the gates to revisit are
+BoundAnalysisRules.containsFrac and the SymExpr.Chr abstention notes.
+
 **Division in body position (fixed):** `/` and `%` in a function BODY now
 hoist in the receipts Drafter like calls (operator calls, per dispatch
 unification): fresh result var, UNREFINED sort — no false IH can attach, the

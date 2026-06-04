@@ -58,8 +58,14 @@ public final class AltParser {
      */
     static final String TUPLE_SENTINEL = "_tuple";
 
-    /** Keywords are recognized by text at parse time, not by token kind. */
-    private static final Set<String> KEYWORDS = Set.of(
+    /**
+     * Keywords are recognized by text at parse time, not by token kind.
+     * Public because tooling (the playground's syntax highlighter) consumes
+     * this set as the single source of truth for the keyword vocabulary —
+     * a new keyword added here highlights everywhere without a second list
+     * to update.
+     */
+    public static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
             "function", "method", "struct", "let",
             "assign", "trait", "Type",
@@ -784,6 +790,7 @@ public final class AltParser {
             case IrExpr.SelfRef s -> true;
             case IrExpr.Lit l -> false;
             case IrExpr.Dec d -> false;
+            case IrExpr.Chr c -> false;
             case IrExpr.Bool b -> false;
             case IrExpr.Var v -> false;
             case IrExpr.BinOp op -> containsSelfRef(op.left()) || containsSelfRef(op.right());
@@ -950,6 +957,8 @@ public final class AltParser {
             // engine is integer-only); the bare Decimal sort is the maximal
             // shape we infer.
             case IrExpr.Dec d -> new IrSort.Named("Decimal", d.origin());
+            // Same stance for Char in the value slice: bare Char.
+            case IrExpr.Chr c -> new IrSort.Named("Char", c.origin());
             case IrExpr.Var v -> {
                 IrSort scoped = currentScope.get(v.name());
                 if (scoped != null) yield scoped;
@@ -1518,6 +1527,7 @@ public final class AltParser {
             AltToken t = peek();
             boolean literalClause = t.kind() == AltToken.Kind.INTEGER
                     || t.kind() == AltToken.Kind.DECIMAL
+                    || t.kind() == AltToken.Kind.CHAR
                     || (t.kind() == AltToken.Kind.IDENT
                             && (t.text().equals("true") || t.text().equals("false")));
             if (literalClause) {
@@ -1543,7 +1553,8 @@ public final class AltParser {
                 }
                 IrSort declSort = decl.members().get(posField);
                 String base = baseSortName(declSort);
-                if (!"Int".equals(base) && !"Bool".equals(base) && !"Decimal".equals(base)) {
+                if (!"Int".equals(base) && !"Bool".equals(base) && !"Decimal".equals(base)
+                        && !"Char".equals(base)) {
                     throw new ParseException(
                             "A literal field pattern needs a primitive-sorted field; '"
                                     + posField + "' of '" + typeName + "' has sort " + declSort,
@@ -1552,6 +1563,7 @@ public final class AltParser {
                 IrExpr lit = switch (t.kind()) {
                     case INTEGER -> new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
                     case DECIMAL -> new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+                    case CHAR -> new IrExpr.Chr(t.text().codePointAt(0), t.origin());
                     default -> new IrExpr.Bool(t.text().equals("true"), t.origin());
                 };
                 members.put(posField, new IrSort.Refined(base,
@@ -2551,6 +2563,10 @@ public final class AltParser {
             case DECIMAL -> {
                 consume();
                 yield new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+            }
+            case CHAR -> {
+                consume();
+                yield new IrExpr.Chr(t.text().codePointAt(0), t.origin());
             }
             case IDENT -> {
                 if (t.text().equals("true")) {

@@ -87,6 +87,7 @@ public final class TruffleLowering {
         PontifNode node = switch (expr) {
             case IrExpr.Lit l -> IntLiteral.of(l.value());
             case IrExpr.Dec d -> DecimalLiteral.of(d.value());
+            case IrExpr.Chr c -> sibarum.pontif.ast.literal.CharLiteral.of(c.codePoint());
             case IrExpr.Bool b -> Bool.of(b.value());
             case IrExpr.Var v -> Var.of(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(

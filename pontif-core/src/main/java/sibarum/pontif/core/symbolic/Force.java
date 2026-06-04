@@ -18,6 +18,7 @@ public final class Force {
                         "Cannot force non-integer rational " + f.num() + "/" + f.denom() + " to a primitive");
             }
             case SymExpr.Dec d -> d.value();
+            case SymExpr.Chr c -> new sibarum.pontif.core.types.CharValue(c.codePoint());
             case SymExpr.Add(SymExpr l, SymExpr r) -> (Long) apply(l) + (Long) apply(r);
             case SymExpr.Mul(SymExpr l, SymExpr r) -> (Long) apply(l) * (Long) apply(r);
             case SymExpr.Pow(SymExpr b, SymExpr e) -> {

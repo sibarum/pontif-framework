@@ -197,6 +197,7 @@ public final class ConservationDrafter {
             case IrExpr.Lambda lam -> collectCallNames(lam.body(), out);
             case IrExpr.Lit l -> { }
             case IrExpr.Dec d -> { }
+            case IrExpr.Chr c -> { }
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
@@ -311,6 +312,7 @@ public final class ConservationDrafter {
             // stance here before this compiles.
             case IrExpr.Lit ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Dec ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Chr ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Bool ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Var ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.SelfRef ignored -> wrapReturn(draftValue(expr, ctx), ctx);
@@ -391,6 +393,8 @@ public final class ConservationDrafter {
             // Metadata: constants, naming, binding, path selection.
             case IrExpr.Lit l -> new Flow.Constant(String.valueOf(l.value()));
             case IrExpr.Dec d -> new Flow.Constant(d.value().toPlainString());
+            case IrExpr.Chr c -> new Flow.Constant(
+                    "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'");
             case IrExpr.Bool b -> new Flow.Constant(String.valueOf(b.value()));
             case IrExpr.Var v -> {
                 Flow bound = ctx.env.get(v.name());
@@ -715,7 +719,12 @@ public final class ConservationDrafter {
             default -> null;
         };
         if ("Bool".equals(base)) return Capacity.BIT;
-        if ("Int".equals(base) || "Decimal".equals(base)) return Capacity.NUMERIC;
+        // Char joins the NUMERIC rule: a code point is ~21 bits, so a
+        // comparison/branch extracts one bit of many — branching spend never
+        // exhausts a Char's content the way it exhausts a Bool's.
+        if ("Int".equals(base) || "Decimal".equals(base) || "Char".equals(base)) {
+            return Capacity.NUMERIC;
+        }
         return Capacity.OTHER;
     }
 

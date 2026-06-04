@@ -24,7 +24,32 @@ public final class Cmp extends BinaryOp {
     }
 
     @Override
+    protected boolean acceptsChar() {
+        return true;
+    }
+
+    @Override
     protected Object combine(Object leftValue, Object rightValue) {
+        // Char compares only with Char, by code point — no Char/Int tower.
+        if (leftValue instanceof sibarum.pontif.core.types.CharValue
+                || rightValue instanceof sibarum.pontif.core.types.CharValue) {
+            if (!(leftValue instanceof sibarum.pontif.core.types.CharValue lc)
+                    || !(rightValue instanceof sibarum.pontif.core.types.CharValue rc)) {
+                throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
+                        "Char compares only with Char — got " + leftValue
+                                + " " + op.name() + " " + rightValue, origin());
+            }
+            int c = Integer.compare(lc.codePoint(), rc.codePoint());
+            return switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+                case APPROX -> c == 0;  // code points are exact → ~= is ==
+            };
+        }
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
             BigDecimal a = asDecimal(leftValue, op.name());
             BigDecimal b = asDecimal(rightValue, op.name());

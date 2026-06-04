@@ -113,12 +113,25 @@ Kleene fixpoint from the optimistic seed — recursion traces instead of
 staying residual (ruling in `conservation-algebra.md`). Not a sort, never narrows, nothing
 in the runtime: receipts are for auditors, sorts are for callers.
 
+**Char** — The fourth scalar: a Unicode code point (full range, not just the
+BMP), written `'a'` / `'\n'` (escapes: `\n \t \' \\`). Ordered and compared
+by code point; **chars order and compare — they don't compute** (no
+arithmetic), and there is no Char/Int tower (mixed comparisons fail closed;
+an `ord`/`chr` conversion pair is a future ruling — a bijection, so a
+natural `Reversible` witness). Under the capacity law a Char is ~21 bits:
+branching spends one bit of many, never exhausting it (the numeric rule).
+Unlike `Decimal`, Char IS discrete — code points are integers — so Char
+narrows (`[Char:@=='a']`, code-point ranges) may legitimately route through
+integer discharge; that's the follow-up slice. Strings arrive later as the
+first Char **collection**, on the same collection atom model sorting waits
+for.
+
 **Data-Conservative** — The headline conservation property, sort-aware under
 the **capacity law**: *measurement counts as conservation exactly when it
-exhausts the measured content.* Every `Int`/`Decimal` input atom's content
-must reach the return (verbatim or derived — a chain through a comparison
-carries one bit, not content); every `Bool` atom must reach the return **or**
-be spent in branching (its whole content is one bit). Claims consumption, not
+exhausts the measured content.* Every `Int`/`Decimal`/`Char` input atom's
+content must reach the return (verbatim or derived — a chain through a
+comparison carries one bit, not content); every `Bool` atom must reach the
+return **or** be spent in branching (its whole content is one bit). Claims consumption, not
 recoverability — `Lossless` is reserved for the future cross-ledger property
 (algebraic + conservation combined: the output *determines* the input).
 `DataConservativeExcept(s.email)` declares an intentional drop and goes stale

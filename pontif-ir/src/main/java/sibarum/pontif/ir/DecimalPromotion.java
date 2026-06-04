@@ -57,6 +57,9 @@ final class DecimalPromotion {
         return switch (e) {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
+            // Char does NOT promote — there is no Char/Int tower; mixed
+            // comparisons fail closed at the type/runtime layers.
+            case IrExpr.Chr c -> c;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 public sealed interface IrExpr
-        permits IrExpr.Lit, IrExpr.Dec, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
+        permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess {
@@ -24,6 +24,7 @@ public sealed interface IrExpr
 
     static Lit lit(long value) { return new Lit(value, Origin.NONE); }
     static Dec dec(BigDecimal value) { return new Dec(value, Origin.NONE); }
+    static Chr chr(int codePoint) { return new Chr(codePoint, Origin.NONE); }
     static Bool bool(boolean value) { return new Bool(value, Origin.NONE); }
     static Var var(String name) { return new Var(name, Origin.NONE); }
     static SelfRef self() { return new SelfRef(Origin.NONE); }
@@ -45,6 +46,19 @@ public sealed interface IrExpr
         public Dec {
             if (value == null) {
                 throw new IllegalArgumentException("Dec value must be non-null");
+            }
+        }
+    }
+
+    /**
+     * Character literal — a Unicode code point (full range, not just the
+     * BMP). The fourth scalar; ordered by code point, no arithmetic.
+     */
+    record Chr(int codePoint, Origin origin) implements IrExpr {
+        public Chr {
+            if (!Character.isValidCodePoint(codePoint)) {
+                throw new IllegalArgumentException(
+                        "Chr code point out of Unicode range: " + codePoint);
             }
         }
     }

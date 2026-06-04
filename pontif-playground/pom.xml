@@ -31,6 +31,12 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-runtime</artifactId>
         </dependency>
+        <!-- Direct, not just transitive via pontif-runtime: the syntax
+             highlighter imports AltParser.KEYWORDS. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-parser</artifactId>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-core</artifactId>

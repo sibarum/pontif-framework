@@ -7,7 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 public sealed interface SymExpr
-        permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Bool, SymExpr.Self,
+        permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Chr,
+                SymExpr.Bool, SymExpr.Self,
                 SymExpr.Add, SymExpr.Mul, SymExpr.Pow,
                 SymExpr.Cmp, SymExpr.And, SymExpr.Or,
                 SymExpr.Lam, SymExpr.App, SymExpr.Case,
@@ -17,6 +18,7 @@ public sealed interface SymExpr
     static Lit lit(long value) { return new Lit(value); }
     static Frac frac(long num, long denom) { return new Frac(num, denom); }
     static Dec dec(BigDecimal value) { return new Dec(value); }
+    static Chr chr(int codePoint) { return new Chr(codePoint); }
     static Bool bool(boolean value) { return new Bool(value); }
     static Self self() { return Self.INSTANCE; }
     static Add add(SymExpr left, SymExpr right) { return new Add(left, right); }
@@ -72,6 +74,15 @@ public sealed interface SymExpr
      * {@code signum()}.
      */
     record Dec(BigDecimal value) implements SymExpr {}
+
+    /**
+     * Character value leaf — a Unicode code point. A value atom like
+     * {@link Lit}/{@link Dec}; the integer-only discharge engines abstain on
+     * it for now. Char IS discrete (code points are integers), so routing
+     * Char obligations through integer reasoning is legitimate — that's the
+     * narrows slice, not this one.
+     */
+    record Chr(int codePoint) implements SymExpr {}
 
     record Bool(boolean value) implements SymExpr {}
 

@@ -52,7 +52,7 @@ public final class SortChecker {
      * leak into the IR and must validate.
      */
     private static final Set<String> PRIMITIVE_SORT_NAMES = Set.of(
-            "Int", "Bool", "Decimal",
+            "Int", "Bool", "Decimal", "Char",
             "_", "_record", "_tuple");
 
     private SortChecker() {}
@@ -376,6 +376,7 @@ public final class SortChecker {
             }
             case IrExpr.Lit ignored -> {}
             case IrExpr.Dec ignored -> {}
+            case IrExpr.Chr ignored -> {}
             case IrExpr.Bool ignored -> {}
             case IrExpr.Var ignored -> {}
             case IrExpr.SelfRef ignored -> {}
@@ -389,6 +390,7 @@ public final class SortChecker {
         switch (expr) {
             case IrExpr.Lit l -> {}
             case IrExpr.Dec d -> {}
+            case IrExpr.Chr c -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {}
@@ -869,6 +871,10 @@ public final class SortChecker {
             // No decimal kernel reasoning — bare Decimal; matches over it need
             // a default arm, per the rule.
             case IrExpr.Dec d -> IrSort.named("Decimal");
+            // Same stance for Char in the value slice: bare Char (the engines
+            // abstain on Chr for now). Char IS discrete, so singleton/range
+            // reasoning via the integer kernel is the narrows slice's upgrade.
+            case IrExpr.Chr c -> IrSort.named("Char");
             // Arithmetic results: Int op Int is Int; any Decimal operand makes
             // it Decimal (promotion). Comparisons/logical yield Bool. Lets a
             // computed scrutinee like `match n + 1` have a provable domain.

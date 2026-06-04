@@ -176,6 +176,7 @@ public final class IrCompiler {
         switch (expr) {
             case IrExpr.Lit l -> { }
             case IrExpr.Dec d -> { }
+            case IrExpr.Chr c -> { }
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
@@ -259,6 +260,7 @@ public final class IrCompiler {
             // Decimal literals appear in Decimal narrows ([Decimal:@>=1.5]);
             // SortChecker's shape validation governs where they're allowed.
             case IrExpr.Dec d -> SymExpr.dec(d.value());
+            case IrExpr.Chr c -> SymExpr.chr(c.codePoint());
             case IrExpr.Bool b -> SymExpr.bool(b.value());
             case IrExpr.Var v -> SymExpr.var(v.name());
             case IrExpr.SelfRef s -> SymExpr.self();

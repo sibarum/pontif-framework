@@ -27,7 +27,8 @@ public final class Refinements {
 
     private static boolean isConstant(SymExpr expr) {
         return expr instanceof SymExpr.Lit || expr instanceof SymExpr.Frac
-                || expr instanceof SymExpr.Dec || expr instanceof SymExpr.Bool;
+                || expr instanceof SymExpr.Dec || expr instanceof SymExpr.Chr
+                || expr instanceof SymExpr.Bool;
     }
 
     /**

@@ -78,7 +78,31 @@ public final class RefinementRules {
         return null;
     }
 
+    /**
+     * Char counterpart: folds comparisons where BOTH sides are {@link
+     * SymExpr.Chr}, by code point. Strictly Chr-with-Chr — there is no
+     * Char/Int tower, so a Chr never folds against a Lit; mixed comparisons
+     * stay residual (and fail closed downstream) rather than inventing a
+     * conversion.
+     */
+    public static final RewriteRule CMP_CHR_CHR = (expr, simp) -> {
+        if (expr instanceof SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r)
+                && l instanceof SymExpr.Chr lc && r instanceof SymExpr.Chr rc) {
+            int c = Integer.compare(lc.codePoint(), rc.codePoint());
+            boolean truth = switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+            };
+            return Optional.of(SymExpr.bool(truth));
+        }
+        return Optional.empty();
+    };
+
     public static List<RewriteRule> all() {
-        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL, CMP_DEC_NUMERIC);
+        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL, CMP_DEC_NUMERIC, CMP_CHR_CHR);
     }
 }

@@ -19,7 +19,23 @@ public abstract class BinaryOp extends PontifNode {
 
     @Override
     public final Object execute(VirtualFrame frame) {
-        return combine(left.execute(frame), right.execute(frame));
+        Object l = left.execute(frame);
+        Object r = right.execute(frame);
+        // Chars order and compare; they don't compute. Only comparison nodes
+        // opt in — everything else fails closed with a located error instead
+        // of a ClassCastException.
+        if (!acceptsChar() && (l instanceof sibarum.pontif.core.types.CharValue
+                || r instanceof sibarum.pontif.core.types.CharValue)) {
+            throw new RuntimeCheckException(
+                    "Operator applied to a Char operand — chars order and compare; "
+                            + "they don't compute (got " + l + ", " + r + ")", origin());
+        }
+        return combine(l, r);
+    }
+
+    /** Whether this node accepts Char operands (comparison nodes only). */
+    protected boolean acceptsChar() {
+        return false;
     }
 
     @Override
@@ -50,6 +66,7 @@ public abstract class BinaryOp extends PontifNode {
         if (v instanceof Long || v instanceof Integer) return "Int";
         if (v instanceof BigDecimal) return "Decimal";
         if (v instanceof Boolean) return "Bool";
+        if (v instanceof sibarum.pontif.core.types.CharValue) return "Char";
         return v == null ? "null" : v.getClass().getSimpleName();
     }
 }

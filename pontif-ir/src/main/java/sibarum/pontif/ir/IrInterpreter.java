@@ -44,6 +44,7 @@ public final class IrInterpreter {
         return switch (expr) {
             case IrExpr.Lit l -> l.value();
             case IrExpr.Dec d -> d.value();
+            case IrExpr.Chr c -> new sibarum.pontif.core.types.CharValue(c.codePoint());
             case IrExpr.Bool b -> b.value();
             case IrExpr.Var v -> env.lookup(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(
@@ -150,6 +151,13 @@ public final class IrInterpreter {
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
             return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op), op.origin());
         }
+        // Char compares only with Char, by code point. No arithmetic, no
+        // promotion (there is no Char/Int tower) — anything else fails closed
+        // with an origin-carrying error.
+        if (l instanceof sibarum.pontif.core.types.CharValue
+                || r instanceof sibarum.pontif.core.types.CharValue) {
+            return evalCharBinOp(op, l, r);
+        }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
             case MUL -> (Long) l * (Long) r;
@@ -174,6 +182,44 @@ public final class IrInterpreter {
             case APPROX -> java.util.Objects.equals(l, r);
             case AND -> (Boolean) l && (Boolean) r;
             case OR -> (Boolean) l || (Boolean) r;
+        };
+    }
+
+    /**
+     * Char operations: ordering and equality by code point, both operands
+     * Char. Arithmetic and logical ops on chars are errors, as are mixed
+     * Char/non-Char comparisons — fail closed until a conversion pair
+     * (ord/chr) is ruled.
+     */
+    private static Object evalCharBinOp(IrExpr.BinOp op, Object l, Object r) {
+        if (!(l instanceof sibarum.pontif.core.types.CharValue lc)
+                || !(r instanceof sibarum.pontif.core.types.CharValue rc)) {
+            throw new RuntimeCheckException(
+                    "Char compares only with Char — got " + l + " " + opSymbol(op.op())
+                            + " " + r + " (no Char/Int tower; ord/chr conversion is not "
+                            + "yet a ruled operation)", op.origin());
+        }
+        return switch (op.op()) {
+            case LT -> lc.codePoint() < rc.codePoint();
+            case LE -> lc.codePoint() <= rc.codePoint();
+            case GT -> lc.codePoint() > rc.codePoint();
+            case GE -> lc.codePoint() >= rc.codePoint();
+            case EQ -> lc.codePoint() == rc.codePoint();
+            case NE -> lc.codePoint() != rc.codePoint();
+            // Code points are exact values — ~= coincides with == .
+            case APPROX -> lc.codePoint() == rc.codePoint();
+            case ADD, SUB, MUL, DIV, MOD, AND, OR -> throw new RuntimeCheckException(
+                    "Operator '" + opSymbol(op.op()) + "' is not defined for Char — "
+                            + "chars order and compare; they don't compute", op.origin());
+        };
+    }
+
+    private static String opSymbol(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/"; case MOD -> "%";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ -> "=="; case NE -> "!="; case APPROX -> "~=";
+            case AND -> "&"; case OR -> "|";
         };
     }
 
@@ -313,6 +359,9 @@ public final class IrInterpreter {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof BigDecimal d) return SymExpr.dec(d);
+        if (value instanceof sibarum.pontif.core.types.CharValue c) {
+            return SymExpr.chr(c.codePoint());
+        }
         if (value instanceof Boolean b) return SymExpr.bool(b);
         if (value instanceof RecordValue r) {
             LinkedHashMap<String, SymExpr> members = new LinkedHashMap<>();
