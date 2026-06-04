@@ -2,9 +2,10 @@
 Conservation Algebra: deriving the theory from the IR
 ===
 
-Status: DRAFT FOR RED-PEN. Nothing here is implemented; the v1 ledger
-(consult/combine/emit) stays as-is until this derivation is ratified. Every
-state name below is provisional.
+Status: RATIFIED AND IMPLEMENTED (see Consequences). The hypothesized v1
+ledger (consult/combine/emit) is superseded by the derived model below; the
+remaining open rulings are cosmetic (rung display names, the method-note's
+eventual home).
 
 # Method: circular design
 

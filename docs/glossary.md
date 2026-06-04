@@ -75,6 +75,15 @@ positional (`_tuple`) sorts additionally arity-exact. Native `==` follows
 matching ("if it wouldn't match, it's not equal"); user `==` overloads are
 ordinary dispatch the kernel never consults.
 
+**circular design** — The generalization backward design forced on itself
+(`docs/conservation-algebra.md`): for a feature whose artifact transcribes the
+IR, the IR is the theory's *alphabet* — classifications are DERIVED per sealed
+form, never hypothesized over it. The tell of a hypothesized taxonomy is a
+`default ->` case; a derived one has none, and the sealed-switch exhaustiveness
+check is the theory's standing completeness proof: any future IR variant must
+declare what it conserves before the ledger compiles. The theory audits the
+language; the language type-checks the theory.
+
 **coherence rule (orphan rule)** — A trait impl `impl Trait for Type` may be
 declared only in the module owning `Trait` or `Type`, never a third module
 owning neither. Borrowed from Rust; closes the type-piracy hole Pontif's global
@@ -86,6 +95,30 @@ nothing: `[Point(a, _)]`, `[(a, _, c)]`. It is what keeps a positional pattern
 *arity-total* (see **positional totality**) while honestly declining a
 component — more honest than naming an unused binder. Generalizes the `[_]`
 default-arm marker from the whole value to one slot.
+
+**conservation receipts** — The second ledger (`pontif-conservation`,
+`docs/conservation-receipts.md`): the receipt graph proves what values *are*;
+this proves where they *went*. Per function, a dataflow graph of exactly three
+node kinds — **Computation** (operations + resolved calls, op-classed with
+recoverability verdicts), **Branch** (matchers + dispatches — discrimination),
+**Construction** (constructors + function returns) — with metadata (constants,
+naming, binding, projection) on flow edges. Per-branch-path *role multisets*
+per input atom; residual flow (lambdas, applications, unresolved/recursive
+calls) is the located ignorance every query fails closed on. Properties attach
+via the same `proof f = …` statement as algebraic proofs (`std.conservation`);
+callee summaries compose over the call DAG. Not a sort, never narrows, nothing
+in the runtime: receipts are for auditors, sorts are for callers.
+
+**Data-Conservative** — The headline conservation property, sort-aware under
+the **capacity law**: *measurement counts as conservation exactly when it
+exhausts the measured content.* Every `Int`/`Decimal` input atom's content
+must reach the return (verbatim or derived — a chain through a comparison
+carries one bit, not content); every `Bool` atom must reach the return **or**
+be spent in branching (its whole content is one bit). Claims consumption, not
+recoverability — `Lossless` is reserved for the future cross-ledger property
+(algebraic + conservation combined: the output *determines* the input).
+`DataConservativeExcept(s.email)` declares an intentional drop and goes stale
+(compile error) the moment the drop disappears.
 
 **decomposition (`.{}`)** — Pontif's one named-decomposition operation: "from
 X, take {these}." Three consumers, one payload: `requires math.{min, max}`,

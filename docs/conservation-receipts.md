@@ -62,6 +62,11 @@ with an optional filter expression.
 
 # Status
 
+*(The Slice 1/2 notes below are historical — the event taxonomy and sample
+rendering they describe are the superseded v1; the current model is
+`conservation-algebra.md`'s, per the "Re-cut + composition landed" entry at
+the end of this section.)*
+
 **Slice 1 landed: the ledger and its first reading** (`pontif-conservation`). The
 drafter transcribes per-function dataflow events — in the converged taxonomy,
 reads have kinds: *consult* (read to determine branching), *combine* (read to
