@@ -189,6 +189,14 @@ public final class App {
         }
     }
 
+    /** Recompute and publish both style axes for the editor: token colors
+     *  (foreground) and bracket-block tints (background, outermost-first). */
+    private static void applyHighlight(String content) {
+        AltHighlighter.Styles styles = AltHighlighter.highlight(content);
+        TextStyleStates.setForeground(codeText, styles.foreground());
+        TextStyleStates.setBackground(codeText, styles.background());
+    }
+
     /** Tweak palettes for variants used by this app. Process-global; runs once at startup. */
     private static void applyTheme() {
         // DEFAULT is the secondary-button look (Open / Save / Save As). The framework
@@ -226,13 +234,12 @@ public final class App {
             null, false,
             true, true, true, true, 1).withLineNumbers(true);
 
-        // Live syntax highlighting: recompute foreground spans from scratch
-        // on every content change (keystroke, file open), plus one initial
+        // Live syntax highlighting: recompute all spans from scratch on
+        // every content change (keystroke, file open), plus one initial
         // publish so the default content is colored before the first edit.
         // Registered against codeText's final identity (after withLineNumbers).
-        TextStates.onContentChange(codeText, content ->
-            TextStyleStates.setForeground(codeText, AltHighlighter.highlight(content)));
-        TextStyleStates.setForeground(codeText, AltHighlighter.highlight(DEFAULT_CODE));
+        TextStates.onContentChange(codeText, App::applyHighlight);
+        applyHighlight(DEFAULT_CODE);
 
         Component codePane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
 

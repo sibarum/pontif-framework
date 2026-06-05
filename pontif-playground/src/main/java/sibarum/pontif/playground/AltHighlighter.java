@@ -2,38 +2,87 @@ package sibarum.pontif.playground;
 
 import sibarum.dasum.gui.core.input.TextStyle;
 import sibarum.dasum.gui.core.render.Color;
+import sibarum.pontif.core.Origin;
+import sibarum.pontif.ir.IrModule;
+import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Single-pass, error-tolerant colorizer for Pontif alt syntax — comments,
- * keywords, literals (numbers and chars), and the {@code @} principal
- * subject. Everything else keeps the editor's default color.
+ * Editor colorizer for Pontif alt syntax. Two independent passes:
  *
- * <p>Deliberately NOT built on {@link sibarum.pontif.parser.AltLexer}: the
- * real lexer throws on invalid input (mid-edit source usually is invalid),
- * skips comments entirely, and reports line/column rather than the flat
- * char offsets {@link TextStyle} wants. The scanning here mirrors the
- * lexer's token shapes tolerantly — anything that doesn't scan just stays
- * uncolored. The keyword vocabulary is NOT mirrored: it is read from
- * {@link AltParser#KEYWORDS}, so a keyword added to the parser highlights
- * here with no second list to update.
+ * <p><b>Foreground</b> — a single-pass, error-tolerant token scanner:
+ * comments, keywords, literals (numbers and chars), and the {@code @}
+ * principal subject. Deliberately NOT built on
+ * {@link sibarum.pontif.parser.AltLexer}: the real lexer throws on invalid
+ * input (mid-edit source usually is invalid), skips comments entirely, and
+ * reports line/column rather than the flat char offsets {@link TextStyle}
+ * wants. The scanning mirrors the lexer's token shapes tolerantly —
+ * anything that doesn't scan just stays uncolored. The keyword vocabulary
+ * is NOT mirrored: it is read from {@link AltParser#KEYWORDS}, so a keyword
+ * added to the parser highlights here with no second list to update.
+ *
+ * <p><b>Background</b> — function-body tints, parser-backed: where a body
+ * starts and ends (the lets through the final expression) is not decidable
+ * by a flat scanner — a top-level {@code let} is textually identical to a
+ * body {@code let} — so this pass runs the real {@link AltParser} and uses
+ * the statement origins as boundaries. When the source doesn't parse
+ * (mid-edit), body spans are CLEARED rather than left stale: no claim
+ * beats a wrong claim. They reappear on the next parseable keystroke.
  */
 final class AltHighlighter {
 
-    // --- Palette (dark-theme; editor default CODE_FG stays the base) ---
+    // --- Foreground palette (dark-theme; editor default CODE_FG stays the base) ---
     private static final Color COMMENT = new Color(0.45f, 0.60f, 0.45f, 1f);
     private static final Color KEYWORD = new Color(0.55f, 0.65f, 0.95f, 1f);
     private static final Color LITERAL = new Color(0.95f, 0.75f, 0.45f, 1f);
     private static final Color SUBJECT = new Color(0.40f, 0.85f, 0.90f, 1f);
 
+    // The three background tints mix where they overlap, drawing the shape
+    // of a declaration: green signature meets blue body at the ->, with red
+    // paren blocks layering over both.
+    /** Signature tint — declaration start up to (not including) the {@code ->}. */
+    private static final Color SIG_BG = new Color(0.90f, 0.30f, 0.30f, 0.10f);
+    /** Body tint — the {@code ->} through the final expression. */
+    private static final Color BODY_BG = new Color(0.30f, 0.50f, 0.95f, 0.10f);
+    /** Paren-block tint, both brackets included; everywhere parens balance. */
+    private static final Color PAREN_BG = new Color(0.30f, 0.85f, 0.40f, 0.20f);
+
+    // Identifier rainbow: every non-keyword identifier is tinted by a hue
+    // hashed from its name — same name, same color, everywhere. Saturation
+    // and value are fixed (readable on the dark theme); only hue varies.
+    // Builtin sort names (Int, Bool, ...) hash like everything else — no
+    // exclusion list to go stale; they simply have stable colors too.
+    private static final float IDENT_SATURATION = 0.55f;
+    private static final float IDENT_VALUE = 0.95f;
+
+    /** Foreground token spans + background block spans for one pass. */
+    record Styles(List<TextStyle> foreground, List<TextStyle> background) {}
+
     private AltHighlighter() {}
 
-    /** Foreground style ranges for {@code content}. Never throws. */
-    static List<TextStyle> highlight(String content) {
-        List<TextStyle> out = new ArrayList<>();
+    /** Style ranges for {@code content}. Never throws. */
+    static Styles highlight(String content) {
+        List<TextStyle> fg = new ArrayList<>();
+        List<TextStyle> bg = new ArrayList<>();
+        scanTokens(content, fg, bg);
+        bg.addAll(bodySpans(content));
+        // Backgrounds render in list order, each over the previous, so sort
+        // outermost-first. Spans only nest or stay disjoint (paren blocks
+        // balance within a body or a signature; body spans come from the
+        // parser), so (start asc, end desc) is exactly that order.
+        bg.sort(java.util.Comparator
+                .comparingInt(TextStyle::start)
+                .thenComparing(java.util.Comparator.comparingInt(TextStyle::end).reversed()));
+        return new Styles(fg, bg);
+    }
+
+    // --- Tolerant token scan: foreground colors + paren-block tints ---
+
+    private static void scanTokens(String content, List<TextStyle> fg, List<TextStyle> bg) {
+        List<Integer> openParens = new ArrayList<>();
         int n = content.length();
         int i = 0;
         while (i < n) {
@@ -42,14 +91,29 @@ final class AltHighlighter {
                 // Comment — to end of line, same as AltLexer's skip rule.
                 int start = i;
                 while (i < n && content.charAt(i) != '\n') i++;
-                out.add(new TextStyle(start, i, COMMENT));
+                fg.add(new TextStyle(start, i, COMMENT));
             } else if (c == '@') {
-                out.add(new TextStyle(i, i + 1, SUBJECT));
+                fg.add(new TextStyle(i, i + 1, SUBJECT));
+                i++;
+            } else if (c == '(') {
+                openParens.add(i);
+                i++;
+            } else if (c == ')') {
+                // Matched pairs only; a stray close is ignored and an
+                // unclosed open at EOF gets no span (tolerant mid-edit).
+                // The span reaches back over the call target in front of
+                // the open paren — "target(...)" tints as one block.
+                // EXPERIMENT (2026-06-05): paren tints OFF while trying the
+                // identifier rainbow — re-enable by restoring the add.
+                if (!openParens.isEmpty()) {
+                    int open = openParens.remove(openParens.size() - 1);
+                    // bg.add(new TextStyle(targetStart(content, open), i + 1, PAREN_BG));
+                }
                 i++;
             } else if (c == '\'') {
                 int end = charLiteralEnd(content, i);
                 if (end > 0) {
-                    out.add(new TextStyle(i, end, LITERAL));
+                    fg.add(new TextStyle(i, end, LITERAL));
                     i = end;
                 } else {
                     i++;    // doesn't scan as a char literal — leave uncolored
@@ -66,18 +130,262 @@ final class AltHighlighter {
                     i++;
                     while (i < n && isDigit(content.charAt(i))) i++;
                 }
-                out.add(new TextStyle(start, i, LITERAL));
+                fg.add(new TextStyle(start, i, LITERAL));
             } else if (isIdentStart(c)) {
                 int start = i;
                 while (i < n && isIdentPart(content.charAt(i))) i++;
-                if (AltParser.KEYWORDS.contains(content.substring(start, i))) {
-                    out.add(new TextStyle(start, i, KEYWORD));
+                // Keywords keep the editor's default color — structure words
+                // stay quiet; only user-defined names get the hue rainbow.
+                String word = content.substring(start, i);
+                if (!AltParser.KEYWORDS.contains(word)) {
+                    fg.add(new TextStyle(start, i, identColor(word)));
                 }
             } else {
                 i++;
             }
         }
+    }
+
+    // --- Background: parser-backed function-body spans ---
+
+    // Last successfully parsed editor content and the declaration spans it
+    // produced. When a keystroke breaks the parse, the cached spans are
+    // carried forward shifted by the edit delta (see shiftSpans) instead of
+    // vanishing — deliberately erring toward spanning too far over showing
+    // nothing. Single-editor assumption; only touched from the GLFW thread
+    // (content-change listener + initial publish).
+    private static String lastParsedContent = null;
+    private static List<TextStyle> lastDeclSpans = List.of();
+
+    private static List<TextStyle> bodySpans(String content) {
+        IrModule module;
+        try {
+            module = AltParser.parseModule(content, "<editor>");
+        } catch (Exception e) {
+            if (lastParsedContent == null) {
+                return List.of();   // never had a good parse — nothing to carry
+            }
+            List<TextStyle> shifted = shiftSpans(lastDeclSpans, lastParsedContent, content);
+            // Re-anchor so consecutive broken keystrokes shift incrementally
+            // from each other, not from an ever-staler snapshot.
+            lastParsedContent = content;
+            lastDeclSpans = shifted;
+            return shifted;
+        }
+
+        int[] lineStarts = lineIndex(content);
+        // Every top-level statement start is a boundary that caps the body
+        // extent of the declaration before it. Statement origins are points
+        // at the declaring keyword; synthetic decls (e.g. destructuring
+        // lets) share their source statement's origin — duplicates are
+        // harmless in a boundary list.
+        List<Integer> declStarts = new ArrayList<>();
+        List<Integer> boundaries = new ArrayList<>();
+        for (IrStmt s : module.statements()) {
+            Origin o = s.origin();
+            if (o == null || !o.isPresent()) continue;
+            int off = offsetOf(o.span().start(), lineStarts, content.length());
+            boundaries.add(off);
+            declStarts.add(off);
+        }
+        // A trailing main expression caps the last declaration's body too.
+        if (module.main() != null && module.main().origin() != null
+                && module.main().origin().isPresent()) {
+            boundaries.add(offsetOf(module.main().origin().span().start(),
+                    lineStarts, content.length()));
+        }
+        boundaries.sort(Integer::compare);
+
+        List<TextStyle> bg = new ArrayList<>();
+        for (int declOff : declStarts) {
+            // Only true function/method declarations get a body tint. The
+            // textual check filters out top-level lets, which also lower to
+            // FunctionDecl but whose match-arm arrows would fool the
+            // body-intro search below.
+            if (!wordAt(content, declOff, "function") && !wordAt(content, declOff, "method")) {
+                continue;
+            }
+            int bound = content.length();
+            for (int b : boundaries) {
+                if (b > declOff) { bound = b; break; }
+            }
+            int arrowEnd = bodyIntroArrowEnd(content, declOff, bound);
+            if (arrowEnd < 0) {
+                // Body-less decl (synthesized return) — it is all signature,
+                // and signature tints are currently off (see below).
+                continue;
+            }
+
+            // Green signature up to the arrow; blue from the arrow through
+            // the end of the last non-comment token before the next
+            // declaration — the doc block introducing the NEXT function
+            // stays untinted. The two spans meet seamlessly at the ->.
+            int arrowStart = arrowEnd - 2;
+            int end = lastTokenEnd(content, arrowEnd, bound);
+            // EXPERIMENT (2026-06-05): signature (left-of-arrow) tint OFF
+            // while trying the identifier rainbow — re-enable by restoring:
+            bg.add(new TextStyle(declOff, arrowStart, SIG_BG));
+            if (end > arrowStart) {
+                // Div-style body: wrapLineEndings extends each line's fill
+                // to the right edge, but only lines whose hard '\n' is
+                // inside the range — so swallow the final line's newline
+                // (and any trailing same-line comment, which sits on the
+                // extended fill either way) to include the last line too.
+                while (end < bound && content.charAt(end) != '\n') end++;
+                if (end < bound) end++;
+                bg.add(new TextStyle(arrowStart, end, BODY_BG, true));
+            }
+        }
+        lastParsedContent = content;
+        lastDeclSpans = bg;
+        return bg;
+    }
+
+    /**
+     * Carry spans across one edit that broke the parse: positions are
+     * remapped through a common-prefix/common-suffix diff of the two
+     * texts. Spans before the edit stay put, spans after shift by the
+     * length delta, and a span touching the edited region stretches to
+     * cover all of it — over-spanning beats vanishing while the user is
+     * mid-keystroke. Fresh truth replaces all of this on the next
+     * successful parse.
+     */
+    private static List<TextStyle> shiftSpans(List<TextStyle> spans, String oldC, String newC) {
+        int oldLen = oldC.length();
+        int newLen = newC.length();
+        int max = Math.min(oldLen, newLen);
+        int p = 0;
+        while (p < max && oldC.charAt(p) == newC.charAt(p)) p++;
+        int s = 0;
+        while (s < max - p && oldC.charAt(oldLen - 1 - s) == newC.charAt(newLen - 1 - s)) s++;
+        int delta = newLen - oldLen;
+        int oldEditEnd = oldLen - s;    // edit region: old [p, oldEditEnd) → new [p, newLen - s)
+
+        List<TextStyle> out = new ArrayList<>(spans.size());
+        for (TextStyle t : spans) {
+            int start = t.start() <= p ? t.start()
+                    : t.start() >= oldEditEnd ? t.start() + delta
+                    : p;                          // started inside the edit — snap to its left edge
+            int end = t.end() <= p ? t.end()
+                    : t.end() >= oldEditEnd ? t.end() + delta
+                    : newLen - s;                 // ended inside the edit — swallow the whole region
+            if (end > start) out.add(new TextStyle(start, end, t.color(), t.wrapLineEndings()));
+        }
         return out;
+    }
+
+    /**
+     * End offset (exclusive) of the body-intro {@code ->} between
+     * {@code from} and {@code bound}, or -1 if there is none. Comments and
+     * char literals are skipped, so a {@code ->} in a doc line can't fake a
+     * body. The first live arrow after a function/method head IS the body
+     * intro — params and return sorts contain no arrows.
+     */
+    private static int bodyIntroArrowEnd(String content, int from, int bound) {
+        int i = from;
+        while (i < bound - 1) {
+            char c = content.charAt(i);
+            if (c == '#') {
+                while (i < bound && content.charAt(i) != '\n') i++;
+            } else if (c == '\'') {
+                int end = charLiteralEnd(content, i);
+                i = end > 0 ? end : i + 1;
+            } else if (c == '-' && content.charAt(i + 1) == '>') {
+                return i + 2;
+            } else {
+                i++;
+            }
+        }
+        return -1;
+    }
+
+    /** End offset of the last non-comment token in {@code [from, bound)}. */
+    private static int lastTokenEnd(String content, int from, int bound) {
+        int i = from;
+        int lastEnd = from;
+        while (i < bound) {
+            char c = content.charAt(i);
+            if (c == '#') {
+                while (i < bound && content.charAt(i) != '\n') i++;
+            } else if (Character.isWhitespace(c)) {
+                i++;
+            } else if (c == '\'') {
+                int end = charLiteralEnd(content, i);
+                i = end > 0 ? end : i + 1;
+                lastEnd = i;
+            } else {
+                i++;
+                lastEnd = i;
+            }
+        }
+        return lastEnd;
+    }
+
+    /**
+     * Stable per-name color: the hue is hashed from the identifier text
+     * (Fibonacci-scrambled — String.hashCode alone clusters short names),
+     * saturation and value fixed. Same name → same color, every occurrence,
+     * every session.
+     */
+    private static Color identColor(String name) {
+        int h = name.hashCode() * 0x9E3779B9;
+        float hue = ((h >>> 8) & 0xFFFFFF) / (float) 0x1000000 * 360f;
+        return hsv(hue, IDENT_SATURATION, IDENT_VALUE);
+    }
+
+    /** HSV → RGB at alpha 1. Hue in degrees [0, 360). */
+    private static Color hsv(float hue, float s, float v) {
+        float c = v * s;
+        float x = c * (1f - Math.abs((hue / 60f) % 2f - 1f));
+        float m = v - c;
+        float r, g, b;
+        if      (hue <  60f) { r = c; g = x; b = 0; }
+        else if (hue < 120f) { r = x; g = c; b = 0; }
+        else if (hue < 180f) { r = 0; g = c; b = x; }
+        else if (hue < 240f) { r = 0; g = x; b = c; }
+        else if (hue < 300f) { r = x; g = 0; b = c; }
+        else                 { r = c; g = 0; b = x; }
+        return new Color(r + m, g + m, b + m, 1f);
+    }
+
+    /**
+     * Start of the call target immediately in front of an open paren —
+     * the identifier chain ({@code foo}, {@code Type.method}) ending at
+     * {@code openParen} with no gap. Grouping parens with no target
+     * ({@code x * (x - 1)}) get back {@code openParen} unchanged; a
+     * chained call ({@code f(x).g(y)}) reaches back only to {@code g}.
+     */
+    private static int targetStart(String content, int openParen) {
+        int i = openParen;
+        while (i > 0 && (isIdentPart(content.charAt(i - 1)) || content.charAt(i - 1) == '.')) {
+            i--;
+        }
+        while (i < openParen && content.charAt(i) == '.') i++;   // ".g(" → "g("
+        return i;
+    }
+
+    /** Start offsets of each line, for 1-indexed (line, column) → flat offset. */
+    private static int[] lineIndex(String content) {
+        List<Integer> starts = new ArrayList<>();
+        starts.add(0);
+        for (int i = 0; i < content.length(); i++) {
+            if (content.charAt(i) == '\n') starts.add(i + 1);
+        }
+        int[] out = new int[starts.size()];
+        for (int i = 0; i < out.length; i++) out[i] = starts.get(i);
+        return out;
+    }
+
+    private static int offsetOf(Origin.Position p, int[] lineStarts, int length) {
+        if (p.line() - 1 >= lineStarts.length) return length;
+        return Math.min(length, lineStarts[p.line() - 1] + p.column() - 1);
+    }
+
+    /** True when {@code word} sits at {@code off} with an identifier boundary after it. */
+    private static boolean wordAt(String content, int off, String word) {
+        if (!content.startsWith(word, off)) return false;
+        int after = off + word.length();
+        return after >= content.length() || !isIdentPart(content.charAt(after));
     }
 
     /**
