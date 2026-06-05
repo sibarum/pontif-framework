@@ -33,8 +33,8 @@ class TraitIrTest {
 
     /** Trait: Duck { quack():Int } — using Int as the return for simple verification. */
     private static IrSort.Trait duckTrait() {
-        Map<String, IrSort.Function> methods = new LinkedHashMap<>();
-        methods.put("quack", new IrSort.Function(List.of(), IrSort.named("Int"), Origin.NONE));
+        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        methods.put("quack", new IrSort.Method(List.of(), IrSort.named("Int"), Origin.NONE));
         return new IrSort.Trait("Duck", methods, Origin.NONE);
     }
 

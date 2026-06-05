@@ -64,6 +64,7 @@ public final class Simplifier {
             case SymExpr.Frac f -> f;
             case SymExpr.Dec d -> d;
             case SymExpr.Chr c -> c;
+            case SymExpr.DispatchRef d -> d;
             case SymExpr.Bool b -> b;
             case SymExpr.Self s -> s;
             case SymExpr.Add(SymExpr l, SymExpr r) -> new SymExpr.Add(simplify(l), simplify(r));

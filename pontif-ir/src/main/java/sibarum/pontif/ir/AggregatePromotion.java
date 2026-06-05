@@ -97,6 +97,7 @@ final class AggregatePromotion {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
+            case IrExpr.DispatchRef d -> d;
             // Operands of any BinOp (including ==) carry no assertion.
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(),

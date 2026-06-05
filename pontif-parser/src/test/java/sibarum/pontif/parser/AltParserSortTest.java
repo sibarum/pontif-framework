@@ -211,8 +211,8 @@ class AltParserSortTest {
 
     @Test
     void functionSort_anonymousParams() throws Exception {
-        // [Function(Int):Int] — single anonymous param returning Int.
-        IrSort.Function f = (IrSort.Function) sort("[Function(Int):Int]");
+        // [Method(Int):Int] — single anonymous param returning Int.
+        IrSort.Method f = (IrSort.Method) sort("[Method(Int):Int]");
         assertEquals(1, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Int", ((IrSort.Named) f.returnSort()).name());
@@ -220,8 +220,8 @@ class AltParserSortTest {
 
     @Test
     void functionSort_multipleAnonymousParams() throws Exception {
-        // [Function(Int, Bool):Int]
-        IrSort.Function f = (IrSort.Function) sort("[Function(Int, Bool):Int]");
+        // [Method(Int, Bool):Int]
+        IrSort.Method f = (IrSort.Method) sort("[Method(Int, Bool):Int]");
         assertEquals(2, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Bool", ((IrSort.Named) f.paramSorts().get(1)).name());
@@ -229,19 +229,19 @@ class AltParserSortTest {
 
     @Test
     void functionSort_nestedFunctionReturn() throws Exception {
-        // [Function(Int):[Function(Int):Int]] — curried-style sort.
-        IrSort.Function f = (IrSort.Function) sort("[Function(Int):[Function(Int):Int]]");
-        IrSort.Function inner = (IrSort.Function) f.returnSort();
+        // [Method(Int):[Method(Int):Int]] — curried-style sort.
+        IrSort.Method f = (IrSort.Method) sort("[Method(Int):[Method(Int):Int]]");
+        IrSort.Method inner = (IrSort.Method) f.returnSort();
         assertEquals(1, inner.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) inner.returnSort()).name());
     }
 
     @Test
     void functionSort_namedParams_notYetSupported() {
-        // [Function(x:Int):Ret] — named params would let return refinements
-        // reference the param, but IrSort.Function doesn't carry names yet.
+        // [Method(x:Int):Ret] — named params would let return refinements
+        // reference the param, but IrSort.Method doesn't carry names yet.
         ParseException ex = assertThrows(ParseException.class,
-                () -> sort("[Function(x:Int):Int]"));
+                () -> sort("[Method(x:Int):Int]"));
         assertTrue(ex.getMessage().contains("Named-parameter"),
                 "expected error about named-parameter; got: " + ex.getMessage());
     }

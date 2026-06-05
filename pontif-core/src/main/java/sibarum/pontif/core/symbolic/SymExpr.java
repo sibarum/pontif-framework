@@ -8,7 +8,7 @@ import java.util.Map;
 
 public sealed interface SymExpr
         permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Chr,
-                SymExpr.Bool, SymExpr.Self,
+                SymExpr.Bool, SymExpr.Self, SymExpr.DispatchRef,
                 SymExpr.Add, SymExpr.Mul, SymExpr.Pow,
                 SymExpr.Cmp, SymExpr.And, SymExpr.Or,
                 SymExpr.Lam, SymExpr.App, SymExpr.Case,
@@ -85,6 +85,17 @@ public sealed interface SymExpr
     record Chr(int codePoint) implements SymExpr {}
 
     record Bool(boolean value) implements SymExpr {}
+
+    /**
+     * Dispatch-reference value leaf — a metareference ({@code inc[Int]})
+     * lifted to the symbolic layer. A value atom built from statics only
+     * (name + key sorts, no data content); the discharge engines abstain.
+     */
+    record DispatchRef(String functionName, List<Sort> keySorts) implements SymExpr {
+        public DispatchRef {
+            keySorts = List.copyOf(keySorts);
+        }
+    }
 
     record Self() implements SymExpr {
         public static final Self INSTANCE = new Self();

@@ -11,10 +11,12 @@ public record Sort(
         String name,
         SymExpr predicate,
         Map<String, Sort> members,
-        List<Sort> functionParams,
-        Sort functionReturnSort,
+        List<Sort> methodParams,
+        Sort methodReturnSort,
         List<Sort> unionBranches,
-        List<Sort> intersectionBranches) {
+        List<Sort> intersectionBranches,
+        List<Sort> dispatchKeySorts,
+        Sort dispatchReturnSort) {
 
     public Sort {
         if (members != null) {
@@ -23,8 +25,8 @@ public record Sort(
             // silently strip it.
             members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
         }
-        if (functionParams != null) {
-            functionParams = List.copyOf(functionParams);
+        if (methodParams != null) {
+            methodParams = List.copyOf(methodParams);
         }
         if (unionBranches != null) {
             unionBranches = List.copyOf(unionBranches);
@@ -32,28 +34,46 @@ public record Sort(
         if (intersectionBranches != null) {
             intersectionBranches = List.copyOf(intersectionBranches);
         }
+        if (dispatchKeySorts != null) {
+            dispatchKeySorts = List.copyOf(dispatchKeySorts);
+        }
     }
 
     public static Sort of(String name) {
-        return new Sort(name, null, null, null, null, null, null);
+        return new Sort(name, null, null, null, null, null, null, null, null);
     }
 
     public static Sort refined(String name, SymExpr predicate) {
-        return new Sort(name, predicate, null, null, null, null, null);
+        return new Sort(name, predicate, null, null, null, null, null, null, null);
     }
 
     public static Sort structural(String name, Map<String, Sort> members) {
-        return new Sort(name, null, members, null, null, null, null);
+        return new Sort(name, null, members, null, null, null, null, null, null);
     }
 
-    public static Sort function(List<Sort> params, Sort returnSort) {
+    public static Sort method(List<Sort> params, Sort returnSort) {
         StringBuilder n = new StringBuilder("(");
         for (int i = 0; i < params.size(); i++) {
             if (i > 0) n.append(", ");
             n.append(params.get(i));
         }
         n.append(") -> ").append(returnSort);
-        return new Sort(n.toString(), null, null, params, returnSort, null, null);
+        return new Sort(n.toString(), null, null, params, returnSort, null, null, null, null);
+    }
+
+    /**
+     * Dispatch sort — the metareference contract ({@code [Dispatch(Int):Int]}).
+     * Distinct from {@link #method}: a dispatch is a name-keyed candidate set,
+     * not a single body; the two never cross-assign.
+     */
+    public static Sort dispatch(List<Sort> keySorts, Sort returnSort) {
+        StringBuilder n = new StringBuilder("Dispatch(");
+        for (int i = 0; i < keySorts.size(); i++) {
+            if (i > 0) n.append(", ");
+            n.append(keySorts.get(i));
+        }
+        n.append("):").append(returnSort);
+        return new Sort(n.toString(), null, null, null, null, null, null, keySorts, returnSort);
     }
 
     /**
@@ -72,7 +92,7 @@ public record Sort(
             if (i > 0) n.append(" | ");
             n.append(branches.get(i));
         }
-        return new Sort(n.toString(), null, null, null, null, branches, null);
+        return new Sort(n.toString(), null, null, null, null, branches, null, null, null);
     }
 
     /**
@@ -89,7 +109,7 @@ public record Sort(
             if (i > 0) n.append(" & ");
             n.append(branches.get(i));
         }
-        return new Sort(n.toString(), null, null, null, null, null, branches);
+        return new Sort(n.toString(), null, null, null, null, null, branches, null, null);
     }
 
     public boolean isRefined() {
@@ -100,12 +120,16 @@ public record Sort(
         return members != null;
     }
 
-    public boolean isFunction() {
-        return functionReturnSort != null;
+    public boolean isMethod() {
+        return methodReturnSort != null;
     }
 
     public boolean isUnion() {
         return unionBranches != null;
+    }
+
+    public boolean isDispatch() {
+        return dispatchReturnSort != null;
     }
 
     public boolean isIntersection() {
@@ -114,7 +138,7 @@ public record Sort(
 
     @Override
     public String toString() {
-        if (functionReturnSort != null) {
+        if (methodReturnSort != null) {
             return name;
         }
         if (members != null) {

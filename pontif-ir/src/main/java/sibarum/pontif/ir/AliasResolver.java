@@ -159,21 +159,28 @@ public final class AliasResolver {
                 }
                 yield new IrSort.Structural(s.name(), resolvedMembers, s.origin());
             }
-            case IrSort.Function f -> {
+            case IrSort.Method f -> {
                 List<IrSort> resolvedParams = new ArrayList<>(f.paramSorts().size());
                 for (IrSort p : f.paramSorts()) {
                     resolvedParams.add(resolveSort(p, aliases, path));
                 }
-                yield new IrSort.Function(resolvedParams, resolveSort(f.returnSort(), aliases, path), f.origin());
+                yield new IrSort.Method(resolvedParams, resolveSort(f.returnSort(), aliases, path), f.origin());
+            }
+            case IrSort.Dispatch d -> {
+                List<IrSort> resolvedKeys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) {
+                    resolvedKeys.add(resolveSort(k, aliases, path));
+                }
+                yield new IrSort.Dispatch(resolvedKeys, resolveSort(d.returnSort(), aliases, path), d.origin());
             }
             case IrSort.Trait t -> {
                 // Trait sort's method signatures are Function sorts; recurse
                 // into each to substitute any aliased param/return types.
-                Map<String, IrSort.Function> resolvedMethods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                Map<String, IrSort.Method> resolvedMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
                     resolvedMethods.put(
                             e.getKey(),
-                            (IrSort.Function) resolveSort(e.getValue(), aliases, path));
+                            (IrSort.Method) resolveSort(e.getValue(), aliases, path));
                 }
                 yield new IrSort.Trait(t.name(), resolvedMethods, t.origin());
             }
@@ -214,6 +221,11 @@ public final class AliasResolver {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
+            case IrExpr.DispatchRef d -> {
+                List<IrSort> newKeys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) newKeys.add(substituteResolved(k, resolved));
+                yield new IrExpr.DispatchRef(d.functionName(), newKeys, d.origin());
+            }
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(),
                     rewriteExpr(op.left(), resolved),
@@ -283,17 +295,22 @@ public final class AliasResolver {
                 }
                 yield new IrSort.Structural(s.name(), newMembers, s.origin());
             }
-            case IrSort.Function f -> {
+            case IrSort.Dispatch d -> {
+                List<IrSort> newKeys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) newKeys.add(substituteResolved(k, resolved));
+                yield new IrSort.Dispatch(newKeys, substituteResolved(d.returnSort(), resolved), d.origin());
+            }
+            case IrSort.Method f -> {
                 List<IrSort> newParams = new ArrayList<>(f.paramSorts().size());
                 for (IrSort p : f.paramSorts()) newParams.add(substituteResolved(p, resolved));
-                yield new IrSort.Function(newParams, substituteResolved(f.returnSort(), resolved), f.origin());
+                yield new IrSort.Method(newParams, substituteResolved(f.returnSort(), resolved), f.origin());
             }
             case IrSort.Trait t -> {
-                Map<String, IrSort.Function> newMethods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                Map<String, IrSort.Method> newMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
                     newMethods.put(
                             e.getKey(),
-                            (IrSort.Function) substituteResolved(e.getValue(), resolved));
+                            (IrSort.Method) substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, t.origin());
             }

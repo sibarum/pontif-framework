@@ -45,6 +45,19 @@ public final class IrInterpreter {
             case IrExpr.Lit l -> l.value();
             case IrExpr.Dec d -> d.value();
             case IrExpr.Chr c -> new sibarum.pontif.core.types.CharValue(c.codePoint());
+            // A metareference evaluates to a first-class dispatch — built
+            // from statics only; invocation reruns registry dispatch.
+            case IrExpr.DispatchRef d -> {
+                List<sibarum.pontif.core.types.Sort> keys = new ArrayList<>(d.keySorts().size());
+                try {
+                    for (IrSort k : d.keySorts()) keys.add(IrCompiler.compileSort(k));
+                } catch (CompileException ce) {
+                    throw new RuntimeCheckException(
+                            "Metareference key sort failed to compile: " + ce.getMessage(),
+                            d.origin());
+                }
+                yield new sibarum.pontif.core.types.DispatchValue(d.functionName(), keys);
+            }
             case IrExpr.Bool b -> b.value();
             case IrExpr.Var v -> env.lookup(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(
@@ -293,6 +306,18 @@ public final class IrInterpreter {
         // the bound value as a closure rather than dispatching by name.
         if (env.contains(call.functionName())) {
             Object fnValue = env.lookup(call.functionName());
+            // A bound metareference: application reruns registry dispatch
+            // under the REFERENCED name — `ref(2)` does what `inc(2)` does,
+            // candidates and narrowings intact.
+            if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
+                if (call.args().size() != dv.keySorts().size()) {
+                    throw new RuntimeCheckException(
+                            "Metareference " + dv + " takes " + dv.keySorts().size()
+                                    + " argument(s); got " + call.args().size(),
+                            call.origin());
+                }
+                return dispatchByName(dv.functionName(), call, env, module);
+            }
             if (!(fnValue instanceof Closure closure)) {
                 throw new RuntimeCheckException(
                         "'" + call.functionName() + "' is bound locally but is not a closure; got "
@@ -314,6 +339,16 @@ public final class IrInterpreter {
             }
         }
 
+        return dispatchByName(call.functionName(), call, env, module);
+    }
+
+    /**
+     * Registry dispatch under {@code name} — the shared tail for direct
+     * calls and metareference application (where {@code name} is the
+     * referenced function, not the bound variable).
+     */
+    private Object dispatchByName(
+            String name, IrExpr.Call call, Environment env, CompiledModule module) {
         List<Object> argValues = new ArrayList<>();
         List<SymExpr> argSymbolics = new ArrayList<>();
         for (IrExpr argExpr : call.args()) {
@@ -322,13 +357,31 @@ public final class IrInterpreter {
             argSymbolics.add(toSymExpr(argValue));
         }
 
-        DispatchResult dr = module.dispatch().resolve(call.functionName(), argSymbolics, checker(module));
+        DispatchResult dr = module.dispatch().resolve(name, argSymbolics, checker(module));
         switch (dr) {
-            case DispatchResult.NoMatch nm -> throw new RuntimeCheckException(
-                    "Dispatch failed for '" + call.functionName() + "': " + nm.reason(),
-                    call.origin());
+            case DispatchResult.NoMatch nm -> {
+                // Application through a top-level binding: a module-level
+                // `let ref = inc[Int]` declares a ZERO-ARG function; applying
+                // it with args is the ()-law reaching through that sugar —
+                // evaluate the binding, and if it holds a metareference,
+                // re-dispatch under the referenced name.
+                if (!call.args().isEmpty()) {
+                    DispatchResult zero = module.dispatch().resolve(
+                            name, List.of(), checker(module));
+                    if (zero instanceof DispatchResult.Resolved z) {
+                        CompiledModule.CompiledFunction zf = module.functions().get(z.decl());
+                        if (zf != null && eval(zf.body(), Environment.empty(), module)
+                                instanceof sibarum.pontif.core.types.DispatchValue dv) {
+                            return dispatchByName(dv.functionName(), call, env, module);
+                        }
+                    }
+                }
+                throw new RuntimeCheckException(
+                        "Dispatch failed for '" + name + "': " + nm.reason(),
+                        call.origin());
+            }
             case DispatchResult.Ambiguous a -> throw new RuntimeCheckException(
-                    "Ambiguous dispatch for '" + call.functionName() + "' between "
+                    "Ambiguous dispatch for '" + name + "' between "
                             + a.candidates().size() + " candidate(s)",
                     call.origin());
             case DispatchResult.Resolved resolved -> {
@@ -361,6 +414,9 @@ public final class IrInterpreter {
         if (value instanceof BigDecimal d) return SymExpr.dec(d);
         if (value instanceof sibarum.pontif.core.types.CharValue c) {
             return SymExpr.chr(c.codePoint());
+        }
+        if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
+            return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
         }
         if (value instanceof Boolean b) return SymExpr.bool(b);
         if (value instanceof RecordValue r) {

@@ -793,6 +793,7 @@ public final class AltParser {
             case IrExpr.Chr c -> false;
             case IrExpr.Bool b -> false;
             case IrExpr.Var v -> false;
+            case IrExpr.DispatchRef d -> false;
             case IrExpr.BinOp op -> containsSelfRef(op.left()) || containsSelfRef(op.right());
             case IrExpr.LetIn l -> containsSelfRef(l.value()) || containsSelfRef(l.body());
             case IrExpr.Call c -> c.args().stream().anyMatch(AltParser::containsSelfRef);
@@ -866,7 +867,7 @@ public final class AltParser {
                         start.origin());
             }
             IrSort.Trait named = new IrSort.Trait(name, t.methods(), t.origin());
-            for (Map.Entry<String, IrSort.Function> e : named.methods().entrySet()) {
+            for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
                 declaredFunctionReturns.put(
                         name + "." + e.getKey(), e.getValue().returnSort());
             }
@@ -957,6 +958,10 @@ public final class AltParser {
             // engine is integer-only); the bare Decimal sort is the maximal
             // shape we infer.
             case IrExpr.Dec d -> new IrSort.Named("Decimal", d.origin());
+            // A metareference's maximal shape is its Dispatch sort; the
+            // return stays "_" at parse level (candidates aren't consulted).
+            case IrExpr.DispatchRef d -> new IrSort.Dispatch(
+                    d.keySorts(), new IrSort.Named("_", d.origin()), d.origin());
             // Same stance for Char in the value slice: bare Char.
             case IrExpr.Chr c -> new IrSort.Named("Char", c.origin());
             case IrExpr.Var v -> {
@@ -1021,7 +1026,7 @@ public final class AltParser {
                 yield IrSort.named("_");
             }
             case IrExpr.Apply ap -> IrSort.named("_");
-            case IrExpr.Lambda lam -> new IrSort.Function(
+            case IrExpr.Lambda lam -> new IrSort.Method(
                     lam.params().stream().map(IrParam::sort).toList(),
                     lam.returnSort(),
                     lam.origin());
@@ -1186,8 +1191,8 @@ public final class AltParser {
     }
 
     /**
-     * Parses {@code Type{methodName:FunctionSort, ...}} — the trait literal.
-     * Each entry must be {@code methodName:[Function(...):Ret]} (function
+     * Parses {@code Type{methodName:MethodSort, ...}} — the trait literal.
+     * Each entry must be {@code methodName:[Method(...):Ret]} (method
      * sort). The returned {@link IrSort.Trait} has an empty placeholder
      * name; {@link #parseLet} patches it with the binding name from the
      * enclosing {@code let X:Type{...}} declaration.
@@ -1195,17 +1200,17 @@ public final class AltParser {
     private IrSort.Trait parseTraitTypeLiteral() throws ParseException {
         AltToken typeTok = expect(AltToken.Kind.IDENT);  // "Type"
         AltToken open = expect(AltToken.Kind.LBRACE);
-        Map<String, IrSort.Function> methods = new LinkedHashMap<>();
+        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
             AltToken methodName = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
             IrSort methodSort = parseSort();
-            if (!(methodSort instanceof IrSort.Function fn)) {
+            if (!(methodSort instanceof IrSort.Method fn)) {
                 throw new ParseException(
                         "Trait method '" + methodName.text() + "' must have a "
-                                + "function sort like [Function(args):Ret]; got " + methodSort,
+                                + "method sort like [Method(args):Ret]; got " + methodSort,
                         methodName.origin());
             }
             if (methods.containsKey(methodName.text())) {
@@ -1297,8 +1302,15 @@ public final class AltParser {
         }
 
         if (peek().kind() == AltToken.Kind.LPAREN) {
-            if (baseTok.text().equals("Function")) {
+            if (baseTok.text().equals("Method")) {
                 return parseFunctionSortBody(baseTok);
+            }
+            if (baseTok.text().equals("Dispatch")) {
+                // [Dispatch(Int):Int] — the metareference sort. Same body
+                // grammar as Method; a different sort entirely (a dispatch is
+                // a name-keyed candidate set, not a single body).
+                IrSort.Method shape = parseFunctionSortBody(baseTok);
+                return new IrSort.Dispatch(shape.paramSorts(), shape.returnSort(), baseTok.origin());
             }
             consume();  // LPAREN
             java.util.Set<String> literalFields = new java.util.LinkedHashSet<>();
@@ -1473,16 +1485,16 @@ public final class AltParser {
     }
 
     /**
-     * Parses {@code (P1, P2, ...):R} after the {@code Function} keyword.
+     * Parses {@code (P1, P2, ...):R} after the {@code Method} keyword.
      * Only positional/anonymous param sorts are accepted in slice 7. Named
-     * params ({@code (x:Int)}) require {@link IrSort.Function} to carry param
+     * params ({@code (x:Int)}) require {@link IrSort.Method} to carry param
      * names — tracked as deferred work.
      *
-     * <p>The returned {@link IrSort.Function} uses the {@code Function} token's
+     * <p>The returned {@link IrSort.Method} uses the {@code Method} token's
      * origin; the caller may rebuild with a wider span if it has the closing
      * {@code ]} on hand.
      */
-    private IrSort.Function parseFunctionSortBody(AltToken funcTok) throws ParseException {
+    private IrSort.Method parseFunctionSortBody(AltToken funcTok) throws ParseException {
         expect(AltToken.Kind.LPAREN);
         List<IrSort> paramSorts = new ArrayList<>();
         boolean first = true;
@@ -1491,8 +1503,8 @@ public final class AltParser {
             if (peek().kind() == AltToken.Kind.IDENT
                     && peek(1).kind() == AltToken.Kind.COLON) {
                 throw new ParseException(
-                        "Named-parameter function sorts (e.g., [Function(x:Int):Ret]) "
-                                + "are not yet supported — IrSort.Function needs param-name "
+                        "Named-parameter method sorts (e.g., [Method(x:Int):Ret]) "
+                                + "are not yet supported — IrSort.Method needs param-name "
                                 + "support. Use positional form for now.",
                         peek().origin());
             }
@@ -1502,7 +1514,7 @@ public final class AltParser {
         expect(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
-        return new IrSort.Function(paramSorts, returnSort, funcTok.origin());
+        return new IrSort.Method(paramSorts, returnSort, funcTok.origin());
     }
 
     /**
@@ -1762,7 +1774,9 @@ public final class AltParser {
                 || typeName.equals("Int")
                 || typeName.equals("Bool")
                 || typeName.equals("Decimal")
-                || typeName.equals("Function")) {
+                || typeName.equals("Char")
+                || typeName.equals("Method")
+                || typeName.equals("Dispatch")) {
             return null;
         }
         // Bare-name operator generic (`function +(l, r)`) wins; the legacy
@@ -2498,7 +2512,8 @@ public final class AltParser {
             case IrSort.Named n -> n.name();
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
-            case IrSort.Function f -> null;
+            case IrSort.Method f -> null;
+            case IrSort.Dispatch d -> "Dispatch";
             case IrSort.Trait t -> t.name();
             // Cross-base unions/intersections have no single base name.
             case IrSort.Union u -> null;
@@ -2644,6 +2659,48 @@ public final class AltParser {
                 // a typing-context placeholder), but it lives in the IR as SelfRef.
                 consume();
                 yield new IrExpr.SelfRef(t.origin());
+            }
+            case DOLLAR -> {
+                // Name literal: `$` marks a NAME (the namespace level — quoted,
+                // not evaluated), the third element of the notation law (`[]`
+                // types, `()` values, `$` names). The general production is the
+                // $fqn literal; its one implemented case is the dispatch
+                // reference `$name[Sorts]`, which reifies the dispatch keyed at
+                // those sorts (sort `[Dispatch(...):...]`).
+                AltToken dollar = consume();
+                AltToken firstName = expect(AltToken.Kind.IDENT);
+                StringBuilder name = new StringBuilder(firstName.text());
+                AltToken lastName = firstName;
+                while (peek().kind() == AltToken.Kind.DOT
+                        && peek(1).kind() == AltToken.Kind.IDENT) {
+                    consume();                       // DOT
+                    AltToken seg = consume();        // IDENT
+                    name.append('.').append(seg.text());
+                    lastName = seg;
+                }
+                String dottedName = name.toString();
+                AltToken next = peek();
+                boolean adjacentBracket = next.kind() == AltToken.Kind.LBRACKET
+                        && next.line() == lastName.line()
+                        && next.column() == lastName.column() + lastName.text().length();
+                if (adjacentBracket) {
+                    consume();                       // LBRACKET
+                    List<IrSort> keys = new ArrayList<>();
+                    boolean firstKey = true;
+                    while (peek().kind() != AltToken.Kind.RBRACKET) {
+                        if (!firstKey) expect(AltToken.Kind.COMMA);
+                        keys.add(parseSort());
+                        firstKey = false;
+                    }
+                    AltToken close = expect(AltToken.Kind.RBRACKET);
+                    yield new IrExpr.DispatchRef(dottedName, keys, dollar.spanTo(close));
+                }
+                throw new ParseException(
+                        "A bare name literal ($" + dottedName + ") is not yet a "
+                                + "value — dispatch references take key sorts "
+                                + "($name[Sorts]); bare type references are a "
+                                + "later slice.",
+                        dollar.origin());
             }
             case OP -> {
                 // Unary minus: `-x` ⇒ `0 - x` (cheap desugar).

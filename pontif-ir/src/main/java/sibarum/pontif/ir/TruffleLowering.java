@@ -88,6 +88,18 @@ public final class TruffleLowering {
             case IrExpr.Lit l -> IntLiteral.of(l.value());
             case IrExpr.Dec d -> DecimalLiteral.of(d.value());
             case IrExpr.Chr c -> sibarum.pontif.ast.literal.CharLiteral.of(c.codePoint());
+            case IrExpr.DispatchRef d -> {
+                List<sibarum.pontif.core.types.Sort> keys = new ArrayList<>(d.keySorts().size());
+                try {
+                    for (IrSort k : d.keySorts()) keys.add(IrCompiler.compileSort(k));
+                } catch (CompileException ce) {
+                    throw new IllegalStateException(
+                            "Metareference key sort failed to compile (should have been "
+                                    + "caught at sort-check): " + ce.getMessage(), ce);
+                }
+                yield sibarum.pontif.ast.literal.DispatchRefLiteral.of(
+                        new sibarum.pontif.core.types.DispatchValue(d.functionName(), keys));
+            }
             case IrExpr.Bool b -> Bool.of(b.value());
             case IrExpr.Var v -> Var.of(v.name());
             case IrExpr.SelfRef s -> throw new IllegalStateException(

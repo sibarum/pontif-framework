@@ -88,6 +88,16 @@ public final class CallNode extends PontifNode {
 
     private Object executeAsClosure(VirtualFrame frame) {
         Object fnValue = frame.getObject(closureSlot);
+        // A bound metareference: application reruns registry dispatch under
+        // the REFERENCED name — candidates and narrowings intact.
+        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
+            if (argNodes.length != dv.keySorts().size()) {
+                throw new RuntimeCheckException(
+                        "Metareference " + dv + " takes " + dv.keySorts().size()
+                                + " argument(s); got " + argNodes.length, origin());
+            }
+            return executeAsDispatch(frame, dv.functionName());
+        }
         if (!(fnValue instanceof LambdaValue lambda)) {
             throw new RuntimeCheckException(
                     "'" + functionName + "' is bound locally but is not a closure; "
@@ -110,6 +120,13 @@ public final class CallNode extends PontifNode {
     }
 
     private Object executeAsDispatch(VirtualFrame frame) {
+        return executeAsDispatch(frame, functionName);
+    }
+
+    /** Registry dispatch under {@code name} — shared by direct calls and
+     * metareference application (where {@code name} is the referenced
+     * function, not the bound variable). */
+    private Object executeAsDispatch(VirtualFrame frame, String name) {
         Object[] args = new Object[argNodes.length];
         List<SymExpr> argSymbolics = new ArrayList<>();
         for (int i = 0; i < argNodes.length; i++) {
@@ -117,13 +134,27 @@ public final class CallNode extends PontifNode {
             argSymbolics.add(toSymExpr(args[i]));
         }
 
-        DispatchResult dr = dispatch.resolve(functionName, argSymbolics, simplifier);
+        DispatchResult dr = dispatch.resolve(name, argSymbolics, simplifier);
         return switch (dr) {
-            case DispatchResult.NoMatch nm -> throw new RuntimeCheckException(
-                    "Dispatch failed for '" + functionName + "': " + nm.reason(),
-                    origin());
+            case DispatchResult.NoMatch nm -> {
+                // Application through a top-level binding (zero-arg function
+                // holding a metareference): evaluate it; if it's a dispatch
+                // value, re-dispatch under the referenced name.
+                if (argNodes.length > 0
+                        && dispatch.resolve(name, List.of(), simplifier)
+                                instanceof DispatchResult.Resolved z) {
+                    CallTarget zt = registry.callTarget(z.decl());
+                    if (zt != null && zt.call()
+                            instanceof sibarum.pontif.core.types.DispatchValue dv) {
+                        yield executeAsDispatch(frame, dv.functionName());
+                    }
+                }
+                throw new RuntimeCheckException(
+                        "Dispatch failed for '" + name + "': " + nm.reason(),
+                        origin());
+            }
             case DispatchResult.Ambiguous a -> throw new RuntimeCheckException(
-                    "Ambiguous dispatch for '" + functionName + "' between "
+                    "Ambiguous dispatch for '" + name + "' between "
                             + a.candidates().size() + " candidate(s)",
                     origin());
             case DispatchResult.Resolved r -> {
@@ -155,6 +186,13 @@ public final class CallNode extends PontifNode {
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof Boolean b) return SymExpr.bool(b);
+        if (value instanceof java.math.BigDecimal d) return SymExpr.dec(d);
+        if (value instanceof sibarum.pontif.core.types.CharValue c) {
+            return SymExpr.chr(c.codePoint());
+        }
+        if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
+            return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
+        }
         if (value instanceof sibarum.pontif.ast.record.RecordValue r) {
             java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
             for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {

@@ -19,6 +19,8 @@ public final class Force {
             }
             case SymExpr.Dec d -> d.value();
             case SymExpr.Chr c -> new sibarum.pontif.core.types.CharValue(c.codePoint());
+            case SymExpr.DispatchRef d -> new sibarum.pontif.core.types.DispatchValue(
+                    d.functionName(), d.keySorts());
             case SymExpr.Add(SymExpr l, SymExpr r) -> (Long) apply(l) + (Long) apply(r);
             case SymExpr.Mul(SymExpr l, SymExpr r) -> (Long) apply(l) * (Long) apply(r);
             case SymExpr.Pow(SymExpr b, SymExpr e) -> {

@@ -42,7 +42,7 @@ public final class SortChecker {
      * Sort names that aren't aliases — accepted as terminal sort references.
      *
      * <p>{@code Int}, {@code Bool} are primitives. Function-typed bindings
-     * use {@link IrSort.Function} (with explicit param + return shapes),
+     * use {@link IrSort.Method} (with explicit param + return shapes),
      * not a placeholder Named sort.
      *
      * <p>{@code "_"}, {@code "_record"}, and {@code "_tuple"} are internal
@@ -126,9 +126,9 @@ public final class SortChecker {
         }
 
         // Verify every contract method has a matching impl with self-prepended arity.
-        for (Map.Entry<String, IrSort.Function> e : contract.methods().entrySet()) {
+        for (Map.Entry<String, IrSort.Method> e : contract.methods().entrySet()) {
             String methodName = e.getKey();
-            IrSort.Function contractSig = e.getValue();
+            IrSort.Method contractSig = e.getValue();
             IrStmt.FunctionDecl impl = implByShortName.get(methodName);
             if (impl == null) {
                 throw new CompileException(
@@ -184,7 +184,7 @@ public final class SortChecker {
                 // the dispatch fallback resolves them to ConcreteType.method
                 // at runtime against the trait registry. Return sort is the
                 // contract's declared return.
-                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
+                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
                     map.put(t.name() + "." + e.getKey(), e.getValue().returnSort());
                 }
             }
@@ -302,15 +302,19 @@ public final class SortChecker {
                     validateSortNames(member, structDefs);
                 }
             }
-            case IrSort.Function f -> {
+            case IrSort.Method f -> {
                 for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs);
                 validateSortNames(f.returnSort(), structDefs);
+            }
+            case IrSort.Dispatch d -> {
+                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs);
+                validateSortNames(d.returnSort(), structDefs);
             }
             case IrSort.Trait t -> {
                 // Trait's name identifies the trait itself — not a reference
                 // to another sort. Method-contract sorts are Function sorts;
                 // recurse into them to validate param/return types.
-                for (IrSort.Function f : t.methods().values()) validateSortNames(f, structDefs);
+                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs);
             }
             case IrSort.Union u -> {
                 for (IrSort b : u.branches()) validateSortNames(b, structDefs);
@@ -380,6 +384,7 @@ public final class SortChecker {
             case IrExpr.Bool ignored -> {}
             case IrExpr.Var ignored -> {}
             case IrExpr.SelfRef ignored -> {}
+            case IrExpr.DispatchRef ignored -> {}
         }
     }
 
@@ -394,6 +399,18 @@ public final class SortChecker {
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
             case IrExpr.Var v -> {}
+            // A metareference must name a declared function — zero candidates
+            // is a compile error, not a runtime surprise. Key sorts validate
+            // like any other sort reference.
+            case IrExpr.DispatchRef d -> {
+                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs);
+                if (!functionReturns.containsKey(d.functionName())) {
+                    throw new CompileException(
+                            "Metareference '" + d.functionName()
+                                    + "[...]' names no declared function",
+                            d.origin());
+                }
+            }
             case IrExpr.BinOp op -> {
                 checkExpr(op.left(), typeEnv, functionReturns, structDefs);
                 checkExpr(op.right(), typeEnv, functionReturns, structDefs);

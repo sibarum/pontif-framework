@@ -32,6 +32,8 @@ public final class AlphaEquivalence {
                     && ad.value().compareTo(bd.value()) == 0;
             case SymExpr.Chr ac -> b instanceof SymExpr.Chr bc
                     && ac.codePoint() == bc.codePoint();
+            case SymExpr.DispatchRef ad -> b instanceof SymExpr.DispatchRef bd
+                    && ad.equals(bd);
             case SymExpr.Bool ab -> b instanceof SymExpr.Bool bb && ab.value() == bb.value();
             case SymExpr.Self as -> b instanceof SymExpr.Self;
             case SymExpr.Add(SymExpr al, SymExpr ar) -> {

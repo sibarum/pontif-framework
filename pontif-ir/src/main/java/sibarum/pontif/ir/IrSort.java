@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Function, IrSort.Trait, IrSort.Union, IrSort.Intersection {
+public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Method, IrSort.Dispatch, IrSort.Trait, IrSort.Union, IrSort.Intersection {
 
     Origin origin();
 
@@ -21,11 +21,11 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         return new Structural(name, members, Origin.NONE);
     }
 
-    static Function function(List<IrSort> paramSorts, IrSort returnSort) {
-        return new Function(paramSorts, returnSort, Origin.NONE);
+    static Method method(List<IrSort> paramSorts, IrSort returnSort) {
+        return new Method(paramSorts, returnSort, Origin.NONE);
     }
 
-    static Trait trait(String name, Map<String, IrSort.Function> methods) {
+    static Trait trait(String name, Map<String, IrSort.Method> methods) {
         return new Trait(name, methods, Origin.NONE);
     }
 
@@ -58,15 +58,34 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
     }
 
-    record Function(List<IrSort> paramSorts, IrSort returnSort, Origin origin) implements IrSort {
-        public Function {
+    record Method(List<IrSort> paramSorts, IrSort returnSort, Origin origin) implements IrSort {
+        public Method {
             if (paramSorts == null) {
-                throw new IllegalArgumentException("Function paramSorts must be non-null");
+                throw new IllegalArgumentException("Method paramSorts must be non-null");
             }
             if (returnSort == null) {
-                throw new IllegalArgumentException("Function returnSort must be non-null");
+                throw new IllegalArgumentException("Method returnSort must be non-null");
             }
             paramSorts = List.copyOf(paramSorts);
+        }
+    }
+
+    /**
+     * Dispatch sort — the metareference's contract: a first-class DISPATCH
+     * keyed at the given argument sorts ({@code [Dispatch(Int):Int]}). NOT a
+     * method/closure: a dispatch value carries a name-keyed candidate set and
+     * invocation reruns runtime dispatch, narrowings intact. The two sorts
+     * mirror the two dispatch mechanisms and never cross-assign.
+     */
+    record Dispatch(List<IrSort> keySorts, IrSort returnSort, Origin origin) implements IrSort {
+        public Dispatch {
+            if (keySorts == null) {
+                throw new IllegalArgumentException("Dispatch keySorts must be non-null");
+            }
+            if (returnSort == null) {
+                throw new IllegalArgumentException("Dispatch returnSort must be non-null");
+            }
+            keySorts = List.copyOf(keySorts);
         }
     }
 
@@ -78,7 +97,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      * here exclude the implicit {@code self} parameter; SortChecker
      * prepends it at validation time.
      */
-    record Trait(String name, Map<String, IrSort.Function> methods, Origin origin) implements IrSort {
+    record Trait(String name, Map<String, IrSort.Method> methods, Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");

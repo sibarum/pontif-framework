@@ -75,6 +75,10 @@ public final class NarrowingInference {
             case IrExpr.Dec d -> IrSort.named("Decimal");
             // Same for chars in the value slice — bare Char.
             case IrExpr.Chr c -> IrSort.named("Char");
+            // A metareference's narrowing is its Dispatch shape; the return
+            // stays "_" at this level (shallow — candidates aren't consulted).
+            case IrExpr.DispatchRef d ->
+                    new IrSort.Dispatch(d.keySorts(), IrSort.named("_"), d.origin());
             case IrExpr.Bool b -> boolSingleton(b.value());
             case IrExpr.Var v -> ctx.typeEnv().get(v.name());
             case IrExpr.LetIn let -> {
@@ -314,6 +318,7 @@ public final class NarrowingInference {
             case IrExpr.Chr ignored -> true;
             case IrExpr.Bool ignored -> true;
             case IrExpr.Var ignored -> true;
+            case IrExpr.DispatchRef ignored -> true;
         };
     }
 
@@ -388,6 +393,7 @@ public final class NarrowingInference {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
+            case IrExpr.DispatchRef d -> d;
         };
     }
 
@@ -459,6 +465,7 @@ public final class NarrowingInference {
             case IrExpr.Chr c -> c;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
+            case IrExpr.DispatchRef d -> d;
         };
     }
 

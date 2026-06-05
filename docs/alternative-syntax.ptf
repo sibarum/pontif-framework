@@ -158,16 +158,16 @@ function alwaysFalse():[Bool:false]
 # Return type parameterized by argument — value fully determined.
 function timesTwo(n:Int):[Int:n*2]
 
-# === Function sorts =========================================================
-# Function sorts use `Function(params):return`, wrapped in brackets like
+# === Method sorts ===========================================================
+# Method sorts use `Method(params):return`, wrapped in brackets like
 # any other sort.  Params may be named (for dependent returns) or
 # anonymous (positional).
 
 # Named params — return sort references the input.
-function addN(n:Int):[Function(x:Int):[Int:x+n]]
+function addN(n:Int):[Method(x:Int):[Int:x+n]]
 
 # Anonymous params — used when return doesn't depend on inputs.
-function applyTwice(f:[Function(Int):Int], x:Int):Int -> f(f(x))
+function applyTwice(f:[Method(Int):Int], x:Int):Int -> f(f(x))
 
 # === Structs ================================================================
 
@@ -264,7 +264,7 @@ function same(a:Point, b:Point):Bool -> a == b
 # and dispatch is resolved at runtime by consulting the TraitRegistry.
 # Narrowing handles polymorphism — no parallel trait-dispatch mechanism.
 let Duck:Type{
-  quack:[Function():Int]
+  quack:[Method():Int]
 }
 
 assign trait Point:Duck {
@@ -310,8 +310,8 @@ function nested(p:Point):Int -> match p {
 #   [Point(x:[Int:@>0])]               # struct with refined field
 #   [Point(x, y)]                      # match destructure (binds x, y)
 #   [Point(x:[Int:@>0], y)]            # mixed: constrain x, bind y
-#   [Function(Int, Int):Int]           # function sort, anonymous params
-#   [Function(x:Int):[Int:x+1]]        # function sort, named (dependent)
+#   [Method(Int, Int):Int]             # method sort, anonymous params
+#   [Method(x:Int):[Int:x+1]]          # method sort, named (dependent)
 #   [(Int, Bool)]                      # tuple sort — anonymous positional aggregate
 #   [([Int:@>0], Bool)]                # tuple with a refined component
 #   [(a, b)]                           # tuple destructure (binds a, b)

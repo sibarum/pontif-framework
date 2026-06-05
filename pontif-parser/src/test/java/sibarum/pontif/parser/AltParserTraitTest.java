@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests for alt-syntax trait surface:
  * <ul>
- *   <li>{@code let Duck:Type{methodName:[Function(...):Ret], ...}} — trait
+ *   <li>{@code let Duck:Type{methodName:[Method(...):Ret], ...}} — trait
  *       declaration, lowers to {@link IrStmt.TypeAlias} with
  *       {@link IrSort.Trait}.</li>
  *   <li>{@code assign trait Donald:Duck { methodName(params):Ret -> body }} —
@@ -32,7 +32,7 @@ class AltParserTraitTest {
 
     @Test
     void traitDecl_lowersToTypeAliasWithTraitSort() throws Exception {
-        IrModule m = parse("let Duck:Type{quack:[Function():Int]}");
+        IrModule m = parse("let Duck:Type{quack:[Method():Int]}");
         IrStmt.TypeAlias ta = assertInstanceOf(IrStmt.TypeAlias.class, m.statements().get(0));
         assertEquals("Duck", ta.name());
         IrSort.Trait trait = assertInstanceOf(IrSort.Trait.class, ta.sort());
@@ -42,10 +42,10 @@ class AltParserTraitTest {
 
     @Test
     void traitDecl_methodWithParams_parses() throws Exception {
-        IrModule m = parse("let Eater:Type{eat:[Function(Int):Int]}");
+        IrModule m = parse("let Eater:Type{eat:[Method(Int):Int]}");
         IrStmt.TypeAlias ta = (IrStmt.TypeAlias) m.statements().get(0);
         IrSort.Trait trait = (IrSort.Trait) ta.sort();
-        IrSort.Function eatSig = trait.methods().get("eat");
+        IrSort.Method eatSig = trait.methods().get("eat");
         assertEquals(1, eatSig.paramSorts().size());
     }
 
@@ -53,8 +53,8 @@ class AltParserTraitTest {
     void traitDecl_multipleMethods_parses() throws Exception {
         IrModule m = parse("""
                 let Duck:Type{
-                  quack:[Function():Int],
-                  eat:[Function(Int):Int]
+                  quack:[Method():Int],
+                  eat:[Method(Int):Int]
                 }
                 """);
         IrSort.Trait trait = (IrSort.Trait) ((IrStmt.TypeAlias) m.statements().get(0)).sort();
@@ -65,16 +65,16 @@ class AltParserTraitTest {
     void traitDecl_withValue_throws() {
         // Trait sorts can't have values; trait decls are type-level only.
         ParseException ex = assertThrows(ParseException.class, () ->
-                parse("let Duck:Type{quack:[Function():Int]} = 5"));
+                parse("let Duck:Type{quack:[Method():Int]} = 5"));
         assertTrue(ex.getMessage().toLowerCase().contains("trait"));
     }
 
     @Test
     void traitDecl_nonFunctionMethodSort_throws() {
-        // `quack:Int` isn't a function sort — must reject.
+        // `quack:Int` isn't a method sort — must reject.
         ParseException ex = assertThrows(ParseException.class, () ->
                 parse("let Duck:Type{quack:Int}"));
-        assertTrue(ex.getMessage().toLowerCase().contains("function"));
+        assertTrue(ex.getMessage().toLowerCase().contains("method"));
     }
 
     // --- assign trait X:Y { ... } -------------------------------------------
@@ -82,7 +82,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_singleMethod_lowersToTraitImpl() throws Exception {
         IrModule m = parse("""
-                let Duck:Type{quack:[Function():Int]}
+                let Duck:Type{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> 42
@@ -104,7 +104,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_methodUsesSelf_parsesCorrectly() throws Exception {
         IrModule m = parse("""
-                let Sized:Type{size:[Function():Int]}
+                let Sized:Type{size:[Method():Int]}
                 struct Point(x:Int, y:Int)
                 assign trait Point:Sized {
                   size():Int -> self.x + self.y
@@ -121,7 +121,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_methodWithUserParam_selfPrependedAndUserParamFollows() throws Exception {
         IrModule m = parse("""
-                let Eater:Type{eat:[Function(Int):Int]}
+                let Eater:Type{eat:[Method(Int):Int]}
                 struct Cow(mass:Int)
                 assign trait Cow:Eater {
                   eat(food:Int):Int -> self.mass + food
@@ -139,8 +139,8 @@ class AltParserTraitTest {
     void traitImpl_multipleMethods_allParsed() throws Exception {
         IrModule m = parse("""
                 let Duck:Type{
-                  quack:[Function():Int],
-                  eat:[Function(Int):Int]
+                  quack:[Method():Int],
+                  eat:[Method(Int):Int]
                 }
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
@@ -158,7 +158,7 @@ class AltParserTraitTest {
     void traitImpl_keywordAsMethodName_throws() {
         ParseException ex = assertThrows(ParseException.class, () ->
                 parse("""
-                        let Duck:Type{match:[Function():Int]}
+                        let Duck:Type{match:[Method():Int]}
                         struct Donald(name:Int)
                         assign trait Donald:Duck {
                           match():Int -> 42

@@ -49,7 +49,7 @@ class ParserTraitTest {
         IrSort.Trait trait = assertInstanceOf(IrSort.Trait.class, ta.sort());
         assertEquals("Duck", trait.name());
         assertTrue(trait.methods().containsKey("quack"));
-        IrSort.Function quackSig = trait.methods().get("quack");
+        IrSort.Method quackSig = trait.methods().get("quack");
         assertEquals(0, quackSig.paramSorts().size());
     }
 
@@ -63,7 +63,7 @@ class ParserTraitTest {
                 """);
         IrStmt.TypeAlias ta = (IrStmt.TypeAlias) m.statements().get(0);
         IrSort.Trait trait = (IrSort.Trait) ta.sort();
-        IrSort.Function eatSig = trait.methods().get("eat");
+        IrSort.Method eatSig = trait.methods().get("eat");
         assertEquals(1, eatSig.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) eatSig.paramSorts().get(0)).name());
     }

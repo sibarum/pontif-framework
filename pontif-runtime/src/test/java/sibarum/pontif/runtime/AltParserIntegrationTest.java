@@ -408,7 +408,7 @@ class AltParserIntegrationTest {
         //   - Assign the trait via `assign trait Donald:Duck { ... }`.
         //   - Function takes a trait-typed param; call with a Donald.
         String src = """
-                let Duck:Type{quack:[Function():Int]}
+                let Duck:Type{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> self.name + 100
@@ -424,7 +424,7 @@ class AltParserIntegrationTest {
     void trait_directTraitMethodCall_fromAltSyntax() throws Exception {
         // Trait.method call directly on a struct value — slice-1 fallback.
         String src = """
-                let Duck:Type{quack:[Function():Int]}
+                let Duck:Type{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> 42

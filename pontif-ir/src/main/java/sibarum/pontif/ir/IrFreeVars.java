@@ -21,6 +21,7 @@ public final class IrFreeVars {
             case IrExpr.Chr c -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
+            case IrExpr.DispatchRef d -> {}
             case IrExpr.Var v -> {
                 if (!bound.contains(v.name())) {
                     free.add(v.name());

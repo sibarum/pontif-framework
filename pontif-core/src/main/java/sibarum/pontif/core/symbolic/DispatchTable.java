@@ -169,7 +169,7 @@ public final class DispatchTable {
      * structural, function, or unrecognized bare-named sorts.
      */
     private boolean isTraitNameSort(sibarum.pontif.core.types.Sort sort) {
-        if (sort.isRefined() || sort.isStructural() || sort.isFunction()) {
+        if (sort.isRefined() || sort.isStructural() || sort.isMethod()) {
             return false;
         }
         return traitRegistry.isDeclaredTrait(sort.name());

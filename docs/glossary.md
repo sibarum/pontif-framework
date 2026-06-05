@@ -204,6 +204,25 @@ can reuse names without colliding. `requires pkg.{names}` imports; `exports
 directory tree of modules linked into one program, entry named in
 `module.ptf.toml`. See **coherence rule**.
 
+**metareference** — A first-class reference to the META level, sorted
+narrowly enough to use safely. Function references don't exist in Pontif —
+`$inc[Int]` reifies the DISPATCH keyed at those sorts (sort
+`[Dispatch(Int):Int]`): not a function pointer but a name-keyed candidate
+set; invocation is application (`ref(2)`, per the bracket/paren law: `[]`
+for types, `()` for values) and reruns runtime dispatch, narrowings intact —
+it resolves exactly how `inc(2)` resolves. The `$` sigil marks a NAME —
+quoted, not evaluated — the third element of the notation law (`[]` types,
+`()` values, `$` names); the general production is the $fqn literal
+(`$com.ns.fn[Int]` parses unambiguously), with bare `$Type` reserved for the
+type-reference slice. `[Dispatch(...)]` and `[Method(...)]`
+mirror the two dispatch mechanisms and never cross-assign: a Method is one
+body (a lambda, a trait contract); a Dispatch is a reified dispatch site.
+Zero candidates at the reference is a compile error. Creating a reference
+consumes nothing (a constant in the conservation ledger); invocation through
+a binding is residual, fail-closed, per the Lambda/Apply ruling — the
+captured candidate set makes dispatch-as-Branch a later upgrade. Type
+references (`[Type(...)]`/`[Type{...}]`) are the second slice.
+
 **narrowing** — What `:` denotes everywhere. `x:T` reads "x narrows to T."
 Used at every level — params, refinements, struct fields, function returns.
 Chosen over "has type" / "is of sort" because it's descriptive and reads
@@ -307,7 +326,7 @@ Becomes "authentic by attribution" when signed by a trusted Proof
 Authority — see PA entry.
 
 **trait** — A named method contract that nominal struct types opt into.
-Declared as a sort: `let Duck:Type{quack:[Function():Audio]}`. Types
+Declared as a sort: `let Duck:Type{quack:[Method():Audio]}`. Types
 satisfy a trait via `assign trait T:Duck { ... }`, which both declares
 the impl methods and registers the (`T`, `Duck`) pair in the
 `TraitRegistry`. *Pontif's polymorphism mechanism is narrowing, not a

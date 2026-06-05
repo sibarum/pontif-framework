@@ -27,6 +27,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         COLON,                  // :
         DOT,                    // .
         AT,                     // @
+        DOLLAR,                 // $ — name-literal sigil ($fqn; metareferences)
         EQUALS,                 // = (value-level assignment; used by parseLet and by-name struct literals)
         ARROW,                  // ->
 

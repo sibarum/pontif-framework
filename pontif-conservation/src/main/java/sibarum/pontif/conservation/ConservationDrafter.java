@@ -201,6 +201,9 @@ public final class ConservationDrafter {
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
+            // Creating a metareference is not a call — invocation through a
+            // binding is the residual case, handled at the Call site.
+            case IrExpr.DispatchRef d -> { }
         };
     }
 
@@ -313,6 +316,7 @@ public final class ConservationDrafter {
             case IrExpr.Lit ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Dec ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Chr ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.DispatchRef ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Bool ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Var ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.SelfRef ignored -> wrapReturn(draftValue(expr, ctx), ctx);
@@ -395,6 +399,13 @@ public final class ConservationDrafter {
             case IrExpr.Dec d -> new Flow.Constant(d.value().toPlainString());
             case IrExpr.Chr c -> new Flow.Constant(
                     "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'");
+            // A metareference is built from statics only — no input content
+            // flows into it. Its INVOCATION (a call through the binding) is
+            // the residual case, per the Lambda/Apply ruling.
+            case IrExpr.DispatchRef d -> new Flow.Constant(
+                    d.functionName() + "[" + d.keySorts().stream()
+                            .map(ConservationDrafter::renderSort)
+                            .collect(java.util.stream.Collectors.joining(", ")) + "]");
             case IrExpr.Bool b -> new Flow.Constant(String.valueOf(b.value()));
             case IrExpr.Var v -> {
                 Flow bound = ctx.env.get(v.name());
@@ -745,7 +756,8 @@ public final class ConservationDrafter {
                     ? "(" + String.join(", ", s.members().values().stream()
                             .map(ConservationDrafter::renderSort).toList()) + ")"
                     : s.name();
-            case IrSort.Function f -> "Function";
+            case IrSort.Method f -> "Method";
+            case IrSort.Dispatch d -> "Dispatch";
             case IrSort.Trait t -> t.name();
             case IrSort.Union u -> "Union";
             case IrSort.Intersection i -> "Intersection";

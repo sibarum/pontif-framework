@@ -151,13 +151,17 @@ public final class IrCompiler {
             case IrSort.Structural s -> {
                 for (IrSort inner : s.members().values()) registerSort(inner, map);
             }
-            case IrSort.Function f -> {
+            case IrSort.Method f -> {
                 for (IrSort p : f.paramSorts()) registerSort(p, map);
                 registerSort(f.returnSort(), map);
             }
+            case IrSort.Dispatch d -> {
+                for (IrSort k : d.keySorts()) registerSort(k, map);
+                registerSort(d.returnSort(), map);
+            }
             case IrSort.Trait t -> {
                 // Method contract sorts are Function sorts; recurse into each.
-                for (IrSort.Function f : t.methods().values()) registerSort(f, map);
+                for (IrSort.Method f : t.methods().values()) registerSort(f, map);
             }
             case IrSort.Union u -> {
                 for (IrSort b : u.branches()) registerSort(b, map);
@@ -180,6 +184,9 @@ public final class IrCompiler {
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
+            case IrExpr.DispatchRef d -> {
+                for (IrSort k : d.keySorts()) registerSort(k, map);
+            }
             case IrExpr.BinOp op -> {
                 registerSortsInExpr(op.left(), map);
                 registerSortsInExpr(op.right(), map);
@@ -219,6 +226,11 @@ public final class IrCompiler {
         return switch (sort) {
             case IrSort.Named n -> Sort.of(n.name());
             case IrSort.Refined r -> Sort.refined(r.name(), compileSymExpr(r.predicate()));
+            case IrSort.Dispatch d -> {
+                List<Sort> keys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) keys.add(compileSort(k));
+                yield Sort.dispatch(keys, compileSort(d.returnSort()));
+            }
             case IrSort.Structural s -> {
                 java.util.Map<String, Sort> members = new java.util.LinkedHashMap<>();
                 for (java.util.Map.Entry<String, IrSort> e : s.members().entrySet()) {
@@ -226,12 +238,12 @@ public final class IrCompiler {
                 }
                 yield Sort.structural(s.name(), members);
             }
-            case IrSort.Function f -> {
+            case IrSort.Method f -> {
                 java.util.List<Sort> params = new java.util.ArrayList<>(f.paramSorts().size());
                 for (IrSort p : f.paramSorts()) {
                     params.add(compileSort(p));
                 }
-                yield Sort.function(params, compileSort(f.returnSort()));
+                yield Sort.method(params, compileSort(f.returnSort()));
             }
             case IrSort.Trait t -> {
                 // At the Sort layer, a trait collapses to a bare named sort.
@@ -261,6 +273,11 @@ public final class IrCompiler {
             // SortChecker's shape validation governs where they're allowed.
             case IrExpr.Dec d -> SymExpr.dec(d.value());
             case IrExpr.Chr c -> SymExpr.chr(c.codePoint());
+            case IrExpr.DispatchRef d -> {
+                List<Sort> keys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) keys.add(compileSort(k));
+                yield new SymExpr.DispatchRef(d.functionName(), keys);
+            }
             case IrExpr.Bool b -> SymExpr.bool(b.value());
             case IrExpr.Var v -> SymExpr.var(v.name());
             case IrExpr.SelfRef s -> SymExpr.self();

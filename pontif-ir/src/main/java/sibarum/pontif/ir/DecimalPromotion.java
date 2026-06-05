@@ -63,6 +63,7 @@ final class DecimalPromotion {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
+            case IrExpr.DispatchRef d -> d;
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(), rewriteExpr(op.left(), structs), rewriteExpr(op.right(), structs), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(

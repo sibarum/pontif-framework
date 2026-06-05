@@ -27,9 +27,9 @@ class TruffleLambdaTest {
     }
 
     private static final IrSort INT = IrSort.named("Int");
-    private static final IrSort FN = new IrSort.Function(List.of(INT), INT, sibarum.pontif.core.Origin.NONE);
-    private static final IrSort HOF = new IrSort.Function(List.of(FN), INT, sibarum.pontif.core.Origin.NONE);
-    private static final IrSort CURRIED = new IrSort.Function(List.of(INT), FN, sibarum.pontif.core.Origin.NONE);
+    private static final IrSort FN = new IrSort.Method(List.of(INT), INT, sibarum.pontif.core.Origin.NONE);
+    private static final IrSort HOF = new IrSort.Method(List.of(FN), INT, sibarum.pontif.core.Origin.NONE);
+    private static final IrSort CURRIED = new IrSort.Method(List.of(INT), FN, sibarum.pontif.core.Origin.NONE);
 
     // --- Basic Apply ---
 

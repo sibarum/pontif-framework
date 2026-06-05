@@ -189,7 +189,7 @@ public final class Parser {
         Token open = expect(Token.Kind.LPAREN);
         expectSymbol(language.interfaceKeyword());
         Token nameTok = expect(Token.Kind.SYMBOL);
-        java.util.LinkedHashMap<String, IrSort.Function> methods = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, IrSort.Method> methods = new java.util.LinkedHashMap<>();
         while (peek().kind() != Token.Kind.RPAREN) {
             expect(Token.Kind.LPAREN);
             Token methodName = expect(Token.Kind.SYMBOL);
@@ -202,7 +202,7 @@ public final class Parser {
             IrSort returnSort = parseSort();
             expect(Token.Kind.RPAREN);
             methods.put(methodName.text(),
-                    new IrSort.Function(paramSorts, returnSort, methodName.origin()));
+                    new IrSort.Method(paramSorts, returnSort, methodName.origin()));
         }
         Token close = expect(Token.Kind.RPAREN);
         Origin origin = open.spanTo(close);
@@ -307,7 +307,7 @@ public final class Parser {
                 expect(Token.Kind.RPAREN);
                 IrSort returnSort = parseSort();
                 Token close = expect(Token.Kind.RPAREN);
-                return new IrSort.Function(paramSorts, returnSort, open.spanTo(close));
+                return new IrSort.Method(paramSorts, returnSort, open.spanTo(close));
             }
             if (head.text().equals(language.structSortKeyword())) {
                 // (struct Name (field1 sort1) (field2 sort2) ...)

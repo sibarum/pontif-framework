@@ -178,7 +178,7 @@ public final class OverloadOverlap {
      * may override with its own composite reason.
      */
     private static Result checkSorts(IrSort a, IrSort b, int paramIndex) {
-        if (a instanceof IrSort.Function || b instanceof IrSort.Function
+        if (a instanceof IrSort.Method || b instanceof IrSort.Method
                 || a instanceof IrSort.Trait || b instanceof IrSort.Trait
                 || a instanceof IrSort.Union || b instanceof IrSort.Union
                 || a instanceof IrSort.Intersection || b instanceof IrSort.Intersection) {

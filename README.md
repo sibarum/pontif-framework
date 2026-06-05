@@ -41,7 +41,7 @@ The framework ships:
 struct Point(x:Int, y:Int)
 
 let Sized:Type{
-  magnitude:[Function():Int]
+  magnitude:[Method():Int]
 }
 
 assign trait Point:Sized {

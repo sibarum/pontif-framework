@@ -45,7 +45,7 @@ class CrossFieldInvariantTest {
                         SymExpr.fieldAccess(SymExpr.self(), "y")));
         SymExpr selfBound = Substitute.applySelf(sumMethod, record);
 
-        Sort fnSort = Sort.function(List.of(UNIT), INT_GT_0);
+        Sort fnSort = Sort.method(List.of(UNIT), INT_GT_0);
         ProofResult r = Refinements.satisfies(selfBound, fnSort, SIMPLIFIER);
         assertInstanceOf(ProofResult.Residual.class, r,
                 "Without sibling invariants, x+y > 0 cannot be decided. Got: " + r);
@@ -61,7 +61,7 @@ class CrossFieldInvariantTest {
                         SymExpr.fieldAccess(SymExpr.self(), "y")));
         SymExpr selfBound = Substitute.applySelf(sumMethod, record);
 
-        Sort fnSort = Sort.function(List.of(UNIT), INT_GT_0);
+        Sort fnSort = Sort.method(List.of(UNIT), INT_GT_0);
         Context ctx = Context.of(
                 SymExpr.cmp(SymExpr.var("a"), SymExpr.CmpOp.GE, SymExpr.lit(0)),
                 SymExpr.cmp(SymExpr.var("b"), SymExpr.CmpOp.GT, SymExpr.lit(0)));
@@ -79,7 +79,7 @@ class CrossFieldInvariantTest {
         Sort sumType = Sort.structural("Sum", Map.of(
                 "x", INT_GE_0,
                 "y", INT_GT_0,
-                "total", Sort.function(List.of(UNIT), INT_GT_0)));
+                "total", Sort.method(List.of(UNIT), INT_GT_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "x", SymExpr.var("a"),
@@ -104,7 +104,7 @@ class CrossFieldInvariantTest {
         // count to 5), so this test mainly confirms cross-field propagation doesn't break the concrete case.
         Sort counter = Sort.structural("Counter", Map.of(
                 "count", INT_GE_0,
-                "next", Sort.function(List.of(UNIT), INT_GT_0)));
+                "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "count", SymExpr.lit(5),
@@ -171,8 +171,8 @@ class CrossFieldInvariantTest {
 
         Sort counter = Sort.structural("Counter", Map.of(
                 "count", INT_GE_0,
-                "isEmpty", Sort.function(List.of(UNIT), INT_GE_0),
-                "next", Sort.function(List.of(UNIT), INT_GT_0)));
+                "isEmpty", Sort.method(List.of(UNIT), INT_GE_0),
+                "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "count", SymExpr.lit(0),
@@ -196,7 +196,7 @@ class CrossFieldInvariantTest {
         // (The count member itself residuals, but that's a separate concern.)
         Sort counter = Sort.structural("Counter", Map.of(
                 "count", INT_GE_0,
-                "next", Sort.function(List.of(UNIT), INT_GT_0)));
+                "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "count", SymExpr.var("c"),
@@ -210,7 +210,7 @@ class CrossFieldInvariantTest {
 
         Context ctx = Context.of(
                 SymExpr.cmp(SymExpr.var("c"), SymExpr.CmpOp.GE, SymExpr.lit(0)));
-        Sort fnSort = Sort.function(List.of(UNIT), INT_GT_0);
+        Sort fnSort = Sort.method(List.of(UNIT), INT_GT_0);
         ProofResult r = Refinements.satisfies(selfBound, fnSort, SIMPLIFIER.withContext(ctx));
         assertTrue(r.isPassed(),
                 "next method body verifies under count's invariant. Got: " + r);
@@ -222,7 +222,7 @@ class CrossFieldInvariantTest {
         // positive field plus 5" — verified to be >= 5.
         Sort sort = Sort.structural("S", Map.of(
                 "v", INT_GE_0,
-                "plus5", Sort.function(List.of(UNIT), INT_GE_0)));
+                "plus5", Sort.method(List.of(UNIT), INT_GE_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "v", SymExpr.var("v_val"),

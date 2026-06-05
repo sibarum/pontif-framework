@@ -100,6 +100,16 @@ public final class AltLexer {
                 continue;
             }
 
+            // Name-literal sigil: a '$' that STARTS a token is the DOLLAR
+            // token ($fqn; metareferences). A '$' INTERNAL to an identifier
+            // stays part of it (isIdentPart includes '$', so `foo$bar` is one
+            // IDENT) — only a token-start '$' becomes DOLLAR.
+            if (c == '$') {
+                advance();
+                tokens.add(new AltToken(AltToken.Kind.DOLLAR, "$", source, startLine, startCol));
+                continue;
+            }
+
             // Identifier
             if (isIdentStart(c)) {
                 tokens.add(readIdent(startLine, startCol));

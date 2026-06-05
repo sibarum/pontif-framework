@@ -74,8 +74,8 @@ public final class Refinements {
      * so this never unrolls a recursive type.
      */
     private static Sort resolveNominal(Sort sort, java.util.Map<String, Sort> registry) {
-        if (sort.isRefined() || sort.isStructural() || sort.isFunction()
-                || sort.isUnion() || sort.isIntersection()) {
+        if (sort.isRefined() || sort.isStructural() || sort.isMethod()
+                || sort.isDispatch() || sort.isUnion() || sort.isIntersection()) {
             return sort;
         }
         Sort resolved = registry.get(sort.name());
@@ -101,8 +101,27 @@ public final class Refinements {
         if (sort.isStructural()) {
             return satisfiesStructural(value, sort, simplifier);
         }
-        if (sort.isFunction()) {
+        if (sort.isMethod()) {
             return satisfiesFunction(value, sort, simplifier);
+        }
+        if (sort.isDispatch()) {
+            // A Dispatch sort is satisfied only by a metareference whose key
+            // sorts match exactly (v1 — subsumption/widening is a later
+            // ruling). A Method/closure never satisfies a Dispatch and vice
+            // versa: the two mechanisms don't cross-assign.
+            if (!(value instanceof SymExpr.DispatchRef ref)) {
+                return ProofResult.failed(
+                        "Value " + value + " is not a dispatch reference — "
+                                + "[Dispatch(...)] is satisfied only by a metareference "
+                                + "like name[Sorts]");
+            }
+            if (!ref.keySorts().equals(sort.dispatchKeySorts())) {
+                return ProofResult.failed(
+                        "Metareference " + value + " is keyed at " + ref.keySorts()
+                                + " but the sort requires keys " + sort.dispatchKeySorts()
+                                + " (exact match — key subsumption is a later ruling)");
+            }
+            return ProofResult.passed();
         }
         if (sort.isUnion()) {
             return satisfiesUnion(value, sort, simplifier);
@@ -262,8 +281,8 @@ public final class Refinements {
     }
 
     private static ProofResult satisfiesFunction(SymExpr value, Sort sort, Simplifier simplifier) {
-        java.util.List<Sort> paramSorts = sort.functionParams();
-        Sort returnSort = sort.functionReturnSort();
+        java.util.List<Sort> paramSorts = sort.methodParams();
+        Sort returnSort = sort.methodReturnSort();
 
         SymExpr current = simplifier.simplify(value);
         Context ctx = simplifier.context();
@@ -301,11 +320,11 @@ public final class Refinements {
         if (tighter.isStructural() && looser.isStructural()) {
             return implyStructural(tighter, looser, simplifier, assumed);
         }
-        if (tighter.isFunction() && looser.isFunction()) {
+        if (tighter.isMethod() && looser.isMethod()) {
             return implyFunction(tighter, looser, simplifier, assumed);
         }
         if (tighter.isStructural() || looser.isStructural()
-                || tighter.isFunction() || looser.isFunction()) {
+                || tighter.isMethod() || looser.isMethod()) {
             return ProofResult.failed(
                     "Cannot relate different sort kinds: " + tighter + " vs " + looser);
         }
@@ -328,14 +347,14 @@ public final class Refinements {
 
     private static ProofResult implyFunction(Sort tighter, Sort looser, Simplifier simplifier,
                                              Coinduction.Assumed assumed) {
-        if (tighter.functionParams().size() != looser.functionParams().size()) {
+        if (tighter.methodParams().size() != looser.methodParams().size()) {
             return ProofResult.failed(
                     "Function arity mismatch: " + tighter + " vs " + looser);
         }
         // Parameter sorts are contravariant: looser's param implies tighter's param
-        for (int i = 0; i < tighter.functionParams().size(); i++) {
-            Sort tParam = tighter.functionParams().get(i);
-            Sort lParam = looser.functionParams().get(i);
+        for (int i = 0; i < tighter.methodParams().size(); i++) {
+            Sort tParam = tighter.methodParams().get(i);
+            Sort lParam = looser.methodParams().get(i);
             ProofResult r = imply(lParam, tParam, simplifier, assumed);
             if (!r.isPassed()) {
                 if (r instanceof ProofResult.Failed f) {
@@ -345,7 +364,7 @@ public final class Refinements {
             }
         }
         // Return sorts are covariant: tighter's return implies looser's return
-        ProofResult retCheck = imply(tighter.functionReturnSort(), looser.functionReturnSort(), simplifier, assumed);
+        ProofResult retCheck = imply(tighter.methodReturnSort(), looser.methodReturnSort(), simplifier, assumed);
         if (!retCheck.isPassed()) {
             if (retCheck instanceof ProofResult.Failed f) {
                 return ProofResult.failed("Return sort: " + f.witness());

@@ -704,6 +704,28 @@ can't lower (no `Not` op, F2); inline alt lambda `(x:Int)->…` not parseable
 defined" instead of the generic overload-overlap message (`OverloadOverlap`
 special-cases zero-arg overloads).
 
+**Metareferences Slice 1 LANDED (James's proposal + name): dispatch
+references.** `$inc[Int]` : `[Dispatch(Int):Int]` — reifies the dispatch
+site (candidate set, narrowings intact); invocation by application
+(`ref(2)`); works module-level (application reaches through the
+zero-arg-let sugar), as params, on both backends; overload sets captured
+not pinned (apply selects by value); Dispatch/Method never cross-assign;
+zero candidates = compile error; syntax: the `$` name-literal sigil (James's
+ruling; replaced the interim bracket-adjacency rule — bare `$name` errors
+honestly pending type references). Rename rode along: the
+Function sort is now **Method** (ruling B — the sorts mirror the two
+dispatch mechanisms). Conservation/receipts: reference = constant,
+invocation = residual fail-closed (Lambda/Apply ruling; captured candidate
+sets make dispatch-as-Branch a later upgrade). **Deferred:** the
+bare-function-name-in-value-position fence (needs pattern-binding name
+extraction to avoid false rejections — the pre-existing hole remains);
+key-sort compatibility at the REFERENCE site (today zero-candidates only;
+`inc[Decimal]` compiles and fails closed at the param wall/apply);
+Dispatch-sort subsumption (v1 exact key match); method references
+(`Point.scale[Decimal]`, waits for dispatch-unification Phase 2);
+**Slice 2: type references** (`[Type(...)]`/`[Type{...}]`, the one-way
+struct→trait lattice, TypeValue application = construction).
+
 **Char LANDED (value slice — James's sequencing: "character first, then" —
 String arrives later as the first Char COLLECTION, on the same collection
 atom model sorting waits for).** The fourth scalar via the Decimal playbook:
@@ -866,8 +888,8 @@ representation + reasoners. Full suite green throughout (~1060 tests).
   that go deeper (`@.field.subfield`, `@.method(...)`) or that involve
   function-call shapes still aren't recursively type-checked. Extend
   when nested struct refinements show up.
-- **`Function` sort isn't validated at runtime.** A function declared
-  with return sort `[Function(Int):Int]` doesn't check that the lambda
+- **`Method` sort isn't validated at runtime.** A function declared
+  with return sort `[Method(Int):Int]` doesn't check that the lambda
   body produces an `Int → Int`. `Refinements.satisfiesFunction` exists;
   not wired in.
 - **Destructuring through a type alias.** Match patterns that name an
@@ -1099,11 +1121,11 @@ representation + reasoners. Full suite green throughout (~1060 tests).
 
 ## Alt syntax — surface forms not yet parsed (would error today)
 
-- **Named-parameter function sorts: `[Function(x:Int):[Int:x+n]]`.**
+- **Named-parameter method sorts: `[Method(x:Int):[Int:x+n]]`.**
   Lets dependent return refinements reference the function's own
   parameter. AltParser throws a clear "not yet supported" error.
-  Needs `IrSort.Function` to carry param names.
-- **Inline lambda creation.** `[Function(...):Ret]` is parseable as a
+  Needs `IrSort.Method` to carry param names.
+- **Inline lambda creation.** `[Method(...):Ret]` is parseable as a
   sort but you can't create a value of that sort from alt syntax.
   Probably want something like `(x:Int) -> x+1`. Design call.
 

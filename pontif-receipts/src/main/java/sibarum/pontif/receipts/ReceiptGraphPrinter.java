@@ -81,14 +81,14 @@ public final class ReceiptGraphPrinter {
 
     /** Renders a {@link Sort} in surface-like notation. */
     public static String renderSort(Sort sort) {
-        if (sort.isFunction()) {
+        if (sort.isMethod()) {
             StringBuilder sb = new StringBuilder("(");
-            List<Sort> params = sort.functionParams();
+            List<Sort> params = sort.methodParams();
             for (int i = 0; i < params.size(); i++) {
                 if (i > 0) sb.append(", ");
                 sb.append(renderSort(params.get(i)));
             }
-            return sb.append(") -> ").append(renderSort(sort.functionReturnSort())).toString();
+            return sb.append(") -> ").append(renderSort(sort.methodReturnSort())).toString();
         }
         if (sort.isStructural()) {
             StringBuilder sb = new StringBuilder(sort.name()).append("{");
@@ -143,6 +143,14 @@ public final class ReceiptGraphPrinter {
             case SymExpr.Frac f -> f.num() + "/" + f.denom();
             case SymExpr.Dec d -> d.value().toPlainString();
             case SymExpr.Chr c -> "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'";
+            case SymExpr.DispatchRef d -> {
+                StringBuilder sb = new StringBuilder(d.functionName()).append('[');
+                for (int i = 0; i < d.keySorts().size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(d.keySorts().get(i));
+                }
+                yield sb.append(']').toString();
+            }
             case SymExpr.Bool b -> Boolean.toString(b.value());
             case SymExpr.Self s -> "@";
             // Sub is encoded as Add(l, Mul(-1, r)) by the IR compiler — render

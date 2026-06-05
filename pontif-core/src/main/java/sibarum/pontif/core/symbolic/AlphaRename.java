@@ -16,6 +16,7 @@ public final class AlphaRename {
             case SymExpr.Frac f -> false;
             case SymExpr.Dec d -> false;
             case SymExpr.Chr c -> false;
+            case SymExpr.DispatchRef d -> false;
             case SymExpr.Bool b -> false;
             case SymExpr.Self s -> false;
             case SymExpr.Add(SymExpr l, SymExpr r) -> isFreeIn(name, l) || isFreeIn(name, r);

@@ -10,7 +10,7 @@ import java.util.Map;
 
 public sealed interface IrExpr
         permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
-                IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call,
+                IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess {
 
@@ -64,6 +64,24 @@ public sealed interface IrExpr
     }
 
     record Bool(boolean value, Origin origin) implements IrExpr {}
+
+    /**
+     * Metareference to a dispatch: {@code inc[Int]} reifies the DISPATCH
+     * SITE keyed at the given sorts — not a function pointer. Invocation
+     * (application: {@code ref(2)}) reruns runtime dispatch over the name's
+     * candidates, narrowings intact — it resolves exactly how {@code inc(2)}
+     * resolves. Bare function names in value position are a compile error;
+     * this is the blessed form.
+     */
+    record DispatchRef(String functionName, List<IrSort> keySorts, Origin origin)
+            implements IrExpr {
+        public DispatchRef {
+            if (functionName == null || functionName.isEmpty()) {
+                throw new IllegalArgumentException("DispatchRef functionName must be non-empty");
+            }
+            keySorts = List.copyOf(keySorts);
+        }
+    }
 
     record Var(String name, Origin origin) implements IrExpr {}
 

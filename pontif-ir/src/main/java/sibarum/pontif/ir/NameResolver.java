@@ -132,15 +132,20 @@ public final class NameResolver {
                 }
                 yield new IrSort.Structural(resolveTypeName(s.name(), m, table, s.origin()), members, s.origin());
             }
-            case IrSort.Function f -> {
+            case IrSort.Method f -> {
                 List<IrSort> ps = new ArrayList<>(f.paramSorts().size());
                 for (IrSort p : f.paramSorts()) ps.add(rewriteSort(p, m, table));
-                yield new IrSort.Function(ps, rewriteSort(f.returnSort(), m, table), f.origin());
+                yield new IrSort.Method(ps, rewriteSort(f.returnSort(), m, table), f.origin());
+            }
+            case IrSort.Dispatch d -> {
+                List<IrSort> ks = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) ks.add(rewriteSort(k, m, table));
+                yield new IrSort.Dispatch(ks, rewriteSort(d.returnSort(), m, table), d.origin());
             }
             case IrSort.Trait t -> {
-                Map<String, IrSort.Function> methods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Function> e : t.methods().entrySet()) {
-                    methods.put(e.getKey(), (IrSort.Function) rewriteSort(e.getValue(), m, table));
+                Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
+                    methods.put(e.getKey(), (IrSort.Method) rewriteSort(e.getValue(), m, table));
                 }
                 yield new IrSort.Trait(resolveTypeName(t.name(), m, table, t.origin()), methods, t.origin());
             }
@@ -195,6 +200,14 @@ public final class NameResolver {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
+            // A metareference names a dispatch — FQN-resolve the name like a
+            // call site's, and rewrite type names inside the key sorts.
+            case IrExpr.DispatchRef d -> {
+                List<IrSort> keys = new ArrayList<>(d.keySorts().size());
+                for (IrSort k : d.keySorts()) keys.add(rewriteSort(k, m, table));
+                yield new IrExpr.DispatchRef(
+                        resolveCallName(d.functionName(), m, table), keys, d.origin());
+            }
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(), rewrite(op.left(), m, table), rewrite(op.right(), m, table), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(

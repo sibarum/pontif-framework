@@ -22,18 +22,18 @@ Decl form:
 
 ```
 let Duck:Type{
-  quack:[Function():Audio],
-  eat:[Function(food:Food):Poop]
+  quack:[Method():Audio],
+  eat:[Method(food:Food):Poop]
 }
 ```
 
 Reading: Duck has kind `Type` (it's a contract-shaped sort).
 Type-level field assignments use `:` because they're sort narrowings,
 not value assignments — the contract says "any value satisfying Duck
-must have a method `quack` narrowing to `[Function():Audio]`."
+must have a method `quack` narrowing to `[Method():Audio]`."
 
 The `self` parameter is *implicit* in each method's signature. A
-contract method `quack:[Function():Audio]` says the implementation
+contract method `quack:[Method():Audio]` says the implementation
 should be a function from receiver-only to Audio; `self` is prepended
 at impl-check time.
 
@@ -157,8 +157,8 @@ from the trait's contract.
 
 ```
 let Duck:Type{
-  quack:[Function():Audio],
-  eat:[Function(food:Food):Poop]
+  quack:[Method():Audio],
+  eat:[Method(food:Food):Poop]
 }
 
 struct Donald(name:String, color:Color)

@@ -36,29 +36,29 @@ class FunctionSortTest {
 
     @Test
     void functionSort_constructed() throws Exception {
-        Sort fn = Sort.function(List.of(ANY_INT, ANY_INT), ANY_INT);
-        assertTrue(fn.isFunction());
+        Sort fn = Sort.method(List.of(ANY_INT, ANY_INT), ANY_INT);
+        assertTrue(fn.isMethod());
         assertFalse(fn.isStructural());
         assertFalse(fn.isRefined());
-        assertEquals(2, fn.functionParams().size());
-        assertEquals(ANY_INT, fn.functionReturnSort());
+        assertEquals(2, fn.methodParams().size());
+        assertEquals(ANY_INT, fn.methodReturnSort());
     }
 
     @Test
     void functionSort_isDistinctFromOtherKinds() throws Exception {
-        Sort fn = Sort.function(List.of(ANY_INT), ANY_INT);
+        Sort fn = Sort.method(List.of(ANY_INT), ANY_INT);
         Sort scalar = Sort.of("Int");
         Sort struct = Sort.structural("S", Map.of("x", ANY_INT));
-        assertFalse(scalar.isFunction());
-        assertFalse(struct.isFunction());
-        assertTrue(fn.isFunction());
+        assertFalse(scalar.isMethod());
+        assertFalse(struct.isMethod());
+        assertTrue(fn.isMethod());
     }
 
     // --- Function-sort satisfaction ---
 
     @Test
     void lamSatisfiesFunctionSort_basicArity() throws Exception {
-        Sort fn = Sort.function(List.of(ANY_INT), ANY_INT);
+        Sort fn = Sort.method(List.of(ANY_INT), ANY_INT);
         SymExpr identity = SymExpr.lam("x", SymExpr.var("x"));
         assertTrue(Refinements.satisfies(identity, fn, SIMPLIFIER).isPassed());
     }
@@ -66,7 +66,7 @@ class FunctionSortTest {
     @Test
     void lamWithRefinedReturn_bodyPassesUnderPrecondition() throws Exception {
         // (x: Int[@>=0]) -> Int[@>=0] = x   — identity, body trivially satisfies
-        Sort fn = Sort.function(List.of(INT_GE_0), INT_GE_0);
+        Sort fn = Sort.method(List.of(INT_GE_0), INT_GE_0);
         SymExpr identity = SymExpr.lam("x", SymExpr.var("x"));
         ProofResult r = Refinements.satisfies(identity, fn, SIMPLIFIER);
         assertTrue(r.isPassed(),
@@ -76,7 +76,7 @@ class FunctionSortTest {
     @Test
     void lamWithSquareBody_satisfiesNonNegReturn() throws Exception {
         // (x: Int) -> Int[@>=0] = x * x
-        Sort fn = Sort.function(List.of(ANY_INT), INT_GE_0);
+        Sort fn = Sort.method(List.of(ANY_INT), INT_GE_0);
         SymExpr square = SymExpr.lam("x", SymExpr.mul(SymExpr.var("x"), SymExpr.var("x")));
         ProofResult r = Refinements.satisfies(square, fn, SIMPLIFIER);
         assertTrue(r.isPassed(),
@@ -86,7 +86,7 @@ class FunctionSortTest {
     @Test
     void lamWithReturnSortViolation_fails() throws Exception {
         // (x: Int[@>=0]) -> Int[@>0] = x   — x could be 0; should NOT pass
-        Sort fn = Sort.function(List.of(INT_GE_0), INT_GT_0);
+        Sort fn = Sort.method(List.of(INT_GE_0), INT_GT_0);
         SymExpr identity = SymExpr.lam("x", SymExpr.var("x"));
         ProofResult r = Refinements.satisfies(identity, fn, SIMPLIFIER);
         assertFalse(r.isPassed(),
@@ -95,14 +95,14 @@ class FunctionSortTest {
 
     @Test
     void nonLamValue_failsFunctionSort() throws Exception {
-        Sort fn = Sort.function(List.of(ANY_INT), ANY_INT);
+        Sort fn = Sort.method(List.of(ANY_INT), ANY_INT);
         ProofResult r = Refinements.satisfies(SymExpr.lit(5), fn, SIMPLIFIER);
         assertInstanceOf(ProofResult.Failed.class, r);
     }
 
     @Test
     void symbolicValue_yieldsResidualOnFunctionSort() throws Exception {
-        Sort fn = Sort.function(List.of(ANY_INT), ANY_INT);
+        Sort fn = Sort.method(List.of(ANY_INT), ANY_INT);
         ProofResult r = Refinements.satisfies(SymExpr.var("f"), fn, SIMPLIFIER);
         assertInstanceOf(ProofResult.Residual.class, r);
     }
@@ -112,24 +112,24 @@ class FunctionSortTest {
     @Test
     void functionImplies_covariantReturn() throws Exception {
         // (Int) -> Int[@>0] implies (Int) -> Int[@>=0]   (tighter return → looser return)
-        Sort tighterReturn = Sort.function(List.of(ANY_INT), INT_GT_0);
-        Sort looserReturn = Sort.function(List.of(ANY_INT), INT_GE_0);
+        Sort tighterReturn = Sort.method(List.of(ANY_INT), INT_GT_0);
+        Sort looserReturn = Sort.method(List.of(ANY_INT), INT_GE_0);
         assertTrue(Refinements.imply(tighterReturn, looserReturn, SIMPLIFIER).isPassed());
     }
 
     @Test
     void functionImplies_contravariantParam() throws Exception {
         // (Int) -> Int implies (Int[@>=0]) -> Int   (looser param accepts more, so subtype)
-        Sort looserParam = Sort.function(List.of(ANY_INT), ANY_INT);
-        Sort tighterParam = Sort.function(List.of(INT_GE_0), ANY_INT);
+        Sort looserParam = Sort.method(List.of(ANY_INT), ANY_INT);
+        Sort tighterParam = Sort.method(List.of(INT_GE_0), ANY_INT);
         // A function accepting any Int can be used wherever a function accepting only @>=0 is expected
         assertTrue(Refinements.imply(looserParam, tighterParam, SIMPLIFIER).isPassed());
     }
 
     @Test
     void functionImplies_arityMismatchFails() throws Exception {
-        Sort unary = Sort.function(List.of(ANY_INT), ANY_INT);
-        Sort binary = Sort.function(List.of(ANY_INT, ANY_INT), ANY_INT);
+        Sort unary = Sort.method(List.of(ANY_INT), ANY_INT);
+        Sort binary = Sort.method(List.of(ANY_INT, ANY_INT), ANY_INT);
         assertFalse(Refinements.imply(unary, binary, SIMPLIFIER).isPassed());
     }
 
@@ -140,7 +140,7 @@ class FunctionSortTest {
         // Counter type: { count : Int[@>=0], next : (Unit) -> Int[@>0] }
         Sort counter = Sort.structural("Counter", Map.of(
                 "count", INT_GE_0,
-                "next", Sort.function(List.of(UNIT), INT_GT_0)));
+                "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
         // Instance: count = 5, next = lambda that returns self.count + 1
         SymExpr instance = SymExpr.record(Map.of(
@@ -158,7 +158,7 @@ class FunctionSortTest {
         // Same Counter type but next() returns 0, which violates @>0
         Sort counter = Sort.structural("Counter", Map.of(
                 "count", INT_GE_0,
-                "next", Sort.function(List.of(UNIT), INT_GT_0)));
+                "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
         SymExpr instance = SymExpr.record(Map.of(
                 "count", SymExpr.lit(5),
@@ -225,7 +225,7 @@ class FunctionSortTest {
     void recordWithExtraMembers_satisfiesStructuralWithSubsetMethods() throws Exception {
         // Width subtyping: extra members (including extra methods) are fine
         Sort basicInterface = Sort.structural("HasNext", Map.of(
-                "next", Sort.function(List.of(UNIT), ANY_INT)));
+                "next", Sort.method(List.of(UNIT), ANY_INT)));
 
         SymExpr fancyInstance = SymExpr.record(Map.of(
                 "count", SymExpr.lit(5),
