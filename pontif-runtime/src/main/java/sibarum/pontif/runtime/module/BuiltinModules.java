@@ -39,6 +39,9 @@ public final class BuiltinModules {
     /** The conservation-property builtin module's name. */
     public static final String STD_CONSERVATION = "std.conservation";
 
+    /** The sequence-substrate builtin module's name (docs/streams.md). */
+    public static final String STD_STREAM = "std.stream";
+
     private BuiltinModules() {}
 
     /** All builtin modules, by name. */
@@ -47,7 +50,36 @@ public final class BuiltinModules {
         mods.put(STD_COMMON, stdCommon());
         mods.put(STD_PROOF, stdProof());
         mods.put(STD_CONSERVATION, stdConservation());
+        mods.put(STD_STREAM, stdStream());
         return mods;
+    }
+
+    /**
+     * The Queue — the sequence substrate's inductive view (streams slice 1,
+     * {@code docs/streams.md}): {@code Element(head, rest:[Element|Leaf])},
+     * recursion through the constructor (contractive, admitted), terminal
+     * {@code Leaf()} re-exported from {@code std.common} — the same nominal
+     * proof trees use. {@code head} is loose ({@code "_"}) until the
+     * {@code [Stream(T)]} sort form lands; the element-sort discipline is a
+     * later slice. Pure functions consume a Queue by matching the
+     * {@code [Element|Leaf]} union — bare-arm sum-type matching, totality
+     * determined, structural recursion certifiable by descent.
+     */
+    private static IrModule stdStream() {
+        IrStmt requiresCommon = new IrStmt.Requires(STD_COMMON,
+                List.of(new IrStmt.RequireEntry("Leaf", "Leaf")), Origin.NONE);
+
+        IrSort elementOrLeaf = IrSort.union(List.of(IrSort.named("Element"), IrSort.named("Leaf")));
+        Map<String, IrSort> elementFields = new LinkedHashMap<>();
+        elementFields.put("head", IrSort.named("_"));
+        elementFields.put("rest", elementOrLeaf);
+        IrStmt element = IrStmt.typeAlias("Element", IrSort.structural("Element", elementFields));
+
+        // Element declared here; Leaf re-exported (imported + exported).
+        IrStmt exports = IrStmt.exports(List.of("Element", "Leaf"), true);
+
+        return new IrModule(STD_STREAM,
+                List.of(requiresCommon, exports, element), IrExpr.lit(0));
     }
 
     /**
