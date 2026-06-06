@@ -126,7 +126,26 @@ public final class TruffleLowering {
         List<PontifNode> valueNodes = new ArrayList<>(record.members().size());
         for (Map.Entry<String, IrExpr> e : record.members().entrySet()) {
             fieldNames.add(e.getKey());
-            valueNodes.add(lowerExpr(e.getValue(), module, registry));
+            PontifNode valueNode = lowerExpr(e.getValue(), module, registry);
+            // Construction-claim checks stamped by ConstructionGate — wrap the
+            // member so the value is judged at construction, mirroring the
+            // IrInterpreter path.
+            IrSort checkSort = record.runtimeChecks().get(e.getKey());
+            if (checkSort != null) {
+                valueNode = sibarum.pontif.ast.record.ConstructionCheckNode.of(
+                        valueNode, module.sortFor(checkSort),
+                        record.typeName() + "." + e.getKey(), compiler.simplifier());
+                valueNode.withOrigin(e.getValue().origin());
+            }
+            valueNodes.add(valueNode);
+        }
+        // A native constructor builds its carrier scalar instead of a
+        // RecordValue — the registry's construct map is injected here (the
+        // ast module sits below the registry).
+        NativeConstructors.Entry nativeCons = NativeConstructors.get(record.typeName());
+        if (nativeCons != null) {
+            return sibarum.pontif.ast.record.NativeConstructNode.of(
+                    valueNodes, (values, origin) -> nativeCons.construct().apply(values, origin));
         }
         return RecordNode.of(record.typeName(), fieldNames, valueNodes);
     }

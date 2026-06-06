@@ -77,6 +77,16 @@ positional (`_tuple`) sorts additionally arity-exact. Native `==` follows
 matching ("if it wouldn't match, it's not equal"); user `==` overloads are
 ordinary dispatch the kernel never consults.
 
+**construction gate** — The claim rule's enforcement half (ruled 2026-06-05,
+`ConstructionGate`): a constructor argument is judged against its declared
+field sort at the construction site, three ways. *Provable fit* (the
+argument's narrowing implies the field sort) passes with no runtime check —
+the proof discharged it. *Provable miss* (disjoint) is a compile error — the
+value would be born lying. *Genuine overlap / undecidable* compiles with a
+runtime check at the construction site (fail-closed; both engines). Decided
+by the same kernel as match totality; bare unregistered field sorts keep the
+substrate's leniency, and the Int→Decimal embedding is never ruled disjoint.
+
 **circular design** — The generalization backward design forced on itself
 (`docs/conservation-algebra.md`): for a feature whose artifact transcribes the
 IR, the IR is the theory's *alphabet* — classifications are DERIVED per sealed

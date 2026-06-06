@@ -32,6 +32,10 @@ The framework ships:
   algorithmic properties (`proof translate = DataConservative()`); a drop,
   duplication, or untraceable flow the proof doesn't account for
   rejects the program (`requires std.conservation`).
+- A **construction gate** — constructor arguments are judged against
+  their declared field sorts, three ways: provable fit passes with no
+  runtime check, provable miss is a compile error, genuine overlap
+  compiles with a runtime check at the construction site.
 - A Truffle lowering and an `IrInterpreter` (`pontif-runtime`).
 - A playground for editing and running snippets (`pontif-playground`).
 

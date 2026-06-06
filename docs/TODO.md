@@ -1578,3 +1578,8 @@ earn its keep.
   issuers / oracle modules as trusted *Proof Authorities*, and
   receipts they produce are accepted by attribution rather than
   independent validation.
+
+- **Decimal constructor arg naming.** `Decimal(unscaled, scale)` shipped
+  with BigDecimal''s vocabulary (ruled 2026-06-06, provisional). Revisit
+  the names once Strings are fully implemented — the digits-as-text
+  reading may suggest better words.

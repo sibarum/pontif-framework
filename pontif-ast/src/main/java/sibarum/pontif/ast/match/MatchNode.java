@@ -50,7 +50,7 @@ public final class MatchNode extends PontifNode {
     @Override
     public Object execute(VirtualFrame frame) {
         Object value = scrutinee.execute(frame);
-        SymExpr symbolicValue = toSymExpr(value);
+        SymExpr symbolicValue = sibarum.pontif.ast.record.RuntimeValues.toSymExpr(value);
         for (int i = 0; i < patterns.length; i++) {
             ProofResult result = Refinements.satisfies(symbolicValue, patterns[i], simplifier);
             if (result instanceof ProofResult.Passed) {
@@ -75,22 +75,6 @@ public final class MatchNode extends PontifNode {
         all.add(scrutinee);
         all.addAll(Arrays.asList(results));
         return all;
-    }
-
-    private static SymExpr toSymExpr(Object value) {
-        if (value instanceof Long l) return SymExpr.lit(l);
-        if (value instanceof Integer i) return SymExpr.lit(i.longValue());
-        if (value instanceof Boolean b) return SymExpr.bool(b);
-        if (value instanceof sibarum.pontif.ast.record.RecordValue r) {
-            java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
-            for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
-                members.put(e.getKey(), toSymExpr(e.getValue()));
-            }
-            return SymExpr.record(r.typeName(), members);
-        }
-        throw new IllegalArgumentException(
-                "Cannot convert runtime value to SymExpr (type "
-                        + (value == null ? "null" : value.getClass().getSimpleName()) + "): " + value);
     }
 
     public record Branch(Sort pattern, PontifNode result) {

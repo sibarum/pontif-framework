@@ -219,6 +219,13 @@ public final class SortChecker {
      * disjunctions, non-constant bounds) is rejected — not a type-narrowing
      * problem, per the Decimal design.
      */
+    /** {@code @.unscaled} / {@code @.scale} — a projection of Decimal's anatomy. */
+    private static boolean isAnatomyProjection(IrExpr e) {
+        return e instanceof IrExpr.FieldAccess fa
+                && fa.base() instanceof IrExpr.SelfRef
+                && sibarum.pontif.core.Decimals.isAnatomyField(fa.fieldName());
+    }
+
     private static void validateDecimalNarrow(IrExpr predicate, sibarum.pontif.core.Origin origin)
             throws CompileException {
         if (predicate instanceof IrExpr.BinOp op) {
@@ -233,6 +240,18 @@ public final class SortChecker {
                             (op.left() instanceof IrExpr.SelfRef && isNumericConst(op.right()))
                                     || (op.right() instanceof IrExpr.SelfRef && isNumericConst(op.left()));
                     if (selfVsConst) {
+                        return;
+                    }
+                    // The anatomy narrows (slice 2 of the native-constructor
+                    // registry): comparisons of @.unscaled / @.scale against a
+                    // numeric constant. These are DISCRETE obligations (scale
+                    // is an Int; unscaled is integer-valued), so they sit on
+                    // the integer side of the ruled discreteness boundary —
+                    // they don't widen the three Decimal-domain narrows.
+                    boolean anatomyVsConst =
+                            (isAnatomyProjection(op.left()) && isNumericConst(op.right()))
+                                    || (isAnatomyProjection(op.right()) && isNumericConst(op.left()));
+                    if (anatomyVsConst) {
                         return;
                     }
                 }
@@ -498,6 +517,18 @@ public final class SortChecker {
                                 "Record of sort '" + sp.name() + "' has no field '"
                                         + fa.fieldName() + "'; available fields: "
                                         + sp.members().keySet(),
+                                fa.origin());
+                    }
+                } else if (baseSort != null) {
+                    // Native anatomies get the same typo coverage as structs.
+                    String base = matchBaseName(baseSort);
+                    if (base != null && NativeConstructors.has(base)
+                            && !NativeConstructors.get(base).shape().members()
+                                    .containsKey(fa.fieldName())) {
+                        throw new CompileException(
+                                "'" + base + "' has no field '" + fa.fieldName()
+                                        + "' — its anatomy is "
+                                        + NativeConstructors.get(base).shape().members().keySet(),
                                 fa.origin());
                     }
                 }

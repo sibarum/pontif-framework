@@ -147,8 +147,16 @@ public sealed interface IrExpr
      * for anonymous records (S-expr {@code (record ...)} construction).
      * Used downstream by the dispatch table's trait-fallback rule to
      * identify the concrete type of an argument.
+     *
+     * <p>{@code runtimeChecks} (field → declared sort) is stamped by
+     * {@link ConstructionGate} on exactly the members whose fit against the
+     * declared field sort could not be decided at compile time — the runtime
+     * validates those at construction (the claim rule's middle verdict:
+     * provable fit passes unchecked, provable miss is a compile error,
+     * genuine overlap carries a runtime check). Empty for unstamped records.
      */
-    record Record(String typeName, Map<String, IrExpr> members, Origin origin) implements IrExpr {
+    record Record(String typeName, Map<String, IrExpr> members,
+                  Map<String, IrSort> runtimeChecks, Origin origin) implements IrExpr {
         public Record {
             if (members == null) {
                 throw new IllegalArgumentException("Record members must be non-null");
@@ -157,11 +165,19 @@ public sealed interface IrExpr
             // load-bearing for destructure desugar, error messages, and Truffle
             // lowering. Map.copyOf would silently strip the order.
             members = Collections.unmodifiableMap(new LinkedHashMap<>(members));
+            runtimeChecks = runtimeChecks == null
+                    ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(runtimeChecks));
+        }
+
+        /** Unstamped constructor — the shape every pass builds; the gate stamps. */
+        public Record(String typeName, Map<String, IrExpr> members, Origin origin) {
+            this(typeName, members, Map.of(), origin);
         }
 
         /** Backward-compat constructor used by tests and S-expr parser. */
         public Record(Map<String, IrExpr> members, Origin origin) {
-            this(null, members, origin);
+            this(null, members, Map.of(), origin);
         }
     }
 

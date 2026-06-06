@@ -77,10 +77,46 @@ public final class IrInterpreter {
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     members.put(e.getKey(), eval(e.getValue(), env, module));
                 }
+                // Construction-claim checks stamped by ConstructionGate: the
+                // members whose fit was undecidable at compile time are judged
+                // here, where the value is concrete. Fail-closed: anything
+                // short of Passed rejects the construction.
+                for (Map.Entry<String, IrSort> check : r.runtimeChecks().entrySet()) {
+                    Object v = members.get(check.getKey());
+                    Sort claim = module.sortFor(check.getValue());
+                    ProofResult pr = Refinements.satisfies(toSymExpr(v), claim, checker(module));
+                    if (!(pr instanceof ProofResult.Passed)) {
+                        throw new RuntimeCheckException(
+                                "Construction claim violated: '" + r.typeName() + "."
+                                        + check.getKey() + "' = " + v
+                                        + " does not satisfy the declared sort " + claim,
+                                r.origin());
+                    }
+                }
+                // A native constructor builds its carrier scalar (the bijection
+                // contract's construct half), not a RecordValue.
+                NativeConstructors.Entry nativeCons = NativeConstructors.get(r.typeName());
+                if (nativeCons != null) {
+                    yield nativeCons.construct().apply(
+                            members.values().toArray(), r.origin());
+                }
                 yield new RecordValue(r.typeName(), members);
             }
             case IrExpr.FieldAccess fa -> {
                 Object baseValue = eval(fa.base(), env, module);
+                // Decimal anatomy projection — total; unscaled is the
+                // canonical scale-0 Decimal (never an Int: one-way wall).
+                if (baseValue instanceof BigDecimal dec) {
+                    if (!sibarum.pontif.core.Decimals.isAnatomyField(fa.fieldName())) {
+                        throw new RuntimeCheckException(
+                                "Decimal has no field '." + fa.fieldName()
+                                        + "' — its anatomy is (unscaled, scale)",
+                                fa.origin());
+                    }
+                    yield "scale".equals(fa.fieldName())
+                            ? (Object) sibarum.pontif.core.Decimals.projectScale(dec)
+                            : sibarum.pontif.core.Decimals.projectUnscaled(dec);
+                }
                 if (!(baseValue instanceof RecordValue rec)) {
                     throw new RuntimeCheckException(
                             "Field access '." + fa.fieldName() + "' requires a record value, got "

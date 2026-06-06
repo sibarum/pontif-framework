@@ -231,8 +231,8 @@ public final class ConservationDrafter {
             Map<String, List<IrStmt.FunctionDecl>> declsByName,
             Map<String, ConservationSummary> summaries, boolean inDispatchArm)
             throws CompileException {
-        Ctx ctx = new Ctx(fd, structs, declsByName, summaries, inDispatchArm);
         List<TypedAtom> inputs = inputAtomsOf(fd, structs);
+        Ctx ctx = new Ctx(fd, structs, declsByName, summaries, inDispatchArm, inputs);
         StringBuilder params = new StringBuilder();
         for (IrParam p : fd.params()) {
             String varName = p.name() + "_0";
@@ -264,16 +264,25 @@ public final class ConservationDrafter {
         final Map<String, ConservationSummary> summaries;
         /** Drafting a dispatch-as-Branch candidate: no re-entry, no summaries. */
         final boolean inDispatchArm;
+        /** The function's flattened input atoms — leaf detection for native projection. */
+        final List<TypedAtom> inputs;
         int counter = 1;
 
         Ctx(IrStmt.FunctionDecl enclosing, Map<String, IrSort.Structural> structs,
                 Map<String, List<IrStmt.FunctionDecl>> declsByName,
-                Map<String, ConservationSummary> summaries, boolean inDispatchArm) {
+                Map<String, ConservationSummary> summaries, boolean inDispatchArm,
+                List<TypedAtom> inputs) {
             this.enclosing = enclosing;
             this.structs = structs;
             this.declsByName = declsByName;
             this.summaries = summaries;
             this.inDispatchArm = inDispatchArm;
+            this.inputs = inputs;
+        }
+
+        /** True when {@code path} IS an input atom (a scalar leaf — no sub-atoms). */
+        boolean isLeafAtom(AttributePath path) {
+            return inputs.stream().anyMatch(a -> a.path().equals(path));
         }
 
         String add(FlowNode node) {
@@ -422,6 +431,19 @@ public final class ConservationDrafter {
             case IrExpr.FieldAccess fa -> {
                 Flow base = draftValue(fa.base(), ctx);
                 yield switch (base) {
+                    // Native-anatomy projection on a scalar LEAF atom (a
+                    // Decimal param): there is no sub-atom to select — the
+                    // projection DERIVES part of the atom's content.
+                    // Content-class, DEGRADED (influence, not recoverability);
+                    // the (unscaled, scale) pair is jointly recoverable, a
+                    // cross-node fact like /+% — a later refinement.
+                    case Flow.Verbatim v when ctx.isLeafAtom(v.path())
+                            && sibarum.pontif.core.Decimals.isAnatomyField(fa.fieldName()) -> {
+                        String id = ctx.freshId("c");
+                        ctx.add(new FlowNode.Computation(id, "." + fa.fieldName(),
+                                OpClass.ARITHMETIC, Recoverability.DEGRADED, List.of(v)));
+                        yield new Flow.FromNode(id);
+                    }
                     case Flow.Verbatim v -> new Flow.Verbatim(v.path().child(fa.fieldName()));
                     // Projection through a known construction is exact: the
                     // slot's own flow (path-selection metadata collapsing).

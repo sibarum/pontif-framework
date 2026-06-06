@@ -1149,6 +1149,12 @@ public final class AltParser {
         }
         AltToken end = expect(AltToken.Kind.RPAREN);
         Origin origin = start.spanTo(end);
+        if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
+            throw new ParseException(
+                    "'" + nameTok.text() + "' is a native type — its constructor "
+                            + "is built in and cannot be redeclared",
+                    nameTok.origin());
+        }
         IrSort.Structural structSort = new IrSort.Structural(nameTok.text(), members, origin);
         declaredStructs.put(nameTok.text(), structSort);
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
@@ -1527,6 +1533,20 @@ public final class AltParser {
      *     Primitive-sorted fields only; names added to {@code literalFieldsOut}.
      * Mixed forms are allowed.
      */
+    /**
+     * The shape a {@code [Name(...)]} pattern destructures against: the
+     * declared struct, or a native constructor's registered anatomy
+     * ({@code [Decimal(u, s)]} — irrefutable, every Decimal has a canonical
+     * (unscaled, scale)).
+     */
+    private IrSort.Structural patternShapeFor(String typeName) {
+        IrSort.Structural decl = declaredStructs.get(typeName);
+        if (decl != null) return decl;
+        return sibarum.pontif.ir.NativeConstructors.has(typeName)
+                ? sibarum.pontif.ir.NativeConstructors.get(typeName).shape()
+                : null;
+    }
+
     private Map<String, IrSort> parseStructFields(String typeName, Origin typeOrigin,
             java.util.Set<String> literalFieldsOut, Map<String, String> renamesOut)
             throws ParseException {
@@ -1544,7 +1564,7 @@ public final class AltParser {
                             && (t.text().equals("true") || t.text().equals("false")));
             if (literalClause) {
                 consume();
-                IrSort.Structural decl = declaredStructs.get(typeName);
+                IrSort.Structural decl = patternShapeFor(typeName);
                 if (decl == null) {
                     throw new ParseException(
                             "A literal field pattern inside [" + typeName + "(...)] requires '"
@@ -1591,7 +1611,7 @@ public final class AltParser {
                 // pattern stays arity-total) but binds nothing. Recorded in
                 // literalFieldsOut, the "constrain/occupy but don't bind" set
                 // the destructure desugar skips.
-                IrSort.Structural decl = declaredStructs.get(typeName);
+                IrSort.Structural decl = patternShapeFor(typeName);
                 if (decl == null) {
                     throw new ParseException(
                             "A '_' discard inside [" + typeName + "(...)] requires '"
@@ -1621,7 +1641,7 @@ public final class AltParser {
                 fieldSort = parseSort();
             } else {
                 // Bare ident — look up declared field sort.
-                IrSort.Structural decl = declaredStructs.get(typeName);
+                IrSort.Structural decl = patternShapeFor(typeName);
                 if (decl == null) {
                     throw new ParseException(
                             "Bare field name '" + fieldName.text() + "' inside [" + typeName
@@ -1661,7 +1681,7 @@ public final class AltParser {
         // [Ternion(a)] is lying by omission. Enforced in pattern context only;
         // a partial field-sort *type* (e.g. [Point(x:[Int:@>0])]) is honest
         // narrowing, not a pattern, so it's left alone.
-        IrSort.Structural decl = declaredStructs.get(typeName);
+        IrSort.Structural decl = patternShapeFor(typeName);
         if (parsingTuplePattern && decl != null && members.size() < decl.members().size()) {
             throw new ParseException(
                     "Pattern [" + typeName + "(...)] lists " + members.size() + " of "
@@ -1862,10 +1882,19 @@ public final class AltParser {
             } else if (t.kind() == AltToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
                 AltToken open = consume();
                 // Struct-literal shortcut: a bare ident matching a declared
-                // struct constructs a record (positional), not a Call.
+                // struct constructs a record (positional), not a Call. Native
+                // constructors (Decimal(unscaled, scale)) route the same way —
+                // their registered shape plays the struct declaration's part.
                 if (expr instanceof IrExpr.Var v && declaredStructs.containsKey(v.name())) {
                     expr = parsePositionalStructLiteral(
                             declaredStructs.get(v.name()), v.name(), open);
+                    continue;
+                }
+                if (expr instanceof IrExpr.Var v
+                        && sibarum.pontif.ir.NativeConstructors.has(v.name())) {
+                    expr = parsePositionalStructLiteral(
+                            sibarum.pontif.ir.NativeConstructors.get(v.name()).shape(),
+                            v.name(), open);
                     continue;
                 }
                 List<IrExpr> args = parseArgList();
@@ -1902,13 +1931,17 @@ public final class AltParser {
             } else if (t.kind() == AltToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
                     && expr instanceof IrExpr.Var v
-                    && declaredStructs.containsKey(v.name())) {
+                    && (declaredStructs.containsKey(v.name())
+                            || sibarum.pontif.ir.NativeConstructors.has(v.name()))) {
                 // By-name struct literal `Foo{x=a, y=b}`. The brace form is
                 // reserved for declared-struct construction in this slice;
-                // anonymous and dotted-name forms are deferred.
+                // anonymous and dotted-name forms are deferred. Native
+                // constructors take the brace form too.
                 AltToken open = consume();
-                expr = parseByNameStructLiteral(
-                        declaredStructs.get(v.name()), v.name(), open);
+                IrSort.Structural shape = declaredStructs.containsKey(v.name())
+                        ? declaredStructs.get(v.name())
+                        : sibarum.pontif.ir.NativeConstructors.get(v.name()).shape();
+                expr = parseByNameStructLiteral(shape, v.name(), open);
             } else {
                 break;
             }
@@ -2480,7 +2513,26 @@ public final class AltParser {
                             Origin.NONE);
                 }
             }
-            wrapped.add(new IrExpr.MatchBranch(b.pattern(), result));
+            IrSort pattern = b.pattern();
+            // A native-anatomy pattern ([Decimal(u, s)]) matches the CARRIER,
+            // not a record — the arm's sort becomes the bare nominal name (the
+            // destructure is irrefutable: every carrier has a canonical
+            // anatomy), or a refinement over the anatomy when fields are
+            // literal-constrained ([Decimal(25, s)] → [Decimal:@.unscaled==25]).
+            if (b.pattern() instanceof IrSort.Structural sp
+                    && sibarum.pontif.ir.NativeConstructors.has(sp.name())) {
+                IrExpr conjunct = null;
+                for (Map.Entry<String, IrSort> e : sp.members().entrySet()) {
+                    if (!(e.getValue() instanceof IrSort.Refined rf)) continue;
+                    IrExpr p = selfToFieldAccess(rf.predicate(), e.getKey());
+                    conjunct = conjunct == null ? p
+                            : new IrExpr.BinOp(IrExpr.Op.AND, conjunct, p, Origin.NONE);
+                }
+                pattern = conjunct == null
+                        ? IrSort.named(sp.name())
+                        : new IrSort.Refined(sp.name(), conjunct, Origin.NONE);
+            }
+            wrapped.add(new IrExpr.MatchBranch(pattern, result));
         }
         IrExpr match = new IrExpr.Match(scrutineeRef, wrapped, matchOrigin);
         if (!needsOuterLet) return match;
@@ -2491,6 +2543,22 @@ public final class AltParser {
         // callee's return, etc.).
         IrSort scrutineeSort = inferMaximalSort(scrutinee);
         return new IrExpr.LetIn(outerLetName, scrutineeSort, scrutinee, match, matchOrigin);
+    }
+
+    /**
+     * Rewrites a per-field pattern predicate ({@code @==25}, Self meaning the
+     * FIELD) into a whole-value predicate ({@code @.unscaled==25}, Self
+     * meaning the carrier) — the form native-anatomy patterns refine with.
+     */
+    private static IrExpr selfToFieldAccess(IrExpr pred, String field) {
+        return switch (pred) {
+            case IrExpr.SelfRef s -> new IrExpr.FieldAccess(s, field, s.origin());
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    selfToFieldAccess(op.left(), field),
+                    selfToFieldAccess(op.right(), field),
+                    op.origin());
+            default -> pred;  // literals and anything Self-free pass through
+        };
     }
 
     /**

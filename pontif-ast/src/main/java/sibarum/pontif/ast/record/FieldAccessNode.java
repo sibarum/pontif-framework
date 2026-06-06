@@ -33,6 +33,19 @@ public final class FieldAccessNode extends PontifNode {
     @Override
     public Object execute(VirtualFrame frame) {
         Object baseValue = base.execute(frame);
+        // Decimal anatomy projection — total; unscaled is the canonical
+        // scale-0 Decimal (never an Int: one-way wall). Mirrors IrInterpreter.
+        if (baseValue instanceof java.math.BigDecimal dec) {
+            if (!sibarum.pontif.core.Decimals.isAnatomyField(fieldName)) {
+                throw new RuntimeCheckException(
+                        "Decimal has no field '." + fieldName
+                                + "' — its anatomy is (unscaled, scale)",
+                        origin());
+            }
+            return "scale".equals(fieldName)
+                    ? (Object) sibarum.pontif.core.Decimals.projectScale(dec)
+                    : sibarum.pontif.core.Decimals.projectUnscaled(dec);
+        }
         if (!(baseValue instanceof RecordValue record)) {
             throw new RuntimeCheckException(
                     "Field access '." + fieldName + "' requires a record value, got "

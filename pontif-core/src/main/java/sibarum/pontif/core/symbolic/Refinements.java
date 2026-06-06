@@ -130,7 +130,15 @@ public final class Refinements {
             return satisfiesIntersection(value, sort, simplifier);
         }
         if (!sort.isRefined()) {
-            return ProofResult.passed();
+            return satisfiesBareNamed(value, sort, simplifier);
+        }
+        // Refined-primitive kind gate: the base bites on concrete value kind
+        // BEFORE the predicate runs, same ruling as bare names — a record that
+        // happens to carry a 'scale' member must not satisfy
+        // [Decimal:@.scale==2] by predicate coincidence.
+        ProofResult kind = primitiveKindGate(value, sort.name(), simplifier);
+        if (kind != null) {
+            return kind;
         }
         // Refined-by-name claim gate: `[Point:@.x > @.y]` asserts Point-ness
         // before its predicate. When the refined base is a DECLARED type and
@@ -154,6 +162,49 @@ public final class Refinements {
                             "Value " + value + " does not satisfy " + sort + " — predicate " + sort.predicate() + " evaluates to false");
         }
         return ProofResult.residual(simplified);
+    }
+
+    /**
+     * A bare named sort with no refinement. The KNOWN primitive names bite on
+     * the value's kind (ruled 2026-06-06: an anonymous aggregate never matches
+     * {@code [Decimal]} — and by the same claim-rule reading, {@code [Int]}
+     * never matches a Bool). The lossless Int→Decimal embedding is honored
+     * ({@code [Decimal]} accepts an Int value). Symbolic values (Vars and
+     * unevaluated expressions) stay unconstrained — biting is for concrete
+     * wrong-kind values only, so symbolic dispatch/receipt resolution keeps
+     * its hypothesis-driven behavior. Unregistered non-primitive names
+     * (traits, inline shape labels) keep the substrate's leniency.
+     */
+    private static ProofResult satisfiesBareNamed(SymExpr value, Sort sort, Simplifier simplifier) {
+        ProofResult kind = primitiveKindGate(value, sort.name(), simplifier);
+        return kind != null ? kind : ProofResult.passed();
+    }
+
+    /**
+     * The primitive kind check shared by bare and refined sorts: fails iff a
+     * CONCRETE value's kind mismatches a known primitive base name; {@code
+     * null} otherwise (symbolic value, matching kind, or a non-primitive name
+     * — the caller decides what no-rejection means). The Int→Decimal
+     * embedding is honored.
+     */
+    private static ProofResult primitiveKindGate(SymExpr value, String name, Simplifier simplifier) {
+        SymExpr v = simplifier.simplify(value);
+        boolean concrete = v instanceof SymExpr.Lit || v instanceof SymExpr.Dec
+                || v instanceof SymExpr.Bool || v instanceof SymExpr.Chr
+                || v instanceof SymExpr.Record;
+        if (!concrete) {
+            return null;
+        }
+        boolean ok = switch (name) {
+            case "Int" -> v instanceof SymExpr.Lit;
+            case "Decimal" -> v instanceof SymExpr.Dec || v instanceof SymExpr.Lit;
+            case "Bool" -> v instanceof SymExpr.Bool;
+            case "Char" -> v instanceof SymExpr.Chr;
+            default -> true;  // trait / shape-label / unknown — unconstrained
+        };
+        return ok ? null
+                : ProofResult.failed("Value " + v + " is not a " + name
+                        + " — a primitive base sort accepts only values of its kind");
     }
 
     /**

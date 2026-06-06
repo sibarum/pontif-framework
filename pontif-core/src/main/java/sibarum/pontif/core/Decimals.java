@@ -39,6 +39,29 @@ public final class Decimals {
      * tolerance has no jurisdiction at zero — a tiny value cannot be assumed
      * to be a rounding artifact.
      */
+    /**
+     * The Decimal anatomy ({@code Decimal(unscaled:Decimal, scale:Int)} — the
+     * native constructor's shape; this class is the single authority for its
+     * projection half). Both projections are <b>total</b>:
+     * {@code unscaled} is the canonical scale-0 integer-valued Decimal (never
+     * an Int — the Int→Decimal embedding is a one-way wall), {@code scale} is
+     * BigDecimal's 32-bit scale. Scale-0 values are the anatomy's
+     * self-fixpoints: {@code x.unscaled.unscaled == x.unscaled}.
+     */
+    public static boolean isAnatomyField(String field) {
+        return "unscaled".equals(field) || "scale".equals(field);
+    }
+
+    /** Canonical unscaled part — a scale-0 integer-valued Decimal. Total. */
+    public static BigDecimal projectUnscaled(BigDecimal v) {
+        return new BigDecimal(v.unscaledValue());
+    }
+
+    /** The scale part. Total. */
+    public static long projectScale(BigDecimal v) {
+        return v.scale();
+    }
+
     public static boolean approxEqual(BigDecimal a, BigDecimal b) {
         if (a.compareTo(b) == 0) {
             return true;

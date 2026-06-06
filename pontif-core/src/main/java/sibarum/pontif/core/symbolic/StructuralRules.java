@@ -28,7 +28,25 @@ public final class StructuralRules {
         return Optional.empty();
     };
 
+    /**
+     * Anatomy projection on a concrete Decimal — what makes
+     * {@code [Decimal:@.scale==2]} refinements and literal-constrained
+     * {@code [Decimal(25, s)]} patterns decidable. Both projections are total
+     * ({@link sibarum.pontif.core.Decimals} is the anatomy authority);
+     * {@code unscaled} reduces to the canonical scale-0 Decimal, never an Int
+     * — the Int→Decimal embedding is a one-way wall.
+     */
+    public static final RewriteRule FIELD_ACCESS_ON_DECIMAL = (expr, simp) -> {
+        if (expr instanceof SymExpr.FieldAccess(SymExpr.Dec dec, String name)
+                && sibarum.pontif.core.Decimals.isAnatomyField(name)) {
+            return Optional.of("scale".equals(name)
+                    ? SymExpr.lit(sibarum.pontif.core.Decimals.projectScale(dec.value()))
+                    : SymExpr.dec(sibarum.pontif.core.Decimals.projectUnscaled(dec.value())));
+        }
+        return Optional.empty();
+    };
+
     public static List<RewriteRule> all() {
-        return List.of(FIELD_ACCESS_ON_RECORD);
+        return List.of(FIELD_ACCESS_ON_RECORD, FIELD_ACCESS_ON_DECIMAL);
     }
 }

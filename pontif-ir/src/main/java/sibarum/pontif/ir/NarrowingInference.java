@@ -216,6 +216,10 @@ public final class NarrowingInference {
      */
     private static IrSort inferRecord(IrExpr.Record r, InferenceContext ctx) {
         if (r.typeName() == null) return null;
+        // A native constructor's value is its carrier scalar — field-predicate
+        // narrowings (@.unscaled==25) would claim projections that don't exist
+        // until the bijection's other half lands. Bare nominal sort only.
+        if (NativeConstructors.has(r.typeName())) return IrSort.named(r.typeName());
         List<IrExpr> conjuncts = new ArrayList<>();
         for (Map.Entry<String, IrExpr> entry : r.members().entrySet()) {
             IrSort memberNarrowing = infer(entry.getValue(), ctx);

@@ -42,6 +42,13 @@ public final class IrCompiler {
         // both single-file and linked compiles get it.
         resolved = DecimalPromotion.rewrite(resolved);
 
+        // The claim rule at construction sites, three-way: provable fit passes
+        // unchecked, provable miss is a compile error, genuine overlap gets a
+        // runtime check stamped on the record (enforced by the interpreter and
+        // the Truffle lowering). Runs after the promotions so it judges the
+        // promoted members.
+        resolved = ConstructionGate.rewrite(resolved);
+
         // Static sort propagation: catch field-access typos and missing-field
         // references before they reach runtime. Best-effort; the runtime still
         // validates fields it couldn't resolve here.
@@ -216,6 +223,9 @@ public final class IrCompiler {
                 }
             }
             case IrExpr.Record r -> {
+                // Stamped construction checks read their sorts at runtime via
+                // CompiledModule.sortFor — register them like match patterns.
+                for (IrSort s : r.runtimeChecks().values()) registerSort(s, map);
                 for (IrExpr v : r.members().values()) registerSortsInExpr(v, map);
             }
             case IrExpr.FieldAccess fa -> registerSortsInExpr(fa.base(), map);
