@@ -1,5 +1,6 @@
 package sibarum.pontif.runtime.module;
 
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSort;
@@ -29,6 +30,9 @@ import java.util.Map;
  */
 public final class BuiltinModules {
 
+    /** The shared-shapes builtin module's name — structs with reuse value live here. */
+    public static final String STD_COMMON = "std.common";
+
     /** The proof-authoring builtin module's name. */
     public static final String STD_PROOF = "std.proof";
 
@@ -40,16 +44,34 @@ public final class BuiltinModules {
     /** All builtin modules, by name. */
     public static Map<String, IrModule> all() {
         Map<String, IrModule> mods = new LinkedHashMap<>();
+        mods.put(STD_COMMON, stdCommon());
         mods.put(STD_PROOF, stdProof());
         mods.put(STD_CONSERVATION, stdConservation());
         return mods;
     }
 
+    /**
+     * Structs with cross-domain reuse value (ruled 2026-06-06). Founding
+     * resident: {@code Leaf()} — the canonical terminal, referenced by
+     * {@code [Leaf|Split]} (proof trees) and {@code [Element(T)|Leaf]}
+     * (streams, when they land). One freestanding nominal, borrowed by
+     * whichever unions need it — the un-Haskell union design's poster child.
+     * Domain modules RE-EXPORT it so their import surfaces stay whole.
+     */
+    private static IrModule stdCommon() {
+        IrStmt leaf = IrStmt.typeAlias("Leaf", IrSort.structural("Leaf", new LinkedHashMap<>()));
+        IrStmt exports = IrStmt.exports(List.of("Leaf"), true);
+        return new IrModule(STD_COMMON, List.of(exports, leaf), IrExpr.lit(0));
+    }
+
     private static IrModule stdProof() {
         IrSort leafOrSplit = IrSort.union(List.of(IrSort.named("Leaf"), IrSort.named("Split")));
 
-        // struct Leaf()
-        IrStmt leaf = IrStmt.typeAlias("Leaf", IrSort.structural("Leaf", new LinkedHashMap<>()));
+        // Leaf lives in std.common; std.proof re-exports it (requires +
+        // exports of the imported name), so `requires std.proof.{Leaf, …}`
+        // keeps working and resolves to the SAME nominal: std.common/Leaf.
+        IrStmt requiresCommon = new IrStmt.Requires(STD_COMMON,
+                List.of(new IrStmt.RequireEntry("Leaf", "Leaf")), Origin.NONE);
 
         // struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
         Map<String, IrSort> splitFields = new LinkedHashMap<>();
@@ -68,10 +90,12 @@ public final class BuiltinModules {
         IrStmt singletons =
                 IrStmt.typeAlias("Singletons", IrSort.structural("Singletons", singletonsFields));
 
+        // Leaf appears in the exports although it is imported, not declared —
+        // that combination IS a re-export.
         IrStmt exports = IrStmt.exports(List.of("Leaf", "Split", "Singletons"), true);
 
         return new IrModule(STD_PROOF,
-                List.of(exports, leaf, split, singletons), IrExpr.lit(0));
+                List.of(requiresCommon, exports, split, singletons), IrExpr.lit(0));
     }
 
     /**

@@ -53,7 +53,11 @@ public final class ModuleImportCheck {
                     String remote = entry.remoteName();
                     boolean declared = table.functionOwners(remote).contains(source)
                             || table.typeOwners(remote).contains(source);
-                    if (!declared) {
+                    // RE-EXPORT: the source may export a name it imports
+                    // rather than declares — valid iff the chase reaches a
+                    // true declarer (each hop's own requires is validated by
+                    // this same loop, so per-hop visibility is covered).
+                    if (!declared && table.originOf(source, remote) == null) {
                         throw new CompileException(
                                 "module '" + source + "' declares no name '" + remote
                                         + "' to import (required by '" + module + "')",
@@ -70,8 +74,14 @@ public final class ModuleImportCheck {
                     // imports may bring the same remote name as long as their
                     // local names differ; that's exactly what rename is for. A
                     // local name bound twice to different providers (different
-                    // module OR different remote name) is ambiguous.
-                    String provider = ModuleSymbolTable.fqn(source, remote);
+                    // module OR different remote name) is ambiguous. Providers
+                    // compare by DECLARING ORIGIN: importing the same nominal
+                    // through two re-export doors is not ambiguous — it's one
+                    // name arriving twice.
+                    ModuleSymbolTable.ImportedName origin = table.originOf(source, remote);
+                    String provider = origin != null
+                            ? ModuleSymbolTable.fqn(origin.sourceModule(), origin.remoteName())
+                            : ModuleSymbolTable.fqn(source, remote);
                     String prior = seen.put(entry.localName(), provider);
                     if (prior != null && !prior.equals(provider)) {
                         throw new CompileException(

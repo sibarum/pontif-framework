@@ -155,4 +155,30 @@ public final class ModuleSymbolTable {
     public boolean isExported(String module, String localKey) {
         return exports.getOrDefault(module, Set.of()).contains(localKey);
     }
+
+    /**
+     * The DECLARING origin of {@code name} as visible from {@code module}:
+     * the module itself when it declares the name, else the transitive
+     * source through {@code requires} links — the <b>re-export chase</b>
+     * (a module may export a name it imports; importers of that module must
+     * resolve to the true declarer so one nominal stays one nominal).
+     * Returns {@code null} when no declaring origin exists (or on a cycle —
+     * fail-closed; the import check reports it as undeclared).
+     */
+    public ImportedName originOf(String module, String name) {
+        String curModule = module;
+        String curName = name;
+        Set<String> visited = new LinkedHashSet<>();
+        while (visited.add(fqn(curModule, curName))) {
+            if (functionOwners(curName).contains(curModule)
+                    || typeOwners(curName).contains(curModule)) {
+                return new ImportedName(curModule, curName);
+            }
+            ImportedName in = importedName(curModule, curName);
+            if (in == null) return null;
+            curModule = in.sourceModule();
+            curName = in.remoteName();
+        }
+        return null;
+    }
 }

@@ -103,25 +103,28 @@ public final class ModuleLinker {
      * programs link exactly as before.
      */
     private static Map<String, IrModule> withRequiredBuiltins(Map<String, IrModule> modules) {
-        Set<String> required = new HashSet<>();
-        for (IrModule m : modules.values()) {
-            for (IrStmt s : m.statements()) {
-                if (s instanceof IrStmt.Requires r) required.add(r.targetModule());
-            }
-        }
         Map<String, IrModule> builtins = BuiltinModules.all();
-        boolean any = false;
-        for (String name : builtins.keySet()) {
-            if (required.contains(name) && !modules.containsKey(name)) {
-                any = true;
-                break;
+        // TRANSITIVE collection: a required builtin's own requires pull in
+        // further builtins (std.proof re-exports std.common's Leaf, so
+        // requiring std.proof must inject std.common too).
+        Set<String> needed = new HashSet<>();
+        java.util.ArrayDeque<IrModule> scan = new java.util.ArrayDeque<>(modules.values());
+        while (!scan.isEmpty()) {
+            IrModule m = scan.pop();
+            for (IrStmt s : m.statements()) {
+                if (s instanceof IrStmt.Requires r
+                        && builtins.containsKey(r.targetModule())
+                        && !modules.containsKey(r.targetModule())
+                        && needed.add(r.targetModule())) {
+                    scan.push(builtins.get(r.targetModule()));
+                }
             }
         }
-        if (!any) return modules;
+        if (needed.isEmpty()) return modules;
 
         Map<String, IrModule> all = new LinkedHashMap<>();
         for (Map.Entry<String, IrModule> e : builtins.entrySet()) {
-            if (required.contains(e.getKey()) && !modules.containsKey(e.getKey())) {
+            if (needed.contains(e.getKey())) {
                 all.put(e.getKey(), e.getValue());
             }
         }

@@ -98,10 +98,16 @@ public final class NameResolver {
         if (t.indexOf('/') >= 0 || PRIMITIVES.contains(t)) return t;
         if (table.typeOwners(t).contains(m)) return ModuleSymbolTable.fqn(m, t);
         ModuleSymbolTable.ImportedName imported = table.importedName(m, t);
-        // FQN via the REMOTE name — see resolveCallName; a renamed type import
-        // (`requires geo.{Point -> Pt}`) resolves local Pt to geo/Point.
+        // FQN via the DECLARING ORIGIN — a renamed type import
+        // (`requires geo.{Point -> Pt}`) resolves local Pt to geo/Point, and a
+        // RE-EXPORTED import chases through the exporting module to the true
+        // declarer (std.proof re-exporting std.common's Leaf resolves to
+        // std.common/Leaf — one nominal, however many doors it's served from).
         if (imported != null) {
-            return ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
+            ModuleSymbolTable.ImportedName declarer = table.originOf(m, t);
+            return declarer != null
+                    ? ModuleSymbolTable.fqn(declarer.sourceModule(), declarer.remoteName())
+                    : ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
         }
         int dot = t.indexOf('.');
         if (dot > 0 && table.requiredModules(m).contains(t.substring(0, dot))) {
@@ -167,11 +173,15 @@ public final class NameResolver {
         if (n.indexOf('/') >= 0) return n;  // already an FQN
         if (table.moduleDeclaresFunction(m, n)) return ModuleSymbolTable.fqn(m, n);
         ModuleSymbolTable.ImportedName imported = table.importedName(m, n);
-        // The FQN uses the REMOTE name — the symbol as the source module
-        // declares it. The local name is just how this module refers to it
-        // (they differ only under a `name -> alias` rename).
+        // The FQN uses the DECLARING ORIGIN — the symbol as the module that
+        // truly declares it knows it. The local name is just how this module
+        // refers to it (rename), and the import's direct source may itself be
+        // a RE-EXPORT (the chase finds the declarer).
         if (imported != null) {
-            return ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
+            ModuleSymbolTable.ImportedName origin = table.originOf(m, n);
+            return origin != null
+                    ? ModuleSymbolTable.fqn(origin.sourceModule(), origin.remoteName())
+                    : ModuleSymbolTable.fqn(imported.sourceModule(), imported.remoteName());
         }
         int dot = n.indexOf('.');
         if (dot > 0) {
