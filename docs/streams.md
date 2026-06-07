@@ -2,13 +2,16 @@
 Streams: the sequence substrate
 ===
 
-Status: DRAFT FOR RED-PEN (2026-06-06). Companion to `actions.md` — the
-queue defined there is this document's first customer, but the substrate
-stands on its own (collections, String-later, the fold theory). Markers:
-**RULED** = settled in design conversation; **DERIVED** = follows from ruled
-material plus standing laws; **PROPOSED** = Claude's suggestion awaiting a
-ruling; **OPEN** = explicitly undecided. All names provisional until the
-glossary ratifies them.
+Status: RATIFIED (2026-06-06; slice 1 landed the same day). Companion to
+`actions.md` — the queue defined there is this document's first customer,
+but the substrate stands on its own (collections, String-later, the fold
+theory). Ratification covers the architecture and the RULED material; the
+items still marked OPEN below (combinator names other than `exchange`,
+`singleton`'s name, `std.algebra`'s home, pipeline syntax, element-sort
+flow, the String confirmation, mix's mismatch lean) remain live decisions.
+Markers: **RULED** = settled; **DERIVED** = follows from ruled material
+plus standing laws; **PROPOSED** = suggestion awaiting a ruling; **OPEN** =
+explicitly undecided.
 
 # The governing decision (RULED)
 

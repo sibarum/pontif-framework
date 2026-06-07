@@ -77,6 +77,32 @@ positional (`_tuple`) sorts additionally arity-exact. Native `==` follows
 matching ("if it wouldn't match, it's not equal"); user `==` overloads are
 ordinary dispatch the kernel never consults.
 
+**exchange** — The stream combinator that is the third no-erase answer
+(ruled 2026-06-06, `streams.md`): neither erase nor split — *focus*.
+Matching elements are lent out, modified, and placed back; the result is
+the full stream with modifications woven in at their original positions,
+non-matching elements untouched. Per-element borrow → transform → return:
+the conservation coin at stream granularity. Silent discard is structurally
+inexpressible (classic discard-filter = `partition` + a declared drop).
+The `when`-arm's semantics inside the pure world.
+
+**Queue / Array (stream jurisdictions)** — The Stream substrate's two
+implementors mark *jurisdiction*, not data structure (`streams.md`,
+ratified 2026-06-06): **Queue** is the inductive view
+(`Element(head, rest:[Element|Leaf])`) — pure-side, consumed by structural
+recursion, termination certifiable by descent; **Array** is native storage
+— action-side, iterable only via observation (memory order is runtime
+dynamics, the observer world's business). A proven-linear Queue may be
+array-backed in the lowering: same memory, different jurisdiction.
+
+**std.common** — The builtin home for structs with cross-domain reuse value
+(ruled 2026-06-06). Founding resident: `Leaf()`, the canonical terminal —
+one freestanding nominal borrowed by `[Leaf|Split]` (proof trees) and
+`[Element|Leaf]` (streams) alike, served through **re-exports** (a module
+exporting a name it imports; importers resolve through the chase to the
+declaring origin, so one nominal stays one nominal however many doors it
+arrives by).
+
 **construction gate** — The claim rule's enforcement half (ruled 2026-06-05,
 `ConstructionGate`): a constructor argument is judged against its declared
 field sort at the construction site, three ways. *Provable fit* (the
