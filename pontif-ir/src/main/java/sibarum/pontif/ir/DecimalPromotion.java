@@ -37,7 +37,7 @@ final class DecimalPromotion {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         fd.name(), fd.params(), fd.returnSort(),
-                        rewriteExpr(fd.body(), structs), fd.origin());
+                        rewriteExpr(fd.body(), structs), fd.origin(), fd.topLevelLet());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl m : ti.methods()) {
@@ -68,8 +68,13 @@ final class DecimalPromotion {
                     op.op(), rewriteExpr(op.left(), structs), rewriteExpr(op.right(), structs), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(
                     l.name(), l.declaredSort(),
-                    promote(rewriteExpr(l.value(), structs), l.declaredSort()),
-                    rewriteExpr(l.body(), structs), l.origin());
+                    // The user's claim is the declared boundary when present
+                    // (the narrowing slot holds the value's own inferred sort,
+                    // which for an Int literal is an Int refinement — no
+                    // promotion signal there).
+                    promote(rewriteExpr(l.value(), structs),
+                            l.claim() != null ? l.claim() : l.declaredSort()),
+                    rewriteExpr(l.body(), structs), l.origin(), l.claim());
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) args.add(rewriteExpr(a, structs));

@@ -528,7 +528,7 @@ public final class AltParser {
                     entry.remoteName(), start.origin());
             declaredTopLevelLets.put(entry.localName(), memberSort);
             IrStmt decl = new IrStmt.FunctionDecl(
-                    entry.localName(), List.of(), memberSort, accessor, start.origin());
+                    entry.localName(), List.of(), memberSort, accessor, start.origin(), true);
             if (first == null) {
                 first = decl;
             } else {
@@ -874,14 +874,29 @@ public final class AltParser {
             return new IrStmt.TypeAlias(name, named, start.origin());
         }
         if (value == null) {
-            // Spec-only — synthesis from maximally-specific sort is a separate
-            // TODO item (see docs/TODO.md). Stay NoOp so other decls process.
-            return new IrStmt.NoOp("let " + name + ":" + declaredSort, start.origin());
+            // Spec-only let: a value-pinning sort IS the definition — the
+            // predicate `@==EXPR` carries its witness as an expression, so
+            // the body is synthesized verbatim from the pin
+            // (`let zero:[Decimal:@==0.0]` means zero = 0.0; the claim
+            // wrapper below still notarizes the synthesis at force).
+            value = pinnedWitness(declaredSort);
+            if (value == null) {
+                // Non-pinning sorts (e.g. [Int:@>0]): no unique witness —
+                // stay NoOp so other decls process (synthesis from
+                // maximally-specific non-singleton sorts is a separate TODO).
+                return new IrStmt.NoOp("let " + name + ":" + declaredSort, start.origin());
+            }
         }
         IrSort inferredSort = inferMaximalSort(value);
+        boolean intToDecimal = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferredSort);
+            // The lossless Int→Decimal embedding is not a mismatch —
+            // DecimalPromotion promotes the literal at IR time and the
+            // construction gate judges the claim (same leniency the record
+            // gate already grants its fields).
+            intToDecimal = "Decimal".equals(declaredBase) && "Int".equals(inferredBase);
             // An anonymous aggregate ("_record") against a declared name is the
             // promotion sugar, not a mismatch — `let p:Point = {x=1, y=2}` is
             // checked construction with the redundant name elided.
@@ -889,6 +904,7 @@ public final class AltParser {
             // sees imported structs this parser can't).
             if (declaredBase != null && inferredBase != null
                     && !inferredBase.equals("_record")
+                    && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
                 throw new ParseException(
                         "let '" + name + "' declared as " + declaredSort
@@ -897,16 +913,98 @@ public final class AltParser {
                         start.origin());
             }
         }
-        // Promotion case: the declared sort IS the binding's sort (the value's
-        // anonymous shape gets stamped at IR time); otherwise keep the tighter
+        // Promotion cases: an anonymous value's shape takes the declared
+        // sort (stamped at IR time); an Int literal at a Decimal boundary
+        // takes BARE Decimal — the value promotes at IR time, and the
+        // refined claim (if any) travels in the wrapper below, NOT in the
+        // 0-arg return sort, where it would be an obligation the integer-
+        // only discharge kernel can never prove. Otherwise keep the tighter
         // inferred narrowing as before.
         IrSort binding = declaredSort != null
                 && "_record".equals(baseSortName(inferredSort))
                 ? declaredSort
+                : intToDecimal
+                ? new IrSort.Named("Decimal", declaredSort.origin())
                 : inferredSort;
         declaredTopLevelLets.put(name, binding);
+        // A declared sort is a claim made where the binding is made. The
+        // 0-arg lowering keeps the tight inferred narrowing as the return
+        // sort; the claim itself travels inside, on a LetIn the construction
+        // gate judges three-way (fit/miss/overlap) like a constructor arg.
+        // The promotion-sugar case is exempt: the stamped record's own
+        // construction gate judgment IS the claim check.
+        IrExpr fnBody = value;
+        if (declaredSort != null && !"_record".equals(baseSortName(inferredSort))) {
+            fnBody = new IrExpr.LetIn(
+                    name, binding, value,
+                    new IrExpr.Var(name, start.origin()),
+                    start.origin(), declaredSort);
+        }
         return new IrStmt.FunctionDecl(
-                name, List.of(), binding, value, start.origin());
+                name, List.of(), binding, fnBody, start.origin(), true);
+    }
+
+    /**
+     * The unique witness a value-pinning refinement carries, or null when
+     * the sort doesn't pin one. Two pin shapes:
+     *
+     * <p><b>Syntactic</b> — {@code Refined(base, @ == EXPR)} (also what the
+     * bare-expr sugar produces: {@code [Decimal:0.0]} ≡
+     * {@code [Decimal:@==0.0]}): the witness is EXPR verbatim, any base,
+     * provided EXPR is closed over {@code @} (a self-referential pin like
+     * {@code @==@+1} has no extractable witness).
+     *
+     * <p><b>Semantic</b> — an Int refinement whose extension the bound
+     * engine collapses to a single point: integer-strict cuts make
+     * {@code [Int:@>-1 & @<1]} the singleton {@code {0}} — discreteness is
+     * the license (a Decimal interval has no such witness; choosing one
+     * would inject information the program never supplied). Sound to be
+     * optimistic here: {@code bound} over-approximates, and the synthesized
+     * binding still carries its claim — the construction gate verifies the
+     * witness against the full predicate (compile-time FITS or a notarized
+     * runtime check), so a wrong witness can never bind silently.
+     */
+    private IrExpr pinnedWitness(IrSort sort) {
+        if (!(sort instanceof IrSort.Refined r)) return null;
+        if (r.predicate() instanceof IrExpr.BinOp op
+                && op.op() == IrExpr.Op.EQ
+                && op.left() instanceof IrExpr.SelfRef
+                && !containsSelfRef(op.right())) {
+            return op.right();
+        }
+        if ("Int".equals(r.name())) {
+            try {
+                sibarum.pontif.core.symbolic.SymExpr pred =
+                        sibarum.pontif.ir.IrCompiler.compileSymExpr(
+                                substituteSelfWithVar(r.predicate(), "@spec"));
+                sibarum.pontif.predicates.Interval range =
+                        sibarum.pontif.predicates.BoundAnalysis.bound(
+                                sibarum.pontif.core.symbolic.SymExpr.var("@spec"),
+                                List.of(pred));
+                if (!range.isEmpty()
+                        && range.lo() == range.hi()
+                        && range.lo() != sibarum.pontif.predicates.Interval.NEG_INF
+                        && range.lo() != sibarum.pontif.predicates.Interval.POS_INF) {
+                    return new IrExpr.Lit(range.lo(), r.origin());
+                }
+            } catch (sibarum.pontif.ir.CompileException outsideFragment) {
+                // predicate outside the symbolic fragment — no witness derivable
+            }
+        }
+        return null;
+    }
+
+    /** {@code @} → a named var, so the bound engine sees an ordinary subject. */
+    private static IrExpr substituteSelfWithVar(IrExpr e, String varName) {
+        return switch (e) {
+            case IrExpr.SelfRef s -> new IrExpr.Var(varName, s.origin());
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(),
+                    substituteSelfWithVar(op.left(), varName),
+                    substituteSelfWithVar(op.right(), varName),
+                    op.origin());
+            default -> e;  // predicates are comparison trees; leaves pass through
+        };
     }
 
     /**
@@ -2195,9 +2293,9 @@ public final class AltParser {
                     start.origin());
             declaredTopLevelLets.put(binder, e.getValue());
             pendingTopLevelDecls.add(new IrStmt.FunctionDecl(
-                    binder, List.of(), e.getValue(), accessor, start.origin()));
+                    binder, List.of(), e.getValue(), accessor, start.origin(), true));
         }
-        return new IrStmt.FunctionDecl(synthetic, List.of(), valueSort, value, start.origin());
+        return new IrStmt.FunctionDecl(synthetic, List.of(), valueSort, value, start.origin(), true);
     }
 
     private IrExpr parseLetExpr() throws ParseException {
@@ -2223,13 +2321,18 @@ public final class AltParser {
         expect(AltToken.Kind.EQUALS);
         IrExpr value = parseExpr();
         IrSort inferred = inferMaximalSort(value);
+        boolean intToDecimal = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferred);
+            // The lossless Int→Decimal embedding is not a mismatch (see
+            // parseLet) — promoted and gate-judged at IR time.
+            intToDecimal = "Decimal".equals(declaredBase) && "Int".equals(inferredBase);
             // "_record" against a declared name is the promotion sugar (see
             // parseLet) — AggregatePromotion stamps and validates at IR time.
             if (declaredBase != null && inferredBase != null
                     && !inferredBase.equals("_record")
+                    && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
                 throw new ParseException(
                         "let '" + name + "' declared as " + declaredSort
@@ -2239,7 +2342,7 @@ public final class AltParser {
             }
         }
         IrSort binding = declaredSort != null
-                && "_record".equals(baseSortName(inferred))
+                && ("_record".equals(baseSortName(inferred)) || intToDecimal)
                 ? declaredSort
                 : inferred;
         IrSort prevBinding = currentScope.get(name);
@@ -2252,7 +2355,9 @@ public final class AltParser {
             if (hadPrev) currentScope.put(name, prevBinding);
             else currentScope.remove(name);
         }
-        return new IrExpr.LetIn(name, binding, value, body, start.origin());
+        // The declared sort travels as the binding's claim — judged by the
+        // construction gate three-way, like a constructor argument.
+        return new IrExpr.LetIn(name, binding, value, body, start.origin(), declaredSort);
     }
 
     /**

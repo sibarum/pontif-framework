@@ -48,7 +48,7 @@ public final class StructLiteralRewriter {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         fd.name(), fd.params(), fd.returnSort(),
-                        rewriteExpr(fd.body(), structs), fd.origin());
+                        rewriteExpr(fd.body(), structs), fd.origin(), fd.topLevelLet());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl mm : ti.methods()) {
@@ -80,7 +80,7 @@ public final class StructLiteralRewriter {
                     op.op(), rewriteExpr(op.left(), structs), rewriteExpr(op.right(), structs), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(
                     l.name(), l.declaredSort(), rewriteExpr(l.value(), structs),
-                    rewriteExpr(l.body(), structs), l.origin());
+                    rewriteExpr(l.body(), structs), l.origin(), l.claim());
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) args.add(rewriteExpr(a, structs));

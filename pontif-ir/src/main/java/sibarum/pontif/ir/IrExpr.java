@@ -89,7 +89,28 @@ public sealed interface IrExpr
 
     record BinOp(Op op, IrExpr left, IrExpr right, Origin origin) implements IrExpr {}
 
-    record LetIn(String name, IrSort declaredSort, IrExpr value, IrExpr body, Origin origin) implements IrExpr {}
+    /**
+     * Let binding. {@code declaredSort} is the binding's <em>narrowing</em> —
+     * the tightest sort the parser could derive for the value (the declared
+     * sort only when the value's shape is anonymous; see promotion).
+     *
+     * <p>{@code claim} carries the user's declared sort verbatim when the
+     * binding was written {@code let x:Sort = v} — the claim rule's binding
+     * half: a declared sort at a let is a claim made where the binding is
+     * made, judged by {@link ConstructionGate} exactly like a constructor
+     * argument (provable fit passes clean and the claim is stripped, provable
+     * miss is a compile error, genuine overlap keeps the claim and the
+     * runtime validates at bind). Null when the let is undeclared or the
+     * claim was discharged.
+     */
+    record LetIn(String name, IrSort declaredSort, IrExpr value, IrExpr body,
+                 Origin origin, IrSort claim) implements IrExpr {
+
+        /** Claim-free constructor — undeclared lets and pre-claim passes. */
+        public LetIn(String name, IrSort declaredSort, IrExpr value, IrExpr body, Origin origin) {
+            this(name, declaredSort, value, body, origin, null);
+        }
+    }
 
     record Call(String functionName, List<IrExpr> args, Origin origin) implements IrExpr {
         public Call {

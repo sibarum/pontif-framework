@@ -352,7 +352,7 @@ public final class NarrowingInference {
                     l.name(), l.declaredSort(),
                     substituteFieldAccessWithSelf(l.value(), targetField),
                     substituteFieldAccessWithSelf(l.body(), targetField),
-                    l.origin());
+                    l.origin(), l.claim());
             case IrExpr.Call c -> {
                 List<IrExpr> newArgs = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) {
@@ -425,7 +425,7 @@ public final class NarrowingInference {
                     l.name(), l.declaredSort(),
                     substituteSelfWithFieldAccess(l.value(), fieldName),
                     substituteSelfWithFieldAccess(l.body(), fieldName),
-                    l.origin());
+                    l.origin(), l.claim());
             case IrExpr.Call c -> {
                 List<IrExpr> newArgs = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) {

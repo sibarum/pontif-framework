@@ -14,10 +14,16 @@ public record CompiledModule(
         Map<FunctionDecl, CompiledFunction> functions,
         IrExpr main,
         Map<IrSort, Sort> compiledSorts,
-        Map<String, Sort> structRegistry) {
+        Map<String, Sort> structRegistry,
+        List<String> topLevelLets) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
+        // Declaration-ordered names of the 0-arg functions that lower
+        // top-level lets. Force-evaluated by every engine at program start,
+        // before main — a binding's claims are notarized whether or not
+        // anything references it (the lazy ruling's loophole, closed).
+        topLevelLets = List.copyOf(topLevelLets);
         // IdentityHashMap semantics preserved — sorts are keyed by instance, not
         // by record-equality, so two structurally-equal IrSorts at different
         // origins remain distinct entries. Defensive copy keeps the map opaque.

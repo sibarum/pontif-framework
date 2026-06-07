@@ -54,7 +54,8 @@ public final class NameResolver {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         ModuleSymbolTable.fqn(m, fd.name()), rewriteParams(fd.params(), m, table),
-                        rewriteSort(fd.returnSort(), m, table), rewrite(fd.body(), m, table), fd.origin());
+                        rewriteSort(fd.returnSort(), m, table), rewrite(fd.body(), m, table), fd.origin(),
+                        fd.topLevelLet());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl mm : ti.methods()) {
@@ -222,7 +223,8 @@ public final class NameResolver {
                     op.op(), rewrite(op.left(), m, table), rewrite(op.right(), m, table), op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(
                     l.name(), rewriteSort(l.declaredSort(), m, table), rewrite(l.value(), m, table),
-                    rewrite(l.body(), m, table), l.origin());
+                    rewrite(l.body(), m, table), l.origin(),
+                    l.claim() == null ? null : rewriteSort(l.claim(), m, table));
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) args.add(rewrite(a, m, table));

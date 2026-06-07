@@ -92,6 +92,19 @@ public final class Drafter {
             throws CompileException {
         int callIndex = 0;
 
+        // A declared top-level let lowers to a 0-arg function whose body is
+        // wrapped in a claim-bearing LetIn (`LetIn(n, value, Var(n))`) so the
+        // construction gate can judge the claim. The wrapper is dataflow-
+        // transparent — the claim is a check, identity on the value — so
+        // drafting sees through it; otherwise the body equation would route
+        // through a binding and the return obligation could never discharge.
+        IrExpr fnBody = fd.body();
+        if (fnBody instanceof IrExpr.LetIn l
+                && l.body() instanceof IrExpr.Var v
+                && v.name().equals(l.name())) {
+            fnBody = l.value();
+        }
+
         // Build params + a rename map (body's IrExpr.Var("n") → SymExpr.Var("n_0")).
         List<Param> params = new ArrayList<>(fd.params().size());
         Map<String, SymExpr> renameBindings = new HashMap<>();
@@ -110,16 +123,26 @@ public final class Drafter {
         // call-instance form (y → y_0) so the obligation reads in the same
         // variables as the body equation — otherwise r_0 == y+1 (raw) can't
         // be discharged against the body r_0 == y_0+1 (renamed).
+        //
+        // A top-level let's return sort is DEFINITIONAL, not declared: the
+        // parser inferred it FROM the body (`let five = zero + 5` carries
+        // [Int:@==zero+5] — a receipt of inference, not a claim), so it
+        // mints no proof obligation. The binding's actual declared claim
+        // travels in the claim wrapper, judged by the construction gate.
+        Sort resultSort = IrCompiler.compileSort(fd.returnSort());
+        if (fd.topLevelLet() && resultSort.isRefined()) {
+            resultSort = Sort.of(resultSort.name());
+        }
         Var resultVar = new Var(
                 "r_" + callIndex,
-                renameSortPredicate(IrCompiler.compileSort(fd.returnSort()), renameBindings));
+                renameSortPredicate(resultSort, renameBindings));
 
         // Sub-call result vars start at r_1 (r_0 is the function result).
         int[] callCounter = {1};
 
-        List<Branch> branches = fd.body() instanceof IrExpr.Match match
+        List<Branch> branches = fnBody instanceof IrExpr.Match match
                 ? draftMatchBranches(match, resultVar, renameBindings, ctx, callCounter)
-                : List.of(draftUnconditionalBranch(fd.body(), resultVar, renameBindings, ctx, callCounter));
+                : List.of(draftUnconditionalBranch(fnBody, resultVar, renameBindings, ctx, callCounter));
 
         return new Node(fd.name(), params, resultVar, branches);
     }
@@ -278,7 +301,7 @@ public final class Drafter {
                     l.name(), l.declaredSort(),
                     hoistCalls(l.value(), renameBindings, ctx, callCounter, calls),
                     hoistCalls(l.body(), renameBindings, ctx, callCounter, calls),
-                    l.origin());
+                    l.origin(), l.claim());
             // Leaves and forms not yet call-hoisted (Apply/Lambda/Match nested
             // in a body equation are rare; transcribed as-is for now).
             default -> expr;

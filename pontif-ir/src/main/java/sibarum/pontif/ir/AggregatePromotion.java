@@ -49,7 +49,8 @@ final class AggregatePromotion {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         fd.name(), fd.params(), fd.returnSort(),
-                        rewriteExpr(fd.body(), fd.returnSort(), structs, fns), fd.origin());
+                        rewriteExpr(fd.body(), fd.returnSort(), structs, fns), fd.origin(),
+                        fd.topLevelLet());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl m : ti.methods()) {
@@ -106,11 +107,16 @@ final class AggregatePromotion {
                     op.origin());
             case IrExpr.LetIn l -> new IrExpr.LetIn(
                     l.name(), l.declaredSort(),
-                    rewriteExpr(l.value(), l.declaredSort(), structs, fns),
+                    // A claimed sort is the assertion when present (the
+                    // narrowing slot holds the inferred shape, which for an
+                    // anonymous aggregate value is no assertion at all).
+                    rewriteExpr(l.value(),
+                            l.claim() != null ? l.claim() : l.declaredSort(),
+                            structs, fns),
                     // The let's body is the enclosing tail — the outer
                     // assertion (e.g. a function's return sort) flows through.
                     rewriteExpr(l.body(), expected, structs, fns),
-                    l.origin());
+                    l.origin(), l.claim());
             case IrExpr.Call c -> {
                 List<IrStmt.FunctionDecl> candidates = fns.getOrDefault(c.functionName(), List.of());
                 List<IrExpr> args = new ArrayList<>(c.args().size());

@@ -48,17 +48,35 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
         return new Exports(names, self, Origin.NONE);
     }
 
+    /**
+     * Function declaration. {@code topLevelLet} marks the 0-arg lowering of
+     * a top-level {@code let} — these are <b>force-evaluated at program
+     * start</b> (declaration order, before main), so a binding's claims are
+     * notarized whether or not anything references it. The lazy ruling
+     * (2026-06-05) was overturned 2026-06-07: an unreferenced binding was a
+     * loophole where an unproven claim's runtime check never ran. Genuine
+     * functions ({@code topLevelLet} false) are never forced — a diverging
+     * or erroring body is legitimate until applied.
+     */
     record FunctionDecl(
             String name,
             List<IrParam> params,
             IrSort returnSort,
             IrExpr body,
-            Origin origin) implements IrStmt {
+            Origin origin,
+            boolean topLevelLet) implements IrStmt {
         public FunctionDecl {
             params = List.copyOf(params);
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Function name must be non-empty");
             }
+        }
+
+        /** Ordinary function declaration — everything that isn't a top-level let. */
+        public FunctionDecl(
+                String name, List<IrParam> params, IrSort returnSort,
+                IrExpr body, Origin origin) {
+            this(name, params, returnSort, body, origin, false);
         }
     }
 

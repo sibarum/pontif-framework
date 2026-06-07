@@ -74,9 +74,23 @@ public final class TruffleLowering {
             registry.register(e.getKey(), e.getValue());
         }
 
-        // Lower main
+        // Lower main — prefixed with the force chain: every top-level let
+        // evaluates before main (declaration order), so its claims are
+        // notarized whether or not anything references it. Built here, at
+        // lowering time, so the chain never enters the module IR (ledgers
+        // and receipts never see it). Mirrors IrInterpreter.eval.
+        IrExpr mainExpr = module.main();
+        List<String> lets = module.topLevelLets();
+        for (int i = lets.size() - 1; i >= 0; i--) {
+            mainExpr = new IrExpr.LetIn(
+                    "__force$" + i,
+                    null,
+                    new IrExpr.Call(lets.get(i), List.of(), sibarum.pontif.core.Origin.NONE),
+                    mainExpr,
+                    sibarum.pontif.core.Origin.NONE);
+        }
         Resolver mainResolver = new Resolver();
-        PontifNode mainBody = lowerExpr(module.main(), module, registry);
+        PontifNode mainBody = lowerExpr(mainExpr, module, registry);
         mainBody.resolve(mainResolver);
         FrameDescriptor mainDesc = mainResolver.build();
         PontifRootNode mainRoot = new PontifRootNode(null, mainDesc, mainBody);
@@ -106,10 +120,22 @@ public final class TruffleLowering {
                     "Self has no runtime meaning — it's a typing-context placeholder; "
                             + "should not appear in executable expressions");
             case IrExpr.BinOp op -> lowerBinOp(op, module, registry);
-            case IrExpr.LetIn l -> Let.of(
-                    l.name(),
-                    lowerExpr(l.value(), module, registry),
-                    lowerExpr(l.body(), module, registry));
+            case IrExpr.LetIn l -> {
+                PontifNode valueNode = lowerExpr(l.value(), module, registry);
+                // Binding claim kept by ConstructionGate (UNKNOWN verdict) —
+                // wrap the value so it is judged at bind, mirroring the
+                // IrInterpreter path and the record-member check above.
+                if (l.claim() != null) {
+                    valueNode = sibarum.pontif.ast.record.ConstructionCheckNode.of(
+                            valueNode, module.sortFor(l.claim()),
+                            l.name(), compiler.simplifier());
+                    valueNode.withOrigin(l.value().origin());
+                }
+                yield Let.of(
+                        l.name(),
+                        valueNode,
+                        lowerExpr(l.body(), module, registry));
+            }
             case IrExpr.Call c -> lowerCall(c, module, registry);
             case IrExpr.Lambda lambda -> lowerLambda(lambda, module, registry);
             case IrExpr.Apply apply -> lowerApply(apply, module, registry);

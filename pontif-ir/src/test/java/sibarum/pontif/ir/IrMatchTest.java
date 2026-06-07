@@ -56,7 +56,8 @@ class IrMatchTest {
         }
         return new CompiledModule(
                 module.name(), new sibarum.pontif.core.symbolic.DispatchTable(),
-                java.util.Map.of(), module.main(), sorts, java.util.Map.of());
+                java.util.Map.of(), module.main(), sorts, java.util.Map.of(),
+                java.util.List.of());
     }
 
     private static Object runUncheckedInterpreter(IrModule module) throws Exception {

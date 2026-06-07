@@ -27,6 +27,16 @@ public final class IrInterpreter {
     }
 
     public Object eval(CompiledModule module) {
+        // The Inquisition: every top-level let is force-evaluated before
+        // main, declaration order — its claims (binding claims, construction
+        // checks) are notarized whether or not anything references it. Pure
+        // language: forcing is observationally invisible except where a
+        // check fails or the value diverges — exactly the lies the lazy
+        // ruling let an unreferenced binding tell. Genuine 0-arg functions
+        // are NOT forced; a diverging body is legitimate until applied.
+        for (String let : module.topLevelLets()) {
+            eval(new IrExpr.Call(let, List.of(), Origin.NONE), Environment.empty(), module);
+        }
         return eval(module.main(), Environment.empty(), module);
     }
 
@@ -65,6 +75,20 @@ public final class IrInterpreter {
             case IrExpr.BinOp op -> evalBinOp(op, env, module);
             case IrExpr.LetIn l -> {
                 Object value = eval(l.value(), env, module);
+                // Binding claim kept by ConstructionGate (UNKNOWN verdict):
+                // the declared sort whose fit was undecidable at compile time
+                // is judged here, where the value is concrete. Fail-closed,
+                // mirroring construction checks.
+                if (l.claim() != null) {
+                    Sort claim = module.sortFor(l.claim());
+                    ProofResult pr = Refinements.satisfies(toSymExpr(value), claim, checker(module));
+                    if (!(pr instanceof ProofResult.Passed)) {
+                        throw new RuntimeCheckException(
+                                "Binding claim violated: '" + l.name() + "' = " + value
+                                        + " does not satisfy the declared sort " + claim,
+                                l.origin());
+                    }
+                }
                 Environment extended = env.extend(l.name(), value);
                 yield eval(l.body(), extended, module);
             }

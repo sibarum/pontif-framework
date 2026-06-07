@@ -79,6 +79,8 @@ public final class IrCompiler {
         // lookups read from this map via CompiledModule.sortFor, so the runtime
         // path is exception-free.
         Map<IrSort, Sort> compiledSorts = new IdentityHashMap<>();
+        // Declaration-ordered top-level let names — the engines' force list.
+        List<String> topLevelLets = new ArrayList<>();
 
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
@@ -87,6 +89,7 @@ public final class IrCompiler {
                     registerSort(fd.returnSort(), compiledSorts);
                     registerSortsInExpr(fd.body(), compiledSorts);
                     compileFunctionDecl(fd, dispatch, functions, compiledSorts);
+                    if (fd.topLevelLet()) topLevelLets.add(fd.name());
                 }
                 case IrStmt.TraitImpl ti -> {
                     // Register methods as regular FunctionDecls in the
@@ -121,7 +124,7 @@ public final class IrCompiler {
 
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
-                structRegistry);
+                structRegistry, topLevelLets);
     }
 
     private void compileFunctionDecl(
@@ -200,6 +203,9 @@ public final class IrCompiler {
             }
             case IrExpr.LetIn l -> {
                 registerSort(l.declaredSort(), map);
+                // Binding claims kept by the gate are runtime-checked via
+                // CompiledModule.sortFor — register them like record checks.
+                if (l.claim() != null) registerSort(l.claim(), map);
                 registerSortsInExpr(l.value(), map);
                 registerSortsInExpr(l.body(), map);
             }

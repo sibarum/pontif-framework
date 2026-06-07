@@ -82,7 +82,7 @@ final class ConstructionGate {
         }
         return new IrStmt.FunctionDecl(
                 fd.name(), fd.params(), fd.returnSort(),
-                rewriteExpr(fd.body(), ctx, structs), fd.origin());
+                rewriteExpr(fd.body(), ctx, structs), fd.origin(), fd.topLevelLet());
     }
 
     /**
@@ -113,7 +113,8 @@ final class ConstructionGate {
                 IrSort bound = inferred != null ? inferred : l.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(l.name(), bound) : ctx;
                 yield new IrExpr.LetIn(l.name(), l.declaredSort(), value,
-                        rewriteExpr(l.body(), bodyCtx, structs), l.origin());
+                        rewriteExpr(l.body(), bodyCtx, structs), l.origin(),
+                        gateClaim(l, value, ctx, structs));
             }
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
@@ -149,6 +150,34 @@ final class ConstructionGate {
             case IrExpr.Record r -> gateRecord(r, ctx, structs);
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), ctx, structs), fa.fieldName(), fa.origin());
+        };
+    }
+
+    /**
+     * The claim rule's binding half: a declared sort at a let is judged
+     * against the value's narrowing exactly like a constructor argument.
+     * Returns the claim the runtime must still check (UNKNOWN verdict),
+     * null when discharged (FITS) or absent, and throws on a provable miss.
+     *
+     * <p>Same leniencies as the record gate, deliberately: a bare
+     * unregistered claim ({@code let x:Int = …}) is not gated at all
+     * (today's behavior — the parser's base check is the only judge), and
+     * a claim the runtime cannot satisfy-check is never kept.
+     */
+    private static IrSort gateClaim(
+            IrExpr.LetIn l, IrExpr value, InferenceContext ctx,
+            Map<String, IrSort.Structural> structs) throws CompileException {
+        IrSort claim = l.claim();
+        if (claim == null || !gated(claim, structs)) return null;
+        IrSort arg = argSort(value, ctx, structs);
+        return switch (classify(arg, claim, structs)) {
+            case FITS -> null;  // discharged — provable fit, no runtime check
+            case DISJOINT -> throw new CompileException(
+                    "let '" + l.name() + "' can never satisfy its declared sort "
+                            + render(claim) + " — the value's sort is "
+                            + render(arg) + ", which is disjoint",
+                    value.origin());
+            case UNKNOWN -> runtimeCheckable(claim, structs) ? claim : null;
         };
     }
 
