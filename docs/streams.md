@@ -87,22 +87,48 @@ queue is a stream whose source happens to be reality.
 
 # The combinator basis (RULED)
 
-Four combinators — two partitions and two maps of attention:
+Five combinators — two partitions, two maps of attention, and an exchange:
 
 | Combinator | Splits / transforms | Conservation character |
 | --- | --- | --- |
 | `partition` | by **content** (predicate) | per-element Branch — both halves returned, nothing erased |
 | `next` | by **position** (head ∕ tail) | bijective destructure (`Element ↔ (head, rest)`) — RECOVERABLE |
-| `map` | per-element computation | per-element Computation |
+| `map` | every element | per-element Computation |
+| `exchange` | matching elements, **in place** | per-element borrow-and-return — the conservation coin at stream granularity |
 | `fold` | the monoidal collapse | combine; association uncontracted under proof (below) |
 
 Notes, each load-bearing:
 
-- **`partition` IS filter, with honest accounting.** `filter` does not
-  exist, not even as sugar: discarding the non-matching half is an
+- **`partition` IS filter, with honest accounting.** Classic `filter` does
+  not exist, not even as sugar: discarding the non-matching half is an
   erasure, and erasures are declared (the `DataConservativeExcept`
-  precedent, element-wise). Wanting filter means writing the partition and
+  precedent, element-wise). Wanting discard means writing the partition and
   the drop; the ledger shows both halves.
+- **`exchange` (name RULED 2026-06-06) is the third no-erase answer:
+  neither erase nor split — focus.** It never breaks the stream: matching
+  elements are *lent out*, modified, and *placed back*; the result is the
+  **full stream with the modifications woven in at their original
+  positions**, non-matching elements riding through untouched. Each match
+  is borrow → transform → return — assignment-becomes-swap at stream
+  granularity, nothing erased (the remainder is total), nothing duplicated
+  (the element moves out and back). Consequences: silent discard is
+  *structurally inexpressible* (the non-matching elements are in your hands
+  whether you wanted them or not — "modify to nothing" isn't a
+  modification); modifications preserve the element sort, or the stream's
+  sort honestly widens ("expanded"). And the resonance is not decorative:
+  **`exchange` is the `when`-arm's semantics inside the pure world** —
+  select the matching, react, everything else flows past untouched for
+  other observers. One selective-attention construct, two jurisdictions,
+  like `next` and destructure.
+  - v1 ships the **one-shot form** — `exchange(pred[T], f[T], xs)` →
+    the full stream, `f` applied where `pred` matched. Branch +
+    Computation per element; zero new theory.
+  - The **cursor form** (the selection as a value you work through, the
+    remainder reclaiming it) is a NAMED FOLLOW-UP: selection and
+    remainder coexisting would place matching elements twice, so the
+    selection must be a **linear borrow the ledger proves consumed and
+    returned** — Pontif's first borrow construct, checked rather than
+    trusted, by the NoDuplication-shaped machinery that already prints.
 - **`next` returns the `[Element(T)|Leaf]`-shaped union**, handled by
   match — never separate partial `head`/`tail`. On the pure Queue, `next`
   *is* destructuring match; as a trait method it is what action-side
@@ -112,9 +138,10 @@ Notes, each load-bearing:
   (captured overload sets resolve the callee). Lambdas would land the
   entire collection layer on the algebra's fail-closed residual.
 - The basis is the conservation algebra's three node kinds, lifted
-  pointwise over a sequence: partition/next are Branch, map is Computation,
-  fold is the combine — and stream sources are Construction. The API is
-  not a library; it is the algebra with a cardinality.
+  pointwise over a sequence — plus its coin: partition/next are Branch,
+  map is Computation, fold is the combine, exchange is the swap, and
+  stream sources are Construction. The API is not a library; it is the
+  algebra with a cardinality.
 
 # The one fold (RULED in shape; proof vocabulary PROPOSED)
 
@@ -183,7 +210,8 @@ they stay.
 # Open questions (for red-pen)
 
 1. **Names**: `Stream`, `Queue`, `Element`, `partition`, `next`,
-   `map`, `fold`, `Associative`, `Identity`. **`Leaf` is RULED shared** —
+   `map`, `fold`, `Associative`, `Identity` (still provisional;
+   **`exchange` is RULED** — 2026-06-06). **`Leaf` is RULED shared** —
    one freestanding nominal referenced by both `[Leaf|Split]` and
    `[Element(T)|Leaf]` (the un-Haskell union design's poster child: types
    are freestanding, unions borrow them). Mechanically this is
@@ -209,14 +237,18 @@ they stay.
 # Slices (PROPOSED)
 
 0. **This document ratified.**
-1. **Queue, purely**: `Element`/`Leaf` as (builtin or user) structs, stream
-   literal desugar to construction, consumption by ordinary match +
-   structural recursion. No trait, no combinators — pins that the inductive
-   view works end-to-end with zero new machinery. Reviewable artifact:
-   ledgers of queue-consuming functions (the recursion fixpoint exercising
-   `Element` descent).
-2. **The Stream trait + `map`/`partition`/`next`** with metareference
-   arguments, Queue as first implementor.
+1. **Queue, purely** — LANDED 2026-06-06: `std.stream` declares `Element`
+   and re-exports `std.common`'s `Leaf`; construction, bare-arm union
+   matching, and structural recursion ride existing rails (the only
+   production change was the module definition; the construction gate
+   covered queue typing for free). `head` is loose until `[Stream(T)]`
+   lands; literal sugar deferred with it. Known gap surfaced: destructure
+   patterns over *imported* structs don't parse (the parser's per-file
+   declaredStructs — slice-5 restriction); consumers use bare arms + field
+   access meanwhile.
+2. **The Stream trait + `map`/`partition`/`next`/`exchange`** (one-shot
+   form) with metareference arguments, Queue as first implementor; the
+   `[Stream(T)]` sort form and literal desugar.
 3. **The one fold**: `Associative`/`Identity` proof vocabulary
    (`std.algebra`), builtin facts, fold refusing unproven ops.
 4. **Array implementor**: native storage, action-side iteration (depends on
@@ -224,3 +256,5 @@ they stay.
 5. **Licenses**, each its own slice with its hypothesis statement:
    array-backing under linearity, fusion under single-consumption, parallel
    fold under `Associative + Identity`.
+6. **Cursor-form `exchange`**: the linear borrow (selection proven consumed
+   and returned), once the ledger obligation is ruled.
