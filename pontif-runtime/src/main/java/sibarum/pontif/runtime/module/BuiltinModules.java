@@ -55,31 +55,74 @@ public final class BuiltinModules {
     }
 
     /**
-     * The Queue — the sequence substrate's inductive view (streams slice 1,
-     * {@code docs/streams.md}): {@code Element(head, rest:[Element|Leaf])},
-     * recursion through the constructor (contractive, admitted), terminal
-     * {@code Leaf()} re-exported from {@code std.common} — the same nominal
-     * proof trees use. {@code head} is loose ({@code "_"}) until the
-     * {@code [Stream(T)]} sort form lands; the element-sort discipline is a
-     * later slice. Pure functions consume a Queue by matching the
-     * {@code [Element|Leaf]} union — bare-arm sum-type matching, totality
-     * determined, structural recursion certifiable by descent.
+     * The Queue and its combinators — the sequence substrate's inductive view
+     * ({@code docs/streams.md}, ratified): {@code Element(head,
+     * rest:[Element|Leaf])} with terminal {@code Leaf()} re-exported from
+     * {@code std.common}, plus the basis written <b>in Pontif source</b> —
+     * the first builtin that is itself Pontif, parsed at registration. The
+     * combinators are recursive match functions; function-valued parameters
+     * are metareferences invoked by application.
+     *
+     * <p>Interim leniencies, both flagged in the doc: {@code head} and the
+     * function params are loose ({@code "_"}) until the {@code [Stream(T)]}
+     * sort form and Dispatch-key subsumption land (a Dispatch param sort
+     * requires EXACT key match today, which would pin each combinator to one
+     * key sort). Combinator bodies call through bindings, which the
+     * conservation drafter treats as residual — combinator pipelines are
+     * fail-closed in the ledger until the drafter learns to resolve
+     * metareference arguments (a named follow-up).
      */
+    private static final String STD_STREAM_SOURCE = """
+            requires std.common.{Leaf}
+            exports @.{Element, Leaf, singleton, concat, append, map, exchange, partition}
+
+            struct Element(head:_, rest:[Element|Leaf])
+
+            function singleton(x:_):Element -> Element(x, Leaf())
+
+            function concat(a:[Element|Leaf], b:[Element|Leaf]):[Element|Leaf] -> match a {
+              [Element] -> Element(a.head, concat(a.rest, b))
+              [Leaf]    -> b
+            }
+
+            function append(q:[Element|Leaf], x:_):[Element|Leaf] -> concat(q, singleton(x))
+
+            function map(f:_, q:[Element|Leaf]):[Element|Leaf] -> match q {
+              [Element] -> Element(f(q.head), map(f, q.rest))
+              [Leaf]    -> Leaf()
+            }
+
+            function exchange(p:_, f:_, q:[Element|Leaf]):[Element|Leaf] -> match q {
+              [Element] -> match p(q.head) {
+                [Bool:@==true] -> Element(f(q.head), exchange(p, f, q.rest))
+                _              -> Element(q.head, exchange(p, f, q.rest))
+              }
+              [Leaf] -> Leaf()
+            }
+
+            function partition(p:_, q:[Element|Leaf]):[([Element|Leaf], [Element|Leaf])] -> match q {
+              [Element] -> match partition(p, q.rest) {
+                [(yes, no)] -> match p(q.head) {
+                  [Bool:@==true] -> (Element(q.head, yes), no)
+                  _              -> (yes, Element(q.head, no))
+                }
+              }
+              [Leaf] -> (Leaf(), Leaf())
+            }
+
+            0
+            """;
+
     private static IrModule stdStream() {
-        IrStmt requiresCommon = new IrStmt.Requires(STD_COMMON,
-                List.of(new IrStmt.RequireEntry("Leaf", "Leaf")), Origin.NONE);
-
-        IrSort elementOrLeaf = IrSort.union(List.of(IrSort.named("Element"), IrSort.named("Leaf")));
-        Map<String, IrSort> elementFields = new LinkedHashMap<>();
-        elementFields.put("head", IrSort.named("_"));
-        elementFields.put("rest", elementOrLeaf);
-        IrStmt element = IrStmt.typeAlias("Element", IrSort.structural("Element", elementFields));
-
-        // Element declared here; Leaf re-exported (imported + exported).
-        IrStmt exports = IrStmt.exports(List.of("Element", "Leaf"), true);
-
-        return new IrModule(STD_STREAM,
-                List.of(requiresCommon, exports, element), IrExpr.lit(0));
+        try {
+            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(
+                    STD_STREAM_SOURCE, STD_STREAM);
+            // Force the registry name regardless of header conventions.
+            return new IrModule(STD_STREAM, parsed.statements(), parsed.main());
+        } catch (sibarum.pontif.parser.ParseException pe) {
+            throw new IllegalStateException(
+                    "std.stream's builtin source failed to parse: " + pe.getMessage(), pe);
+        }
     }
 
     /**
