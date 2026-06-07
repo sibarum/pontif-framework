@@ -143,6 +143,40 @@ Notes, each load-bearing:
   stream sources are Construction. The API is not a library; it is the
   algebra with a cardinality.
 
+# Extensions: concat, append, mix
+
+**`concat` (RULED needed, 2026-06-06)** — the stream **monoid**:
+associative with identity `Leaf()`, both provable by structural induction
+over `Element`, so the facts ship as builtins — and the parallel-reduction
+license applies wherever concat is folded. Two structures complete at once:
+`flatten = fold(concat, Leaf(), …)` comes free, and **the monad closes** —
+`singleton(x) = Element(x, Leaf())` is pure, map + fold(concat) is bind;
+the stream is the free monoid over its elements, and the literal-as-monad
+reading gets its join. Conservation: total placement — every element of
+both streams placed once, order kept, nothing erased or duplicated.
+(Cons-Queue concat is O(first argument) — representation gossip,
+uncontracted, the array-backing license's territory.)
+
+**`append` (PROPOSED sugar)** — `append(xs, x) = concat(xs, singleton(x))`.
+Legitimate sugar: it hides no erasure (contrast filter, whose sugar was
+rejected for hiding one). Owes a ratified name for `singleton` —
+candidates: `singleton` / `single` / `one` / `of`.
+
+**`mix` (NOTED — awaiting its first use-case; not to be implemented
+before one arrives)** — the n-ary zip:
+`mix((Stream(A), Stream(B), …), f[A, B, …]) → Stream(C)`. The typing is
+possible with **no parametric machinery**: the arities live in the tuple
+(fixed, heterogeneous — what tuples are for) and in the metareference's
+key sorts, so the check is per-call-site coherence (open question 4,
+n-ary) — and `map` is unary mix, so the basis stays minimal. Recorded for
+when the consumer arrives, the one genuine ruling: **length mismatch**.
+Truncate-to-shortest silently erases the longer tails — the leniency that
+lies, fenced. Honest options: (1) **total accounting** — return the zipped
+stream AND the unconsumed remainder (the partition/exchange precedent);
+(2) **equal-length as an unproven theory** — a runtime mode whose
+counterexample payload is literally the leftover tail. Lean: (1) as the
+primitive, (2) as declared-expectation sugar over it.
+
 # The one fold (RULED in shape; proof vocabulary PROPOSED)
 
 There is exactly one `fold`. The lfold/rfold split conflates two
@@ -210,8 +244,9 @@ they stay.
 # Open questions (for red-pen)
 
 1. **Names**: `Stream`, `Queue`, `Element`, `partition`, `next`,
-   `map`, `fold`, `Associative`, `Identity` (still provisional;
-   **`exchange` is RULED** — 2026-06-06). **`Leaf` is RULED shared** —
+   `map`, `fold`, `concat`, `append`, `singleton`, `Associative`,
+   `Identity` (still provisional; **`exchange` is RULED** — 2026-06-06).
+   **`Leaf` is RULED shared** —
    one freestanding nominal referenced by both `[Leaf|Split]` and
    `[Element(T)|Leaf]` (the un-Haskell union design's poster child: types
    are freestanding, unions borrow them). Mechanically this is
@@ -247,10 +282,11 @@ they stay.
    declaredStructs — slice-5 restriction); consumers use bare arms + field
    access meanwhile.
 2. **The Stream trait + `map`/`partition`/`next`/`exchange`** (one-shot
-   form) with metareference arguments, Queue as first implementor; the
-   `[Stream(T)]` sort form and literal desugar.
+   form) **+ `concat`/`append`** with metareference arguments, Queue as
+   first implementor; the `[Stream(T)]` sort form and literal desugar.
 3. **The one fold**: `Associative`/`Identity` proof vocabulary
-   (`std.algebra`), builtin facts, fold refusing unproven ops.
+   (`std.algebra`), builtin facts (including concat's own — unlocking
+   flatten and its parallel license), fold refusing unproven ops.
 4. **Array implementor**: native storage, action-side iteration (depends on
    `actions.md` slice 1 — the queue runtime).
 5. **Licenses**, each its own slice with its hypothesis statement:
