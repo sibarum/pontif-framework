@@ -109,12 +109,20 @@ final class ConstructionGate {
                     op.origin());
             case IrExpr.LetIn l -> {
                 IrExpr value = rewriteExpr(l.value(), ctx, structs);
-                IrSort inferred = NarrowingInference.infer(l.value(), ctx);
-                IrSort bound = inferred != null ? inferred : l.declaredSort();
+                // S3: demotion coercion. If the value's sort is a struct that
+                // declares a base demoting to the claim, project it (run the
+                // morphism, drop unmentioned fields — a clean forget, no tag)
+                // instead of letting the gate reject it as disjoint.
+                IrExpr coerced = maybeDemote(value, l.claim(), ctx, structs);
+                boolean demoted = coerced != value;
+                IrSort inferred = NarrowingInference.infer(demoted ? coerced : l.value(), ctx);
+                IrSort bound = inferred != null ? inferred
+                        : demoted ? l.claim() : l.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(l.name(), bound) : ctx;
-                yield new IrExpr.LetIn(l.name(), l.declaredSort(), value,
+                IrSort declared = demoted ? l.claim() : l.declaredSort();
+                yield new IrExpr.LetIn(l.name(), declared, coerced,
                         rewriteExpr(l.body(), bodyCtx, structs), l.origin(),
-                        gateClaim(l, value, ctx, structs));
+                        gateClaim(l, coerced, ctx, structs));
             }
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
@@ -222,6 +230,96 @@ final class ConstructionGate {
             }
         }
         return new IrExpr.Record(r.typeName(), members, checks, r.origin());
+    }
+
+    /**
+     * Demotion coercion (S3): if {@code value}'s static sort is a struct that
+     * declares a base demoting to {@code claim}'s base, replace it with the
+     * morphism projection — a fresh {@code Base(...)} record built from the
+     * value's fields, dropping fields the base doesn't mention. A clean forget:
+     * no surviving brand. Returns {@code value} unchanged when it isn't a
+     * demotion.
+     */
+    private static IrExpr maybeDemote(
+            IrExpr value, IrSort claim, InferenceContext ctx,
+            Map<String, IrSort.Structural> structs) {
+        if (claim == null) return value;
+        String claimBase = baseName(claim);
+        IrSort.Structural to = claimBase == null ? null : structs.get(claimBase);
+        if (to == null) return value;  // claim isn't a declared struct
+        IrSort arg = NarrowingInference.infer(value, ctx);
+        String argBase = arg == null ? null : baseName(arg);
+        if (argBase == null || argBase.equals(claimBase)) return value;
+        IrSort.Structural from = structs.get(argBase);
+        if (from == null || from.baseSort() == null) return value;
+        if (!claimBase.equals(baseName(from.baseSort()))) return value;  // doesn't demote here
+        return projectDemotion(value, from, to);
+    }
+
+    /**
+     * Builds {@code Base(...)} from {@code value} per {@code from}'s demotion
+     * morphism: each base field's value is the morphism's {@code @.field == RHS}
+     * right-hand side, with the deriving struct's param names rewritten to field
+     * reads on {@code value}. Unmentioned base fields fall back to a same-named
+     * projection.
+     */
+    private static IrExpr projectDemotion(
+            IrExpr value, IrSort.Structural from, IrSort.Structural to) {
+        Map<String, IrExpr> rhsByField = new LinkedHashMap<>();
+        if (from.baseSort() instanceof IrSort.Refined r) {
+            collectFieldRhs(r.predicate(), rhsByField);
+        }
+        Map<String, IrExpr> fields = new LinkedHashMap<>();
+        for (String f : to.members().keySet()) {
+            IrExpr rhs = rhsByField.get(f);
+            fields.put(f, rhs != null
+                    ? substituteParamReads(rhs, value, from.members().keySet())
+                    : new IrExpr.FieldAccess(value, f, value.origin()));
+        }
+        return new IrExpr.Record(to.name(), fields, value.origin());
+    }
+
+    /** Records each {@code @.field == RHS} conjunct as field -> RHS. */
+    private static void collectFieldRhs(IrExpr pred, Map<String, IrExpr> out) {
+        if (pred instanceof IrExpr.BinOp op) {
+            switch (op.op()) {
+                case AND -> {
+                    collectFieldRhs(op.left(), out);
+                    collectFieldRhs(op.right(), out);
+                }
+                case EQ -> {
+                    String lf = selfFieldName(op.left());
+                    if (lf != null) { out.put(lf, op.right()); return; }
+                    String rf = selfFieldName(op.right());
+                    if (rf != null) out.put(rf, op.left());
+                }
+                default -> { }
+            }
+        }
+    }
+
+    private static String selfFieldName(IrExpr e) {
+        return e instanceof IrExpr.FieldAccess fa && fa.base() instanceof IrExpr.SelfRef
+                ? fa.fieldName() : null;
+    }
+
+    /** Rewrites {@code Var(p)} (p a deriving-struct field) to {@code value.p}. */
+    private static IrExpr substituteParamReads(IrExpr e, IrExpr value, Set<String> params) {
+        return switch (e) {
+            case IrExpr.Var v -> params.contains(v.name())
+                    ? new IrExpr.FieldAccess(value, v.name(), v.origin()) : v;
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    substituteParamReads(op.left(), value, params),
+                    substituteParamReads(op.right(), value, params), op.origin());
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    substituteParamReads(fa.base(), value, params), fa.fieldName(), fa.origin());
+            case IrExpr.Call c -> {
+                List<IrExpr> args = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) args.add(substituteParamReads(a, value, params));
+                yield new IrExpr.Call(c.functionName(), args, c.origin());
+            }
+            default -> e;
+        };
     }
 
     /** The argument's narrowing; a named-record argument claims its own name. */

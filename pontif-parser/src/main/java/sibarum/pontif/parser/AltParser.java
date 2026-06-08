@@ -920,6 +920,7 @@ public final class AltParser {
         }
         IrSort inferredSort = inferMaximalSort(value);
         boolean intToDecimal = false;
+        boolean demotion = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferredSort);
@@ -937,11 +938,20 @@ public final class AltParser {
                     && !inferredBase.equals("_record")
                     && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
-                throw new ParseException(
-                        "let '" + name + "' declared as " + declaredSort
-                                + " but value's inferred sort is " + inferredSort
-                                + " (base sort mismatch)",
-                        start.origin());
+                // A declared DEMOTION: the value's struct carries a base sort
+                // that demotes to the claimed base (`struct Point3D:[Point:…]`),
+                // so `let b:Point = a` is a valid projection, not a mismatch —
+                // ConstructionGate runs the morphism at IR time. The binding is
+                // recorded at the demoted (base) sort.
+                if (demotesTo(inferredBase, declaredBase)) {
+                    demotion = true;
+                } else {
+                    throw new ParseException(
+                            "let '" + name + "' declared as " + declaredSort
+                                    + " but value's inferred sort is " + inferredSort
+                                    + " (base sort mismatch)",
+                            start.origin());
+                }
             }
         }
         // Promotion cases: an anonymous value's shape takes the declared
@@ -951,7 +961,9 @@ public final class AltParser {
         // 0-arg return sort, where it would be an obligation the integer-
         // only discharge kernel can never prove. Otherwise keep the tighter
         // inferred narrowing as before.
-        IrSort binding = declaredSort != null
+        IrSort binding = demotion
+                ? declaredSort
+                : declaredSort != null
                 && "_record".equals(baseSortName(inferredSort))
                 ? declaredSort
                 : intToDecimal
@@ -1067,6 +1079,19 @@ public final class AltParser {
      *       a use case justifies them.
      * </ul>
      */
+    /**
+     * True when {@code fromBase}'s declared struct demotes (is-a) to
+     * {@code toBase} — it carries a {@code :[toBase:…]} base sort. The coercion
+     * {@code let b:toBase = a} (where {@code a : fromBase}) is then a valid
+     * demotion projection, not a base-sort mismatch (ConstructionGate runs the
+     * morphism at IR time).
+     */
+    private boolean demotesTo(String fromBase, String toBase) {
+        IrSort.Structural from = declaredStructs.get(fromBase);
+        if (from == null || from.baseSort() == null) return false;
+        return toBase.equals(baseSortName(from.baseSort()));
+    }
+
     private IrSort inferMaximalSort(IrExpr expr) {
         return switch (expr) {
             case IrExpr.Lit lit -> new IrSort.Refined(

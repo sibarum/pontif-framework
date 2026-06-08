@@ -86,4 +86,49 @@ class StructExtensionTest {
         assertTrue(r.text().contains("does not pin base field"),
                 () -> "got: " + r.text());
     }
+
+    // --- S3: demotion coercion ----------------------------------------------
+
+    @Test
+    void demotion_projectsTheMorphism() {
+        // let b:Point = a runs the morphism: b is Point(2, 3); 2 + 3 = 5.
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                let a = Point3D(2, 3, 5)
+                let b:Point = a
+                b.x + b.y""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void demotion_dropsTheUnmentionedField() {
+        // z is gone after demotion — b.z is an error (clean forget, no tag).
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                let a = Point3D(2, 3, 5)
+                let b:Point = a
+                b.z""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), "b.z should error — z was dropped by the demotion");
+    }
+
+    @Test
+    void promotionByAssignment_isRejected() {
+        // let c:Point3D = b can't fabricate z — no auto-promotion.
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                let a = Point3D(2, 3, 5)
+                let b:Point = a
+                let c:Point3D = b
+                42""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), "promotion by assignment can't synthesize z — must be rejected");
+    }
 }

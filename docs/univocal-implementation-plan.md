@@ -82,7 +82,18 @@ morphism-RHS param scoping; demotion coercion is S3.
 - Reviewable: the decl parses + registers; a non-total morphism is rejected with
   a pointed diagnostic. No coercion yet.
 
-### ☐ S3 — demotion coercion  *(needs S2)*
+### ☑ S3 — demotion coercion  *(landed 2026-06-08, full suite green)*
+**Landed:** `let b:Point = a` (a:Point3D) runs the morphism → `Point(a.x, a.y)`,
+`z` dropped, no surviving tag. Two seams: the parser's base-mismatch check now
+allows a declared demotion (`demotesTo`) and records the binding at the demoted
+(base) sort; `ConstructionGate.maybeDemote`/`projectDemotion` rewrite the value
+to the projection record (morphism RHS with deriving-struct param names rewritten
+to field reads on the value). Reviewable verified: demotion projects, `b.z`
+errors (clean forget), `let c:Point3D = b` rejected (no auto-promotion). Both
+engines, no runtime change (the projection rides existing Record construction).
+**Follow-up:** the value expr is duplicated per base field (fine for pure
+top-level-let constants; bind-once for non-constant values later).
+
 At a declared-sort assignment where the value's sort ⊑ target via the morphism,
 run the projection → drop unmentioned fields, **no surviving tag**.
 - Seams: the LetIn claim / coercion site (NOT `ConstructionGate` at the
