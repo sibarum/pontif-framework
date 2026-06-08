@@ -268,14 +268,16 @@ public final class Drafter {
             // wrong narrowing — the base sort comes from the operands, per
             // the Int-promotes-to-Decimal ruling.
             case IrExpr.BinOp op when op.op() == IrExpr.Op.DIV
-                    || op.op() == IrExpr.Op.MOD -> {
+                    || op.op() == IrExpr.Op.MOD
+                    || op.op() == IrExpr.Op.POW -> {
                 IrExpr left = hoistCalls(op.left(), renameBindings, ctx, callCounter, calls);
                 IrExpr right = hoistCalls(op.right(), renameBindings, ctx, callCounter, calls);
                 String varName = "r_" + (callCounter[0]++);
                 List<SymExpr> argBindings = List.of(
                         Substitute.apply(IrCompiler.compileSymExpr(left), renameBindings),
                         Substitute.apply(IrCompiler.compileSymExpr(right), renameBindings));
-                String opName = op.op() == IrExpr.Op.DIV ? "/" : "%";
+                String opName = op.op() == IrExpr.Op.DIV ? "/"
+                        : op.op() == IrExpr.Op.MOD ? "%" : "^";
                 Sort base = Sort.of(involvesDecimal(left, ctx) || involvesDecimal(right, ctx)
                         ? "Decimal" : "Int");
                 calls.add(new CallRef(opName, argBindings, new Var(varName, base)));

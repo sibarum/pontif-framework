@@ -344,9 +344,9 @@ public final class IrCompiler {
             case SUB -> SymExpr.add(l, SymExpr.mul(SymExpr.lit(-1), r));
             // Division/remainder are not in the linear integer fragment the
             // refinement kernel reasons over — reject in predicate position.
-            case DIV, MOD -> throw new CompileException(
-                    "Division/remainder ('/' , '%') is not supported inside refinement "
-                            + "predicates — the discharge kernel is linear.", op.origin());
+            case DIV, MOD, POW -> throw new CompileException(
+                    "Division/remainder/power ('/', '%', '^') is not supported inside "
+                            + "refinement predicates — the discharge kernel is linear.", op.origin());
             // Approximate equality is a runtime value operator; the proof layer
             // never forgives — predicates and narrows stay exact.
             case APPROX -> throw new CompileException(

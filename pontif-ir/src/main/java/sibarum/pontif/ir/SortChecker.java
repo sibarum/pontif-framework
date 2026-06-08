@@ -998,7 +998,7 @@ public final class SortChecker {
             // it Decimal (promotion). Comparisons/logical yield Bool. Lets a
             // computed scrutinee like `match n + 1` have a provable domain.
             case IrExpr.BinOp op -> switch (op.op()) {
-                case ADD, SUB, MUL, DIV, MOD -> {
+                case ADD, SUB, MUL, DIV, MOD, POW -> {
                     IrSort ls = inferSort(op.left(), typeEnv, functionReturns, structDefs);
                     IrSort rs = inferSort(op.right(), typeEnv, functionReturns, structDefs);
                     String lb = ls == null ? null : matchBaseName(ls);

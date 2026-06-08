@@ -171,7 +171,16 @@ unnecessary (`$` kept, see [[project_requires_unification]]).
 - Reviewable: the `magnitude` monadic form compiles + runs, equivalent to the
   plain-body version.
 
-### ☐ S9 — `^` power operator  *(small, independent, OOS-flagged)*
+### ☑ S9 — `^` power operator  *(landed 2026-06-08, full suite green)*
+**Landed:** `IrExpr.Op.POW`; lexer `^`; precedence 7 (tighter than `*`, left-assoc
+for now); `Int^Int` repeated-multiply (exp ≥ 0), Decimal promotion if either
+operand Decimal (`BigDecimal.pow`, integer exponent). Negative Int exponents and
+non-integer Decimal exponents (transcendental) are runtime errors. Opaque in the
+receipts drafter (hoisted like `/`/`%`) and fenced from refinement predicates
+(the kernel stays linear); ConservationDrafter treats it ARITHMETIC/DEGRADED.
+New `pontif-ast/binary/Pow`. The enum-switch exhaustiveness caught every site.
+PowerOperatorTest pins it. *(`^` is now overloadable too — in OVERLOADABLE_OPS.)*
+
 `Op.POW`; lexer `^`; `Int^Int→Int`, Decimal promotion if either operand Decimal;
 opaque in the receipts drafter (like `/`). Decimal^non-integer is out of scope
 (transcendental).

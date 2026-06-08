@@ -81,6 +81,7 @@ public final class AltParser {
             case "<", "<=", ">", ">=" -> 4;
             case "+", "-" -> 5;
             case "*", "/", "%" -> 6;
+            case "^" -> 7;                              // power — binds tighter than * (left-assoc for now)
             default -> -1;
         };
     }
@@ -92,6 +93,7 @@ public final class AltParser {
             case "*" -> IrExpr.Op.MUL;
             case "/" -> IrExpr.Op.DIV;
             case "%" -> IrExpr.Op.MOD;
+            case "^" -> IrExpr.Op.POW;
             case "<" -> IrExpr.Op.LT;
             case "<=" -> IrExpr.Op.LE;
             case ">" -> IrExpr.Op.GT;
@@ -1309,14 +1311,14 @@ public final class AltParser {
                 // see the Dec literal case). Int arithmetic and all comparisons
                 // keep the value-pinned refinement.
                 boolean decimalArith = switch (op.op()) {
-                    case ADD, SUB, MUL, DIV, MOD -> isDecimalOperand(op.left()) || isDecimalOperand(op.right());
+                    case ADD, SUB, MUL, DIV, MOD, POW -> isDecimalOperand(op.left()) || isDecimalOperand(op.right());
                     default -> false;
                 };
                 if (decimalArith) {
                     yield IrSort.named("Decimal");
                 }
                 String baseName = switch (op.op()) {
-                    case ADD, SUB, MUL, DIV, MOD -> "Int";
+                    case ADD, SUB, MUL, DIV, MOD, POW -> "Int";
                     case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> "Bool";
                 };
                 yield new IrSort.Refined(
@@ -2129,7 +2131,7 @@ public final class AltParser {
      * {@code &}.
      */
     private static final Set<String> OVERLOADABLE_OPS = Set.of(
-            "+", "-", "*", "/", "%",
+            "+", "-", "*", "/", "%", "^",
             "<", "<=", ">", ">=", "==", "!=");
 
     /**

@@ -245,6 +245,16 @@ public final class IrInterpreter {
                         "Integer remainder by zero: " + l + " % 0", op.origin());
                 yield (Long) l % (Long) r;   // sign of dividend; pairs with DIV (a == (a/b)*b + a%b)
             }
+            case POW -> {
+                long base = (Long) l;
+                long e = (Long) r;
+                if (e < 0L) throw new RuntimeCheckException(
+                        "Negative exponent on Int: " + base + " ^ " + e + " — not an integer",
+                        op.origin());
+                long acc = 1L;
+                for (long i = 0; i < e; i++) acc *= base;
+                yield acc;
+            }
             case LT -> (Long) l < (Long) r;
             case LE -> (Long) l <= (Long) r;
             case GT -> (Long) l > (Long) r;
@@ -281,7 +291,7 @@ public final class IrInterpreter {
             case NE -> lc.codePoint() != rc.codePoint();
             // Code points are exact values — ~= coincides with == .
             case APPROX -> lc.codePoint() == rc.codePoint();
-            case ADD, SUB, MUL, DIV, MOD, AND, OR -> throw new RuntimeCheckException(
+            case ADD, SUB, MUL, DIV, MOD, POW, AND, OR -> throw new RuntimeCheckException(
                     "Operator '" + opSymbol(op.op()) + "' is not defined for Char — "
                             + "chars order and compare; they don't compute", op.origin());
         };
@@ -289,7 +299,7 @@ public final class IrInterpreter {
 
     private static String opSymbol(IrExpr.Op op) {
         return switch (op) {
-            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/"; case MOD -> "%";
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/"; case MOD -> "%"; case POW -> "^";
             case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
             case EQ -> "=="; case NE -> "!="; case APPROX -> "~=";
             case AND -> "&"; case OR -> "|";
@@ -315,7 +325,7 @@ public final class IrInterpreter {
     private static String symbol(IrExpr.Op op) {
         return switch (op) {
             case ADD -> "+"; case SUB -> "-"; case MUL -> "*";
-            case DIV -> "/"; case MOD -> "%";
+            case DIV -> "/"; case MOD -> "%"; case POW -> "^";
             case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
             case EQ -> "=="; case NE -> "!="; case APPROX -> "~=";
             case AND -> "&"; case OR -> "|";
@@ -345,6 +355,20 @@ public final class IrInterpreter {
                 if (r.signum() == 0) throw new RuntimeCheckException(
                         "Decimal remainder by zero: " + l.toPlainString() + " % 0", origin);
                 yield l.remainder(r);
+            }
+            case POW -> {
+                int e;
+                try {
+                    e = r.intValueExact();
+                } catch (ArithmeticException notInt) {
+                    throw new RuntimeCheckException(
+                            "Non-integer exponent " + r.toPlainString()
+                                    + " — a Decimal to a non-integer power is transcendental "
+                                    + "(out of scope)", origin);
+                }
+                if (e < 0) throw new RuntimeCheckException(
+                        "Negative exponent " + e + " — non-negative integer powers only", origin);
+                yield l.pow(e);
             }
             case LT -> l.compareTo(r) < 0;
             case LE -> l.compareTo(r) <= 0;

@@ -694,7 +694,7 @@ public final class ConservationDrafter {
 
     private static OpClass opClass(IrExpr.Op op) {
         return switch (op) {
-            case ADD, SUB, MUL, DIV, MOD -> OpClass.ARITHMETIC;
+            case ADD, SUB, MUL, DIV, MOD, POW -> OpClass.ARITHMETIC;
             case LT, LE, GT, GE, EQ, NE, APPROX -> OpClass.MEASUREMENT;
             case AND, OR -> OpClass.LOGICAL;
         };
@@ -707,7 +707,7 @@ public final class ConservationDrafter {
                     ? Recoverability.RECOVERABLE : Recoverability.DEGRADED;
             // Individually lossy; the joint /+% identity is a cross-node fact
             // (a later refinement). Conservative verdict here.
-            case DIV, MOD -> Recoverability.DEGRADED;
+            case DIV, MOD, POW -> Recoverability.DEGRADED;
             case LT, LE, GT, GE, EQ, NE, APPROX -> Recoverability.MEASUREMENT_BIT;
             case AND, OR -> Recoverability.DEGRADED;
         };
@@ -763,7 +763,7 @@ public final class ConservationDrafter {
 
     private static String opSymbol(IrExpr.Op op) {
         return switch (op) {
-            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/"; case MOD -> "%";
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/"; case MOD -> "%"; case POW -> "^";
             case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
             case EQ -> "=="; case NE -> "!="; case APPROX -> "~=";
             case AND -> "&"; case OR -> "|";
