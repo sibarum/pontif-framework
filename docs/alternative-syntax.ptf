@@ -20,7 +20,7 @@
 #         - Refinement [Sort:pred]:  the value being refined
 #         - Match arm:               the scrutinee
 #    Each refinement binds its own `@`.  Nested refinements SHADOW the
-#    outer `@`.  Methods get `self` injected as the receiver (so the
+#    outer `@`.  Methods get `this` injected as the receiver (so the
 #    receiver has a stable name independent of `@`).
 #
 # 4. `|` IS OR, `&` IS AND, `!` IS NOT, AT EVERY LEVEL.  The level is
@@ -231,7 +231,7 @@ let Point.staticOrigin:[Point(x:[Int:0], y:[Int:0])]
 # Static function — `@` in the return refinement is the produced Int.
 function Point.manhattan(p:Point):[Int:p.x+p.y]
 
-# Instance method.  `self` is the receiver (injected by method desugar).
+# Instance method.  `this` is the receiver (injected by method desugar).
 # `@` inside each field constraint is that field's value-under-refinement
 # (an Int here), so we use `this.x` / `this.y` to reach receiver fields.
 # The form below is spec-only — it pins the return refinement but needs the

@@ -35,7 +35,7 @@ unrelated systems held together by name-string tricks and a hardcoded fast path:
    user types route to it — a split decided by a parse-time guess at the operand
    sort.
 3. **Instance methods — name-mangled.** `method Type.name(…)` desugars to
-   `function Type.name(self:Type, …)`, and `p.name(a)` becomes
+   `function Type.name(this:Type, …)`, and `p.name(a)` becomes
    `Call("Type.name", [p, a])` via `AltParser.methodNameForReceiver`, which needs
    the receiver's sort *at parse time*. That parse-time requirement is the
    parser-blindness that blocks cross-module `recv.method()`. Trait calls add a

@@ -32,9 +32,9 @@ Type-level field assignments use `:` because they're sort narrowings,
 not value assignments — the contract says "any value satisfying Duck
 must have a method `quack` narrowing to `[Method():Audio]`."
 
-The `self` parameter is *implicit* in each method's signature. A
+The `this` parameter is *implicit* in each method's signature. A
 contract method `quack:[Method():Audio]` says the implementation
-should be a function from receiver-only to Audio; `self` is prepended
+should be a function from receiver-only to Audio; `this` is prepended
 at impl-check time.
 
 ## Assigning a trait to a type
@@ -56,11 +56,11 @@ The block does two things simultaneously:
    method decl with the receiving struct's name elided (since the
    header says `Donald`). The block desugars to:
    `method Donald.quack():Audio -> Audio("quack")` etc., each
-   eventually a `FunctionDecl("Donald.quack", [self:Donald], Audio, ...)`.
+   eventually a `FunctionDecl("Donald.quack", [this:Donald], Audio, ...)`.
 2. **Registers the satisfaction claim.** Adds `Donald` to Duck's
    satisfier set in the `TraitRegistry`. Compile fails (in the
    `SortChecker` pass) if any of Duck's contract methods is missing or
-   has a signature that doesn't match (after self-prepending).
+   has a signature that doesn't match (after receiver-prepending).
 
 Standalone methods declared via `method Donald.greet():String -> ...`
 stay outside any `assign trait` block — they belong to Donald but to
@@ -115,21 +115,21 @@ Three new shapes:
 
 - `IrSort.Trait(name, methods, origin)` — a sort whose kind is `Type`.
   `methods` is `Map<String, MethodContract>` where MethodContract is
-  the signature *without* self (param sorts + return sort).
+  the signature *without* the receiver (param sorts + return sort).
 - `IrStmt.TraitDecl(name, methods, origin)` — top-level declaration.
   `AliasResolver` registers it as a sort alias usable in narrowing
   positions; subsequent `Sort.named("Duck")` references resolve to
   the trait sort.
 - `IrStmt.TraitImpl(typeName, traitName, methods, origin)` — the
   trait-assignment block. `methods` is `List<IrStmt.FunctionDecl>`
-  built with the type-qualified name and self-prepended params.
+  built with the type-qualified name and receiver-prepended params.
   Lowering: when the module is compiled, each method becomes a real
   `FunctionDecl` in the dispatch table, and the (type, trait) pair
   is added to `TraitRegistry`.
 
 `SortChecker` extensions:
 - For each `TraitImpl(T, Tr, methods)`: verify every method in Tr's
-  contract has a matching entry in `methods` after self-prepending
+  contract has a matching entry in `methods` after receiver-prepending
   param sorts. Fail compile with a clear "missing/mismatched method"
   error.
 - For narrowing-check sites where the source sort is a struct and the
@@ -150,7 +150,7 @@ Three new shapes:
 ```
 
 Each method inside `(impl ...)` parses with the type-qualified
-function name (`Donald.quack`) and self-prepended params reconstructed
+function name (`Donald.quack`) and receiver-prepended params reconstructed
 from the trait's contract.
 
 ### Step 4 — alt syntax
@@ -168,7 +168,7 @@ assign trait Donald:Duck {
   eat(food:Food):Poop -> Poop(food.weight)
 }
 
-method Donald.greet():String -> "Hi, I'm " + self.name
+method Donald.greet():String -> "Hi, I'm " + this.name
 
 function describe(d:Duck):Audio -> d.quack()
 describe(Donald("Donald", DARK_GREEN))

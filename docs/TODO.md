@@ -802,7 +802,7 @@ with pattern-env plumbing, someday).
 
 - **`@` as the current concrete type (future direction, 2026-06-02).** `@` is
   the refinement-predicate placeholder and deliberately NOT the method receiver
-  (that's `self`). Eventually `@` may also denote the *current concrete type*
+  (that's `this`). Eventually `@` may also denote the *current concrete type*
   in type position (a Self-type) — parked, noted so the symbol isn't reused for
   something else in the meantime.
 
