@@ -229,4 +229,44 @@ class StructExtensionTest {
         assertTrue(r.isError(), "z is unspecified — the merge must reject");
         assertTrue(r.text().contains("unspecified"), () -> "got: " + r.text());
     }
+
+    // --- S8: monadic in-type pipeline (no requires) -------------------------
+
+    @Test
+    void inTypePipeline_synthesizesViaLetStage() {
+        // The "monadic" return: a let-stage computes m via a function call, the
+        // final pin returns m — equivalent to a `-> addUp(x,y)` body. No
+        // `requires`: addUp resolves as an ordinary global function.
+        String src = """
+                struct Point(x:Int, y:Int)
+                function addUp(a:Int, b:Int):Int -> a + b
+                function combine(p:[Point.{x, y}]):[
+                    let m:Int = addUp(x, y) ->
+                    Int:@==m
+                ];
+                combine(Point(2, 3))""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void inTypePipeline_multiStage() {
+        // Two stages chain: a = dbl(10) = 20, b = a + 1 = 21, return b.
+        String src = """
+                function dbl(n:Int):Int -> n * 2
+                function f(n:Int):[
+                    let a:Int = dbl(n) ->
+                    let b:Int = a + 1 ->
+                    Int:@==b
+                ];
+                f(10)""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("21", r.text(), engine.toString());
+        }
+    }
 }

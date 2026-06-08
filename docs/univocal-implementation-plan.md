@@ -157,19 +157,28 @@ mismatch check). Verified: merge → 5; unspecified field rejected.
 
 ## Computation / world-boundary
 
-### ☐ S7 — `requires @.{…}` (world-boundary `@`)  *(independent)*
-`@` = the parent/outside scope inside `requires`; makes `$fqn` import sources
-unnecessary (`$` kept, see [[project_requires_unification]]).
-- Seams: pragmatic — lower `requires @.{name}` to local let-destructure from the
-  enclosing scope (`parseRequires` ~360), avoiding module-linker rework.
-- Reviewable: `requires @.{sqrt}` brings sqrt into scope from the enclosing namespace.
+### ✗ S7 — `requires @.{…}` (world-boundary `@`)  *(DROPPED 2026-06-08, James)*
+Cut entirely. The only use was importing `sqrt` into the S8 in-type pipeline, but
+`sqrt` (any top-level function) is already resolvable by name — `requires @` was
+importing something already in scope. Dropping it removes the whole 4th-wall
+`@`-world-scope question (what the parent scope resolves to / where it's legal).
+`$fqn` import simplification can be revisited separately if a non-global ever
+needs naming; no current case.
 
-### ☐ S8 — monadic in-type pipeline  *(deepest; needs S1+S7)*
+### ☑ S8 — monadic in-type pipeline (no `requires`)  *(landed 2026-06-08, full suite green)*
+**Landed:** `[let x:S = E -> … -> Base:@==witness]` in type position is a staged
+SYNTHESIS directive — desugars to `[Base:@ == (let x = E in … in witness)]` (NOT
+a new executable sort kind; reuses `IrExpr.LetIn` chaining + the `@==EXPR`
+synthesis path). `parseSort` detects the leading `let`; `parsePipelineSort`
+builds the let-chain witness; `effectiveSynthesizedReturn` strips the LetIn-bodied
+pin to the bare base (definitional). Stages' expressions resolve names normally
+(params + global functions) — no import. **Prediction check:** I'd called S8 the
+costly one; dropping `requires` (S7) removed exactly the new-semantics part, so
+what remained was pure recombination — cheap. The cost was the world-boundary
+`@`, which got cut. Verified: single-stage (`combine` → 5) and multi-stage
+(`f(10)` → 21), both engines.
+
 `[requires @.{sqrt} -> let m:Decimal = sqrt(...) -> Decimal:@==m]` in type position.
-- **Approach: DESUGAR** into body statements + a final pin sort — NOT a new
-  executable sort kind (keeps sorts non-executable; reuse `IrExpr.LetIn` chaining).
-- Reviewable: the `magnitude` monadic form compiles + runs, equivalent to the
-  plain-body version.
 
 ### ☑ S9 — `^` power operator  *(landed 2026-06-08, full suite green)*
 **Landed:** `IrExpr.Op.POW`; lexer `^`; precedence 7 (tighter than `*`, left-assoc

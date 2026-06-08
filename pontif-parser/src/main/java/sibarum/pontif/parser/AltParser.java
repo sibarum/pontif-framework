@@ -881,6 +881,12 @@ public final class AltParser {
         if (derived instanceof IrExpr.Record rec && rec.typeName() != null) {
             return new IrSort.Named(rec.typeName(), declaredReturn.origin());
         }
+        // In-type pipeline (S8): a let-chain body's pin (@ == let … in witness)
+        // is definitional and carries opaque calls the gate can't reflexively
+        // prove — declare the bare final base.
+        if (derived instanceof IrExpr.LetIn && declaredReturn instanceof IrSort.Refined r) {
+            return new IrSort.Named(r.name(), declaredReturn.origin());
+        }
         return declaredReturn;
     }
 
@@ -1502,6 +1508,12 @@ public final class AltParser {
     public IrSort parseSort() throws ParseException {
         AltToken t = peek();
         if (t.kind() == AltToken.Kind.LBRACKET) {
+            // In-type pipeline (S8): `[let x:S = E -> … -> Base:@==witness]` — a
+            // staged synthesis directive. The leading `let` is unambiguous (no
+            // sort starts with the `let` keyword).
+            if (peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("let")) {
+                return parsePipelineSort();
+            }
             return parseBracketSort();
         }
         if (t.kind() == AltToken.Kind.IDENT) {
@@ -1533,6 +1545,49 @@ public final class AltParser {
      * derives the body {@code Name(e1, …)} through the existing {@code @==EXPR}
      * path — how {@code function promote(…):Point3D{x,y,z};} gets its body.
      */
+    /**
+     * In-type pipeline (S8): {@code [let x:S = E -> … -> Base:@==witness]} — a
+     * staged synthesis directive, the type-position equivalent of writing the
+     * body with {@code ->}. Desugars to {@code [Base:@ == (let x = E in … in
+     * witness)]}, riding the existing {@code @==EXPR} synthesis path; the
+     * let-stages' expressions resolve names normally (params, global functions),
+     * so no {@code requires} import is needed.
+     */
+    private IrSort parsePipelineSort() throws ParseException {
+        AltToken open = expect(AltToken.Kind.LBRACKET);
+        List<String> names = new ArrayList<>();
+        List<IrSort> sorts = new ArrayList<>();
+        List<IrExpr> exprs = new ArrayList<>();
+        while (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+            consume();  // let
+            AltToken n = expect(AltToken.Kind.IDENT);
+            expect(AltToken.Kind.COLON);
+            IrSort s = parseSort();
+            expect(AltToken.Kind.EQUALS);
+            IrExpr e = parseExpr();
+            expect(AltToken.Kind.ARROW);
+            names.add(n.text());
+            sorts.add(s);
+            exprs.add(e);
+        }
+        IrSort finalSort = parseBracketBranch();
+        AltToken close = expect(AltToken.Kind.RBRACKET);
+        IrExpr witness = tryDeriveBodyFromReturnSort(finalSort);
+        if (witness == null) {
+            throw new ParseException(
+                    "in-type pipeline's final stage must be a value pin "
+                            + "('Base:@==EXPR') — got " + finalSort, close.origin());
+        }
+        IrExpr chain = witness;
+        for (int i = names.size() - 1; i >= 0; i--) {
+            chain = new IrExpr.LetIn(names.get(i), sorts.get(i), exprs.get(i), chain, open.origin());
+        }
+        String base = baseSortName(finalSort);
+        return new IrSort.Refined(base,
+                new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), chain, open.origin()),
+                open.spanTo(close));
+    }
+
     private IrSort parseConstructionPinSort() throws ParseException {
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         IrSort.Structural struct = declaredStructs.get(nameTok.text());
