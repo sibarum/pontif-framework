@@ -118,7 +118,19 @@ works) and accumulates `ParamDestructure`s; all three function-bodied callers
   mirrors the `let`-destructure path. Compose with `->` rename for collisions.
 - Reviewable: bare x,y usable in the function body/return.
 
-### ☐ S5 — promotion via synthesis (function + method)  *(needs S1+S2+S4)*
+### ☑ S5 — promotion via synthesis (function + method)  *(landed 2026-06-08, full suite green)*
+**Landed:** `parseSort` parses a construction-pin `Name{e1,…}` (over a declared
+struct) → `[Name:@ == Name(e1,…)]` (positional into declared fields), so the
+existing `@==EXPR` synthesis derives the body `Name(e1,…)`. Both the `function
+promote(point:[Point.{x,y}], z):Point3D{x,y,z};` and `method
+Point.promote(z):Point3D{this.x,this.y,z};` forms synthesize and run; the
+synthesis branches wrap the body with S4's destructures. **Gotcha fixed:** a
+construction-pin return is DEFINITIONAL (body IS the construction), so
+`effectiveSynthesizedReturn` declares the bare struct, not the self-referential
+`@==Name(…)` obligation the return gate couldn't discharge through the
+destructure `let` indirection (value pins keep their refinement). Verified:
+`promote(Point(2,3),7)` sums to 12; `b.promote(11)` to 16 with inference.
+
 Extend `tryDeriveBodyFromReturnSort` (~769) to a **construction pin** `Type{names}`
 (not just `@==EXPR`).
 - `function promote(point:[Point.{x,y}], z:Int):Point3D{x,y,z};`

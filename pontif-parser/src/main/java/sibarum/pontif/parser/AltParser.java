@@ -637,9 +637,13 @@ public final class AltParser {
             consume();
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
-                declaredFunctionReturns.put(name, returnSort);
+                // The synthesized body references destructured params (S4), so
+                // wrap it in their `let local = param.field` bindings.
+                IrExpr body = wrapParamDestructures(derived, destrs);
+                IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
+                declaredFunctionReturns.put(name, effReturn);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
-                return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
+                return new IrStmt.FunctionDecl(name, params, effReturn, body, start.origin());
             }
             throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
         }
@@ -732,9 +736,11 @@ public final class AltParser {
             consume();  // SEMICOLON
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
-                declaredFunctionReturns.put(name, returnSort);
+                IrExpr body = wrapParamDestructures(derived, destrs);
+                IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
+                declaredFunctionReturns.put(name, effReturn);
                 return new IrStmt.FunctionDecl(
-                        name, desugaredParams, returnSort, derived, start.origin());
+                        name, desugaredParams, effReturn, body, start.origin());
             }
             throw specOnlyWithoutSynthesis("method", name, returnSort, start.origin());
         }
@@ -858,6 +864,22 @@ public final class AltParser {
         }
         if (containsSelfRef(candidate)) return null;
         return candidate;
+    }
+
+    /**
+     * The declared return for a synthesized body. A construction-pin synthesis
+     * (the body is a struct construction, e.g. {@code Point3D(x, y, z)}) is
+     * DEFINITIONAL — the body IS the construction — so the declared return is
+     * the bare struct, not the self-referential {@code @ == Point3D(…)}
+     * obligation (which the return gate can't discharge through the param-
+     * destructure `let` indirection). Value pins ({@code @ == n*2}) keep their
+     * refinement — the gate proves those reflexively.
+     */
+    private static IrSort effectiveSynthesizedReturn(IrExpr derived, IrSort declaredReturn) {
+        if (derived instanceof IrExpr.Record rec && rec.typeName() != null) {
+            return new IrSort.Named(rec.typeName(), declaredReturn.origin());
+        }
+        return declaredReturn;
     }
 
     /** True if {@code expr} contains an {@link IrExpr.SelfRef} anywhere. */
@@ -1414,6 +1436,12 @@ public final class AltParser {
             if (t.text().equals("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
                 return parseTraitTypeLiteral();
             }
+            // `Name{e1, e2, …}` — a construction-pin return sort over a declared
+            // struct (S5): desugars to `[Name:@ == Name(e1, …)]`, so spec-only
+            // synthesis derives the body `Name(e1, …)` via the @==EXPR path.
+            if (peek(1).kind() == AltToken.Kind.LBRACE && declaredStructs.containsKey(t.text())) {
+                return parseConstructionPinSort();
+            }
             // Bare-ident sugar: `Int` ≡ `[Int]`.
             AltToken nameTok = consume();
             return new IrSort.Named(nameTok.text(), nameTok.origin());
@@ -1421,6 +1449,41 @@ public final class AltParser {
         throw new ParseException(
                 "Expected a sort (bare ident or '[...]'); got " + t.kind() + " '" + t.text() + "'",
                 t.origin());
+    }
+
+    /**
+     * Construction-pin return sort: {@code Name{e1, e2, …}} over a declared
+     * struct desugars to {@code [Name:@ == Name(e1, …)]}, the values mapped
+     * POSITIONALLY onto the struct's declared fields. Spec-only synthesis then
+     * derives the body {@code Name(e1, …)} through the existing {@code @==EXPR}
+     * path — how {@code function promote(…):Point3D{x,y,z};} gets its body.
+     */
+    private IrSort parseConstructionPinSort() throws ParseException {
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        IrSort.Structural struct = declaredStructs.get(nameTok.text());
+        List<String> fields = new ArrayList<>(struct.members().keySet());
+        expect(AltToken.Kind.LBRACE);
+        List<IrExpr> values = new ArrayList<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            values.add(parseExpr());
+            first = false;
+        }
+        expect(AltToken.Kind.RBRACE);
+        if (values.size() != fields.size()) {
+            throw new ParseException(
+                    "construction pin '" + nameTok.text() + "{…}' has " + values.size()
+                            + " value(s) but '" + nameTok.text() + "' has " + fields.size()
+                            + " field(s) " + fields,
+                    nameTok.origin());
+        }
+        Map<String, IrExpr> members = new LinkedHashMap<>();
+        for (int i = 0; i < fields.size(); i++) members.put(fields.get(i), values.get(i));
+        IrExpr construction = new IrExpr.Record(nameTok.text(), members, nameTok.origin());
+        IrExpr pin = new IrExpr.BinOp(IrExpr.Op.EQ,
+                new IrExpr.SelfRef(nameTok.origin()), construction, nameTok.origin());
+        return new IrSort.Refined(nameTok.text(), pin, nameTok.origin());
     }
 
     /**

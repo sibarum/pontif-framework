@@ -159,4 +159,40 @@ class StructExtensionTest {
         assertFalse(r.isError(), () -> "got: " + r.text());
         assertEquals("7", r.text());
     }
+
+    // --- S5: promotion via synthesis ----------------------------------------
+
+    @Test
+    void promotion_viaFunctionSynthesis() {
+        // promote synthesizes Point3D(x, y, z) from the return construction pin;
+        // point is destructured to x, y (S4) and z is a param.
+        // promote(Point(2,3), 7) = Point3D(2,3,7); 2+3+7 = 12.
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                function promote(point:[Point.{x, y}], z:Int):Point3D{x, y, z};
+                let p = promote(Point(2, 3), 7)
+                p.x + p.y + p.z""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("12", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void promotion_viaMethodSynthesis() {
+        // method promote uses this.x/this.y + z. On Point(2,3), b.promote(11) =
+        // Point3D(2,3,11); 2+3+11 = 16. The method form enables type inference.
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                method Point.promote(z:Int):Point3D{this.x, this.y, z};
+                let b = Point(2, 3)
+                let p = b.promote(11)
+                p.x + p.y + p.z""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "got: " + r.text());
+        assertEquals("16", r.text());
+    }
 }
