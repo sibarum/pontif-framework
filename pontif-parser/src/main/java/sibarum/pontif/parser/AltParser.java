@@ -601,6 +601,7 @@ public final class AltParser {
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
         // A bare-operator function is a binary operator — exactly two operands
         // (left, right). The legacy `Type.op` form is naturally binary too
         // (receiver + one param), so this only guards the new bare form.
@@ -620,8 +621,9 @@ public final class AltParser {
             Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
             currentScope.clear();
             for (IrParam p : params) currentScope.put(p.name(), p.sort());
+            bindParamDestructures(destrs);
             try {
-                IrExpr body = parseExpr();
+                IrExpr body = wrapParamDestructures(parseExpr(), destrs);
                 declaredFunctionReturns.put(name, returnSort);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
                 return new IrStmt.FunctionDecl(name, params, returnSort, body, start.origin());
@@ -700,6 +702,7 @@ public final class AltParser {
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
 
@@ -741,8 +744,9 @@ public final class AltParser {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         for (IrParam p : desugaredParams) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
         try {
-            IrExpr body = parseExpr();
+            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
             declaredFunctionReturns.put(name, returnSort);
             return new IrStmt.FunctionDecl(
                     name, desugaredParams, returnSort, body, start.origin());
@@ -752,6 +756,41 @@ public final class AltParser {
         }
     }
 
+    /**
+     * A param-sort {@code .{}} destructure (`point:[Point.{x, y -> py}]`): the
+     * param keeps the base sort and each entry binds a local to a field read on
+     * the param in the function body. Accumulated by {@link #parseParamList},
+     * drained by the function/method parsers (S4).
+     */
+    private record ParamDestructure(String local, String paramName,
+                                    String fieldName, IrSort fieldSort) {}
+
+    private final List<ParamDestructure> pendingParamDestructures = new ArrayList<>();
+
+    private List<ParamDestructure> drainParamDestructures() {
+        List<ParamDestructure> d = new ArrayList<>(pendingParamDestructures);
+        pendingParamDestructures.clear();
+        return d;
+    }
+
+    /** Binds the destructured locals into the body's scope for parsing. */
+    private void bindParamDestructures(List<ParamDestructure> destrs) {
+        for (ParamDestructure d : destrs) currentScope.put(d.local(), d.fieldSort());
+    }
+
+    /** Wraps {@code body} in `let local = param.field` for each destructure. */
+    private IrExpr wrapParamDestructures(IrExpr body, List<ParamDestructure> destrs) {
+        IrExpr out = body;
+        for (int i = destrs.size() - 1; i >= 0; i--) {
+            ParamDestructure d = destrs.get(i);
+            out = new IrExpr.LetIn(d.local(), d.fieldSort(),
+                    new IrExpr.FieldAccess(
+                            new IrExpr.Var(d.paramName(), body.origin()), d.fieldName(), body.origin()),
+                    out, body.origin());
+        }
+        return out;
+    }
+
     private List<IrParam> parseParamList(AltToken.Kind terminator) throws ParseException {
         List<IrParam> params = new ArrayList<>();
         boolean first = true;
@@ -759,7 +798,30 @@ public final class AltParser {
             if (!first) expect(AltToken.Kind.COMMA);
             AltToken name = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
-            IrSort sort = parseSort();
+            IrSort sort;
+            // Param-sort `.{}` destructure: `point:[Point.{x, y}]` — the param
+            // keeps base sort [Point]; x, y bind to point.x, point.y in the body.
+            if (peek().kind() == AltToken.Kind.LBRACKET
+                    && peek(1).kind() == AltToken.Kind.IDENT
+                    && peek(2).kind() == AltToken.Kind.DOT
+                    && peek(3).kind() == AltToken.Kind.LBRACE) {
+                consume();  // [
+                AltToken baseTok = expect(AltToken.Kind.IDENT);
+                List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
+                expect(AltToken.Kind.RBRACKET);
+                sort = new IrSort.Named(baseTok.text(), baseTok.origin());
+                IrSort.Structural baseStruct = declaredStructs.get(baseTok.text());
+                for (IrStmt.RequireEntry e : entries) {
+                    IrSort fieldSort = baseStruct != null
+                            && baseStruct.members().get(e.remoteName()) != null
+                            ? baseStruct.members().get(e.remoteName())
+                            : IrSort.named("_");
+                    pendingParamDestructures.add(new ParamDestructure(
+                            e.localName(), name.text(), e.remoteName(), fieldSort));
+                }
+            } else {
+                sort = parseSort();
+            }
             params.add(new IrParam(name.text(), sort));
             first = false;
         }
@@ -1247,6 +1309,7 @@ public final class AltParser {
         expect(AltToken.Kind.LPAREN);
         List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
         expect(AltToken.Kind.ARROW);
@@ -1258,8 +1321,9 @@ public final class AltParser {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         for (IrParam p : allParams) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
         try {
-            IrExpr body = parseExpr();
+            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
             String qualified = typeName + "." + nameTok.text();
             declaredFunctionReturns.put(qualified, returnSort);
             return new IrStmt.FunctionDecl(

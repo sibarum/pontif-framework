@@ -105,7 +105,14 @@ run the projection → drop unmentioned fields, **no surviving tag**.
 
 ## Fabricate-never half
 
-### ☐ S4 — param-sort `.{}` destructuring  *(new `.{}` consumer, the 4th)*
+### ☑ S4 — param-sort `.{}` destructuring  *(landed 2026-06-08, full suite green)*
+**Landed:** `point:[Point.{x, y}]` — the param keeps base sort `[Point]`; x, y
+bind to `point.x`, `point.y` in the body (via `let`-wrapping). `parseParamList`
+detects `[Base.{entries}]` (reusing `parseDotBraceEntryList`, so `x -> px` rename
+works) and accumulates `ParamDestructure`s; all three function-bodied callers
+(function/method/trait-method) drain + bind-into-scope + wrap the body. The 4th
+`.{}` consumer after requires/exports/let. Verified: `function sumXY(point:[Point.{x,y}]):Int -> x + y` and the rename form.
+
 `point:[Point.{x,y}]` binds x,y into scope.
 - Seams: `parseBracketBranch` (~1395) / `parseParamList` (~741); scope injection
   mirrors the `let`-destructure path. Compose with `->` rename for collisions.

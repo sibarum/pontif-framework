@@ -131,4 +131,32 @@ class StructExtensionTest {
         RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "promotion by assignment can't synthesize z — must be rejected");
     }
+
+    // --- S4: param-sort `.{}` destructuring ---------------------------------
+
+    @Test
+    void paramSortDestructure_bindsFieldsInBody() {
+        // point:[Point.{x, y}] — x, y bind to point.x, point.y in the body.
+        String src = """
+                struct Point(x:Int, y:Int)
+                function sumXY(point:[Point.{x, y}]):Int -> x + y
+                sumXY(Point(2, 3))""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void paramSortDestructure_withRename() {
+        // `x -> px` renames the introduced local.
+        String src = """
+                struct Point(x:Int, y:Int)
+                function getX(point:[Point.{x -> px}]):Int -> px
+                getX(Point(7, 9))""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "got: " + r.text());
+        assertEquals("7", r.text());
+    }
 }
