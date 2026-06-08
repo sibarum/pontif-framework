@@ -696,11 +696,11 @@ public final class AltParser {
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
 
-        // Reject a user-declared `self` — would collide with the injected one.
+        // Reject a user-declared `this` — would collide with the injected one.
         for (IrParam p : params) {
-            if (p.name().equals("self")) {
+            if (p.name().equals("this")) {
                 throw new ParseException(
-                        "Method param cannot be named 'self' — that name is reserved for "
+                        "Method param cannot be named 'this' — that name is reserved for "
                                 + "the implicit receiver injected by method desugar",
                         start.origin());
             }
@@ -708,7 +708,7 @@ public final class AltParser {
 
         IrSort receiverSort = new IrSort.Named(receiverTypeName, start.origin());
         List<IrParam> desugaredParams = new ArrayList<>(params.size() + 1);
-        desugaredParams.add(new IrParam("self", receiverSort));
+        desugaredParams.add(new IrParam("this", receiverSort));
         desugaredParams.addAll(params);
 
         if (peek().kind() != AltToken.Kind.ARROW) {
@@ -1196,7 +1196,7 @@ public final class AltParser {
         expect(AltToken.Kind.ARROW);
 
         List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
-        allParams.add(new IrParam("self", selfSort));
+        allParams.add(new IrParam("this", selfSort));
         allParams.addAll(userParams);
 
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);

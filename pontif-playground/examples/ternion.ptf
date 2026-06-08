@@ -16,7 +16,7 @@ function *(left:Ternion, right:Ternion):Ternion ->
   Ternion(z, n, w)
 
 method Ternion.inv():Ternion ->
-  match self {
+  match this {
     [Ternion(z,0,w)] -> Ternion(w, 0, z+1)
     [Ternion(z,n,w)] -> Ternion(w, 1/n, z)
   }

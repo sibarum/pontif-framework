@@ -142,7 +142,7 @@ class FunctionSortTest {
                 "count", INT_GE_0,
                 "next", Sort.method(List.of(UNIT), INT_GT_0)));
 
-        // Instance: count = 5, next = lambda that returns self.count + 1
+        // Instance: count = 5, next = lambda that returns this.count + 1
         SymExpr instance = SymExpr.record(Map.of(
                 "count", SymExpr.lit(5),
                 "next", SymExpr.lam("_",
@@ -189,7 +189,7 @@ class FunctionSortTest {
 
     @Test
     void selfInMethodBody_resolvesToReceiverRecord() throws Exception {
-        // method body: self.x + self.y
+        // method body: this.x + this.y
         SymExpr instance = SymExpr.record(Map.of(
                 "x", SymExpr.lit(3),
                 "y", SymExpr.lit(7),
@@ -207,7 +207,7 @@ class FunctionSortTest {
 
     @Test
     void methodTakingArg_combinesArgAndReceiver() throws Exception {
-        // method body: self.factor * arg
+        // method body: this.factor * arg
         SymExpr instance = SymExpr.record(Map.of(
                 "factor", SymExpr.lit(3),
                 "scale", SymExpr.lam("input",

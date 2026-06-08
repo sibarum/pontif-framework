@@ -233,16 +233,16 @@ function Point.manhattan(p:Point):[Int:p.x+p.y]
 
 # Instance method.  `self` is the receiver (injected by method desugar).
 # `@` inside each field constraint is that field's value-under-refinement
-# (an Int here), so we use `self.x` / `self.y` to reach receiver fields.
+# (an Int here), so we use `this.x` / `this.y` to reach receiver fields.
 # The form below is spec-only — it pins the return refinement but needs the
 # proof engine to synthesize the body.  Methods with explicit bodies (next
 # line) work at runtime today.
-method Point.add(p:Point):[Point(x:[Int:self.x+p.x], y:[Int:self.y+p.y])]
+method Point.add(p:Point):[Point(x:[Int:this.x+p.x], y:[Int:this.y+p.y])]
 
 # Method with an explicit body — callable from instance values via
 # `receiver.add(other)`, which the parser routes to `Point.add(receiver,
 # other)` when it knows the receiver is a Point.
-method Point.plus(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+method Point.plus(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
 function combine(p:Point, q:Point):Point -> p.plus(q)
 let shifted = origin.plus(Point(1, 2))   # works on a let-bound value too
 
@@ -253,8 +253,8 @@ let shifted = origin.plus(Point(1, 2))   # works on a let-bound value too
 # (Int, Bool) always keep the fast BinOp path.  Refinement-predicate
 # arithmetic stays primitive too — overloads are strictly a runtime,
 # value-level concern.  Overloadable: + - * < <= > >= == !=
-method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
-method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
 function shift(a:Point, b:Point):Point -> a + b
 function same(a:Point, b:Point):Bool -> a == b
 
@@ -268,7 +268,7 @@ let Duck:Type{
 }
 
 assign trait Point:Duck {
-  quack():Int -> self.x + self.y
+  quack():Int -> this.x + this.y
 }
 
 # A trait-typed parameter: any value whose concrete type satisfies Duck

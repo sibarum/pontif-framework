@@ -108,7 +108,7 @@ class DecimalPromotionTest {
         // Method-keyed dispatch failures say "method"; bare names say "function".
         RunResult method = run("""
                 struct Box(v:Int)
-                method Box.get():Int -> self.v
+                method Box.get():Int -> this.v
                 Box(1).get(99)
                 """);
         assertTrue(method.isError());

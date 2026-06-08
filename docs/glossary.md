@@ -352,9 +352,13 @@ by issuers are *separate* (see "receipt") and reference into the graph
 but never extend it. Lives in `pontif-receipts`. See `receipt-graph.md`
 for the worked example.
 
-**self** — In a method, the injected receiver. Named explicitly so that
-`@` remains unambiguously the value-under-refinement of the enclosing
-bracket-form. See `alternative-syntax.ptf` principle 3.
+**this** — The statement's subject. In a method, the injected receiver
+(referenced `this.field`); generalizes to the type under declaration in a struct
+decl. Distinct from `@`, which stays the value-under-refinement of the enclosing
+bracket-form — the IR node `IrExpr.SelfRef` / `SymExpr.Self` is `@`, despite the
+legacy name. Renamed from `self` (2026-06-08): `this` is the implicit-receiver
+convention; `self`-as-explicit-arg is Python's. See `alternative-syntax.ptf`
+principle 3.
 
 **snake oil** — A closing receipt the notary can't refute (so it's
 accepted) but also can't independently re-derive. Allowed and flagged.
@@ -399,3 +403,13 @@ return refinement's `@==EXPR` form. A return that *doesn't* pin a value
 no body to synthesize and is a **hard error** at the declaration — real
 synthesis from such a spec is deferred program-search work. See TODO
 under "Alt syntax — surface forms that parse but produce `IrStmt.NoOp`."
+
+**univocal** — Pontif's organizing principle (`docs/univocal-language-design.md`):
+one algebra *said in one sense of many subjects* — refinements, coercions,
+queries, streams, and records all speak it while each keeps its own
+specialization. "Many ways to do the same thing" is therefore principled
+(projections of one algebra), not accidental redundancy. Crucially a *lens, not a
+cage*: the unification is descriptive (shared machinery, the synthesizer reading
+one term-shape) and never an enforced canonical form — honesty stays
+local-per-claim at the gates, not global spelling-conformance. Term: *univocity*,
+the antonym of polysemy; the working title *polylexic* is retired.

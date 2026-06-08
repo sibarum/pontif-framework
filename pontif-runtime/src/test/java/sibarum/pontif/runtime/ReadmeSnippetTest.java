@@ -34,7 +34,7 @@ class ReadmeSnippetTest {
                 }
 
                 assign trait Point:Sized {
-                  magnitude():Int -> self.x * self.x + self.y * self.y
+                  magnitude():Int -> this.x * this.x + this.y * this.y
                 }
 
                 function describe(d:Sized):Int -> d.magnitude()
@@ -82,7 +82,7 @@ class ReadmeSnippetTest {
                 struct Ternion(z:Decimal, n:Decimal, w:Decimal)
 
                 method Ternion.inv():Ternion ->
-                  match self {
+                  match this {
                     [Ternion(z, 0, w)] -> Ternion(w, 0, z+1)
                     [Ternion(z, n, w)] -> Ternion(w, 1.0/n, z)
                   }

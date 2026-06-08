@@ -161,8 +161,8 @@ class CrossFieldInvariantTest {
     void headline_counterWithCrossFieldReasoning() throws Exception {
         // Counter:
         //   count : Int[@>=0]      (concrete value 0)
-        //   isEmpty : (Unit) -> Int[@>=0] = self.count   — trivial, but uses self
-        //   next : (Unit) -> Int[@>0] = self.count + 1
+        //   isEmpty : (Unit) -> Int[@>=0] = this.count   — trivial, but uses self
+        //   next : (Unit) -> Int[@>0] = this.count + 1
         //
         // With concrete count = 0:
         //   isEmpty body: fieldAccess(record, "count") → lit(0). lit(0) >= 0 ✓.

@@ -30,9 +30,9 @@ class DestructuringLetTest {
         RunResult r = run("""
                 struct Ternion(z:Decimal, n:Decimal, w:Decimal)
                 method Ternion.inv():Ternion ->
-                  match self {
+                  match this {
                     [Ternion(z, 0, w)] -> Ternion(w, 0, z+1)
-                    [_] -> Ternion(self.w, 1.0/self.n, self.z)
+                    [_] -> Ternion(this.w, 1.0/this.n, this.z)
                   }
                 let [Ternion(first, second, third)] = Ternion(2,0,5).inv()
                 first + third

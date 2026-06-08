@@ -411,12 +411,12 @@ class AltParserIntegrationTest {
                 let Duck:Type{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
-                  quack():Int -> self.name + 100
+                  quack():Int -> this.name + 100
                 }
                 function describe(d:Duck):Int -> d.quack()
                 describe(Donald(7))
                 """;
-        // Donald(7).name = 7; quack returns self.name + 100 = 107.
+        // Donald(7).name = 7; quack returns this.name + 100 = 107.
         assertEquals(107L, run(src));
     }
 
@@ -477,7 +477,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointPlusPoint_evaluates() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function sum(a:Point, b:Point):Point -> a + b
                 sum(Point(1, 2), Point(3, 4)).x
                 """;
@@ -489,7 +489,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointEquality_evaluates() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+                method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
                 function eq(a:Point, b:Point):Bool -> a == b
                 eq(Point(1, 2), Point(1, 2))
                 """;
@@ -500,7 +500,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointEquality_negative() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+                method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
                 function eq(a:Point, b:Point):Bool -> a == b
                 eq(Point(1, 2), Point(1, 99))
                 """;
@@ -511,7 +511,7 @@ class AltParserIntegrationTest {
     void operatorOverload_chainsLeftToRight() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function tri(a:Point, b:Point, c:Point):Point -> a + b + c
                 tri(Point(1, 1), Point(2, 2), Point(3, 3)).x
                 """;
@@ -524,7 +524,7 @@ class AltParserIntegrationTest {
         // With Point.+ declared, Int+Int must still route through BinOp.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 3 + 4
                 """;
         assertEquals(7L, run(src));
@@ -535,9 +535,9 @@ class AltParserIntegrationTest {
         // Both `pointA.shifted(...)` and `p + q` work in the same function.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 method Point.shifted(dx:Int, dy:Int):Point ->
-                  Point(self.x + dx, self.y + dy)
+                  Point(this.x + dx, this.y + dy)
                 function f(p:Point, q:Point):Int -> (p + q).shifted(10, 10).x
                 f(Point(1, 1), Point(2, 2))
                 """;
@@ -572,7 +572,7 @@ class AltParserIntegrationTest {
         // method declared, then called from a function via instance syntax.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
                 function f(p:Point):Int -> p.magnitudeSq()
                 f(Point(3, 4))
                 """;
@@ -585,7 +585,7 @@ class AltParserIntegrationTest {
         // passed as `self`. Verifies the rewrite composes with method routing.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
                 let origin = Point(3, 4)
                 origin.magnitudeSq()
                 """;
@@ -599,8 +599,8 @@ class AltParserIntegrationTest {
         String src = """
                 struct Point(x:Int, y:Int)
                 method Point.shifted(dx:Int, dy:Int):Point ->
-                  Point(self.x + dx, self.y + dy)
-                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                  Point(this.x + dx, this.y + dy)
+                method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
                 function f(p:Point):Int -> p.shifted(1, 1).magnitudeSq()
                 f(Point(2, 3))
                 """;
@@ -780,31 +780,31 @@ class AltParserIntegrationTest {
 
     @Test
     void method_with_body_desugars_to_function_decl() throws Exception {
-        // method Box.bump(by:Int):Int -> self.value + by
-        //   ⇒ function Box.bump(self:Box, by:Int):Int -> self.value + by
+        // method Box.bump(by:Int):Int -> this.value + by
+        //   ⇒ function Box.bump(self:Box, by:Int):Int -> this.value + by
         // (Note: the user writes `self` directly under the new design. The
         // old @-as-receiver substitution magic is gone.)
         IrModule m = AltParser.parseModule(
-                "module m\nmethod Box.bump(by:Int):Int -> self.value + by",
+                "module m\nmethod Box.bump(by:Int):Int -> this.value + by",
                 "t.ptf");
         assertEquals(1, m.statements().size());
         sibarum.pontif.ir.IrStmt.FunctionDecl fd =
                 (sibarum.pontif.ir.IrStmt.FunctionDecl) m.statements().get(0);
         assertEquals("Box.bump", fd.name());
         assertEquals(2, fd.params().size());
-        assertEquals("self", fd.params().get(0).name());
+        assertEquals("this", fd.params().get(0).name());
         sibarum.pontif.ir.IrSort.Named receiver =
                 (sibarum.pontif.ir.IrSort.Named) fd.params().get(0).sort();
         assertEquals("Box", receiver.name());
         assertEquals("by", fd.params().get(1).name());
-        // Body: (self.value) + by
+        // Body: (this.value) + by
         sibarum.pontif.ir.IrExpr.BinOp body = (sibarum.pontif.ir.IrExpr.BinOp) fd.body();
         assertEquals(sibarum.pontif.ir.IrExpr.Op.ADD, body.op());
         sibarum.pontif.ir.IrExpr.FieldAccess lhs =
                 (sibarum.pontif.ir.IrExpr.FieldAccess) body.left();
         assertEquals("value", lhs.fieldName());
         sibarum.pontif.ir.IrExpr.Var lhsBase = (sibarum.pontif.ir.IrExpr.Var) lhs.base();
-        assertEquals("self", lhsBase.name());
+        assertEquals("this", lhsBase.name());
         sibarum.pontif.ir.IrExpr.Var rhs = (sibarum.pontif.ir.IrExpr.Var) body.right();
         assertEquals("by", rhs.name());
     }
@@ -812,11 +812,11 @@ class AltParserIntegrationTest {
     @Test
     void method_on_primitive_dispatches_end_to_end() throws Exception {
         // Receiver doesn't have to be a struct — Int works too, since `Int` is
-        // just an IrSort.Named like any other. `self` is the receiver name.
+        // just an IrSort.Named like any other. `this` is the receiver name.
         String src = """
                 module m
 
-                method Int.bump(by:Int):Int -> self + by
+                method Int.bump(by:Int):Int -> this + by
 
                 Int.bump(10, 5)
                 """;
@@ -833,13 +833,13 @@ class AltParserIntegrationTest {
     }
 
     @Test
-    void method_param_named_self_is_parse_error() {
+    void method_param_named_this_is_parse_error() {
         ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 ParseException.class,
                 () -> AltParser.parseModule(
-                        "module m\nmethod T.f(self:Int):Int -> self",
+                        "module m\nmethod T.f(this:Int):Int -> this",
                         "t.ptf"));
-        assertTrue(ex.getMessage().contains("'self'"),
+        assertTrue(ex.getMessage().contains("'this'"),
                 "Got: " + ex.getMessage());
     }
 

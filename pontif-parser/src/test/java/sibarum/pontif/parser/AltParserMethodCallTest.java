@@ -36,7 +36,7 @@ class AltParserMethodCallTest {
         String src = """
                 struct Point(x:Int, y:Int)
                 method Point.shifted(dx:Int, dy:Int):Point ->
-                  Point(self.x + dx, self.y + dy)
+                  Point(this.x + dx, this.y + dy)
                 function f(p:Point):Point -> p.shifted(1, 2)
                 """;
         IrModule m = parse(src);
@@ -58,7 +58,7 @@ class AltParserMethodCallTest {
         // Call("origin", []) before being passed as `self`.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
                 let origin = Point(3, 4)
                 origin.magnitudeSq()
                 """;
@@ -77,7 +77,7 @@ class AltParserMethodCallTest {
         // Receiver is itself a Call (a function returning a Point).
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.magnitudeSq():Int -> self.x * self.x + self.y * self.y
+                method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
                 function origin():Point -> Point(0, 0)
                 origin().magnitudeSq()
                 """;

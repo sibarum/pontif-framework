@@ -97,7 +97,7 @@ class AltParserTraitTest {
         IrStmt.FunctionDecl impl = ti.methods().get(0);
         assertEquals("Donald.quack", impl.name());
         assertEquals(1, impl.params().size());  // just self
-        assertEquals("self", impl.params().get(0).name());
+        assertEquals("this", impl.params().get(0).name());
         assertEquals("Donald", ((IrSort.Named) impl.params().get(0).sort()).name());
     }
 
@@ -107,13 +107,13 @@ class AltParserTraitTest {
                 let Sized:Type{size:[Method():Int]}
                 struct Point(x:Int, y:Int)
                 assign trait Point:Sized {
-                  size():Int -> self.x + self.y
+                  size():Int -> this.x + this.y
                 }
                 """);
         IrStmt.TraitImpl ti = (IrStmt.TraitImpl) m.statements().get(2);
         IrStmt.FunctionDecl impl = ti.methods().get(0);
         assertEquals("Point.size", impl.name());
-        // Body references self.x and self.y — the parser should resolve
+        // Body references this.x and this.y — the parser should resolve
         // self as a Var, not auto-Call it.
         assertInstanceOf(sibarum.pontif.ir.IrExpr.BinOp.class, impl.body());
     }
@@ -124,14 +124,14 @@ class AltParserTraitTest {
                 let Eater:Type{eat:[Method(Int):Int]}
                 struct Cow(mass:Int)
                 assign trait Cow:Eater {
-                  eat(food:Int):Int -> self.mass + food
+                  eat(food:Int):Int -> this.mass + food
                 }
                 """);
         IrStmt.TraitImpl ti = (IrStmt.TraitImpl) m.statements().get(2);
         IrStmt.FunctionDecl impl = ti.methods().get(0);
         assertEquals("Cow.eat", impl.name());
         assertEquals(2, impl.params().size());
-        assertEquals("self", impl.params().get(0).name());
+        assertEquals("this", impl.params().get(0).name());
         assertEquals("food", impl.params().get(1).name());
     }
 

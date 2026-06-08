@@ -35,7 +35,7 @@ class CaseTest {
 
     @Test
     void concreteMatch_selectsRightBranch_positive() throws Exception {
-        // match 5 with | positive -> 2*self | _ -> self
+        // match 5 with | positive -> 2*self | _ -> this
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(5),
                 List.of(
@@ -102,7 +102,7 @@ class CaseTest {
 
     @Test
     void selfInArmBodyResolvesToScrutinee() throws Exception {
-        // match 7 with | _ -> self * self
+        // match 7 with | _ -> this * self
         SymExpr expr = SymExpr.case_(
                 SymExpr.lit(7),
                 List.of(SymExpr.branch(ANY, SymExpr.mul(SymExpr.self(), SymExpr.self()))));
@@ -138,7 +138,7 @@ class CaseTest {
     void nestedCase_innerSelfRefersToInnerScrutinee() throws Exception {
         // match 3 with
         //   | _ -> match 7 with
-        //            | _ -> self * self      <-- inner self should be 7, giving 49
+        //            | _ -> this * self      <-- inner self should be 7, giving 49
         SymExpr innerCase = SymExpr.case_(
                 SymExpr.lit(7),
                 List.of(SymExpr.branch(ANY, SymExpr.mul(SymExpr.self(), SymExpr.self()))));
@@ -151,8 +151,8 @@ class CaseTest {
     @Test
     void nestedCase_outerSelfPersistsIntoInnerScrutinee() throws Exception {
         // match 7 with
-        //   | _ -> match self with               <-- self here is outer scrutinee, so 7
-        //            | _ -> self + 1            <-- self here is inner scrutinee, also 7
+        //   | _ -> match this with               <-- self here is outer scrutinee, so 7
+        //            | _ -> this + 1            <-- self here is inner scrutinee, also 7
         SymExpr innerCase = SymExpr.case_(
                 SymExpr.self(),
                 List.of(SymExpr.branch(ANY, SymExpr.add(SymExpr.self(), SymExpr.lit(1)))));

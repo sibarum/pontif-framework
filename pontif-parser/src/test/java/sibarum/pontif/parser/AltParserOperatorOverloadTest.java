@@ -38,12 +38,12 @@ class AltParserOperatorOverloadTest {
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
                 method Point.+(p:Point):Point ->
-                  Point(self.x + p.x, self.y + p.y)
+                  Point(this.x + p.x, this.y + p.y)
                 """);
         IrStmt.FunctionDecl method = (IrStmt.FunctionDecl) m.statements().get(1);
         assertEquals("Point.+", method.name());
-        // self is the injected receiver param
-        assertEquals("self", method.params().get(0).name());
+        // this is the injected receiver param
+        assertEquals("this", method.params().get(0).name());
     }
 
     @Test
@@ -109,7 +109,7 @@ class AltParserOperatorOverloadTest {
     void structPlusStruct_routesToTypeOpMethod() throws Exception {
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function add(a:Point, b:Point):Point -> a + b
                 """);
         IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, lastFnBody(m));
@@ -124,7 +124,7 @@ class AltParserOperatorOverloadTest {
     void structComparison_routesToTypeOpMethod() throws Exception {
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.==(p:Point):Bool -> self.x == p.x & self.y == p.y
+                method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
                 function eq(a:Point, b:Point):Bool -> a == b
                 """);
         IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, lastFnBody(m));
@@ -138,7 +138,7 @@ class AltParserOperatorOverloadTest {
         // Second + also routes (Point.+ exists), producing another Call.
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function tri(a:Point, b:Point, c:Point):Point -> a + b + c
                 """);
         IrExpr.Call outer = assertInstanceOf(IrExpr.Call.class, lastFnBody(m));
@@ -155,7 +155,7 @@ class AltParserOperatorOverloadTest {
         // Point.+ is declared but operands are Int → BinOp path.
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function add(a:Int, b:Int):Int -> a + b
                 """);
         IrExpr.BinOp body = assertInstanceOf(IrExpr.BinOp.class, lastFnBody(m));
@@ -169,7 +169,7 @@ class AltParserOperatorOverloadTest {
         // parser correctly identifies it as the primitive path (left's type wins).
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function f(a:Int, b:Point):Int -> a + 1
                 """);
         assertInstanceOf(IrExpr.BinOp.class, lastFnBody(m));
@@ -182,7 +182,7 @@ class AltParserOperatorOverloadTest {
         // pre-emptively route.
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function diff(a:Point, b:Point):Point -> a - b
                 """);
         assertInstanceOf(IrExpr.BinOp.class, lastFnBody(m));
@@ -194,7 +194,7 @@ class AltParserOperatorOverloadTest {
         // — even if a Type.& method is declared, BinOp wins.
         IrModule m = parse("""
                 struct Foo(a:Bool)
-                method Foo.&(other:Foo):Foo -> Foo(self.a & other.a)
+                method Foo.&(other:Foo):Foo -> Foo(this.a & other.a)
                 function f(x:Foo, y:Foo):Foo -> x & y
                 """);
         // Should still be BinOp(AND, x, y) — not routed to Foo.&.
@@ -210,7 +210,7 @@ class AltParserOperatorOverloadTest {
         // a pure-primitive BinOp tree regardless of any declared overloads.
         IrModule m = parse("""
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(self.x + p.x, self.y + p.y)
+                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
                 function f(n:[Int:@>0 & @<10]):Int -> n
                 """);
         IrStmt.FunctionDecl fd = (IrStmt.FunctionDecl) m.statements().get(2);

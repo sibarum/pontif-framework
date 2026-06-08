@@ -57,7 +57,7 @@ class ApproxEqualityTest {
         RunResult r = run("""
                 struct Ternion(z:Decimal, n:Decimal, w:Decimal)
                 method Ternion.inv():Ternion ->
-                  match self {
+                  match this {
                     [Ternion(z, 0, w)] -> Ternion(w, 0, z+1)
                     [Ternion(z, n, w)] -> Ternion(w, 1.0/n, z)
                   }
