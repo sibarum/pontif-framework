@@ -43,7 +43,16 @@ as `self.x` → `Var("self")`. **Only that becomes `this`.** The 68-site
   `this.x` where there's no injected param) is NOT here — it arrives with S2.
 - Reviewable: method tests pass with `this`; `@` semantics unchanged; `self` gone.
 
-### ☐ S1 — `;` universal synthesis directive  *(parse-layer)*
+### ☑ S1 — `;` universal synthesis directive  *(landed 2026-06-08, full suite green)*
+**Landed:** `SEMICOLON` token + lexer; `;`-gate at all three bodyless-synthesis
+sites (function, method, let). Bodyless-without-`;` is now an error; `;` on a
+non-pinning sort is an honest "does not pin" error (the old silent NoOp for
+bodyless lets is gone). Corpus migrated (~23 spec-only decls across
+SpecOnlyLetTest, SpecOnlySynthesisTest, AltParserIntegrationTest,
+PlaygroundProbeTest, ReturnVerificationMeasurementTest). Partial-value+pin
+(`= partial;`) deferred to S6 — `;` is a harmless terminator when a value is
+present today.
+
 Make a trailing `;` the explicit, sole trigger for function AND value synthesis.
 - Seams: add `SEMICOLON` to `AltToken.Kind` + `AltLexer`; gate `parseFunction`
   (~616) and `parseLet` (~876) on `;`; bodyless-without-`;` → error;

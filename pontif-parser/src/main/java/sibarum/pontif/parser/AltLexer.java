@@ -66,6 +66,7 @@ public final class AltLexer {
                 case '}' -> { advance(); tokens.add(new AltToken(AltToken.Kind.RBRACE, "}", source, startLine, startCol)); continue; }
                 case ',' -> { advance(); tokens.add(new AltToken(AltToken.Kind.COMMA, ",", source, startLine, startCol)); continue; }
                 case ':' -> { advance(); tokens.add(new AltToken(AltToken.Kind.COLON, ":", source, startLine, startCol)); continue; }
+                case ';' -> { advance(); tokens.add(new AltToken(AltToken.Kind.SEMICOLON, ";", source, startLine, startCol)); continue; }
                 case '.' -> { advance(); tokens.add(new AltToken(AltToken.Kind.DOT, ".", source, startLine, startCol)); continue; }
                 case '@' -> { advance(); tokens.add(new AltToken(AltToken.Kind.AT, "@", source, startLine, startCol)); continue; }
                 default -> { /* fall through */ }

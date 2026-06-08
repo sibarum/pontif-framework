@@ -183,7 +183,7 @@ class AltParserIntegrationTest {
         // sugars to `Refined(Bool, @==false)`, so the body is derived as `false`
         // and the decl becomes a normal FunctionDecl.
         IrModule m = AltParser.parseModule(
-                "module m\nfunction alwaysFalse():[Bool:false]",
+                "module m\nfunction alwaysFalse():[Bool:false];",
                 "t.ptf");
         sibarum.pontif.ir.IrStmt.FunctionDecl fd =
                 (sibarum.pontif.ir.IrStmt.FunctionDecl) m.statements().get(0);
@@ -196,7 +196,7 @@ class AltParserIntegrationTest {
         // [Int:42] → Refined(Int, @==42) → derived body = 42
         String src = """
                 module m
-                function answer():[Int:42]
+                function answer():[Int:42];
                 answer()
                 """;
         assertEquals(42L, run(src));
@@ -207,7 +207,7 @@ class AltParserIntegrationTest {
         // [Int:0] sugars to Refined(Int, @==0) → derived body = 0
         String src = """
                 module m
-                function zero():[Int:0]
+                function zero():[Int:0];
                 zero()
                 """;
         assertEquals(0L, run(src));
@@ -234,7 +234,7 @@ class AltParserIntegrationTest {
         // error now, rather than a silently-dropped NoOp that looked defined
         // but failed later with "Unknown function".
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("module m\nfunction f():[Int:@>=0]", "t.ptf"));
+                AltParser.parseModule("module m\nfunction f():[Int:@>=0];", "t.ptf"));
         assertTrue(ex.getMessage().contains("has no body"),
                 () -> "Unexpected message: " + ex.getMessage());
     }
@@ -245,7 +245,7 @@ class AltParserIntegrationTest {
         // `method Int.zero():[Int:0]` ⇒ `function Int.zero(self:Int):[Int:0] -> 0`.
         String src = """
                 module m
-                method Int.zero():[Int:0]
+                method Int.zero():[Int:0];
                 Int.zero(5)
                 """;
         assertEquals(0L, run(src));
@@ -738,7 +738,7 @@ class AltParserIntegrationTest {
                   [@==0] ->  0
                   [@>0 ] ->  1
 
-                function timesTwo(n:Int):[Int:n*2]
+                function timesTwo(n:Int):[Int:n*2];
 
                 factorial(5) + isEven(8) + sign(-3) + timesTwo(7)
                 """;
@@ -754,17 +754,13 @@ class AltParserIntegrationTest {
                 requires math.{min, max}
                 exports @.{foo, bar}
 
-                let Point.origin:Point
-
                 42
                 """;
         IrModule m = AltParser.parseModule(src, "t.ptf");
-        // requires/exports now lower to structured IrStmt.Requires/Exports; the
-        // spec-only `let Point.origin:Point` is the lone remaining NoOp.
-        // (Spec-only functions/methods with non-synthesizable returns are hard
-        // errors now — see spec_only_*_is_hard_error. Synthesizable spec-only
-        // decls — `[Bool:true]`, `[Int:42]`, `[Int:0]` — become FunctionDecls at
-        // parse time; methods WITH a body desugar to FunctionDecls too.)
+        // requires/exports lower to structured IrStmt.Requires/Exports — no NoOp
+        // placeholders remain. (Spec-only functions/methods/lets now require the
+        // `;` synthesis directive; non-synthesizable ones are hard errors — see
+        // spec_only_*_is_hard_error and SpecOnlyLetTest.)
         long requiresCount = m.statements().stream()
                 .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.Requires).count();
         long exportsCount = m.statements().stream()
@@ -773,7 +769,7 @@ class AltParserIntegrationTest {
                 .filter(s -> s instanceof sibarum.pontif.ir.IrStmt.NoOp).count();
         assertEquals(1, requiresCount);
         assertEquals(1, exportsCount);
-        assertEquals(1, noOpCount);
+        assertEquals(0, noOpCount);
         // Main is 42.
         assertEquals(42L, run("module m\n42"));
     }
@@ -850,7 +846,7 @@ class AltParserIntegrationTest {
         // function form (and unlike `let Point.origin:Point`, which stays NoOp
         // on the separate let path).
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("module m\nmethod Point.add(p:Point):Point", "t.ptf"));
+                AltParser.parseModule("module m\nmethod Point.add(p:Point):Point;", "t.ptf"));
         assertTrue(ex.getMessage().contains("has no body"),
                 () -> "Unexpected message: " + ex.getMessage());
     }

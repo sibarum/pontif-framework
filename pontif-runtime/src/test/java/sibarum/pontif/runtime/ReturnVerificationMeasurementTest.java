@@ -113,9 +113,9 @@ class ReturnVerificationMeasurementTest {
                 function depAdd(a:Int, b:Int):[Int:a+b] -> a + b
                 function depDbl(n:Int):[Int:n*2] -> n * 2
                 function depSucc(y:Int):[Int:y+1] -> y + 1
-                function singZero():[Int:0]
-                function singAns():[Int:42]
-                function alwaysFalse():[Bool:false]
+                function singZero():[Int:0];
+                function singAns():[Int:42];
+                function alwaysFalse():[Bool:false];
                 function bit():[Int:0|1] -> 0
                 function prodMag(x:[Int:@>=2], y:[Int:@>=3]):[Int:@>=6] -> x * y
                 function sparse(x:Int):[Int:@>=-16] -> (x-3) * (x+5)

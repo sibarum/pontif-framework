@@ -19,7 +19,7 @@ class SpecOnlySynthesisTest {
         // [Int:@==y+1], which pins the value y+1.
         String src = """
                 module ack
-                function ackermann(x:[Int:0], y:[Int:@>0]):[Int:y+1]
+                function ackermann(x:[Int:0], y:[Int:@>0]):[Int:y+1];
                 ackermann(0, 4)
                 """;
 

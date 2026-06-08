@@ -291,7 +291,7 @@ class PlaygroundProbeTest {
     void probe_dependentReturnSpecOnlySynthesizesBody() throws Exception {
         // PROBE: spec-only, body synthesized from the value-pin a+b.
         assertEquals(5L, run("""
-                function add(a:Int, b:Int):[Int:a+b]
+                function add(a:Int, b:Int):[Int:a+b];
                 add(2, 3)"""));
     }
 

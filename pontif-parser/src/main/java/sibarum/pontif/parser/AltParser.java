@@ -630,14 +630,21 @@ public final class AltParser {
                 currentScope.putAll(savedScope);
             }
         }
-        // No body — try synthesis.
-        IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
-        if (derived != null) {
-            declaredFunctionReturns.put(name, returnSort);
-            if (params.isEmpty()) declaredZeroArgFunctions.add(name);
-            return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
+        // No body — synthesis requires the explicit `;` directive.
+        if (peek().kind() == AltToken.Kind.SEMICOLON) {
+            consume();
+            IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
+            if (derived != null) {
+                declaredFunctionReturns.put(name, returnSort);
+                if (params.isEmpty()) declaredZeroArgFunctions.add(name);
+                return new IrStmt.FunctionDecl(name, params, returnSort, derived, start.origin());
+            }
+            throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
         }
-        throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
+        throw new ParseException(
+                "function '" + name + "' needs a body ('-> expr') or a synthesis "
+                        + "directive (';')",
+                peek().origin());
     }
 
     /**
@@ -712,7 +719,14 @@ public final class AltParser {
         desugaredParams.addAll(params);
 
         if (peek().kind() != AltToken.Kind.ARROW) {
-            // Spec-only — try synthesis (same path as functions).
+            // Spec-only — synthesis requires the explicit `;` directive.
+            if (peek().kind() != AltToken.Kind.SEMICOLON) {
+                throw new ParseException(
+                        "method '" + name + "' needs a body ('-> expr') or a "
+                                + "synthesis directive (';')",
+                        peek().origin());
+            }
+            consume();  // SEMICOLON
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
                 declaredFunctionReturns.put(name, returnSort);
@@ -848,6 +862,11 @@ public final class AltParser {
             consume();
             value = parseExpr();
         }
+        // `;` is the explicit synthesis directive (mirrors function/method).
+        // With a value present it is a no-op terminator today; partial-value +
+        // pin synthesis (`let x:[T:@.f==v] = partial;`) is a later slice.
+        boolean synthDirective = peek().kind() == AltToken.Kind.SEMICOLON;
+        if (synthDirective) consume();
         if (declaredSort == null && value == null) {
             throw new ParseException(
                     "let '" + name + "' needs either a sort annotation (':Sort') "
@@ -874,17 +893,29 @@ public final class AltParser {
             return new IrStmt.TypeAlias(name, named, start.origin());
         }
         if (value == null) {
-            // Spec-only let: a value-pinning sort IS the definition — the
-            // predicate `@==EXPR` carries its witness as an expression, so
-            // the body is synthesized verbatim from the pin
-            // (`let zero:[Decimal:@==0.0]` means zero = 0.0; the claim
-            // wrapper below still notarizes the synthesis at force).
+            // Spec-only let: a value-pinning sort IS the definition, but
+            // synthesis must be requested explicitly with `;` (mirrors
+            // function/method). A bare `let x:Sort` with no value and no
+            // directive is an error, not an implicit synthesis.
+            if (!synthDirective) {
+                throw new ParseException(
+                        "let '" + name + "' with a sort needs a value ('= EXPR') "
+                                + "or a synthesis directive (';')",
+                        start.origin());
+            }
+            // The predicate `@==EXPR` carries its witness as an expression, so
+            // the body is synthesized verbatim from the pin (`let
+            // zero:[Decimal:@==0.0];` means zero = 0.0; the claim wrapper below
+            // still notarizes the synthesis at force).
             value = pinnedWitness(declaredSort);
             if (value == null) {
-                // Non-pinning sorts (e.g. [Int:@>0]): no unique witness —
-                // stay NoOp so other decls process (synthesis from
-                // maximally-specific non-singleton sorts is a separate TODO).
-                return new IrStmt.NoOp("let " + name + ":" + declaredSort, start.origin());
+                // `;` given, but the sort pins no unique witness
+                // (e.g. [Int:@>0]) — honest error, not a silent NoOp.
+                throw new ParseException(
+                        "let '" + name + "': declared sort " + declaredSort
+                                + " does not pin a synthesizable value — `;` needs a "
+                                + "value-pinning sort (e.g. [Int:0] or [Int:@==EXPR])",
+                        start.origin());
             }
         }
         IrSort inferredSort = inferMaximalSort(value);
