@@ -195,4 +195,38 @@ class StructExtensionTest {
         assertFalse(r.isError(), () -> "got: " + r.text());
         assertEquals("16", r.text());
     }
+
+    // --- S6: promotion via value synthesis (partial value ⊕ pin) ------------
+
+    @Test
+    void valueSynthesisPromotion_mergesValueAndPin() {
+        // let p:[Point3D:@.z==0] = b — b (Point) supplies x, y; the pin supplies
+        // z=0. Merged into Point3D(2, 3, 0); 2 + 3 + 0 = 5.
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                let b = Point(2, 3)
+                let p:[Point3D:@.z==0] = b;
+                p.x + p.y + p.z""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void valueSynthesisPromotion_unspecifiedFieldErrors() {
+        // The pin covers only x; b (Point) has no z → z is unspecified, rejected
+        // (fabricate-never — the merge must cover every field).
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                let b = Point(2, 3)
+                let p:[Point3D:@.x==9] = b;
+                p.x""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), "z is unspecified — the merge must reject");
+        assertTrue(r.text().contains("unspecified"), () -> "got: " + r.text());
+    }
 }

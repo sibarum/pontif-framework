@@ -882,6 +882,61 @@ public final class AltParser {
         return declaredReturn;
     }
 
+    /**
+     * S6 merge: build a {@code Target(…)} construction from a partial
+     * {@code value} (a different struct supplying some fields) plus the pin's
+     * {@code @.f == EXPR} field-values. Each target field comes from the pin if
+     * pinned, else a field read on the value, else it's an unspecified-field
+     * error (fabricate-never — the merge must cover every field).
+     */
+    private IrExpr mergePartialWithPin(
+            IrExpr value, String targetName, IrSort.Structural target,
+            IrSort.Structural valueStruct, IrExpr pin, sibarum.pontif.core.Origin origin)
+            throws ParseException {
+        Map<String, IrExpr> pinValues = new LinkedHashMap<>();
+        collectFieldPins(pin, pinValues);
+        Map<String, IrExpr> members = new LinkedHashMap<>();
+        for (String f : target.members().keySet()) {
+            if (pinValues.containsKey(f)) {
+                members.put(f, pinValues.get(f));
+            } else if (valueStruct != null && valueStruct.members().containsKey(f)) {
+                members.put(f, new IrExpr.FieldAccess(value, f, origin));
+            } else {
+                throw new ParseException(
+                        "promotion to '" + targetName + "' leaves field '" + f
+                                + "' unspecified — the value supplies "
+                                + (valueStruct != null ? valueStruct.members().keySet() : "(non-struct)")
+                                + " and the pin supplies " + pinValues.keySet(),
+                        origin);
+            }
+        }
+        return new IrExpr.Record(targetName, members, origin);
+    }
+
+    /** Collects {@code @.field == EXPR} conjuncts of a pin as field -> EXPR. */
+    private static void collectFieldPins(IrExpr pred, Map<String, IrExpr> out) {
+        if (pred instanceof IrExpr.BinOp op) {
+            switch (op.op()) {
+                case AND -> {
+                    collectFieldPins(op.left(), out);
+                    collectFieldPins(op.right(), out);
+                }
+                case EQ -> {
+                    String lf = pinFieldName(op.left());
+                    if (lf != null) { out.put(lf, op.right()); return; }
+                    String rf = pinFieldName(op.right());
+                    if (rf != null) out.put(rf, op.left());
+                }
+                default -> { }
+            }
+        }
+    }
+
+    private static String pinFieldName(IrExpr e) {
+        return e instanceof IrExpr.FieldAccess fa && fa.base() instanceof IrExpr.SelfRef
+                ? fa.fieldName() : null;
+    }
+
     /** True if {@code expr} contains an {@link IrExpr.SelfRef} anywhere. */
     private static boolean containsSelfRef(IrExpr expr) {
         return switch (expr) {
@@ -947,8 +1002,8 @@ public final class AltParser {
             value = parseExpr();
         }
         // `;` is the explicit synthesis directive (mirrors function/method).
-        // With a value present it is a no-op terminator today; partial-value +
-        // pin synthesis (`let x:[T:@.f==v] = partial;`) is a later slice.
+        // With a value present it requests partial-value + pin synthesis (S6,
+        // below); with no value it requests pure pin synthesis (further down).
         boolean synthDirective = peek().kind() == AltToken.Kind.SEMICOLON;
         if (synthDirective) consume();
         if (declaredSort == null && value == null) {
@@ -975,6 +1030,24 @@ public final class AltParser {
                         name + "." + e.getKey(), e.getValue().returnSort());
             }
             return new IrStmt.TypeAlias(name, named, start.origin());
+        }
+        // S6: promotion via value synthesis — `let x:[Target:@.f==v] = partial;`.
+        // The `;` requests synthesis; the value (a DIFFERENT struct) supplies the
+        // base fields, the pin supplies the rest, merged into a Target
+        // construction. The result IS a Target by construction (definitional), so
+        // the binding becomes the bare struct sort and the base-mismatch check
+        // below sees a match.
+        if (synthDirective && value != null && declaredSort instanceof IrSort.Refined ref
+                && declaredStructs.containsKey(ref.name())) {
+            String valueBase = baseSortName(inferMaximalSort(value));
+            if (!ref.name().equals(valueBase)) {
+                IrSort.Structural target = declaredStructs.get(ref.name());
+                IrSort.Structural valueStruct = valueBase == null
+                        ? null : declaredStructs.get(valueBase);
+                value = mergePartialWithPin(
+                        value, ref.name(), target, valueStruct, ref.predicate(), start.origin());
+                declaredSort = new IrSort.Named(ref.name(), declaredSort.origin());
+            }
         }
         if (value == null) {
             // Spec-only let: a value-pinning sort IS the definition, but

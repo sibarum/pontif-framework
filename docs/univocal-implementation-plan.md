@@ -138,7 +138,16 @@ Extend `tryDeriveBodyFromReturnSort` (~769) to a **construction pin** `Type{name
 - Reviewable: both synthesize + run; `promote(b,7)` → Point3D(2,3,7);
   `b.promote(11)` infers Point3D.
 
-### ☐ S6 — promotion via value synthesis (partial value ⊕ pin)  *(needs S1+S2+S3)*
+### ☑ S6 — promotion via value synthesis (partial value ⊕ pin)  *(landed 2026-06-08, full suite green)*
+**Landed:** `let p:[Point3D:@.z==0] = b;` (b:Point) merges the partial value
+(b → x, y) with the pin (→ z=0) into `Point3D(b.x, b.y, 0)`. In `parseLet`, when
+the `;` directive is present and the declared sort is a refined struct whose base
+differs from the value's struct, `mergePartialWithPin` builds the construction —
+each target field from the pin if pinned, else a read on the value, else an
+"unspecified field" error (fabricate-never). The result is a Target by
+construction, so the binding becomes the bare struct (definitional, skips the
+mismatch check). Verified: merge → 5; unspecified field rejected.
+
 `let x:[Point3D:@.z==0] = b;` — merge partial value (b → x,y) with pin (→ z).
 - Seams: `mergePartialWithPin` + `extractFieldPins` in `pinnedWitness` (~967);
   existing LetIn-claim + ConstructionGate verdict unchanged.
