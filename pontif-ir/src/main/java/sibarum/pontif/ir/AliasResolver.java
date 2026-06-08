@@ -157,7 +157,9 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
                     resolvedMembers.put(e.getKey(), resolveSort(e.getValue(), aliases, path));
                 }
-                yield new IrSort.Structural(s.name(), resolvedMembers, s.origin());
+                IrSort resolvedBase = s.baseSort() == null
+                        ? null : resolveSort(s.baseSort(), aliases, path);
+                yield new IrSort.Structural(s.name(), resolvedMembers, resolvedBase, s.origin());
             }
             case IrSort.Method f -> {
                 List<IrSort> resolvedParams = new ArrayList<>(f.paramSorts().size());
@@ -295,7 +297,9 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
                     newMembers.put(e.getKey(), substituteResolved(e.getValue(), resolved));
                 }
-                yield new IrSort.Structural(s.name(), newMembers, s.origin());
+                IrSort newBase = s.baseSort() == null
+                        ? null : substituteResolved(s.baseSort(), resolved);
+                yield new IrSort.Structural(s.name(), newMembers, newBase, s.origin());
             }
             case IrSort.Dispatch d -> {
                 List<IrSort> newKeys = new ArrayList<>(d.keySorts().size());

@@ -61,7 +61,19 @@ Make a trailing `;` the explicit, sole trigger for function AND value synthesis.
 - Reviewable: `let zero:[Decimal:0];` synthesizes; without `;` it errors;
   `function timesTwo(n:Int):[Int:n*2];` synthesizes.
 
-### ☐ S2 — struct-extension declaration  *(core: parse + register + validate)*
+### ☑ S2 — struct-extension declaration  *(landed 2026-06-08, full suite green)*
+**Landed:** `IrSort.Structural` gains a nullable `baseSort` (holds the parsed
+`[Base:rel]` whole — base + morphism predicate); `parseStruct` parses the
+optional `:[Base:rel]` before the param list; `SortChecker.validateStructBase`
+checks the base resolves and (for a refined-struct base) the morphism
+functionally pins every base field — non-total → compile error. Purely additive
+(no existing struct uses `:[…]`). **Gotcha fixed:** three sites rebuilt
+`Structural` via the 3-arg ctor and would have dropped `baseSort` before
+SortChecker saw it — AliasResolver (×2) + NameResolver (now thread it through).
+StructExtensionTest pins parse/total/positional/non-total. **Deferred:** the
+no-parens wrapper form (`struct Zero:[Decimal:0]`, parens still required);
+morphism-RHS param scoping; demotion coercion is S3.
+
 `struct Name:[Base:rel](fields)` — base sort + demotion morphism alongside fields.
 - Seams: extend `IrSort.Structural` with `baseSort` + `baseMorphism`; parse
   `:[Base:rel]` and positional `[Base(x,y)]` in `parseStruct` (~1234); add a

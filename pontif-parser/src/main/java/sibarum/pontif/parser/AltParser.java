@@ -1265,6 +1265,15 @@ public final class AltParser {
     private IrStmt parseStruct() throws ParseException {
         AltToken start = expectKeyword("struct");
         AltToken nameTok = expect(AltToken.Kind.IDENT);
+        // Optional `:[Base:rel]` — the is-a relationship (S2). The parsed sort
+        // (Named / Refined / Union) is stored whole on the Structural; its
+        // refinement predicate, if any, is the demotion morphism. SortChecker
+        // validates that the base resolves and the morphism is total.
+        IrSort baseSort = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();
+            baseSort = parseSort();
+        }
         expect(AltToken.Kind.LPAREN);
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
@@ -1284,7 +1293,7 @@ public final class AltParser {
                             + "is built in and cannot be redeclared",
                     nameTok.origin());
         }
-        IrSort.Structural structSort = new IrSort.Structural(nameTok.text(), members, origin);
+        IrSort.Structural structSort = new IrSort.Structural(nameTok.text(), members, baseSort, origin);
         declaredStructs.put(nameTok.text(), structSort);
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
     }

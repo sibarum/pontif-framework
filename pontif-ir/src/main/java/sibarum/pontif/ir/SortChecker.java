@@ -7,6 +7,7 @@ import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.predicates.SatResult;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -61,6 +62,17 @@ public final class SortChecker {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
         Map<String, IrSort.Structural> structDefs = TypeRegistry.collect(module);
+
+        // Struct is-a relationships (`struct Name:[Base:rel](fields)`): the base
+        // must resolve, and a struct-base morphism must functionally pin every
+        // base field. Validated once per declared struct.
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.TypeAlias ta
+                    && ta.sort() instanceof IrSort.Structural s
+                    && s.baseSort() != null) {
+                validateStructBase(s, structDefs);
+            }
+        }
 
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
@@ -342,6 +354,65 @@ public final class SortChecker {
                 for (IrSort b : i.branches()) validateSortNames(b, structDefs);
             }
         }
+    }
+
+    /**
+     * Validates a struct's declared is-a relationship
+     * ({@code struct Name:[Base:rel](fields)}): the base sort must resolve, and
+     * when the base is a refined STRUCT (the demotion-morphism case) the
+     * predicate must functionally pin every base field — each base {@code @.field}
+     * needs a top-level {@code @.field == <expr>} conjunct, so the demotion
+     * (project Name → Base) is total and deterministic. Subset bases (a
+     * primitive like {@code [Decimal:0]}, a union supertype) carry a narrowing,
+     * not a morphism, so no totality applies.
+     */
+    private static void validateStructBase(
+            IrSort.Structural s,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        IrSort base = s.baseSort();
+        validateSortNames(base, structDefs);  // base resolves; @.field refs exist
+        if (base instanceof IrSort.Refined r && structDefs.containsKey(r.name())) {
+            IrSort.Structural baseStruct = structDefs.get(r.name());
+            Set<String> pinned = new HashSet<>();
+            collectPinnedBaseFields(r.predicate(), pinned);
+            for (String field : baseStruct.members().keySet()) {
+                if (!pinned.contains(field)) {
+                    throw new CompileException(
+                            "struct '" + s.name() + "' demotes to '" + r.name()
+                                    + "' but its morphism does not pin base field '@."
+                                    + field + "' — every base field must be functionally "
+                                    + "determined (e.g. '@." + field + " == <expr>'); pinned: "
+                                    + pinned,
+                            s.origin());
+                }
+            }
+        }
+    }
+
+    /** Collects base fields F appearing as a top-level {@code @.F == …} conjunct. */
+    private static void collectPinnedBaseFields(IrExpr pred, Set<String> out) {
+        if (pred instanceof IrExpr.BinOp op) {
+            switch (op.op()) {
+                case AND -> {
+                    collectPinnedBaseFields(op.left(), out);
+                    collectPinnedBaseFields(op.right(), out);
+                }
+                case EQ -> {
+                    String l = selfFieldName(op.left());
+                    if (l != null) out.add(l);
+                    String rhs = selfFieldName(op.right());
+                    if (rhs != null) out.add(rhs);
+                }
+                default -> { }
+            }
+        }
+    }
+
+    /** The field name of a {@code @.field} access, or null if {@code e} isn't one. */
+    private static String selfFieldName(IrExpr e) {
+        return e instanceof IrExpr.FieldAccess fa && fa.base() instanceof IrExpr.SelfRef
+                ? fa.fieldName()
+                : null;
     }
 
     /**

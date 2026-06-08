@@ -137,7 +137,10 @@ public final class NameResolver {
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
                     members.put(e.getKey(), rewriteSort(e.getValue(), m, table));
                 }
-                yield new IrSort.Structural(resolveTypeName(s.name(), m, table, s.origin()), members, s.origin());
+                IrSort base = s.baseSort() == null
+                        ? null : rewriteSort(s.baseSort(), m, table);
+                yield new IrSort.Structural(
+                        resolveTypeName(s.name(), m, table, s.origin()), members, base, s.origin());
             }
             case IrSort.Method f -> {
                 List<IrSort> ps = new ArrayList<>(f.paramSorts().size());

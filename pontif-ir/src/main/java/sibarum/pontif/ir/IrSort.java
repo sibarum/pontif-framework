@@ -41,7 +41,18 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
 
     record Refined(String name, IrExpr predicate, Origin origin) implements IrSort {}
 
-    record Structural(String name, Map<String, IrSort> members, Origin origin) implements IrSort {
+    /**
+     * Struct sort. {@code baseSort} (nullable) carries the is-a relationship
+     * declared by {@code struct Name:[Base:rel](fields)} — the parsed
+     * {@code [Base:rel]} sort, whose base names the supertype and whose
+     * refinement predicate (if any) is the <em>demotion morphism</em> relating
+     * the base's fields to this struct's constructor params (e.g.
+     * {@code @.x==x & @.y==y} on {@code Point3D:[Point:…](x,y,z)}). Null for a
+     * plain struct with no declared base. Parse + registration + totality
+     * validation only at this slice; the demotion coercion it licenses is a
+     * later slice.
+     */
+    record Structural(String name, Map<String, IrSort> members, IrSort baseSort, Origin origin) implements IrSort {
         public Structural {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Structural sort name must be non-empty");
@@ -55,6 +66,11 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // the same order the user wrote the struct decl. Map.copyOf does
             // NOT preserve order.
             members = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(members));
+        }
+
+        /** Back-compat: a plain struct with no declared base-sort (is-a). */
+        public Structural(String name, Map<String, IrSort> members, Origin origin) {
+            this(name, members, null, origin);
         }
     }
 
