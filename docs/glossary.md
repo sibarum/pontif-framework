@@ -413,3 +413,41 @@ cage*: the unification is descriptive (shared machinery, the synthesizer reading
 one term-shape) and never an enforced canonical form — honesty stays
 local-per-claim at the gates, not global spelling-conformance. Term: *univocity*,
 the antonym of polysemy; the working title *polylexic* is retired.
+
+**struct-extension** — the one construct `struct Name:[Base:rel](fields)`:
+`:[…]` is the is-a face, `(…)` the has-a face (the bracket/paren law). Unifies
+inheritance, newtypes, union supertypes, and refinement subtyping — where `Name`
+sits in the lattice falls out of the bracket contents. `Structural.baseSort`
+carries the parsed `[Base:rel]`. See `docs/univocal-language-design.md`.
+
+**demotion / promotion** — the two subtype casts, governed by *lose freely,
+fabricate never*. **Demotion** (subtype → supertype, `let b:Point = p`) runs the
+declared **morphism** — a total functional map pinning every base field
+(`@.x==x & @.y==y`) — dropping unmentioned fields: a clean forget, no surviving
+tag (`b.z` errors). **Promotion** (supertype → subtype) can't conjure the missing
+fields, so it's never an implicit cast — an explicit, synthesized construction:
+a function, a method, or a value-pin merge (`let q:[Point3D:@.z==0] = b;`). Both
+ride the construction gate; `a/b` dropping its remainder is demotion's analogue
+(the conservative pair is its promote).
+
+**synthesis directive (`;`)** — a trailing `;` in place of a body/value: the
+explicit, sole trigger for spec-only synthesis (functions, methods, lets).
+Bodyless-without-`;` is an error; `;` on a sort that pins no value is a "does not
+pin" error. Synthesis is opt-in and visible — never implicit.
+
+**construction pin** — a return sort `Name{e1, …}` over a declared struct:
+synthesis sugar for `[Name:@ == Name(e1, …)]` (values positional into declared
+fields), so a `;` function's body is the construction. Definitional — the
+declared return collapses to the bare struct. Sibling of the value pin (`@==EXPR`).
+
+**in-type pipeline** — a staged synthesis directive in sort position,
+`[let x:S = E -> … -> Base:@==witness]`: the `let` stages compute (calling global
+functions by name — no import), the final pin returns. Desugars to
+`@ == (let x = E in … in witness)` and rides the synthesis path; the `->` is the
+same bind as streams / queries, now inside a type. Not a new executable sort kind.
+
+**`^`** — the power operator. `Int^Int` (repeated multiplication, exponent ≥ 0)
+and Decimal-promoted `Decimal^Int`; binds tighter than `*`. Fenced from
+refinement predicates (the discharge kernel is linear) and opaque in the receipt
+drafter (like `/`). Negative and non-integer (transcendental) exponents are
+runtime errors — honestly rejected, never approximated.

@@ -2,9 +2,9 @@
 
 An experimental typed language built on top of GraalVM's Truffle. The
 type system is the star: refinements, multi-dispatch, traits, union /
-intersection sorts, and narrowing-driven polymorphism all share a
-single symbolic-predicate kernel — and declared types are *claims the
-compiler proves or rejects*, not annotations it trusts.
+intersection sorts, subtype coercion, and narrowing-driven polymorphism
+all share a single symbolic-predicate kernel — and declared types are
+*claims the compiler proves or rejects*, not annotations it trusts.
 
 ## What it is
 
@@ -182,6 +182,58 @@ function area(s:[Circle|Rect]):Decimal -> match s {
 area(Rect(3.0, 4.0))   # → 12.00
 ```
 
+## Subtypes & synthesis
+
+Inheritance, newtypes, union supertypes, and refinement subtyping aren't four
+features — they're **one construct**. `struct Name:[Base:rel](fields)`: the
+brackets say what the type *is* (is-a), the parens what it *has* (has-a), and
+where `Name` lands in the lattice falls out of the bracket contents — no
+`extends`, no keyword.
+
+```pontif
+struct Point(x:Int, y:Int)
+struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+
+let p = Point3D(2, 3, 5)
+let flat:Point = p                   # demote — run the morphism, forget z
+let back:[Point3D:@.z==0] = flat;    # promote — merge the value with the pin
+
+flat.x + flat.y + back.z             # → 5
+```
+
+The cast law is the no-lie law made geometric: **lose freely, fabricate never.**
+
+- **Demotion** (`flat:Point = p`) runs `Point3D`'s always-required morphism — a
+  clean forget. `flat` is `Point(2, 3)`; `z` is *gone*, not hidden behind a tag,
+  so `flat.z` is an error. (`a/b` dropping its remainder is the same move; the
+  conservative pair `a == (a/b)*b + a%b` is division's `promote`.)
+- **Promotion** can't conjure `z`, so it's never an implicit cast — it's an
+  explicit construction. But the *spec writes the body*: a trailing `;` is the
+  synthesis directive, and the return says how. Three doors, one room — a free
+  function, a method, or a pinned `let` merging a partial value with the missing
+  field (`back`, above).
+
+Synthesis isn't only value-pins. A **construction-pin** return writes a whole
+constructor; the **in-type pipeline** computes in type position — `let` stages
+then a final pin, the same `->`-bind that drives streams and queries, now living
+inside a sort:
+
+```pontif
+struct Vec(x:Int, y:Int)
+
+function normSq(v:[Vec.{x, y}]):[
+  let s:Int = x ^ 2 + y ^ 2 ->
+  Int:@==s
+];
+
+normSq(Vec(3, 4))   # → 25
+```
+
+`v:[Vec.{x, y}]` destructures the parameter into `x` and `y`; `^` is the power
+operator; and the body is synthesized from the spec — no new executable sort
+kind, it desugars to `@ == (let s = x^2 + y^2 in s)`, riding the one synthesis
+path everything else uses. The receiver keyword is `this`.
+
 ## Conservation receipts
 
 The receipt graph proves what values **are**; the conservation ledger
@@ -256,7 +308,7 @@ whole language is one big syntactic sugar for it).
 | Module | What it provides |
 | --- | --- |
 | `pontif-core` | Symbolic algebra (`SymExpr`, `Simplifier`, alpha-equivalence, substitution), the sort system (`Sort`, with refined/structural/function/union/intersection variants), refinements with BigDecimal-generalized implication, multi-dispatch (`DispatchTable`, `FunctionDecl`, `FunctionCheck`, `TraitRegistry`), `Decimals` (display + derived-tolerance `~=`), Truffle language registration. |
-| `pontif-ast` | Ready-made Truffle nodes — literals (Int, Decimal, Bool), arithmetic (`+ - * / %`), comparison (incl. `~=`), let-bindings, lambdas/closures, records, field access, match, function entry/call. |
+| `pontif-ast` | Ready-made Truffle nodes — literals (Int, Decimal, Bool), arithmetic (`+ - * / % ^`), comparison (incl. `~=`), let-bindings, lambdas/closures, records, field access, match, function entry/call. |
 | `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). `AliasResolver` substitutes type aliases; `SortChecker` validates sorts, calls, trait impls, Decimal narrow shapes, and **match totality** (the conservation rule); `DecimalPromotion` promotes Int literals at Decimal boundaries; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
 | `pontif-predicates` | Predicate-arithmetic kernel — satisfiability, complement, and bound analysis over `Int` and `Bool` domains. `PredicateArithmetic` decides single-domain coverage (used by match totality, the `_`-arm desugar, and overload-overlap); `BoundAnalysis` is the hybrid linear-bound + sign engine that powers integer discharge (integer-strictness lives here and only here). |
 | `pontif-defaults` | Canonical rule-set factories for the simplifier — `DefaultRules.production()` and `DefaultRules.full()`. Owns `BoundAnalysisRules`, the in-simplifier wrapper over `BoundAnalysis.discharge`, gated to abstain on non-integer values. |
@@ -284,7 +336,7 @@ Capabilities that work end-to-end in alt syntax:
   richer is rejected as "not a Decimal narrow") — proven by a
   dense-valid discharger that never touches integer-strict reasoning
 - Functions and overloads, methods, instance method calls, operator
-  overloading (`+ - * / % < <= > >= == !=`), static / 0-arg bare access
+  overloading (`+ - * / % ^ < <= > >= == !=`), static / 0-arg bare access
 - **Pattern matching where patterns are sorts** — refinements, struct
   refinements, bare types, destructure with renames, per-field
   narrowing, positional literal fields, `_` slot discards (positional
@@ -299,6 +351,18 @@ Capabilities that work end-to-end in alt syntax:
   construction), re-badging is rejected (`Vec` never passes as a
   same-shaped `Point`), questions never coerce (`match`, `==`), and
   native equality follows matching
+- **Subtypes as one construct** — `struct Name:[Base:rel](fields)` unifies
+  inheritance, newtypes, union supertypes, and refinement subtyping; the
+  bracket/paren law splits is-a from has-a. Demotion runs the declared morphism
+  (a clean forget — no surviving tag); promotion is explicit and synthesized
+  (function, method, or value-pin merge) — *lose freely, fabricate never*
+- **Synthesis from the spec** — a trailing `;` is the universal synthesis
+  directive (functions, methods, lets); value pins, construction pins, and the
+  in-type `let`-pipeline (`->`-bind in a sort) each write the body from the
+  return spec
+- **`^` power operator** — `Int^Int` and Decimal-promoted `Decimal^Int`,
+  binding tighter than `*`; negative and transcendental exponents are honestly
+  rejected (out of scope, not silently approximated)
 - **Conservation receipts** — a per-function compile-time dataflow
   graph derived from the sealed IR (`docs/conservation-algebra.md`:
   Computation / Branch / Construction nodes, metadata on edges,

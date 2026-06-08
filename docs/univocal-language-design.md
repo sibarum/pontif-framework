@@ -7,6 +7,19 @@ This date should be updated every time this file changes.
 Motivation behind this syntax choice:
 We're working towards max unification of all design principles.
 
+---
+STATUS (2026-06-08): IMPLEMENTED. Every slice landed + committed; the
+authoritative per-slice detail lives in `docs/univocal-implementation-plan.md`.
+Deltas from this draft:
+- `self -> this`: DONE (alt-syntax receiver). `@` is unchanged — it's the
+  refinement subject, distinct from the receiver.
+- The `requires @` / "outside the universe" world-boundary: DROPPED. The in-type
+  pipeline's `let` stages call global functions by name, so no import was needed;
+  dropping it removed the parent-scope question entirely.
+- `^` power operator: DONE — no longer out of scope.
+- `@.z` is the canonical field-in-pin spelling (the bare `@z` forms below are loose).
+---
+
 "Univocal" - said in one sense of many things.
 A univocal type system.
 Now THAT sounds cool.
@@ -87,11 +100,10 @@ Computation:
 # Or just write a normal function, like the peasentry
 function magnitude(p:[Point.{x,y}]):Decimal -> sqrt(x^2 + y^2)
 
-# Or the mildly more sophisticated "monadic" method:
-# Here, requires imports names from the parent scope @
-# "let" can now invoke the function
+# Or the mildly more sophisticated "monadic" method: the `let` stages compute,
+# the final pin returns. Global functions (sqrt) resolve by name — no import —
+# so the `requires @` stage was DROPPED (see STATUS).
 function magnitude(p:[Point.{x,y}]):[
-    requires @.{sqrt} ->
     let m:Decimal = sqrt(x^2 + y^2) ->
     Decimal:@==m
 ];
@@ -99,6 +111,13 @@ function magnitude(p:[Point.{x,y}]):[
 
 ```
 
+Requires from outside the universe:
+DROPPED (see STATUS) — the in-type pipeline needs no import; global functions
+resolve by name. The `$fqn` import simplification can return if a non-global
+ever needs naming.
+
 Out Of Scope:
 
 a^b should be the power operator, as Int^Int->Int or if either is a Decimal, Decimal^Decimal->Decimal.
+DONE (no longer OOS): `^` landed — Int^Int and Decimal^Int (Decimal-promoted),
+binding tighter than `*`. Decimal^non-integer (transcendental) stays out of scope.

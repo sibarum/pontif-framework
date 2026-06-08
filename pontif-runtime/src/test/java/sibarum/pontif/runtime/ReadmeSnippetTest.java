@@ -170,6 +170,35 @@ class ReadmeSnippetTest {
         org.junit.jupiter.api.Assertions.assertTrue(err.contains("s_0.email"), () -> err);
     }
 
+    // --- Subtypes & synthesis (the univocal construct) ---
+
+    @Test
+    void readmeSubtypesSnippet_demoteAndPromote() {
+        assertEquals("5", runGated("""
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+
+                let p = Point3D(2, 3, 5)
+                let flat:Point = p
+                let back:[Point3D:@.z==0] = flat;
+                flat.x + flat.y + back.z
+                """));
+    }
+
+    @Test
+    void readmeSynthesisSnippet_pipelineAndPower() {
+        assertEquals("25", runGated("""
+                struct Vec(x:Int, y:Int)
+
+                function normSq(v:[Vec.{x, y}]):[
+                  let s:Int = x ^ 2 + y ^ 2 ->
+                  Int:@==s
+                ];
+
+                normSq(Vec(3, 4))
+                """));
+    }
+
     @Test
     void readmeConservationSnippet_swapWitnessesReversibility() {
         assertEquals("1", runGated("""

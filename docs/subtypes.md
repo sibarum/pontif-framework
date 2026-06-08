@@ -2,6 +2,14 @@
 Subtypes: inheritance as named narrowing
 ===
 
+> **SUPERSEDED (2026-06-08) by `docs/univocal-language-design.md` + the shipped
+> implementation (`docs/univocal-implementation-plan.md`).** This early draft's
+> exclusive `[]`-vs-`()` framing and tagged-reversible-borrow cast were both
+> overturned: the shipped construct is `struct Name:[Base:rel](fields)` (is-a AND
+> has-a on one declaration), and an extension upcast is a *lossy clean forget*
+> (no surviving tag), not a reversible borrow. Kept as the historical design
+> record; read the univocal docs for canonical truth.
+
 Status: DRAFT FOR RED-PEN (2026-06-07). The architecture emerged in design
 conversation (the `Zero` sequence, growing from `loginvolution.ptf`); nothing
 here is implemented. The slice-1 substrate it stands on — the construction
