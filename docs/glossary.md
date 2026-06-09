@@ -447,6 +447,10 @@ declared return collapses to the bare struct. Sibling of the value pin (`@==EXPR
 functions by name — no import), the final pin returns. Desugars to
 `@ == (let x = E in … in witness)` and rides the synthesis path; the `->` is the
 same bind as streams / queries, now inside a type. Not a new executable sort kind.
+The final pin may also carry a **postcondition**: in `[Int:@==r & @>0]` the `@==`
+conjunct DEFINES the body, the rest (`@>0`) is the property the gate PROVES —
+synthesis and verification in one pin (e.g. the recursive `factorial` defined and
+proven-positive at once).
 
 **`^`** — the power operator. `Int^Int` (repeated multiplication, exponent ≥ 0)
 and Decimal-promoted `Decimal^Int`; binds tighter than `*`. Fenced from

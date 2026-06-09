@@ -282,4 +282,21 @@ class StructExtensionTest {
             assertEquals("21", r.text(), engine.toString());
         }
     }
+
+    @Test
+    void inTypePipeline_definesAndProves() {
+        // One pin carries BOTH halves: `@==r` DEFINES the body
+        // (let r = n*factorial(n-1)), `@>0` is the postcondition the gate PROVES
+        // inductively (n>=1 times factorial(n-1)>=1). Synthesis + verification,
+        // one form — the recursive factorial WITH its proven positivity.
+        String src = """
+                function factorial(n:[Int:0]):[Int:1];
+                function factorial(n:[Int:@>0]):[let r:Int = n*factorial(n-1) -> [Int:@==r & @>0]];
+                factorial(5)""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("120", r.text(), engine.toString());
+        }
+    }
 }

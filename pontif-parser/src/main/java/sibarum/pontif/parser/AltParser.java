@@ -846,44 +846,86 @@ public final class AltParser {
     }
 
     /**
-     * For a return sort of shape {@code Refined(_, @ == EXPR)} where EXPR
-     * doesn't itself reference {@code @}, pulls out EXPR as the synthesized
-     * body. Returns {@code null} if the sort isn't synthesizable.
+     * The synthesized body for a return sort: the EXPR of a top-level
+     * {@code @==EXPR} (@-free) conjunct of its predicate — `[Int:@==n*2]`, or
+     * the `@==r` half of `[Int:@==r & @>0]`. Returns null if no such definition
+     * conjunct exists. The remaining conjuncts are the postcondition the gate
+     * still proves (see {@link #removeDefinitionConjunct}) — so one pin can both
+     * DEFINE the body and carry a property to VERIFY.
      */
     private static IrExpr tryDeriveBodyFromReturnSort(IrSort returnSort) {
-        if (!(returnSort instanceof IrSort.Refined r)) return null;
-        if (!(r.predicate() instanceof IrExpr.BinOp bop)) return null;
-        if (bop.op() != IrExpr.Op.EQ) return null;
-        // Accept either side: users naturally write `@==EXPR` (which the implicit
-        // sugar also produces), but hand-built IR could be flipped.
-        IrExpr candidate;
-        if (bop.left() instanceof IrExpr.SelfRef && !(bop.right() instanceof IrExpr.SelfRef)) {
-            candidate = bop.right();
-        } else if (bop.right() instanceof IrExpr.SelfRef && !(bop.left() instanceof IrExpr.SelfRef)) {
-            candidate = bop.left();
-        } else {
-            return null;
+        return returnSort instanceof IrSort.Refined r ? definitionWitness(r.predicate()) : null;
+    }
+
+    /** The EXPR of a top-level `@==EXPR` (@-free) conjunct of {@code pred}, or null. */
+    private static IrExpr definitionWitness(IrExpr pred) {
+        if (!(pred instanceof IrExpr.BinOp bop)) return null;
+        if (bop.op() == IrExpr.Op.EQ) {
+            // Accept either side: `@==EXPR` (the sugar's shape) or a flipped form.
+            IrExpr candidate;
+            if (bop.left() instanceof IrExpr.SelfRef && !(bop.right() instanceof IrExpr.SelfRef)) {
+                candidate = bop.right();
+            } else if (bop.right() instanceof IrExpr.SelfRef && !(bop.left() instanceof IrExpr.SelfRef)) {
+                candidate = bop.left();
+            } else {
+                return null;
+            }
+            return containsSelfRef(candidate) ? null : candidate;
         }
-        if (containsSelfRef(candidate)) return null;
-        return candidate;
+        if (bop.op() == IrExpr.Op.AND) {
+            IrExpr l = definitionWitness(bop.left());
+            return l != null ? l : definitionWitness(bop.right());
+        }
+        return null;
+    }
+
+    /** True if {@code pred} is a `@==EXPR` definition conjunct (one side `@`, other @-free). */
+    private static boolean isDefinitionPin(IrExpr pred) {
+        return pred instanceof IrExpr.BinOp b && b.op() == IrExpr.Op.EQ
+                && ((b.left() instanceof IrExpr.SelfRef && !containsSelfRef(b.right()))
+                || (b.right() instanceof IrExpr.SelfRef && !containsSelfRef(b.left())));
     }
 
     /**
-     * The declared return for a synthesized body. A construction-pin synthesis
-     * (the body is a struct construction, e.g. {@code Point3D(x, y, z)}) is
-     * DEFINITIONAL — the body IS the construction — so the declared return is
-     * the bare struct, not the self-referential {@code @ == Point3D(…)}
-     * obligation (which the return gate can't discharge through the param-
-     * destructure `let` indirection). Value pins ({@code @ == n*2}) keep their
-     * refinement — the gate proves those reflexively.
+     * {@code pred} with its `@==EXPR` definition conjunct removed — the residual
+     * is the postcondition the gate must prove. Null when the predicate is
+     * nothing but the definition (a pure synthesis pin, no postcondition).
+     */
+    private static IrExpr removeDefinitionConjunct(IrExpr pred) {
+        if (isDefinitionPin(pred)) return null;
+        if (pred instanceof IrExpr.BinOp bop && bop.op() == IrExpr.Op.AND) {
+            IrExpr l = removeDefinitionConjunct(bop.left());
+            IrExpr r = removeDefinitionConjunct(bop.right());
+            if (l == null) return r;
+            if (r == null) return l;
+            return new IrExpr.BinOp(IrExpr.Op.AND, l, r, bop.origin());
+        }
+        return pred;
+    }
+
+    /**
+     * The declared return for a synthesized body — the postcondition the gate
+     * still proves, with the definition consumed.
+     * <ul>
+     *   <li>{@code @==witness & POSTCOND} → {@code [base:POSTCOND]}: the witness
+     *       is the body (DEFINE), POSTCOND is proven (VERIFY) — one pin, both.</li>
+     *   <li>A pure construction- or pipeline-pin (Record / let-chain body) is
+     *       DEFINITIONAL — the body IS the construction, and it carries opaque
+     *       calls the gate can't reflexively prove — so declare the bare base.</li>
+     *   <li>A pure value pin ({@code @==n*2}) keeps its refinement — the gate
+     *       proves it reflexively.</li>
+     * </ul>
      */
     private static IrSort effectiveSynthesizedReturn(IrExpr derived, IrSort declaredReturn) {
+        if (declaredReturn instanceof IrSort.Refined r) {
+            IrExpr residual = removeDefinitionConjunct(r.predicate());
+            if (residual != null) {
+                return new IrSort.Refined(r.name(), residual, r.origin());  // postcondition to prove
+            }
+        }
         if (derived instanceof IrExpr.Record rec && rec.typeName() != null) {
             return new IrSort.Named(rec.typeName(), declaredReturn.origin());
         }
-        // In-type pipeline (S8): a let-chain body's pin (@ == let … in witness)
-        // is definitional and carries opaque calls the gate can't reflexively
-        // prove — declare the bare final base.
         if (derived instanceof IrExpr.LetIn && declaredReturn instanceof IrSort.Refined r) {
             return new IrSort.Named(r.name(), declaredReturn.origin());
         }
@@ -1583,9 +1625,18 @@ public final class AltParser {
             chain = new IrExpr.LetIn(names.get(i), sorts.get(i), exprs.get(i), chain, open.origin());
         }
         String base = baseSortName(finalSort);
-        return new IrSort.Refined(base,
-                new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), chain, open.origin()),
-                open.spanTo(close));
+        // `@ == let-chain` is the definition; any non-`@==` conjuncts of the final
+        // pin (e.g. `@>0` in `[Int:@==r & @>0]`) ride along as the postcondition
+        // the gate proves — define and verify in one pin.
+        IrExpr defPred = new IrExpr.BinOp(
+                IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), chain, open.origin());
+        IrExpr postcond = finalSort instanceof IrSort.Refined fr
+                ? removeDefinitionConjunct(fr.predicate())
+                : null;
+        IrExpr fullPred = postcond == null
+                ? defPred
+                : new IrExpr.BinOp(IrExpr.Op.AND, defPred, postcond, open.origin());
+        return new IrSort.Refined(base, fullPred, open.spanTo(close));
     }
 
     private IrSort parseConstructionPinSort() throws ParseException {
