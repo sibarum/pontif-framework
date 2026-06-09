@@ -358,18 +358,33 @@ public final class SortChecker {
 
     /**
      * Validates a struct's declared is-a relationship
-     * ({@code struct Name:[Base:rel](fields)}): the base sort must resolve, and
-     * when the base is a refined STRUCT (the demotion-morphism case) the
-     * predicate must functionally pin every base field — each base {@code @.field}
+     * ({@code struct Name:[Base:rel](fields)}): the base must be a declared
+     * STRUCT (a primitive can only be encapsulated as a field, not an is-a base —
+     * record-is-a-scalar is an open decision, deferred), and the demotion
+     * morphism must functionally pin every base field — each base {@code @.field}
      * needs a top-level {@code @.field == <expr>} conjunct, so the demotion
-     * (project Name → Base) is total and deterministic. Subset bases (a
-     * primitive like {@code [Decimal:0]}, a union supertype) carry a narrowing,
-     * not a morphism, so no totality applies.
+     * (project Name → Base) is total and deterministic.
      */
     private static void validateStructBase(
             IrSort.Structural s,
             Map<String, IrSort.Structural> structDefs) throws CompileException {
         IrSort base = s.baseSort();
+        // Primitives can only be ENCAPSULATED (as a field), never an is-a base —
+        // a struct's `:[Base:…]` must name a declared struct. (Record-is-a-scalar
+        // is an open design decision; deferred.)
+        String baseName = switch (base) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            default -> null;
+        };
+        if (baseName != null && PRIMITIVE_SORT_NAMES.contains(baseName)
+                && !baseName.startsWith("_")) {
+            throw new CompileException(
+                    "struct '" + s.name() + "' cannot be-a primitive '" + baseName
+                            + "' — primitives can only be encapsulated (use a field, e.g. "
+                            + "`struct " + s.name() + "(value:" + baseName + ", …)`).",
+                    s.origin());
+        }
         validateSortNames(base, structDefs);  // base resolves; @.field refs exist
         if (base instanceof IrSort.Refined r && structDefs.containsKey(r.name())) {
             IrSort.Structural baseStruct = structDefs.get(r.name());

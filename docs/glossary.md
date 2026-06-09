@@ -416,9 +416,11 @@ the antonym of polysemy; the working title *polylexic* is retired.
 
 **struct-extension** — the one construct `struct Name:[Base:rel](fields)`:
 `:[…]` is the is-a face, `(…)` the has-a face (the bracket/paren law). Unifies
-inheritance, newtypes, union supertypes, and refinement subtyping — where `Name`
-sits in the lattice falls out of the bracket contents. `Structural.baseSort`
-carries the parsed `[Base:rel]`. See `docs/univocal-language-design.md`.
+struct inheritance and union supertypes; `Structural.baseSort` carries the parsed
+`[Base:rel]`. **The is-a base must be a declared STRUCT** — a primitive can only
+be encapsulated as a field, not is-a'd (so record-is-a-scalar / newtypes /
+refinement-subtyping *over a primitive*, e.g. `Complex:[Decimal:@==r](r,i)`, is a
+deferred decision — ruled 2026-06-08). See `docs/univocal-language-design.md`.
 
 **demotion / promotion** — the two subtype casts, governed by *lose freely,
 fabricate never*. **Demotion** (subtype → supertype, `let b:Point = p`) runs the

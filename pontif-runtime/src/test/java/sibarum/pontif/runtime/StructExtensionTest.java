@@ -87,6 +87,19 @@ class StructExtensionTest {
                 () -> "got: " + r.text());
     }
 
+    @Test
+    void primitiveBase_isRejected_encapsulateInstead() {
+        // A struct can't be-a a primitive — primitives are encapsulated as
+        // fields (record-is-a-scalar is an open decision, deferred). The error
+        // is explicit, not the incidental "Not a Decimal narrow".
+        String src = """
+                struct Complex:[Decimal:@==r](r:Decimal, i:Decimal)
+                Complex(3.0, 4.0).r""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), "a struct can't be-a a primitive");
+        assertTrue(r.text().contains("can only be encapsulated"), () -> "got: " + r.text());
+    }
+
     // --- S3: demotion coercion ----------------------------------------------
 
     @Test

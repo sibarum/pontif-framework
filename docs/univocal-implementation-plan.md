@@ -74,6 +74,14 @@ StructExtensionTest pins parse/total/positional/non-total. **Deferred:** the
 no-parens wrapper form (`struct Zero:[Decimal:0]`, parens still required);
 morphism-RHS param scoping; demotion coercion is S3.
 
+**RULING 2026-06-08 (James): the is-a base must be a declared STRUCT.** A
+primitive can only be ENCAPSULATED (a field), never is-a'd — so record-is-a-scalar
+(`Complex:[Decimal:@==r](r,i)`) is rejected with a clear "primitives can only be
+encapsulated" error (was an incidental "Not a Decimal narrow"). The scalar-base
+morphism machinery (and the design question of whether a lossy-where-it-matters
+demote should be implicit) is deferred. `SortChecker.validateStructBase` enforces;
+`StructExtensionTest.primitiveBase_isRejected_encapsulateInstead` pins it.
+
 `struct Name:[Base:rel](fields)` — base sort + demotion morphism alongside fields.
 - Seams: extend `IrSort.Structural` with `baseSort` + `baseMorphism`; parse
   `:[Base:rel]` and positional `[Base(x,y)]` in `parseStruct` (~1234); add a
