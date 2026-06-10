@@ -27,6 +27,7 @@ import java.util.Map;
  * <h2>Phase A + B + C coverage</h2>
  * <ul>
  *   <li>{@code Lit(n)} → {@code [Int:@==n]}
+ *   <li>{@code Dec(d)} → {@code [Decimal:@==d]} (literal value is exact)
  *   <li>{@code Bool(b)} → {@code [Bool:@==b]}
  *   <li>{@code Var(x)} → env lookup (null if unbound)
  *   <li>{@code Match} → same-base union of arm result narrowings, taken
@@ -70,9 +71,11 @@ public final class NarrowingInference {
     public static IrSort infer(IrExpr expr, InferenceContext ctx) {
         return switch (expr) {
             case IrExpr.Lit l -> intSingleton(l.value());
-            // No value-level narrowing for decimals (integer-only engine);
-            // the bare Decimal sort is all we know.
-            case IrExpr.Dec d -> IrSort.named("Decimal");
+            // A literal's value is known exactly — no engine needed — so a
+            // decimal literal narrows to its singleton just like an integer one.
+            // (Decimal *arithmetic* still doesn't narrow: the bound engine is
+            // integer-only; this is only the literal.)
+            case IrExpr.Dec d -> decimalSingleton(d.value());
             // Same for chars in the value slice — bare Char.
             case IrExpr.Chr c -> IrSort.named("Char");
             // A metareference's narrowing is its Dispatch shape; the return
@@ -162,11 +165,48 @@ public final class NarrowingInference {
         for (IrExpr arg : c.args()) {
             argNarrowings.add(infer(arg, ctx));
         }
+        // Call-site return narrowing: an `assign proof` grants a return per region,
+        // so if the argument narrowings land in one proof's region, its granted
+        // return is what this call observes (a more precise result than the declared
+        // base). Sound because the gate independently verifies every proof — a
+        // narrowing only survives compilation if its proof discharged. Takes
+        // precedence over the declared/dispatched return.
+        IrSort granted = grantedReturnFor(c.functionName(), argNarrowings, ctx);
+        if (granted != null) {
+            return granted;
+        }
         StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings, ctx.sortRegistry());
         if (result instanceof StaticDispatch.Result.Resolved resolved) {
             return resolved.returnSort();
         }
         return ctx.functionReturns().get(c.functionName());
+    }
+
+    /** Probe body for the region pseudo-overloads — unused by StaticDispatch (it reads only params/return). */
+    private static final IrExpr REGION_PROBE_BODY = IrExpr.lit(0);
+
+    /**
+     * The return granted by the {@code assign proof} whose region the argument
+     * narrowings land in, or {@code null} when there are no proofs for the
+     * function or the arguments don't definitely fall in exactly one region.
+     * Each proof's {@code (params -> grantedReturn)} is treated as a pseudo-
+     * overload and resolved by the same narrowing-match dispatch uses: a precise
+     * argument lands in one region, an imprecise one matches none (residual) and
+     * the caller falls back to the declared return.
+     */
+    private static IrSort grantedReturnFor(
+            String functionName, List<IrSort> argNarrowings, InferenceContext ctx) {
+        List<IrStmt.ReturnProof> proofs = ctx.returnProofs().get(functionName);
+        if (proofs == null || proofs.isEmpty()) {
+            return null;
+        }
+        List<IrStmt.FunctionDecl> regions = new ArrayList<>(proofs.size());
+        for (IrStmt.ReturnProof p : proofs) {
+            regions.add(new IrStmt.FunctionDecl(
+                    functionName, p.params(), p.grantedReturn(), REGION_PROBE_BODY, p.origin()));
+        }
+        StaticDispatch.Result r = StaticDispatch.resolve(regions, argNarrowings, ctx.sortRegistry());
+        return r instanceof StaticDispatch.Result.Resolved resolved ? resolved.returnSort() : null;
     }
 
     // --- Match -------------------------------------------------------------
@@ -623,6 +663,18 @@ public final class NarrowingInference {
                         IrExpr.Op.EQ,
                         new IrExpr.SelfRef(Origin.NONE),
                         new IrExpr.Bool(b, Origin.NONE),
+                        Origin.NONE),
+                Origin.NONE);
+    }
+
+    /** Synthesizes {@code [Decimal:@==v]} for a decimal literal (value known exactly). */
+    private static IrSort.Refined decimalSingleton(java.math.BigDecimal v) {
+        return new IrSort.Refined(
+                "Decimal",
+                new IrExpr.BinOp(
+                        IrExpr.Op.EQ,
+                        new IrExpr.SelfRef(Origin.NONE),
+                        new IrExpr.Dec(v, Origin.NONE),
                         Origin.NONE),
                 Origin.NONE);
     }

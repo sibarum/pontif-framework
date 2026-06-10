@@ -108,7 +108,8 @@ class NarrowingInferenceDispatchTest {
                 .withOverloads(Map.of("sign", List.of(pos, neg)));
         // Add a fallback declared return.
         Map<String, IrSort> returns = Map.of("sign", IrSort.named("Int"));
-        ctx = new InferenceContext(ctx.typeEnv(), returns, ctx.structDefs(), ctx.overloads());
+        ctx = new InferenceContext(ctx.typeEnv(), returns, ctx.structDefs(), ctx.overloads(),
+                ctx.returnProofs());
 
         IrSort result = NarrowingInference.infer(
                 IrExpr.call("sign",
@@ -160,6 +161,65 @@ class NarrowingInferenceDispatchTest {
         IrSort result = NarrowingInference.infer(
                 IrExpr.call("sign", List.of(IrExpr.lit(7))), ctx);
         assertEquals(retPos, result);
+    }
+
+    // --- assign-proof return narrowing (call-site, per region) ---------------
+
+    private static final IrSort NONNEG = IrSort.refined("Int",
+            IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(0)));
+
+    private static InferenceContext proveBranchCtx() {
+        // proveBranch(d:Int, x:Int):[Int], with two assign-proofs:
+        //   d<0  grants [Int:@<0]
+        //   d>=0 grants [Int:@>=-16]
+        IrSort retNeg = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.LT, IrExpr.self(), IrExpr.lit(0)));
+        IrSort retGe16 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(-16)));
+        IrStmt.FunctionDecl fn = IrStmt.functionDecl("proveBranch",
+                List.of(new IrParam("d", INT), new IrParam("x", INT)), INT, IrExpr.lit(0));
+        IrStmt.ReturnProof pNeg = IrStmt.returnProof("proveBranch",
+                List.of(new IrParam("d", NEGATIVE), new IrParam("x", INT)), retNeg, null);
+        IrStmt.ReturnProof pPos = IrStmt.returnProof("proveBranch",
+                List.of(new IrParam("d", NONNEG), new IrParam("x", INT)), retGe16, null);
+        return new InferenceContext(Map.of(),
+                Map.of("proveBranch", INT),
+                Map.of(),
+                Map.of("proveBranch", List.of(fn)),
+                Map.of("proveBranch", List.of(pNeg, pPos)));
+    }
+
+    @Test
+    void returnProof_argInKnownRegion_returnsThatRegionsGrant() {
+        // proveBranch(5, 0): arg d=5 lands in the d>=0 region, so the call observes
+        // that region's granted [Int:@>=-16] — not the declared base [Int].
+        IrSort result = NarrowingInference.infer(
+                IrExpr.call("proveBranch", List.of(IrExpr.lit(5), IrExpr.lit(0))),
+                proveBranchCtx());
+        assertEquals(IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(-16))), result);
+    }
+
+    @Test
+    void returnProof_argInOtherRegion_returnsOtherGrant() {
+        // proveBranch(-3, 0): arg d=-3 lands in the d<0 region → granted [Int:@<0].
+        IrSort result = NarrowingInference.infer(
+                IrExpr.call("proveBranch", List.of(IrExpr.lit(-3), IrExpr.lit(0))),
+                proveBranchCtx());
+        assertEquals(IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.LT, IrExpr.self(), IrExpr.lit(0))), result);
+    }
+
+    @Test
+    void returnProof_argRegionUnknown_fallsBackToDeclaredBase() {
+        // proveBranch(n + 1, 0): the first arg's narrowing is unknown, so neither
+        // region definitely matches → fall back to the declared base [Int].
+        IrSort result = NarrowingInference.infer(
+                IrExpr.call("proveBranch", List.of(
+                        IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("n"), IrExpr.lit(1)),
+                        IrExpr.lit(0))),
+                proveBranchCtx());
+        assertEquals(INT, result);
     }
 
     // --- Nested call narrowings propagate -----------------------------------

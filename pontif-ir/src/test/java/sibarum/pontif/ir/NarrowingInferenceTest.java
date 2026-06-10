@@ -35,6 +35,15 @@ class NarrowingInferenceTest {
         assertEquals(boolEq(true), result);
     }
 
+    @Test
+    void decimalLiteral_narrowsToSingleton() {
+        // A decimal literal's value is exact, so it narrows to [Decimal:@==v]
+        // just like an integer literal (no bound engine involved).
+        java.math.BigDecimal v = new java.math.BigDecimal("1.2");
+        IrSort result = NarrowingInference.infer(IrExpr.dec(v), InferenceContext.empty());
+        assertEquals(decEq(v), result);
+    }
+
     // --- Var lookup ----------------------------------------------------------
 
     @Test
@@ -357,6 +366,11 @@ class NarrowingInferenceTest {
     /** {@code [Bool:@==b]} */
     private static IrSort boolEq(boolean b) {
         return IrSort.refined("Bool", eqSelf(IrExpr.bool(b)));
+    }
+
+    /** {@code [Decimal:@==v]} */
+    private static IrSort decEq(java.math.BigDecimal v) {
+        return IrSort.refined("Decimal", eqSelf(IrExpr.dec(v)));
     }
 
     /** {@code [Int:@>=n]} */
