@@ -346,7 +346,7 @@ public final class AltParser {
             case "struct"   -> parseStruct();
             case "method"   -> parseMethod();
             case "let"      -> parseLet();
-            case "assign"   -> parseAssignTrait();
+            case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
             default -> throw new ParseException(
                     "Unknown top-level keyword '" + head.text() + "'",
@@ -1415,6 +1415,66 @@ public final class AltParser {
     // prefix — both implicit from the block header). The parser desugars
     // to an `IrStmt.TraitImpl` whose methods are full FunctionDecls with
     // self prepended and the type-qualified name.
+
+    /**
+     * Dispatches the two {@code assign} forms by the keyword after {@code assign}:
+     * {@code assign trait …} (trait impl) vs {@code assign proof …}
+     * (return-refinement proof).
+     */
+    private IrStmt parseAssign() throws ParseException {
+        AltToken next = peek(1);  // the token after "assign"
+        if (next.kind() == AltToken.Kind.IDENT && next.text().equals("proof")) {
+            return parseAssignProof();
+        }
+        return parseAssignTrait();
+    }
+
+    /**
+     * Parses {@code assign proof NAME(params):PIN}. The PIN is either a
+     * case-function proof {@code [ (match s …) -> [Sort] ]} — whose ordered
+     * {@code [guard] -> expr} arms cut the domain into regions the engine can
+     * discharge (the arm bodies are inert; only the guards matter) — or a bare
+     * sort {@code [Sort]} for a bodyless proof asking for native discharge. The
+     * granted sort is the return refinement the proof proves; the target
+     * function declares only a base return.
+     */
+    private IrStmt parseAssignProof() throws ParseException {
+        AltToken start = expectKeyword("assign");
+        expectKeyword("proof");
+        String functionName = parseDottedName();
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        drainParamDestructures();  // proof params don't use `.{}`; keep the buffer clean
+        expect(AltToken.Kind.COLON);
+
+        // Push proof params into scope so the case-function's `[@…]` arms infer
+        // the subject's base sort, exactly as a function body's match arms do.
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        try {
+            // Case-function pin `[ (match s …) -> [Sort] ]`: the `[` is followed by
+            // `(`. A bare sort (any other token after `[`, or no `[`) is a bodyless
+            // proof.
+            if (peek().kind() == AltToken.Kind.LBRACKET && peek(1).kind() == AltToken.Kind.LPAREN) {
+                consume();  // the pin's opening '['
+                expect(AltToken.Kind.LPAREN);
+                IrExpr body = parseMatch();
+                expect(AltToken.Kind.RPAREN);
+                expect(AltToken.Kind.ARROW);
+                IrSort grantedReturn = parseSort();
+                AltToken close = expect(AltToken.Kind.RBRACKET);
+                return new IrStmt.ReturnProof(
+                        functionName, params, grantedReturn, body, start.spanTo(close));
+            }
+            IrSort grantedReturn = parseSort();
+            return new IrStmt.ReturnProof(functionName, params, grantedReturn, null, start.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+    }
 
     private IrStmt parseAssignTrait() throws ParseException {
         AltToken start = expectKeyword("assign");

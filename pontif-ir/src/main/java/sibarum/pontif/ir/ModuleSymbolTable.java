@@ -99,6 +99,7 @@ public final class ModuleSymbolTable {
                         if (ex.self()) exp.get(module).addAll(ex.names());
                     }
                     case IrStmt.Proof p -> { }
+                    case IrStmt.ReturnProof rp -> { }
                     case IrStmt.NoOp n -> { }
                 }
             }

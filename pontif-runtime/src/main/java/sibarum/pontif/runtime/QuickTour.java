@@ -32,23 +32,25 @@ public final class QuickTour {
             # [2, infinity) and clears the > 1 bar on its own — no help needed.
             function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
-            # Some don't. quirk(x) = x * (x - 1) is the product of two
-            # consecutive integers, so it's always >= 0 — but it's an opaque
-            # product, and the built-in engine can't see that. Declaring
-            # [Int:@>=0] would be rejected on its own. So we hand it a PROOF.
+            # Some don't. quirk(x) = (x - 3) * (x + 5) dips to a minimum of -16
+            # (at x = -1), so it's always >= -16 — but it's an opaque product
+            # whose low point sits in the interior, and the built-in engine can't
+            # see that. Declaring [Int:@>=-16] would be rejected on its own. So we
+            # hand it a PROOF.
 
             # A proof is a tree of case-splits, built from Leaf and Split (the
             # types imported above). Split refers to itself through a
             # [Leaf|Split] union — it's a recursive type, like lists and trees.
 
-            # Split on x >= 1; each leaf is then within the engine's reach:
-            #   x >= 1  ->  both factors >= 0, so the product >= 0
-            #   x <  1  ->  x <= 0 and x - 1 <= -1, product of two negatives >= 0
+            # Cut where interval reasoning works, and let the prover peel the rest:
+            #   x >= 3   ->  both factors >= 0, so the product >= 0
+            #   x <= -6  ->  both factors <= 0, so the product >= 9
+            #   the leftover middle [-5, 2] is finite, so the prover enumerates it
             # The combinators are conservative: a bogus split can never validate,
             # so a proof rescues a true-but-hard return but never launders a
             # false one. (Delete the proof line and Run — quirk is rejected.)
-            function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
-            proof quirk = Split(x >= 1, Leaf(), Leaf())
+            function quirk(x:Int):[Int:@>=-16] -> (x - 3) * (x + 5)
+            proof quirk = Split(x >= 3, Leaf(), Split(x <= -6, Leaf(), Leaf()))
 
             # Main expression — runs when you click Run.
             # inc(4) = 5, quirk(5) = 20.  Sum: 25.

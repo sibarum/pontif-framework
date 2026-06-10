@@ -220,22 +220,23 @@ class ReceiptGraphReportTest {
 
     @Test
     void handWrittenProof_showsDischargedViaProof() throws Exception {
-        // quirk = x*(x-1) >= 0 is beyond the built-in engine (opaque product),
-        // but a hand-written split closes it. The report must agree with the
-        // gate — render the branch as discharged [via proof], not NOT DISCHARGED.
+        // quirk = (x-3)*(x+5) >= -16 is beyond the built-in engine (opaque product
+        // with an interior minimum), but a hand-written split closes it (the middle
+        // [-5,2] auto-peels). The report must agree with the gate — render the
+        // branch as discharged [via proof], not NOT DISCHARGED.
         String src = """
                 module quirk
                 struct Leaf()
                 struct Split(p:Bool, whenTrue:[Leaf|Split], whenFalse:[Leaf|Split])
-                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
-                proof quirk = Split(x>=1, Leaf(), Leaf())
+                function quirk(x:Int):[Int:@>=-16] -> (x - 3) * (x + 5)
+                proof quirk = Split(x>=3, Leaf(), Split(x<=-6, Leaf(), Leaf()))
                 quirk(5)
                 """;
         Path path = ReceiptGraphReport.writeReport(OUT, "quirkProof", src, "quirkProof.ptf");
         String text = Files.readString(path);
         System.out.println(text);
 
-        assertTrue(text.contains("quirk  :  r_0 >= 0"), () -> text);
+        assertTrue(text.contains("quirk  :  r_0 >= -16"), () -> text);
         assertTrue(text.contains("-> discharged [via proof; notary: accepted]"),
                 () -> "quirk's obligation should render as proof-discharged:\n" + text);
         assertTrue(!text.contains("NOT DISCHARGED"),
@@ -252,8 +253,8 @@ class ReceiptGraphReportTest {
         String src = """
                 module tour
                 requires std.proof.{Leaf, Split}
-                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
-                proof quirk = Split(x>=1, Leaf(), Leaf())
+                function quirk(x:Int):[Int:@>=-16] -> (x - 3) * (x + 5)
+                proof quirk = Split(x>=3, Leaf(), Split(x<=-6, Leaf(), Leaf()))
                 quirk(5)
                 """;
         String text = generate(src, "tour.ptf");
@@ -270,7 +271,7 @@ class ReceiptGraphReportTest {
         // tracks the gate's view rather than going silent.
         String src = """
                 module quirk
-                function quirk(x:Int):[Int:@>=0] -> x * (x - 1)
+                function quirk(x:Int):[Int:@>=-16] -> (x - 3) * (x + 5)
                 quirk(5)
                 """;
         Path path = ReceiptGraphReport.writeReport(OUT, "quirkNoProof", src, "quirkNoProof.ptf");

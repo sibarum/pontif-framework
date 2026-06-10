@@ -73,9 +73,10 @@ class ProofAuthoringAdversarialTest {
     @Test
     void splitOverPhantomVariable_doesNotDischarge() {
         // The split is on `y`, which isn't a parameter — it's never bound in the
-        // path facts, so the guard constrains nothing and the proof fails.
+        // path facts, so the guard constrains nothing and the proof fails. (Uses
+        // (x-3)*(x+5)>=-16, a goal the engine genuinely can't close on its own.)
         String err = assertRejected(STRUCTS + """
-                function f(x:Int):[Int:@>=0] -> x*(x-1)
+                function f(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
                 proof f = Split(y>=1, Leaf(), Leaf())
                 42
                 """);
@@ -89,7 +90,7 @@ class ProofAuthoringAdversarialTest {
         // over params (x), not the refinement subject. So `@>=1` constrains
         // nothing useful here and the proof fails. (Documents the params-only rule.)
         String err = assertRejected(STRUCTS + """
-                function f(x:Int):[Int:@>=0] -> x*(x-1)
+                function f(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
                 proof f = Split(@>=1, Leaf(), Leaf())
                 42
                 """);

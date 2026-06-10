@@ -5,7 +5,9 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
+import sibarum.pontif.ir.IrSort;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -82,6 +84,55 @@ public final class RefinementProof {
         throw new CompileException(
                 "unknown proof constructor '" + type + "'; expected Leaf, Split, or Singletons",
                 rec.origin());
+    }
+
+    /**
+     * Lowers an {@code assign proof} case-function body to a {@link Refinement}.
+     * The ordered, first-match arms nest as
+     * {@code Split(g0, Leaf, Split(g1, Leaf, …))}: each arm but the last cuts on
+     * its guard (true-side discharges here), and the <b>last</b> arm becomes the
+     * final else-{@code Leaf} — its region is exactly the structural complement
+     * of the earlier guards (so a trailing {@code [_]} or computed-complement arm
+     * needs no explicit guard). Arm bodies are inert; only the guards (the cuts)
+     * matter. Guards are the arm patterns' predicates with {@code @} bound to the
+     * match subject, then param-renamed to graph vars — the same derivation the
+     * {@code Drafter} uses for a function body's match branches.
+     *
+     * @param match  the case-function {@code (match s [g] -> … …)}
+     * @param rename {@code paramName → graphVar} applied to subject and guards
+     */
+    public static Refinement fromCaseFunction(IrExpr.Match match, Map<String, SymExpr> rename)
+            throws CompileException {
+        SymExpr subject = Substitute.apply(
+                IrCompiler.compileSymExpr(match.scrutinee()), rename);
+        return lowerArms(match.branches(), 0, subject, rename);
+    }
+
+    private static Refinement lowerArms(
+            List<IrExpr.MatchBranch> arms, int i, SymExpr subject, Map<String, SymExpr> rename)
+            throws CompileException {
+        // The last arm is the residual/else region — its guard is the structural
+        // complement of the earlier cuts, which Split derives for free.
+        if (i >= arms.size() - 1) {
+            return Refinement.leaf();
+        }
+        IrExpr.MatchBranch arm = arms.get(i);
+        if (!(arm.pattern() instanceof IrSort.Refined refined)) {
+            throw new CompileException(
+                    "an assign-proof arm guard must be a refinement predicate (e.g. [@>=3]); "
+                            + "structural patterns aren't supported",
+                    arm.pattern().origin());
+        }
+        SymExpr predicate = Substitute.apply(
+                IrCompiler.compileSymExpr(refined.predicate()), rename);
+        SymExpr guard = Substitute.applySelf(predicate, subject);
+        if (!(guard instanceof SymExpr.Cmp)) {
+            throw new CompileException(
+                    "an assign-proof arm guard must be a comparison (e.g. [@>=3]); got " + guard,
+                    refined.origin());
+        }
+        return Refinement.splitOn(guard, Refinement.leaf(),
+                lowerArms(arms, i + 1, subject, rename));
     }
 
     /** The local part of a possibly-FQN'd type name ({@code std.proof/Split} → {@code Split}). */

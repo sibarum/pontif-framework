@@ -1,6 +1,8 @@
 package sibarum.pontif.receipts;
 
 import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.predicates.Interval;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,7 +52,19 @@ final class RefinementValidator {
             case Refinement.Leaf ignored -> {
                 List<SymExpr> hyps = new ArrayList<>(baseFacts);
                 hyps.addAll(splitGuards);
-                yield new Outcome.LeafOutcome(splitGuards, Discharge.discharge(domain, hyps, goal));
+                if (Discharge.discharge(domain, hyps, goal)) {
+                    yield new Outcome.LeafOutcome(splitGuards, true);
+                }
+                // Auto-peel: if the accumulated guards pin a single variable to a
+                // finite integer interval, that residual IS a bounded region — so
+                // enumerate it to singletons (the work the Singletons directive once
+                // did explicitly) and re-walk. Each peeled cell re-attempts discharge
+                // with the variable fixed to one value, where interval arithmetic is
+                // exact. Declines (honest non-discharge) when no single variable is
+                // finitely bounded, the residual is already a point, or it is too
+                // wide to enumerate.
+                Outcome peeled = autoPeel(baseFacts, splitGuards, goal, domain);
+                yield peeled != null ? peeled : new Outcome.LeafOutcome(splitGuards, false);
             }
             case Refinement.Split(SymExpr p, Refinement whenTrue, Refinement whenFalse) -> {
                 Outcome t = walk(whenTrue, baseFacts, append(splitGuards, p), goal, domain);
@@ -64,6 +78,75 @@ final class RefinementValidator {
         List<SymExpr> next = new ArrayList<>(guards);
         next.add(g);
         return next;
+    }
+
+    /** Largest residual interval auto-peel will enumerate; wider residuals decline. */
+    private static final long MAX_PEEL_SIZE = 1024;
+
+    /**
+     * When a leaf fails to discharge but the accumulated guards pin a single
+     * variable to a finite integer interval, enumerate that interval to
+     * singletons via {@link Refinement#splitToSingletons} and re-walk. The
+     * residual left by the enclosing splits IS the interval — so the bounds the
+     * {@code Singletons} directive used to carry explicitly are derived here from
+     * the guards. Returns the peeled (discharged) sub-outcome, or {@code null}
+     * to decline: no single cut variable, an infinite or single-point residual,
+     * an interval wider than {@link #MAX_PEEL_SIZE}, or a peel that still doesn't
+     * discharge. Declining is sound — auto-peel can only widen reach, never
+     * launder a false leaf.
+     */
+    private static Outcome autoPeel(
+            List<SymExpr> baseFacts,
+            List<SymExpr> splitGuards,
+            SymExpr goal,
+            sibarum.pontif.core.types.Sort domain) {
+        SymExpr subject = soleCutVariable(splitGuards);
+        if (subject == null) {
+            return null;
+        }
+        List<SymExpr> hyps = new ArrayList<>(baseFacts);
+        hyps.addAll(splitGuards);
+        Interval iv = BoundAnalysis.bound(subject, hyps);
+        if (iv.lo() == Interval.NEG_INF || iv.hi() == Interval.POS_INF) {
+            return null;  // not a finite interval — nothing to enumerate
+        }
+        long width = iv.hi() - iv.lo();
+        // width <= 0: a single point (peeling can't help) or an overflowed
+        // difference — also stops the recursion a failed singleton would drive.
+        // width >= cap: decline to auto-enumerate something this large (the
+        // residual holds width + 1 integers).
+        if (width <= 0 || width >= MAX_PEEL_SIZE) {
+            return null;
+        }
+        Refinement ladder = Refinement.splitToSingletons(subject, iv.lo(), iv.hi());
+        Outcome peeled = walk(ladder, baseFacts, splitGuards, goal, domain);
+        return peeled.discharged() ? peeled : null;
+    }
+
+    /**
+     * The single variable the guards cut on (the left of every comparison guard),
+     * or {@code null} when the guards cut on zero or more than one variable —
+     * auto-peel only enumerates a single-variable residual. A guard with a
+     * non-variable left (e.g. literal-on-left) is skipped, so such a proof simply
+     * doesn't auto-peel rather than misidentifying its subject.
+     */
+    private static SymExpr soleCutVariable(List<SymExpr> guards) {
+        SymExpr subject = null;
+        for (SymExpr g : guards) {
+            if (!(g instanceof SymExpr.Cmp cmp)) {
+                continue;
+            }
+            SymExpr left = cmp.left();
+            if (!(left instanceof SymExpr.Var) && !(left instanceof SymExpr.Self)) {
+                continue;
+            }
+            if (subject == null) {
+                subject = left;
+            } else if (!subject.equals(left)) {
+                return null;  // more than one cut variable → out of scope
+            }
+        }
+        return subject;
     }
 
     /** The outcome of validating a refinement against one branch's obligation. */

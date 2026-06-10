@@ -52,8 +52,11 @@ class ProofAuthoringTest {
 
     @Test
     void hardReturn_withoutProof_rejects() {
+        // (x-3)*(x+5) >= -16 is true but beyond the engine (the min -16 sits at the
+        // interior x=-1, which the sign-chart's root cuts don't isolate), so without
+        // a proof the declared return is rejected.
         String err = assertRejected("""
-                function f(x:Int):[Int:@>=0] -> x*(x-1)
+                function f(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
                 42
                 """);
         assertTrue(err.contains("Cannot prove the declared return refinement of 'f'"),
@@ -64,7 +67,7 @@ class ProofAuthoringTest {
     void insufficientProof_isStaleHardError() {
         // A bare Leaf supplies no split, so the engine still can't close it.
         String err = assertRejected(STRUCTS + """
-                function f(x:Int):[Int:@>=0] -> x*(x-1)
+                function f(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
                 proof f = Leaf()
                 42
                 """);
@@ -160,6 +163,36 @@ class ProofAuthoringTest {
                       Singletons(x, -5, 2)))
                 42
                 """);
+    }
+
+    @Test
+    void isSparse_middleResidualAutoPeels_withoutSingletons() {
+        // Same flagship hard return, but the middle region [-5, 2] is a BARE Leaf —
+        // no Singletons directive. The x>=3 / x<=-6 cuts pin x to the finite residual
+        // [-5, 2]; auto-peel detects that and enumerates it to singletons internally,
+        // so the opaque product discharges point-by-point (min -16 at x=-1). Without
+        // auto-peel this leaf stays open (the engine's sign-chart can't isolate x=-1).
+        assertCompiles(STRUCTS + """
+                function isSparse(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
+                proof isSparse =
+                  Split(x>=3, Leaf(),
+                    Split(x<=-6, Leaf(), Leaf()))
+                42
+                """);
+    }
+
+    @Test
+    void openSidedResidual_isNotAutoPeeled_staysInsufficient() {
+        // Only one cut, so the false side's residual is the infinite (-inf, 2].
+        // Auto-peel enumerates only FINITE residuals, so it declines here and the
+        // proof is honestly insufficient — the boundary of what auto-peel rescues.
+        String err = assertRejected(STRUCTS + """
+                function isSparse(x:Int):[Int:@>=-16] -> (x-3)*(x+5)
+                proof isSparse = Split(x>=3, Leaf(), Leaf())
+                42
+                """);
+        assertTrue(err.contains("isSparse"),
+                () -> "expected an insufficient-proof rejection for 'isSparse'; got: " + err);
     }
 
     @Test

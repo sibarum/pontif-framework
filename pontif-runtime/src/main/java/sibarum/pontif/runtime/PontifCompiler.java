@@ -8,6 +8,7 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrModule;
+import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
@@ -20,8 +21,10 @@ import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
+import sibarum.pontif.receipts.ReturnProofBinding;
 import sibarum.pontif.runtime.module.ModuleLinker;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -344,6 +347,24 @@ public final class PontifCompiler {
                         + "return, or drop the narrowing.");
             }
         }
+
+        // `assign proof` return-refinement proofs: the granted refinement lives on
+        // the proof, and several proofs may cover one function's regions (proof
+        // dispatch). Each is matched to the body branch it proves and validated
+        // there — see ReturnProofBinding. The target function declares a base
+        // return, so the loop above (which only flags declared-refined nodes)
+        // never sees these.
+        List<IrStmt.ReturnProof> returnProofs = new ArrayList<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.ReturnProof rp) {
+                returnProofs.add(rp);
+            }
+        }
+        Optional<String> returnProofProblem = ReturnProofBinding.validate(returnProofs, graph);
+        if (returnProofProblem.isPresent()) {
+            return returnProofProblem;
+        }
+
         return Optional.empty();
     }
 

@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 
 import java.util.List;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
 
     Origin origin();
 
@@ -30,6 +30,11 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
 
     static Proof proof(String functionName, IrExpr proofTree) {
         return new Proof(functionName, proofTree, Origin.NONE);
+    }
+
+    static ReturnProof returnProof(
+            String functionName, List<IrParam> params, IrSort grantedReturn, IrExpr body) {
+        return new ReturnProof(functionName, params, grantedReturn, body, Origin.NONE);
     }
 
     /** Same-name entries (no renames) — the common shorthand form. */
@@ -144,6 +149,41 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             if (proofTree == null) {
                 throw new IllegalArgumentException("Proof tree must be non-null");
             }
+        }
+    }
+
+    /**
+     * A return-refinement proof attached via {@code assign proof}. Distinct from
+     * the shared {@link Proof} statement (the {@code proof f = <tree>} form, also
+     * used by the conservation ledger): this carries its own parameter signature,
+     * the return refinement it <b>grants and proves</b> ({@code grantedReturn}),
+     * and an optional case-function {@code body} whose ordered {@code [guard] ->}
+     * arms cut the domain into regions the engine can discharge. A {@code null}
+     * body asks the engine to discharge {@code grantedReturn} natively.
+     *
+     * <p>The return-refinement gate ({@code PontifCompiler}) rewrites the target
+     * function's declared return to {@code grantedReturn}, lowers the body to a
+     * {@link sibarum.pontif.receipts.Refinement}, and validates it. The function
+     * itself declares only a base return; the proof is where the refinement lives
+     * (so dispatched proofs can grant different refinements per argument region).
+     * Surface (alt syntax): {@code assign proof f(params):[ (match s ...) -> [Sort] ]}
+     * or {@code assign proof f(params):[Sort]}.
+     */
+    record ReturnProof(
+            String functionName,
+            List<IrParam> params,
+            IrSort grantedReturn,
+            IrExpr body,
+            Origin origin) implements IrStmt {
+        public ReturnProof {
+            if (functionName == null || functionName.isEmpty()) {
+                throw new IllegalArgumentException("ReturnProof functionName must be non-empty");
+            }
+            params = List.copyOf(params);
+            if (grantedReturn == null) {
+                throw new IllegalArgumentException("ReturnProof grantedReturn must be non-null");
+            }
+            // body may be null — a bodyless proof asks for native discharge.
         }
     }
 
