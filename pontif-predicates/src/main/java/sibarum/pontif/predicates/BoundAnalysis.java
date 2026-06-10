@@ -22,6 +22,13 @@ import java.util.Map;
  * so those become opaque atoms whose range comes from {@link SignAnalysis}.
  * Neither tool subsumes the other; this is the hybrid.
  *
+ * <p>When a product's sign is still undecided ({@code x*(x-1)} — both factors
+ * {@code TOP}), the engine falls back to an internal <b>sign-chart
+ * case-split</b>: it partitions the shared variable at the factors' integer
+ * roots into an exhaustive cover of {@code ℤ} and discharges every cell. This
+ * is the move formerly delegated to a user-supplied case-split proof, now
+ * decided in-engine (see {@code dischargeViaSignChart}).
+ *
  * <h2>Soundness</h2>
  * Every atom bound is sound (a single-atom hypothesis like {@code x >= 1}
  * gives {@code [1, ∞)}; a sign gives the matching half-line), and
@@ -63,8 +70,7 @@ public final class BoundAnalysis {
         // A union *value* refinement reaches here as an Or of comparisons
         // (e.g. [Int:0|1] → @==0 | @==1; [Int:@<0|@>10] likewise). Sound to
         // discharge an Or if any disjunct discharges, an And if all conjuncts
-        // do. Incomplete — a true Or whose disjuncts each need a *distinct*
-        // case-split isn't caught here; that's the refinement-proof's job.
+        // do.
         if (goal instanceof SymExpr.Or(SymExpr orL, SymExpr orR)) {
             return discharge(hypotheses, orL) || discharge(hypotheses, orR);
         }
@@ -74,6 +80,15 @@ public final class BoundAnalysis {
         if (!(goal instanceof SymExpr.Cmp(SymExpr subject, SymExpr.CmpOp op, SymExpr bound))) {
             return false;
         }
+        // Direct linear+sign interval reasoning, then — if that can't decide —
+        // an internal sign-chart case-split over a product atom's factor roots.
+        return dischargeCmp(hypotheses, subject, op, bound)
+                || dischargeViaSignChart(hypotheses, subject, op, bound);
+    }
+
+    /** The direct linear+sign interval verdict for a single comparison goal. */
+    private static boolean dischargeCmp(
+            List<SymExpr> hypotheses, SymExpr subject, SymExpr.CmpOp op, SymExpr bound) {
         LinearForm diff = LinearForm.normalize(subject).subtract(LinearForm.normalize(bound));
         Interval iv = evaluate(diff, flatten(hypotheses));
         // Contradictory hypotheses (empty range) entail anything.
@@ -86,6 +101,97 @@ public final class BoundAnalysis {
             case EQ -> iv.lo() == 0 && iv.hi() == 0;
             case NE -> iv.lo() > 0 || iv.hi() < 0;
         };
+    }
+
+    /**
+     * The case-split the engine used to delegate to a user-supplied proof:
+     * the sign of a product like {@code x*(x-1)} is undecided by sign analysis
+     * (both factors are {@code TOP}), but it's pinned once the shared variable's
+     * sign is fixed. So when the goal carries an opaque product atom whose
+     * factors are all linear in a <em>single</em> variable, we split that
+     * variable at the factors' integer roots into an exhaustive partition of
+     * {@code ℤ} (sound only because the domain is discrete — the same gate as
+     * the integer-strict cut), and discharge the goal directly in every cell.
+     *
+     * <p>Generate-and-check: the partition is heuristically chosen but the
+     * verdict is sound — it returns {@code true} only if <em>every</em> cell of
+     * an exhaustive cover discharges, so no false goal slips through (a value
+     * that violates the goal lives in some cell, where {@link #dischargeCmp}
+     * refuses). One level deep (cells discharge directly, never re-split), so it
+     * always terminates; multi-variable / non-factor-root thresholds are out of
+     * scope and surface as honest non-discharge.
+     */
+    private static boolean dischargeViaSignChart(
+            List<SymExpr> hypotheses, SymExpr subject, SymExpr.CmpOp op, SymExpr bound) {
+        LinearForm diff = LinearForm.normalize(subject).subtract(LinearForm.normalize(bound));
+        List<List<SymExpr>> cells = planSignChart(diff);
+        if (cells == null) return false;
+        for (List<SymExpr> cellGuards : cells) {
+            List<SymExpr> cellHyps = new ArrayList<>(hypotheses);
+            cellHyps.addAll(cellGuards);
+            if (!dischargeCmp(cellHyps, subject, op, bound)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * The exhaustive integer cells to split into, or {@code null} when the goal
+     * offers no single-variable product to sign-chart. Cells are guard lists
+     * partitioning {@code ℤ} at the product factors' integer roots:
+     * {@code (-∞, t₁], [t₁+1, t₂], …, [tₘ+1, ∞)}.
+     */
+    private static List<List<SymExpr>> planSignChart(LinearForm diff) {
+        SymExpr var = null;
+        java.util.TreeSet<Long> cuts = new java.util.TreeSet<>();
+        boolean foundProduct = false;
+        for (SymExpr atom : diff.coeffs().keySet()) {
+            if (!(atom instanceof SymExpr.Mul(SymExpr l, SymExpr r))) continue;
+            foundProduct = true;
+            for (SymExpr factor : List.of(l, r)) {
+                Factor fi = factorOf(factor);
+                if (fi == null) return null;        // a factor we can't sign-chart
+                if (fi.constant()) continue;        // contributes no cut/variable
+                if (var == null) var = fi.var();
+                else if (!var.equals(fi.var())) return null;  // multi-variable → bail
+                cuts.add(fi.cut());
+            }
+        }
+        if (!foundProduct || var == null || cuts.isEmpty()) return null;
+
+        List<Long> sorted = new ArrayList<>(cuts);
+        List<List<SymExpr>> cells = new ArrayList<>();
+        cells.add(List.of(cellCmp(var, SymExpr.CmpOp.LE, sorted.get(0))));
+        for (int i = 1; i < sorted.size(); i++) {
+            cells.add(List.of(
+                    cellCmp(var, SymExpr.CmpOp.GE, sorted.get(i - 1) + 1),
+                    cellCmp(var, SymExpr.CmpOp.LE, sorted.get(i))));
+        }
+        cells.add(List.of(cellCmp(var, SymExpr.CmpOp.GE, sorted.get(sorted.size() - 1) + 1)));
+        return cells;
+    }
+
+    /**
+     * A product factor as either a constant or {@code a·v + b} over a single
+     * variable {@code v} (with sign-flip integer root {@code floor(-b/a)}), or
+     * {@code null} when it is multi-variable or itself non-linear.
+     */
+    private record Factor(SymExpr var, long cut, boolean constant) {}
+
+    private static Factor factorOf(SymExpr factor) {
+        LinearForm f = LinearForm.normalize(factor);
+        Map<SymExpr, Long> coeffs = f.coeffs();
+        if (coeffs.isEmpty()) return new Factor(null, 0, true);
+        if (coeffs.size() != 1) return null;
+        Map.Entry<SymExpr, Long> only = coeffs.entrySet().iterator().next();
+        SymExpr v = only.getKey();
+        if (!(v instanceof SymExpr.Var) && !(v instanceof SymExpr.Self)) return null;
+        long a = only.getValue();
+        if (a == 0) return null;
+        return new Factor(v, Math.floorDiv(-f.constant(), a), false);
+    }
+
+    private static SymExpr cellCmp(SymExpr var, SymExpr.CmpOp op, long c) {
+        return SymExpr.cmp(var, op, SymExpr.lit(c));
     }
 
     /**

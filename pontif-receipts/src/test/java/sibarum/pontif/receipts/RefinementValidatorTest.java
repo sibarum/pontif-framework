@@ -95,29 +95,34 @@ class RefinementValidatorTest {
     }
 
     @Test
-    void unsplitNonnegDoesNotDischarge() throws Exception {
-        // Sanity: without the split, the obligation does NOT close — so the
-        // split above is doing real work, not riding a bound the engine
-        // already had.
-        assertFalse(validate(nonnegModule(), Refinement.leaf()).verified());
+    void nonnegDischargesUnsplit_viaInternalSignChart() throws Exception {
+        // Once the engine gained the internal sign-chart case-split, x*(x-1)>=0
+        // closes with NO supplied split — the engine now owns this product's
+        // sign itself. (The split in singleSplitClosesNonneg still validates;
+        // it's just no longer load-bearing. isSparse below is the obligation
+        // still beyond the engine, where a supplied proof keeps earning its keep.)
+        assertTrue(validate(nonnegModule(), Refinement.leaf()).verified());
     }
 
     @Test
     void insufficientSplitReportsUnverified() throws Exception {
-        // A *valid* partition (x_0>=5 vs x_0<5) whose false leaf doesn't close:
-        // over x_0<5 the product x*(x-1) is unbounded below. The partition is
-        // sound; the proof is merely insufficient — exactly the failure mode
-        // the architecture must report honestly (not "wrong", just open).
+        // A *valid* partition (x_0>=3 vs x_0<3) of isSparse whose false leaf
+        // doesn't close: over x_0<3 the product (x-3)*(x+5) dips to its true min
+        // (-16 at x=-1), and the engine's sign-chart can't pin that to >=-16 —
+        // interval arithmetic over the middle region is looser than the real
+        // minimum. The partition is sound; the proof is merely insufficient —
+        // exactly the failure mode the architecture must report honestly
+        // (not "wrong", just open).
         Refinement r = Refinement.splitOn(
-                cmp("x_0", SymExpr.CmpOp.GE, 5), Refinement.leaf(), Refinement.leaf());
-        RefinementValidator.Result result = validate(nonnegModule(), r);
+                cmp("x_0", SymExpr.CmpOp.GE, 3), Refinement.leaf(), Refinement.leaf());
+        RefinementValidator.Result result = validate(isSparseModule(), r);
         assertFalse(result.verified());
 
         // ...and the trace pinpoints *which* leaf stayed open.
         RefinementValidator.Outcome.SplitOutcome split =
                 (RefinementValidator.Outcome.SplitOutcome) result.tree();
-        assertTrue(split.whenTrue().discharged(), "x_0>=5 leaf should close");
-        assertFalse(split.whenFalse().discharged(), "x_0<5 leaf should stay open");
+        assertTrue(split.whenTrue().discharged(), "x_0>=3 leaf should close");
+        assertFalse(split.whenFalse().discharged(), "x_0<3 leaf should stay open");
     }
 
     // --- the headline: isSparse via recursion to singletons -----------------
