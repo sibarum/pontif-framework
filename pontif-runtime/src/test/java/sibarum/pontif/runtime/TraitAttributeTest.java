@@ -85,6 +85,42 @@ class TraitAttributeTest {
                 """));
     }
 
+    @Test
+    void traitDowncastToConcreteStruct_recoversFields() {
+        // trait → struct is free: the value kept its concrete identity, so the
+        // downcast recovers Ipsum's own fields (no information was lost).
+        assertEquals("5", run("""
+                let Heavyish:Type{ weight:[Int:@>0] }
+                struct Ipsum(name:Int)
+                assign trait Ipsum:Heavyish {
+                  weight:Int -> 1
+                }
+                let i = Ipsum(5)
+                let h:Heavyish = i
+                let back:Ipsum = h
+                back.name
+                """));
+    }
+
+    @Test
+    void traitDowncastToWrongStruct_rejected() {
+        // No-lie: h is really an Ipsum, so downcasting it to Other (a different
+        // satisfier) must be rejected — the value can't masquerade as a type it
+        // isn't.
+        var r = runner.run(compiler.compileAlt("""
+                let Heavyish:Type{ weight:[Int:@>0] }
+                struct Ipsum(name:Int)
+                struct Other(name:Int)
+                assign trait Ipsum:Heavyish { weight:Int -> 1 }
+                assign trait Other:Heavyish { weight:Int -> 2 }
+                let i = Ipsum(5)
+                let h:Heavyish = i
+                let back:Other = h
+                back.name
+                """, "trait-attr.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), () -> "expected the wrong-type downcast to be rejected; got: " + r.text());
+    }
+
     // --- attribute satisfied by an existing field ---------------------------
 
     @Test

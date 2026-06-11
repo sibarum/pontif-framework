@@ -1197,12 +1197,16 @@ public final class AltParser {
                 // recorded at the demoted (base) sort.
                 if (demotesTo(inferredBase, declaredBase)) {
                     demotion = true;
-                } else if (declaredTraits.contains(declaredBase)) {
-                    // Struct → trait upcast: implicit and free (the trait's
-                    // attributes are computed projections — nothing fabricated).
-                    // Bind at the trait sort; the value keeps its concrete type
-                    // at runtime, so the trait view's attribute access resolves
-                    // to fields/producers. Satisfaction is checked by the impl.
+                } else if (declaredTraits.contains(declaredBase)
+                        || declaredTraits.contains(inferredBase)) {
+                    // Trait coercion, implicit in BOTH directions (the trait's
+                    // attributes are computed projections — nothing fabricated
+                    // upward, nothing lost downward). Struct→trait binds at the
+                    // trait sort; trait→struct binds at the struct sort and the
+                    // claim's runtime check confirms the value's concrete type
+                    // (a downcast to a type the value isn't is rejected there).
+                    // The value keeps its concrete type at runtime, so trait-view
+                    // attribute access resolves to fields/producers.
                     traitUpcast = true;
                 } else {
                     throw new ParseException(
