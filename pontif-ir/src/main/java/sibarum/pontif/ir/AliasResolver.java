@@ -116,12 +116,23 @@ public final class AliasResolver {
                 // nothing to resolve, and rewriting would be wrong. The gate
                 // reads it and translates it after drafting.
                 newStatements.add(p);
+            } else if (stmt instanceof IrStmt.ReturnProof rp) {
+                // Pass through unchanged (like Proof). The granted return + the
+                // case-function guards are consumed by the inference layer
+                // (call-site narrowing) and the return gate; the body's vars are
+                // proof variables, not aliases. (Alias resolution inside a granted
+                // return is a follow-up if ever needed.) Critically, this must NOT
+                // be dropped — doing so blinds every fromModule-built consumer to
+                // the proof's region narrowing.
+                newStatements.add(rp);
             } else if (stmt instanceof IrStmt.Requires || stmt instanceof IrStmt.Exports) {
                 // Module import/export decls: no sorts to resolve; the loader/
                 // linker + name resolver consume them. Pass through unchanged.
                 newStatements.add(stmt);
             } else if (stmt instanceof IrStmt.NoOp np) {
                 newStatements.add(np);  // pass through; nothing to resolve
+            } else {
+                newStatements.add(stmt);  // never silently drop an unhandled kind
             }
         }
         IrExpr newMain = rewriteExpr(module.main(), resolvedAliases);

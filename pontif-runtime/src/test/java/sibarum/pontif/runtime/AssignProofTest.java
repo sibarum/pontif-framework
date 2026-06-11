@@ -118,4 +118,35 @@ class AssignProofTest {
         assertTrue(err.contains("unknown function") && err.contains("ghost"),
                 () -> "expected unknown-function rejection; got: " + err);
     }
+
+    // --- Call-site return narrowing (end-to-end via the let-claim gate) -------
+
+    private static final String PROVE_BRANCH = """
+            function proveBranch(d:Int, x:Int):[Int] -> (match d
+                [@>=0] -> (x-3)*(x+5)
+                [_]    -> d
+            )
+            assign proof proveBranch(d:[Int:@<0], x:Int):[Int:d]
+            assign proof proveBranch(d:[Int:@>=0], x:Int):[
+              (match x [@>=3]->this(d,x) [@<=-6]->this(d,x) [_]->this(d,x)) -> [Int:@>=-16]
+            ]
+            """;
+
+    @Test
+    void callSiteNarrowing_makesDisjointInBodyClaimProvablyFalse() {
+        // The construction gate statically checks in-body let-claims via
+        // NarrowingInference. proveBranch(5, 0) narrows to the d>=0 region's
+        // [Int:@>=-16], so a claim of the DISJOINT [Int:@<-16] is provably false →
+        // hard rejection. Without call-site narrowing the call would be base [Int],
+        // the claim merely unknown (deferred to a runtime check) and this would
+        // compile. So the rejection here is exactly what the narrowing buys.
+        String err = assertRejected(PROVE_BRANCH + """
+                function check():Int -> { let y:[Int:@<-16] = proveBranch(5, 0)
+                  y }
+                check()
+                """);
+        assertTrue(err.toLowerCase().contains("claim") || err.contains("y")
+                        || err.contains("@") || err.toLowerCase().contains("prove"),
+                () -> "expected the disjoint in-body claim to be rejected; got: " + err);
+    }
 }

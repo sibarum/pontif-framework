@@ -222,6 +222,26 @@ class NarrowingInferenceDispatchTest {
         assertEquals(INT, result);
     }
 
+    @Test
+    void fromModule_collectsReturnProofs_andNarrowsCall() {
+        // The end-to-end context builder must collect ReturnProof statements, not
+        // just function decls — otherwise consumers (ConstructionGate, Drafter) that
+        // build via fromModule never see the region narrowing.
+        IrSort retGe16 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(-16)));
+        IrStmt.FunctionDecl fn = IrStmt.functionDecl("proveBranch",
+                List.of(new IrParam("d", INT), new IrParam("x", INT)), INT, IrExpr.lit(0));
+        IrStmt.ReturnProof pPos = IrStmt.returnProof("proveBranch",
+                List.of(new IrParam("d", NONNEG), new IrParam("x", INT)), retGe16, null);
+        IrModule module = new IrModule("m", List.of(fn, pPos), IrExpr.lit(0));
+
+        InferenceContext ctx = InferenceContext.fromModule(module);
+        IrSort result = NarrowingInference.infer(
+                IrExpr.call("proveBranch", List.of(IrExpr.lit(5), IrExpr.lit(0))), ctx);
+
+        assertEquals(retGe16, result);
+    }
+
     // --- Nested call narrowings propagate -----------------------------------
 
     @Test
