@@ -558,13 +558,19 @@ public final class App {
             boolean shift = Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_LEFT_SHIFT)  == Glfw.GLFW_PRESS
                          || Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_RIGHT_SHIFT) == Glfw.GLFW_PRESS;
 
-            Component.Scroll target = HitTest.findScroll(layoutRoot, lr,
-                    (float) InputState.mouseX(), (float) InputState.mouseY());
-            if (target == null) return;
             double dx, dy;
             if (shift) { dx = -yOff * WHEEL_PIXELS_PER_STEP; dy = 0; }
             else        { dx = -xOff * WHEEL_PIXELS_PER_STEP; dy = -yOff * WHEEL_PIXELS_PER_STEP; }
-            ScrollStates.of(target).scrollByPx((float) dx, (float) dy);
+            // Walk the scroll chain innermost→outermost; the first container
+            // that actually moves consumes the wheel. A nested scroll
+            // bottomed-out at its limit returns false from scrollByPx, so the
+            // event bubbles to its parent (and clip-respect keeps a scroll
+            // not visually under the cursor from capturing).
+            java.util.List<Component.Scroll> chain = HitTest.findScrollChain(
+                    layoutRoot, lr, (float) InputState.mouseX(), (float) InputState.mouseY());
+            for (Component.Scroll s : chain) {
+                if (ScrollStates.of(s).scrollByPx((float) dx, (float) dy)) break;
+            }
         });
     }
 
