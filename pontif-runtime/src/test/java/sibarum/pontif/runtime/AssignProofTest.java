@@ -149,4 +149,31 @@ class AssignProofTest {
                         || err.contains("@") || err.toLowerCase().contains("prove"),
                 () -> "expected the disjoint in-body claim to be rejected; got: " + err);
     }
+
+    @Test
+    void callSiteNarrowing_callerReturnObligationDischargesViaNarrowedCallee() {
+        // caller's declared return [Int:@>=-16] discharges because proveBranch(5, x)
+        // lands in the d>=0 region whose grant is [Int:@>=-16] — and the Drafter now
+        // carries that into the CallRef result sort (post the AliasResolver fix). The
+        // engine can't derive this from proveBranch's body (opaque product), so it
+        // works ONLY via the region narrowing.
+        assertCompiles(PROVE_BRANCH + """
+                function caller(x:Int):[Int:@>=-16] -> proveBranch(5, x)
+                caller(0)
+                """);
+    }
+
+    @Test
+    void callSiteNarrowing_unknownRegionLeavesCallerObligationUnprovable() {
+        // The discriminator: when d's region is unknown (caller's own Int param),
+        // the call carries no narrowing, so caller's [Int:@>=-16] can't discharge
+        // from the base [Int] callee return → rejected. (Same caller text but a
+        // KNOWN region, above, compiles.)
+        String err = assertRejected(PROVE_BRANCH + """
+                function caller(d:Int, x:Int):[Int:@>=-16] -> proveBranch(d, x)
+                caller(5, 0)
+                """);
+        assertTrue(err.contains("caller") || err.toLowerCase().contains("prove"),
+                () -> "expected caller's obligation to be unprovable without a known region; got: " + err);
+    }
 }
