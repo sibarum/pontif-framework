@@ -197,6 +197,13 @@ public final class AltParser {
      */
     private final Set<String> declaredZeroArgFunctions = new java.util.HashSet<>();
 
+    /**
+     * Names declared as reusable sort aliases via {@code let NAME:Type[...]}.
+     * Tracked so the parse-time base-sort-mismatch check defers on an alias-typed
+     * let (the alias's real base is only known after {@code AliasResolver} runs).
+     */
+    private final Set<String> declaredSortAliases = new java.util.HashSet<>();
+
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
     }
@@ -1044,6 +1051,25 @@ public final class AltParser {
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
+            // `let NAME:Type[sortExpr]` — a reusable sort alias (refinements, unions
+            // of refined bases, named sorts). It's a type-level declaration with no
+            // value, lowered to a TypeAlias the AliasResolver inlines — the bracketed
+            // sibling of the `Type{...}` trait form below.
+            if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACKET) {
+                consume();  // `Type`
+                IrSort aliased = parseBracketSort();  // the `[...]` (unions/refinements)
+                if (peek().kind() == AltToken.Kind.SEMICOLON) {
+                    consume();  // optional declaration terminator
+                }
+                if (peek().kind() == AltToken.Kind.EQUALS) {
+                    throw new ParseException(
+                            "let '" + name + "' is a Type[...] sort alias — it declares a "
+                                    + "sort, not a value, so it can't have '= EXPR'",
+                            peek().origin());
+                }
+                declaredSortAliases.add(name);
+                return new IrStmt.TypeAlias(name, aliased, start.origin());
+            }
             declaredSort = parseSort();
         }
         IrExpr value = null;
@@ -1144,6 +1170,7 @@ public final class AltParser {
             if (declaredBase != null && inferredBase != null
                     && !inferredBase.equals("_record")
                     && !intToDecimal
+                    && !declaredSortAliases.contains(declaredBase)  // alias base unknown until resolved
                     && !declaredBase.equals(inferredBase)) {
                 // A declared DEMOTION: the value's struct carries a base sort
                 // that demotes to the claimed base (`struct Point3D:[Point:…]`),
