@@ -15,12 +15,17 @@ landed and committed (per-slice detail in `docs/univocal-implementation-plan.md`
 case-function surface, auto-peel of a finite residual (so `[_]` subsumes an
 explicit `Singletons`), and proof dispatch ("Prove specific branches" — several
 proofs per function, each granting its region's return). The refinement lives on
-the proof; the function declares a base return. STILL DRAFT / NOT yet built:
-"Reusable Sort" (`Type[…]`, `@{…}`), the `!!` runtime-hazard marker, the general
-`{}`→`()` "Case Functions" migration (the proof body uses `()` already), and
-call-site narrowing of a proof's granted return (a caller still sees the base).
-`assign trait` is built; the general/bare `assign` is not. Do not read the
-remaining draft sections as shipped.
+the proof; the function declares a base return. `Type{…}` with typed DATA
+attributes is now BUILT (2026-06-11): methods + attributes together, `assign
+trait` provides exactly the unmet members, and struct↔trait coercion is implicit
+and bidirectional (sound) — see docs/univocal-arrows.md and `TraitAttributeTest`.
+STILL DRAFT / NOT yet built: the `Type[…]` alias of `@{…}` and its relational
+constraint `[Type{…}:@.pred]` (refining a structural base), the `!!`
+runtime-hazard marker, the general `{}`→`()` "Case Functions" migration (the
+proof body uses `()` already), and call-site narrowing of a proof's granted
+return (a caller still sees the base). `assign trait` is built (now incl. data
+attributes); the general/bare `assign` is not. Do not read the remaining draft
+sections as shipped.
 Deltas from this draft (core):
 - `self -> this`: DONE (alt-syntax receiver). `@` is unchanged — it's the
   refinement subject, distinct from the receiver.

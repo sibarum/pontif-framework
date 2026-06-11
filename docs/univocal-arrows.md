@@ -6,6 +6,21 @@ DRAFT — design in progress. Captures the conversation that reframed the old
 docs/univocal-language-design.md: that surface is not "functions with cases" —
 it's the arrow operators, and traits are their first concrete home.
 
+STATUS (2026-06-11): The trait home below is **BUILT** — `Type{…}` with typed
+data attributes (existence-only `width:Int` and refined `weight:[Int:@>0]`)
+alongside methods; `assign trait` providing exactly the unmet members via
+`name:Sort -> producer` arrows (the impl states the base, the contract supplies
+the refinement); the exactly-unmet rule (field XOR producer; over/under-
+assignment rejected); fail-closed (a field must already carry the refinement —
+conservative; a producer rides the return-refinement gate so `weight:Int -> 0`
+is rejected); and **bidirectional implicit coercion** (struct↔trait, sound — a
+wrong-type downcast is rejected). See `TraitAttributeTest`. Built on the
+interpreter; NOT yet done: Truffle attribute-access parity, the relational
+constraint `[Type{…}:@.pred]` (refining a structural base — "the one new piece"
+flagged below), deep field-refinement-through-`this` proving in producers, and
+the `->`/`<-` parser-surface unification (still per-construct). The rest of this
+doc (the generalization, the open questions) remains design.
+
 ---
 
 # Univocal Arrows
