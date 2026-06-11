@@ -1,0 +1,11 @@
+function factorial(n:[Int:0]):[Int:1];
+function factorial(n:[Int:@>0]):[
+  let r:Int = n*factorial(n-1) ->
+  [Int:@==r & @>0]
+];
+
+function parabola(x:Int):[
+  let v:Int = x*(x-1) ->
+	  [Int:v & @>=0]
+];
+

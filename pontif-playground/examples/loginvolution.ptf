@@ -1,0 +1,3 @@
+let AnyNumberNotZero:Type[[Int:@!=0]|[Decimal:@!=0]];
+
+let reusableSort:Type[ @{magnitude:[Method():Int]} & @.coef != 0 ];

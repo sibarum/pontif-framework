@@ -246,6 +246,10 @@ let q:[Int:@>=0] = quirk(2)
 Case Functions
 DRAFT — far-reaching, its own slice. The parser uses `{}` for match today; this
 is the direction, not shipped.
+REFRAMED (see "The Operator Algebra" below and docs/univocal-arrows.md): this
+isn't "functions with cases." A case-function is the `@:(…)` compute cell — a
+decision tree written with the universal arrow `->`. "Case function" is retired
+as a name; the construct is match-the-arrow.
 
 One construct underlies match, map/iteration, and lambda: a *case-function* — an
 ordered set of `[pattern] -> expr` arms, written in `()`.
@@ -300,3 +304,61 @@ Two invariants this must NOT erase:
 Scope: touches match parsing (`{}` today), every match in code/tests/docs, and
 the map/lambda/iterator surface together. One deliberate slice, decided as "the
 case-function is the unit", with the brackets falling out — not a find-and-replace.
+
+
+The Operator Algebra
+
+`@` is the subject — the thing being described. Combined with the three bracket
+kinds and a prefix that selects instance-vs-type, it yields the whole surface as
+one algebra. The BRACKET picks the semantic domain (the bracket/paren law: `{}`
+names/aggregate, `[]` types/refine, `()` values/compute); the PREFIX picks the
+level — `.` reaches into an instance's structure, `:` ascribes to an instance,
+bare operates on the type.
+
+```
+                            on an instance      on the type
+  name (access/construct)        @.{}               @{}
+  refine / restrict              @:[]               @[]
+  call / compute                 @:(…)              @()
+```
+
+Most cells are already the language, retrofitted — this is a structure being
+noticed, not bolted on:
+
+- `@.{}`  — `p.{x, y}` destructure (with inline `field -> local` rename: `p.{style -> s}`); `{x=1, y=2}` construct.
+- `@{}`   — `Type{ ping:[Method():Int], weight:[Int:@>0] }` — a type's members by name (traits / structural shape; methods and typed attributes together).
+- `@:[]`  — `let x:[Int:@>0]`, `p:[Point.{x,y}]` — a refinement ascribed to a value.
+- `@[]`   — `Type[[Int:@!=0]|[Decimal:@!=0]]` — a reusable sort alias (refinement / union at the type level).
+- `@()`   — `f(x)`, `obj.method()`, a lambda — application / dispatch.
+- `@:(…)` — a decision tree that runs to a value (a `(match … )`).
+
+The arrow `->` is ORTHOGONAL to the grid and means one thing everywhere —
+"produced by / bind-and-produce." It appears INSIDE cells (a `@{}` member's impl
+`weight -> 1`; a `@:(…)` match arm; a `@:[]` construction pipeline's let-stages),
+never as a cell of its own. So the presence of `->` never tells you which cell
+you're in — the bracket does. A refinement (`[]`) is therefore free to be a
+predicate (`@>0`) OR a construction (a build recipe that doubles as provenance).
+
+Two clarifying examples — same arrow, different bracket, different domain:
+
+```
+# @:[] — a refinement that IS a construction. The `;` synthesizes the body from
+# it, so the signature alone gives the value's full lineage (provenance in the
+# type — the conservation ledger lifted into the sort; the seed for inverse[f]).
+function groove(bpm:[Int:@>=80], fundamental:[Decimal:@>=30]):[
+  let bass   = osc(fundamental/2) ->
+  let mids   = osc(fundamental)   ->
+  let treble = osc(fundamental*2) ->
+  [MultiOsc(1, (bass, mids, treble))]
+];
+
+# @:(…) — a decision tree that RUNS to a value.
+let venue = (match instrument
+  [Guitar.{style}] -> (match style
+    [Acoustic] -> FancyRestaurant()
+    [Electric] -> MusicFestival()
+    [Midi]     -> ImpossibilityException()
+  )
+  [Piano.{style}] -> …
+)
+```
