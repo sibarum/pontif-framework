@@ -62,7 +62,11 @@ final class ConstructionGate {
                     for (IrStmt.FunctionDecl m : ti.methods()) {
                         methods.add(rewriteFunction(m, base, structs));
                     }
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, ti.origin());
+                    List<IrStmt.FunctionDecl> attrs = new ArrayList<>(ti.attributeProducers().size());
+                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                        attrs.add(rewriteFunction(a, base, structs));
+                    }
+                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.origin());
                 }
                 default -> stmt;  // TypeAlias / Proof / Requires / Exports / NoOp
             });

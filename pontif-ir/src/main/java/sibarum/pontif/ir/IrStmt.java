@@ -118,6 +118,7 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             String typeName,
             String traitName,
             List<FunctionDecl> methods,
+            List<FunctionDecl> attributeProducers,
             Origin origin) implements IrStmt {
         public TraitImpl {
             if (typeName == null || typeName.isEmpty()) {
@@ -127,6 +128,13 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
                 throw new IllegalArgumentException("TraitImpl traitName must be non-empty");
             }
             methods = List.copyOf(methods);
+            attributeProducers = List.copyOf(attributeProducers);
+        }
+
+        /** Back-compat: a methods-only impl (no provided data attributes). */
+        public TraitImpl(String typeName, String traitName,
+                         List<FunctionDecl> methods, Origin origin) {
+            this(typeName, traitName, methods, List.of(), origin);
         }
     }
 

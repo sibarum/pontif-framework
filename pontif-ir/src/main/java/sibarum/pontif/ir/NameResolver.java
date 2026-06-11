@@ -63,9 +63,15 @@ public final class NameResolver {
                                 ModuleSymbolTable.fqn(m, mm.name()), rewriteParams(mm.params(), m, table),
                                 rewriteSort(mm.returnSort(), m, table), rewrite(mm.body(), m, table), mm.origin()));
                     }
+                    List<IrStmt.FunctionDecl> attrs = new ArrayList<>(ti.attributeProducers().size());
+                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                        attrs.add(new IrStmt.FunctionDecl(
+                                ModuleSymbolTable.fqn(m, a.name()), rewriteParams(a.params(), m, table),
+                                rewriteSort(a.returnSort(), m, table), rewrite(a.body(), m, table), a.origin()));
+                    }
                     yield new IrStmt.TraitImpl(
                             resolveTypeName(ti.typeName(), m, table, ti.origin()),
-                            resolveTypeName(ti.traitName(), m, table, ti.origin()), methods, ti.origin());
+                            resolveTypeName(ti.traitName(), m, table, ti.origin()), methods, attrs, ti.origin());
                 }
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
                         resolveTypeName(ta.name(), m, table, ta.origin()),
@@ -157,7 +163,11 @@ public final class NameResolver {
                 for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
                     methods.put(e.getKey(), (IrSort.Method) rewriteSort(e.getValue(), m, table));
                 }
-                yield new IrSort.Trait(resolveTypeName(t.name(), m, table, t.origin()), methods, t.origin());
+                Map<String, IrSort> attrs = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
+                    attrs.put(e.getKey(), rewriteSort(e.getValue(), m, table));
+                }
+                yield new IrSort.Trait(resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

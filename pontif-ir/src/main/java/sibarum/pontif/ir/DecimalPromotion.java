@@ -45,7 +45,13 @@ final class DecimalPromotion {
                                 m.name(), m.params(), m.returnSort(),
                                 rewriteExpr(m.body(), structs), m.origin()));
                     }
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, ti.origin());
+                    List<IrStmt.FunctionDecl> attrs = new ArrayList<>(ti.attributeProducers().size());
+                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                        attrs.add(new IrStmt.FunctionDecl(
+                                a.name(), a.params(), a.returnSort(),
+                                rewriteExpr(a.body(), structs), a.origin()));
+                    }
+                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.origin());
                 }
                 default -> stmt;  // TypeAlias / Proof / Requires / Exports / NoOp
             });

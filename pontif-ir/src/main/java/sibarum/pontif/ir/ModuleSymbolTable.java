@@ -77,6 +77,9 @@ public final class ModuleSymbolTable {
                         for (IrStmt.FunctionDecl m : ti.methods()) {
                             fns.computeIfAbsent(m.name(), k -> new LinkedHashSet<>()).add(module);
                         }
+                        for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                            fns.computeIfAbsent(a.name(), k -> new LinkedHashSet<>()).add(module);
+                        }
                     }
                     case IrStmt.TypeAlias ta -> {
                         types.computeIfAbsent(ta.name(), k -> new LinkedHashSet<>()).add(module);

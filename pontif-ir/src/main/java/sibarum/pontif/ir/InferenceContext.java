@@ -86,6 +86,10 @@ public record InferenceContext(
                     overloads.computeIfAbsent(m.name(), k -> new ArrayList<>()).add(m);
                     returns.put(m.name(), m.returnSort());
                 }
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                    overloads.computeIfAbsent(a.name(), k -> new ArrayList<>()).add(a);
+                    returns.put(a.name(), a.returnSort());
+                }
             } else if (stmt instanceof IrStmt.ReturnProof rp) {
                 returnProofs.computeIfAbsent(rp.functionName(), k -> new ArrayList<>()).add(rp);
             }

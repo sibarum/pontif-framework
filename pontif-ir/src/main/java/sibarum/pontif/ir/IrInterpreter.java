@@ -148,7 +148,18 @@ public final class IrInterpreter {
                                     + ": " + baseValue,
                             fa.origin());
                 }
-                yield rec.get(fa.fieldName(), fa.origin());
+                if (rec.members().containsKey(fa.fieldName())) {
+                    yield rec.get(fa.fieldName(), fa.origin());
+                }
+                // Trait-view attribute access: the value carries no such stored
+                // field, so resolve a computed projection — a `Type.attr(this)`
+                // producer registered by an `assign trait` block. This is what
+                // lets a struct be viewed through a trait that adds attributes.
+                Object projected = tryAttributeProducer(rec, fa.fieldName(), module);
+                if (projected != NO_ATTRIBUTE) {
+                    yield projected;
+                }
+                yield rec.get(fa.fieldName(), fa.origin());  // re-throws the "no field" error
             }
         };
     }
@@ -490,6 +501,27 @@ public final class IrInterpreter {
                 return eval(func.body(), funcEnv, module);
             }
         }
+    }
+
+    /** Sentinel: no attribute producer is registered for the accessed name. */
+    private static final Object NO_ATTRIBUTE = new Object();
+
+    /**
+     * Resolves a trait attribute access {@code rec.name} to the satisfier's
+     * computed producer {@code <typeName>.<name>(this)} — a 0-user-arg function
+     * registered by an {@code assign trait} block. Returns {@link #NO_ATTRIBUTE}
+     * if no such producer is dispatchable (the caller then surfaces the normal
+     * "no field" error).
+     */
+    private Object tryAttributeProducer(RecordValue rec, String name, CompiledModule module) {
+        if (rec.typeName() == null) return NO_ATTRIBUTE;
+        DispatchResult dr = module.dispatch().resolve(
+                rec.typeName() + "." + name, List.of(toSymExpr(rec)), checker(module));
+        if (!(dr instanceof DispatchResult.Resolved resolved)) return NO_ATTRIBUTE;
+        CompiledModule.CompiledFunction func = module.functions().get(resolved.decl());
+        if (func == null || func.params().size() != 1) return NO_ATTRIBUTE;
+        Environment env = Environment.empty().extend(func.params().get(0).name(), rec);
+        return eval(func.body(), env, module);
     }
 
     private static SymExpr toSymExpr(Object value) {

@@ -204,6 +204,15 @@ public final class AltParser {
      */
     private final Set<String> declaredSortAliases = new java.util.HashSet<>();
 
+    /**
+     * Names declared as traits via {@code let NAME:Type{...}}. Tracked so the
+     * base-sort-mismatch check accepts a struct→trait upcast (`let h:Trait = s`):
+     * a trait coerces implicitly in both directions because its attributes are
+     * computed projections (information-conserving). Satisfaction is enforced by
+     * SortChecker (the impl) and dispatch (only satisfiers resolve).
+     */
+    private final Set<String> declaredTraits = new java.util.HashSet<>();
+
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
     }
@@ -1100,10 +1109,18 @@ public final class AltParser {
                                 + "trait declarations are type-level only",
                         start.origin());
             }
-            IrSort.Trait named = new IrSort.Trait(name, t.methods(), t.origin());
+            declaredTraits.add(name);
+            IrSort.Trait named = new IrSort.Trait(name, t.methods(), t.attributes(), t.origin());
             for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
                 declaredFunctionReturns.put(
                         name + "." + e.getKey(), e.getValue().returnSort());
+            }
+            // A data attribute is a computed projection — accessing it through
+            // the trait view (`d.weight`, d:Duck) routes to the satisfier's
+            // `Type.weight(this)` producer, so register `TraitName.attr` as a
+            // 0-arg accessor return (mirrors the method registration above).
+            for (Map.Entry<String, IrSort> e : named.attributes().entrySet()) {
+                declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue());
             }
             return new IrStmt.TypeAlias(name, named, start.origin());
         }
@@ -1154,6 +1171,7 @@ public final class AltParser {
         IrSort inferredSort = inferMaximalSort(value);
         boolean intToDecimal = false;
         boolean demotion = false;
+        boolean traitUpcast = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferredSort);
@@ -1179,6 +1197,13 @@ public final class AltParser {
                 // recorded at the demoted (base) sort.
                 if (demotesTo(inferredBase, declaredBase)) {
                     demotion = true;
+                } else if (declaredTraits.contains(declaredBase)) {
+                    // Struct → trait upcast: implicit and free (the trait's
+                    // attributes are computed projections — nothing fabricated).
+                    // Bind at the trait sort; the value keeps its concrete type
+                    // at runtime, so the trait view's attribute access resolves
+                    // to fields/producers. Satisfaction is checked by the impl.
+                    traitUpcast = true;
                 } else {
                     throw new ParseException(
                             "let '" + name + "' declared as " + declaredSort
@@ -1195,7 +1220,7 @@ public final class AltParser {
         // 0-arg return sort, where it would be an obligation the integer-
         // only discharge kernel can never prove. Otherwise keep the tighter
         // inferred narrowing as before.
-        IrSort binding = demotion
+        IrSort binding = demotion || traitUpcast
                 ? declaredSort
                 : declaredSort != null
                 && "_record".equals(baseSortName(inferredSort))
@@ -1515,12 +1540,68 @@ public final class AltParser {
         IrSort selfSort = new IrSort.Named(typeName, typeNameTok.origin());
 
         List<IrStmt.FunctionDecl> methods = new ArrayList<>();
+        List<IrStmt.FunctionDecl> attributeProducers = new ArrayList<>();
         while (peek().kind() != AltToken.Kind.RBRACE) {
-            methods.add(parseTraitImplMethod(typeName, selfSort));
+            // A member is a METHOD if `(` follows its name (`ping():Int -> …`)
+            // and an ATTRIBUTE producer if `:` does (`weight:Int -> …`). Both
+            // are `member <- producer` arrows; only the `()` differs.
+            if (peek(1).kind() == AltToken.Kind.COLON) {
+                attributeProducers.add(
+                        parseTraitImplAttribute(typeName, traitNameTok.text(), selfSort));
+            } else {
+                methods.add(parseTraitImplMethod(typeName, selfSort));
+            }
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
         return new IrStmt.TraitImpl(
-                typeName, traitNameTok.text(), methods, start.spanTo(close));
+                typeName, traitNameTok.text(), methods, attributeProducers, start.spanTo(close));
+    }
+
+    /**
+     * Parses one attribute producer inside an {@code assign trait} block.
+     * Surface form: {@code name:Sort -> producer}. The producer is an
+     * expression over {@code this} (the instance); a trait attribute is a
+     * computed projection. Lowered to a 0-user-arg {@link IrStmt.FunctionDecl}
+     * {@code Type.name(this):Sort -> producer} so it registers in dispatch like
+     * a 0-arg method and rides the return-refinement gate (the {@code Sort}
+     * refinement, e.g. {@code [Int:@>0]}, is verified against the producer).
+     */
+    private IrStmt.FunctionDecl parseTraitImplAttribute(
+            String typeName, String traitName, IrSort selfSort) throws ParseException {
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        if (KEYWORDS.contains(nameTok.text())) {
+            throw new ParseException(
+                    "Cannot use keyword '" + nameTok.text() + "' as an attribute name",
+                    nameTok.origin());
+        }
+        expect(AltToken.Kind.COLON);
+        IrSort declaredSort = parseSort();
+        expect(AltToken.Kind.ARROW);
+
+        // The impl states the base type; the trait CONTRACT supplies the
+        // refinement (`weight:Int -> 1` is checked against the contract's
+        // `[Int:@>0]`, not bare `Int`). Adopt the contract attribute sort as the
+        // producer's return obligation when the trait was declared earlier in
+        // this file (the common case); otherwise fall back to the impl-declared
+        // sort. `declaredFunctionReturns` holds `Trait.attr -> contractSort`
+        // from the trait's `Type{…}` declaration.
+        IrSort contractSort = declaredFunctionReturns.get(traitName + "." + nameTok.text());
+        IrSort obligation = contractSort != null ? contractSort : declaredSort;
+
+        List<IrParam> params = List.of(new IrParam("this", selfSort));
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        currentScope.put("this", selfSort);
+        try {
+            IrExpr producer = parseExpr();
+            String qualified = typeName + "." + nameTok.text();
+            declaredFunctionReturns.put(qualified, obligation);
+            return new IrStmt.FunctionDecl(
+                    qualified, params, obligation, producer, nameTok.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
     }
 
     /**
@@ -1765,29 +1846,32 @@ public final class AltParser {
         AltToken typeTok = expect(AltToken.Kind.IDENT);  // "Type"
         AltToken open = expect(AltToken.Kind.LBRACE);
         Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        Map<String, IrSort> attributes = new LinkedHashMap<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
-            AltToken methodName = expect(AltToken.Kind.IDENT);
+            AltToken memberName = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
-            IrSort methodSort = parseSort();
-            if (!(methodSort instanceof IrSort.Method fn)) {
+            IrSort memberSort = parseSort();
+            if (methods.containsKey(memberName.text())
+                    || attributes.containsKey(memberName.text())) {
                 throw new ParseException(
-                        "Trait method '" + methodName.text() + "' must have a "
-                                + "method sort like [Method(args):Ret]; got " + methodSort,
-                        methodName.origin());
+                        "Duplicate member '" + memberName.text() + "' in trait body",
+                        memberName.origin());
             }
-            if (methods.containsKey(methodName.text())) {
-                throw new ParseException(
-                        "Duplicate method '" + methodName.text() + "' in trait body",
-                        methodName.origin());
+            // A member is a METHOD if its sort is [Method(...):Ret]; otherwise
+            // it is a typed data ATTRIBUTE — a value sort the satisfier must
+            // supply (a field or a computed producer). Both live in `Type{…}`.
+            if (memberSort instanceof IrSort.Method fn) {
+                methods.put(memberName.text(), fn);
+            } else {
+                attributes.put(memberName.text(), memberSort);
             }
-            methods.put(methodName.text(), fn);
             first = false;
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
         // Placeholder name; parseLet patches it with the binding's name.
-        return new IrSort.Trait("_pending", methods, typeTok.spanTo(close));
+        return new IrSort.Trait("_pending", methods, attributes, typeTok.spanTo(close));
     }
 
     private IrSort parseBracketSort() throws ParseException {

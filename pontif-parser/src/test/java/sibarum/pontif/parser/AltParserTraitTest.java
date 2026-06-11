@@ -70,11 +70,28 @@ class AltParserTraitTest {
     }
 
     @Test
-    void traitDecl_nonFunctionMethodSort_throws() {
-        // `quack:Int` isn't a method sort — must reject.
-        ParseException ex = assertThrows(ParseException.class, () ->
-                parse("let Duck:Type{quack:Int}"));
-        assertTrue(ex.getMessage().toLowerCase().contains("method"));
+    void traitDecl_nonMethodMember_isTypedAttribute() throws Exception {
+        // A non-Method member sort is a typed DATA attribute (existence + type),
+        // not an error — methods and attributes live together in `Type{…}`.
+        IrModule m = parse("let Boxed:Type{width:Int, height:Int}");
+        IrSort.Trait trait = (IrSort.Trait) ((IrStmt.TypeAlias) m.statements().get(0)).sort();
+        assertEquals(0, trait.methods().size());
+        assertEquals(2, trait.attributes().size());
+        assertTrue(trait.attributes().containsKey("width"));
+    }
+
+    @Test
+    void traitDecl_methodsAndAttributesTogether_parse() throws Exception {
+        IrModule m = parse("let Heavyish:Type{ping:[Method():Int], weight:[Int:@>0]}");
+        IrSort.Trait trait = (IrSort.Trait) ((IrStmt.TypeAlias) m.statements().get(0)).sort();
+        assertTrue(trait.methods().containsKey("ping"));
+        assertInstanceOf(IrSort.Refined.class, trait.attributes().get("weight"));
+    }
+
+    @Test
+    void traitDecl_memberWithoutType_throws() {
+        // A member name with no type is rejected (no typeless attribute).
+        assertThrows(ParseException.class, () -> parse("let Duck:Type{weight}"));
     }
 
     // --- assign trait X:Y { ... } -------------------------------------------

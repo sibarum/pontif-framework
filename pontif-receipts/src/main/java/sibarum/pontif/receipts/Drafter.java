@@ -75,6 +75,16 @@ public final class Drafter {
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 roots.add(draftFunction(fd, baseCtx));
+            } else if (stmt instanceof IrStmt.TraitImpl ti) {
+                // A trait attribute producer (`weight:[Int:@>0] -> 1`) lowers to a
+                // 0-user-arg function `Type.weight(this):[Int:@>0] -> 1`. Draft it
+                // so its return refinement rides the gate — that IS the
+                // fail-closed check (the producer must provably satisfy the
+                // attribute's refinement). Methods are validated elsewhere
+                // (SortChecker.checkExpr) and not drafted here.
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                    roots.add(draftFunction(a, baseCtx));
+                }
             }
         }
         return new ReceiptGraph(roots);

@@ -26,7 +26,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     }
 
     static Trait trait(String name, Map<String, IrSort.Method> methods) {
-        return new Trait(name, methods, Origin.NONE);
+        return new Trait(name, methods, Map.of(), Origin.NONE);
     }
 
     static Union union(List<IrSort> branches) {
@@ -106,14 +106,22 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     }
 
     /**
-     * Trait sort: a named contract over method signatures. Values of this
-     * sort are concrete struct types whose {@code Type.method}
-     * declarations satisfy the contract — registered explicitly via
-     * {@link IrStmt.TraitImpl} blocks. The contract method signatures
-     * here exclude the implicit {@code self} parameter; SortChecker
-     * prepends it at validation time.
+     * Trait sort: a named contract over members — methods AND typed data
+     * {@code attributes} (the {@code @{…}} member cell; see
+     * docs/univocal-arrows.md). Values of this sort are concrete struct types
+     * that satisfy the contract — registered explicitly via
+     * {@link IrStmt.TraitImpl} blocks. The contract method signatures here
+     * exclude the implicit {@code this} parameter; SortChecker prepends it.
+     *
+     * <p>An {@code attribute} {@code name->sort} is a required data member: it
+     * is a value sort ({@code Int}, a refinement {@code [Int:@>0]}, a named
+     * struct), NOT a {@link Method} sort. A satisfier supplies it either with a
+     * matching struct field or with a computed producer in its impl block — a
+     * trait attribute is a computed projection of the underlying value, which is
+     * what makes trait coercion free in both directions.
      */
-    record Trait(String name, Map<String, IrSort.Method> methods, Origin origin) implements IrSort {
+    record Trait(String name, Map<String, IrSort.Method> methods,
+                 Map<String, IrSort> attributes, Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -121,8 +129,18 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (methods == null) {
                 throw new IllegalArgumentException("Trait methods must be non-null");
             }
+            if (attributes == null) {
+                throw new IllegalArgumentException("Trait attributes must be non-null");
+            }
             methods = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(methods));
+            attributes = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(attributes));
+        }
+
+        /** Back-compat: a methods-only trait (no data attributes). */
+        public Trait(String name, Map<String, IrSort.Method> methods, Origin origin) {
+            this(name, methods, Map.of(), origin);
         }
     }
 

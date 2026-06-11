@@ -89,8 +89,12 @@ public final class AliasResolver {
                 for (IrStmt.FunctionDecl m : ti.methods()) {
                     rewrittenMethods.add(rewriteFunctionDecl(m, resolvedAliases));
                 }
+                List<IrStmt.FunctionDecl> rewrittenAttrs = new ArrayList<>(ti.attributeProducers().size());
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                    rewrittenAttrs.add(rewriteFunctionDecl(a, resolvedAliases));
+                }
                 newStatements.add(new IrStmt.TraitImpl(
-                        ti.typeName(), ti.traitName(), rewrittenMethods, ti.origin()));
+                        ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs, ti.origin()));
             } else if (stmt instanceof IrStmt.TypeAlias ta) {
                 // Type aliases are kept downstream so SortChecker can see them:
                 // trait contracts for TraitImpl validation; struct definitions
@@ -195,7 +199,11 @@ public final class AliasResolver {
                             e.getKey(),
                             (IrSort.Method) resolveSort(e.getValue(), aliases, path));
                 }
-                yield new IrSort.Trait(t.name(), resolvedMethods, t.origin());
+                Map<String, IrSort> resolvedAttrs = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
+                    resolvedAttrs.put(e.getKey(), resolveSort(e.getValue(), aliases, path));
+                }
+                yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -329,7 +337,11 @@ public final class AliasResolver {
                             e.getKey(),
                             (IrSort.Method) substituteResolved(e.getValue(), resolved));
                 }
-                yield new IrSort.Trait(t.name(), newMethods, t.origin());
+                Map<String, IrSort> newAttrs = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
+                    newAttrs.put(e.getKey(), substituteResolved(e.getValue(), resolved));
+                }
+                yield new IrSort.Trait(t.name(), newMethods, newAttrs, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());

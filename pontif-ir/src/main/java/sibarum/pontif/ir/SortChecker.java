@@ -160,16 +160,166 @@ public final class SortChecker {
             }
         }
 
-        // Validate the impl method bodies themselves.
-        for (IrStmt.FunctionDecl m : ti.methods()) {
-            Map<String, IrSort> typeEnv = new HashMap<>();
-            for (IrParam p : m.params()) {
-                validateSortNames(p.sort(), structDefs);
-                typeEnv.put(p.name(), p.sort());
+        // Over-assignment (methods): an impl method that isn't a contract member
+        // is unreachable through the trait view — defining it asserts dead
+        // structure (the spec calls this a lie). Reject it.
+        for (String implName : implByShortName.keySet()) {
+            if (!contract.methods().containsKey(implName)) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' defines method '" + implName + "', which trait '"
+                                + ti.traitName() + "' does not declare — over-assignment "
+                                + "(a member the view can't reach is dead structure)",
+                        ti.origin());
             }
-            validateSortNames(m.returnSort(), structDefs);
-            checkExpr(m.body(), typeEnv, functionReturns, structDefs);
         }
+
+        // Attribute members: a required attribute is satisfied by EITHER a
+        // matching struct field OR a computed producer in this block — exactly
+        // one (never both: re-providing a present field is over-assignment;
+        // neither is incomplete). A trait attribute is a computed projection,
+        // which is what makes coercion information-conserving in both directions.
+        Map<String, IrStmt.FunctionDecl> producerByShortName = new LinkedHashMap<>();
+        String prodPrefix = ti.typeName() + ".";
+        for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+            String shortName = a.name().startsWith(prodPrefix)
+                    ? a.name().substring(prodPrefix.length())
+                    : a.name();
+            producerByShortName.put(shortName, a);
+        }
+        IrSort.Structural satisfier = structDefs.get(ti.typeName());
+        Map<String, IrSort> fields = satisfier == null ? Map.of() : satisfier.members();
+
+        for (Map.Entry<String, IrSort> e : contract.attributes().entrySet()) {
+            String attrName = e.getKey();
+            IrSort attrSort = e.getValue();
+            boolean hasField = fields.containsKey(attrName);
+            boolean hasProducer = producerByShortName.containsKey(attrName);
+
+            if (hasField && hasProducer) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' re-provides attribute '" + attrName + "', which "
+                                + ti.typeName() + " already has as a field — over-assignment",
+                        ti.origin());
+            }
+            if (!hasField && !hasProducer) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' is missing attribute '" + attrName + "': trait '"
+                                + ti.traitName() + "' requires it and " + ti.typeName()
+                                + " neither declares the field nor provides a producer",
+                        ti.origin());
+            }
+            if (hasField) {
+                // Fail-closed: the field's declared sort must already satisfy the
+                // attribute's requirement. Producer-provided attributes instead
+                // ride the return-refinement gate (Drafter drafts them).
+                requireFieldSatisfies(ti, attrName, fields.get(attrName), attrSort);
+            }
+        }
+
+        // Over-assignment (attributes): a producer for a member the trait does
+        // not declare as an attribute.
+        for (String prodName : producerByShortName.keySet()) {
+            if (!contract.attributes().containsKey(prodName)) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' provides attribute '" + prodName + "', which trait '"
+                                + ti.traitName() + "' does not declare — over-assignment",
+                        ti.origin());
+            }
+        }
+
+        // Validate the impl method + producer bodies themselves.
+        for (IrStmt.FunctionDecl m : ti.methods()) {
+            validateImplBody(m, functionReturns, structDefs);
+        }
+        for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+            validateImplBody(a, functionReturns, structDefs);
+        }
+    }
+
+    private static void validateImplBody(
+            IrStmt.FunctionDecl m,
+            Map<String, IrSort> functionReturns,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        Map<String, IrSort> typeEnv = new HashMap<>();
+        for (IrParam p : m.params()) {
+            validateSortNames(p.sort(), structDefs);
+            typeEnv.put(p.name(), p.sort());
+        }
+        validateSortNames(m.returnSort(), structDefs);
+        checkExpr(m.body(), typeEnv, functionReturns, structDefs);
+    }
+
+    /**
+     * Fail-closed check that a satisfier's existing field discharges a trait
+     * attribute requirement. The bases must match; an unrefined requirement
+     * (existence + type) needs only that. A refined requirement (e.g.
+     * {@code [Int:@>0]}) requires the field to already carry a refinement that
+     * matches structurally — a conservative, sound rule: a field whose stronger
+     * predicate merely <em>implies</em> the requirement (but isn't identical) is
+     * rejected here, fail-closed (full predicate-implication is deferred; the
+     * user can instead provide a producer, which rides the proof gate).
+     */
+    private static void requireFieldSatisfies(
+            IrStmt.TraitImpl ti, String attrName, IrSort fieldSort, IrSort attrSort)
+            throws CompileException {
+        String attrBase = sortBaseName(attrSort);
+        String fieldBase = sortBaseName(fieldSort);
+        if (attrBase != null && !attrBase.equals(fieldBase)) {
+            throw new CompileException(
+                    "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                            + "': field '" + attrName + "' is " + fieldBase
+                            + " but trait '" + ti.traitName() + "' requires " + attrBase,
+                    ti.origin());
+        }
+        if (attrSort instanceof IrSort.Refined attrRef) {
+            if (!(fieldSort instanceof IrSort.Refined fieldRef)
+                    || !predicatesEqual(fieldRef.predicate(), attrRef.predicate())) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "': field '" + attrName + "' does not provably satisfy the "
+                                + "refined requirement trait '" + ti.traitName() + "' places on it "
+                                + "— declare the field with the matching refinement, or provide a "
+                                + "producer (which is proof-checked)",
+                        ti.origin());
+            }
+        }
+    }
+
+    /** Base sort name for an attribute/field sort (null if structureless). */
+    private static String sortBaseName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            default -> null;
+        };
+    }
+
+    /** Structural predicate equality, ignoring {@link sibarum.pontif.core.Origin}. */
+    private static boolean predicatesEqual(IrExpr a, IrExpr b) {
+        if (a == b) return true;
+        if (a == null || b == null || a.getClass() != b.getClass()) return false;
+        return switch (a) {
+            case IrExpr.SelfRef ignored -> true;
+            case IrExpr.Var v -> v.name().equals(((IrExpr.Var) b).name());
+            case IrExpr.Lit l -> java.util.Objects.equals(l.value(), ((IrExpr.Lit) b).value());
+            case IrExpr.BinOp op -> {
+                IrExpr.BinOp ob = (IrExpr.BinOp) b;
+                yield op.op() == ob.op()
+                        && predicatesEqual(op.left(), ob.left())
+                        && predicatesEqual(op.right(), ob.right());
+            }
+            case IrExpr.FieldAccess fa -> {
+                IrExpr.FieldAccess fb = (IrExpr.FieldAccess) b;
+                yield fa.fieldName().equals(fb.fieldName())
+                        && predicatesEqual(fa.base(), fb.base());
+            }
+            default -> a.equals(b);
+        };
     }
 
     /**
@@ -190,14 +340,20 @@ public final class SortChecker {
                 for (IrStmt.FunctionDecl m : ti.methods()) {
                     map.put(m.name(), m.returnSort());
                 }
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                    map.put(a.name(), a.returnSort());
+                }
             } else if (stmt instanceof IrStmt.TypeAlias ta
                     && ta.sort() instanceof IrSort.Trait t) {
-                // Trait.method call names are valid even with no impl yet —
-                // the dispatch fallback resolves them to ConcreteType.method
+                // Trait.member call names are valid even with no impl yet —
+                // the dispatch fallback resolves them to ConcreteType.member
                 // at runtime against the trait registry. Return sort is the
-                // contract's declared return.
+                // contract's declared return (method) / attribute sort.
                 for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
                     map.put(t.name() + "." + e.getKey(), e.getValue().returnSort());
+                }
+                for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
+                    map.put(t.name() + "." + e.getKey(), e.getValue());
                 }
             }
         }
@@ -598,7 +754,13 @@ public final class SortChecker {
                 IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
                 IrSort.Structural sp = resolveNominal(baseSort, structDefs);
                 if (sp != null) {
-                    if (!sp.members().containsKey(fa.fieldName())) {
+                    // A trait attribute reads as a field but is stored as a
+                    // computed projection: `x.weight` resolves to the satisfier's
+                    // `Type.weight(this)` producer. Allow it when no real field
+                    // exists but such an accessor is registered.
+                    boolean isAttributeProjection =
+                            functionReturns.containsKey(sp.name() + "." + fa.fieldName());
+                    if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection) {
                         throw new CompileException(
                                 "Record of sort '" + sp.name() + "' has no field '"
                                         + fa.fieldName() + "'; available fields: "

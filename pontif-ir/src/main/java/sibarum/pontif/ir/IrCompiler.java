@@ -102,6 +102,15 @@ public final class IrCompiler {
                         registerSortsInExpr(m.body(), compiledSorts);
                         compileFunctionDecl(m, dispatch, functions, compiledSorts);
                     }
+                    // Attribute producers are 0-user-arg projections — compile
+                    // them as dispatch functions too, so `v.attr` (a trait-view
+                    // access) routes to `Type.attr(this)` just like a method.
+                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
+                        for (IrParam p : a.params()) registerSort(p.sort(), compiledSorts);
+                        registerSort(a.returnSort(), compiledSorts);
+                        registerSortsInExpr(a.body(), compiledSorts);
+                        compileFunctionDecl(a, dispatch, functions, compiledSorts);
+                    }
                     dispatch.traitRegistry().register(ti.traitName(), ti.typeName());
                 }
                 case IrStmt.TypeAlias ta -> {
@@ -173,6 +182,8 @@ public final class IrCompiler {
             case IrSort.Trait t -> {
                 // Method contract sorts are Function sorts; recurse into each.
                 for (IrSort.Method f : t.methods().values()) registerSort(f, map);
+                // Attribute requirement sorts (e.g. [Int:@>0]) bite too.
+                for (IrSort a : t.attributes().values()) registerSort(a, map);
             }
             case IrSort.Union u -> {
                 for (IrSort b : u.branches()) registerSort(b, map);
