@@ -14,8 +14,9 @@ import java.util.List;
  * Editor colorizer for Pontif alt syntax. Two independent passes:
  *
  * <p><b>Foreground</b> — a single-pass, error-tolerant token scanner:
- * comments, keywords, literals (numbers and chars), and the {@code @}
- * principal subject. Deliberately NOT built on
+ * comments, literals (numbers, chars, strings — dimmed neutral, never hued),
+ * and the {@code @} principal subject; keywords keep the base color. User
+ * names get the hue rainbow (the only semantic color). Deliberately NOT built on
  * {@link sibarum.pontif.parser.AltLexer}: the real lexer throws on invalid
  * input (mid-edit source usually is invalid), skips comments entirely, and
  * reports line/column rather than the flat char offsets {@link TextStyle}
@@ -35,18 +36,22 @@ import java.util.List;
 final class AltHighlighter {
 
     // --- Foreground palette (dark-theme; editor default CODE_FG stays the base) ---
-    private static final Color COMMENT = new Color(0.45f, 0.60f, 0.45f, 1f);
-    private static final Color KEYWORD = new Color(0.55f, 0.65f, 0.95f, 1f);
-    private static final Color LITERAL = new Color(0.95f, 0.75f, 0.45f, 1f);
-    private static final Color SUBJECT = new Color(0.40f, 0.85f, 0.90f, 1f);
+    // Non-name terms carry NO semantic hue — only user names get the rainbow.
+    // DIM_WHITE renders a touch dimmer than the base CODE_FG (0.92, 0.94, 0.97)
+    // so these terms read as distinct from the bright neutral-white terms
+    // (keywords, operators) without a color.
+    private static final Color DIM_WHITE = new Color(0.66f, 0.68f, 0.71f, 1f);
+    /** Comments (`#…`) — dimmed neutral, no hue. */
+    private static final Color COMMENT = DIM_WHITE;
+    /** Literals (numbers, chars, strings) — dimmed neutral, no hue. */
+    private static final Color LITERAL = DIM_WHITE;
+    /** The {@code @} principal subject — dimmed neutral, no hue. */
+    private static final Color SUBJECT = DIM_WHITE;
 
-    // The three background tints mix where they overlap, drawing the shape
-    // of a declaration: green signature meets blue body at the ->, with red
-    // paren blocks layering over both.
-    /** Signature tint — declaration start up to (not including) the {@code ->}. */
-    private static final Color SIG_BG = new Color(0.90f, 0.30f, 0.30f, 0.10f);
-    /** Body tint — the {@code ->} through the final expression. */
-    private static final Color BODY_BG = new Color(0.30f, 0.50f, 0.95f, 0.10f);
+    // The body tint is neutral too: a single very dark gray div down the
+    // indented block, distinct from the editor background (0.07, 0.09, 0.13)
+    // but carrying no semantic color.
+    private static final Color BODY_BG = new Color(0.16f, 0.16f, 0.17f, 0.55f);
     /** Paren-block tint, both brackets included; everywhere parens balance. */
     private static final Color PAREN_BG = new Color(0.30f, 0.85f, 0.40f, 0.20f);
 
@@ -70,9 +75,9 @@ final class AltHighlighter {
         scanTokens(content, fg, bg);
         bg.addAll(bodySpans(content));
         // Backgrounds render in list order, each over the previous, so sort
-        // outermost-first. Spans only nest or stay disjoint (paren blocks
-        // balance within a body or a signature; body spans come from the
-        // parser), so (start asc, end desc) is exactly that order.
+        // outermost-first. Spans only nest or stay disjoint (the signature and
+        // body fills are adjacent, meeting at the arrow; body spans come from
+        // the parser), so (start asc, end desc) is exactly that order.
         bg.sort(java.util.Comparator
                 .comparingInt(TextStyle::start)
                 .thenComparing(java.util.Comparator.comparingInt(TextStyle::end).reversed()));
@@ -118,6 +123,14 @@ final class AltHighlighter {
                 } else {
                     i++;    // doesn't scan as a char literal — leave uncolored
                 }
+            } else if (c == '"') {
+                int end = stringLiteralEnd(content, i);
+                if (end > 0) {
+                    fg.add(new TextStyle(i, end, LITERAL));
+                    i = end;
+                } else {
+                    i++;    // doesn't scan as a string literal — leave uncolored
+                }
             } else if (isDigit(c)) {
                 // Integer / decimal. The '.' joins only when a digit follows
                 // immediately — same rule the lexer uses to keep field access
@@ -157,6 +170,11 @@ final class AltHighlighter {
     private static String lastParsedContent = null;
     private static List<TextStyle> lastDeclSpans = List.of();
 
+    // Largest edit (changed-region length, by prefix/suffix diff) across which
+    // a broken-parse keeps carrying the last good body div. Keystroke-sized;
+    // anything bigger is a structural change and clears instead of smearing.
+    private static final int CARRY_MAX_EDIT = 64;
+
     private static List<TextStyle> bodySpans(String content) {
         IrModule module;
         try {
@@ -164,6 +182,17 @@ final class AltHighlighter {
         } catch (Exception e) {
             if (lastParsedContent == null) {
                 return List.of();   // never had a good parse — nothing to carry
+            }
+            // Carry the last good spans across a SMALL edit — a keystroke that
+            // briefly breaks the parse — so the body div doesn't flicker. But a
+            // LARGE change (a paste, a file swap, deleting a declaration) must
+            // not smear a stale div across unrelated text: clear it. Once the
+            // edit is past keystroke size it is no longer cosmetic, and "no
+            // claim beats a wrong claim."
+            if (changedSpan(lastParsedContent, content) > CARRY_MAX_EDIT) {
+                lastParsedContent = content;
+                lastDeclSpans = List.of();
+                return List.of();
             }
             List<TextStyle> shifted = shiftSpans(lastDeclSpans, lastParsedContent, content);
             // Re-anchor so consecutive broken keystrokes shift incrementally
@@ -209,31 +238,41 @@ final class AltHighlighter {
             for (int b : boundaries) {
                 if (b > declOff) { bound = b; break; }
             }
-            int arrowEnd = bodyIntroArrowEnd(content, declOff, bound);
-            if (arrowEnd < 0) {
-                // Body-less decl (synthesized return) — it is all signature,
-                // and signature tints are currently off (see below).
-                continue;
+            // The body is a DIV down the indented block: it opens at the LAST
+            // character of the declaration's first line (the `:[` or `->`
+            // sitting there) and fills every following line that is INDENTED
+            // (starts with a space or tab) out to the right edge. The first
+            // line back at column 0 — the closing `];`, or the next
+            // declaration — ends the block and stays untinted (unless it, too,
+            // is indented).
+            int headerNl = content.indexOf('\n', declOff);
+            if (headerNl < 0 || headerNl >= bound) {
+                continue;   // no following lines to wrap (file/decl tail)
             }
-
-            // Green signature up to the arrow; blue from the arrow through
-            // the end of the last non-comment token before the next
-            // declaration — the doc block introducing the NEXT function
-            // stays untinted. The two spans meet seamlessly at the ->.
-            int arrowStart = arrowEnd - 2;
-            int end = lastTokenEnd(content, arrowEnd, bound);
-            // EXPERIMENT (2026-06-05): signature (left-of-arrow) tint OFF
-            // while trying the identifier rainbow — re-enable by restoring:
-            bg.add(new TextStyle(declOff, arrowStart, SIG_BG));
-            if (end > arrowStart) {
-                // Div-style body: wrapLineEndings extends each line's fill
-                // to the right edge, but only lines whose hard '\n' is
-                // inside the range — so swallow the final line's newline
-                // (and any trailing same-line comment, which sits on the
-                // extended fill either way) to include the last line too.
-                while (end < bound && content.charAt(end) != '\n') end++;
-                if (end < bound) end++;
-                bg.add(new TextStyle(arrowStart, end, BODY_BG, true));
+            int start = headerNl - 1;       // last character of the first line
+            int end = -1;
+            int pos = headerNl + 1;         // first char of the next line
+            while (pos < bound) {
+                char c = content.charAt(pos);
+                if (c != ' ' && c != '\t') break;   // column 0 — block ends here
+                int nl = content.indexOf('\n', pos);
+                if (nl < 0 || nl >= bound) { end = bound; break; }
+                end = nl + 1;               // include the '\n' so the div fills the line
+                pos = nl + 1;
+            }
+            if (end > start) {
+                // Indented multi-line body: one neutral dark-gray div from the
+                // first line's last char through the last indented line.
+                bg.add(new TextStyle(start, end, BODY_BG, true));
+            } else {
+                // No indented block — an inline body (`… -> expr` on the header
+                // line): tint the arrow's right-hand side only.
+                int arrowEnd = bodyIntroArrowEnd(content, declOff, headerNl);
+                if (arrowEnd > 0) {
+                    int s = arrowEnd - 2;
+                    int e = headerNl < bound ? headerNl + 1 : headerNl;
+                    if (e > s) bg.add(new TextStyle(s, e, BODY_BG, true));
+                }
             }
         }
         lastParsedContent = content;
@@ -250,6 +289,24 @@ final class AltHighlighter {
      * mid-keystroke. Fresh truth replaces all of this on the next
      * successful parse.
      */
+    /**
+     * Length of the changed region between two texts, via a common-prefix /
+     * common-suffix diff — the larger of the old and new changed runs. A
+     * single keystroke is ~1; a paste or file swap is large. Used to decide
+     * whether a broken-parse edit is small enough to carry the cached div
+     * across (see {@link #CARRY_MAX_EDIT}).
+     */
+    private static int changedSpan(String oldC, String newC) {
+        int oldLen = oldC.length();
+        int newLen = newC.length();
+        int max = Math.min(oldLen, newLen);
+        int p = 0;
+        while (p < max && oldC.charAt(p) == newC.charAt(p)) p++;
+        int s = 0;
+        while (s < max - p && oldC.charAt(oldLen - 1 - s) == newC.charAt(newLen - 1 - s)) s++;
+        return Math.max((oldLen - s) - p, (newLen - s) - p);
+    }
+
     private static List<TextStyle> shiftSpans(List<TextStyle> spans, String oldC, String newC) {
         int oldLen = oldC.length();
         int newLen = newC.length();
@@ -297,28 +354,6 @@ final class AltHighlighter {
             }
         }
         return -1;
-    }
-
-    /** End offset of the last non-comment token in {@code [from, bound)}. */
-    private static int lastTokenEnd(String content, int from, int bound) {
-        int i = from;
-        int lastEnd = from;
-        while (i < bound) {
-            char c = content.charAt(i);
-            if (c == '#') {
-                while (i < bound && content.charAt(i) != '\n') i++;
-            } else if (Character.isWhitespace(c)) {
-                i++;
-            } else if (c == '\'') {
-                int end = charLiteralEnd(content, i);
-                i = end > 0 ? end : i + 1;
-                lastEnd = i;
-            } else {
-                i++;
-                lastEnd = i;
-            }
-        }
-        return lastEnd;
     }
 
     /**
@@ -412,6 +447,32 @@ final class AltHighlighter {
         }
         if (p >= n || content.charAt(p) != '\'') return -1;
         return p + 1;                           // past the closing quote
+    }
+
+    /**
+     * End index (exclusive) of a string literal opening at {@code i}, or -1
+     * if it doesn't scan. Mirrors {@code AltLexer.readString}: zero or more
+     * code points (surrogate pairs included) or escapes from
+     * {@code \n \t \" \\}, then the mandatory closing quote. Where the lexer
+     * throws (unknown escape, unterminated), this returns -1.
+     */
+    private static int stringLiteralEnd(String content, int i) {
+        int n = content.length();
+        int p = i + 1;                          // past the opening quote
+        while (p < n) {
+            char c = content.charAt(p);
+            if (c == '"') return p + 1;         // past the closing quote
+            if (c == '\\') {
+                p++;
+                if (p >= n) return -1;
+                char esc = content.charAt(p);
+                if (esc != 'n' && esc != 't' && esc != '"' && esc != '\\') return -1;
+                p++;
+            } else {
+                p += Character.charCount(content.codePointAt(p));
+            }
+        }
+        return -1;                              // unterminated
     }
 
     // ASCII predicates matching AltLexer's identifier rules: start is a
