@@ -23,6 +23,9 @@ public final class RuntimeValues {
         if (value instanceof sibarum.pontif.core.types.CharValue c) {
             return SymExpr.chr(c.codePoint());
         }
+        if (value instanceof sibarum.pontif.core.types.StringValue s) {
+            return SymExpr.str(s.content());
+        }
         if (value instanceof Boolean b) return SymExpr.bool(b);
         if (value instanceof RecordValue r) {
             Map<String, SymExpr> members = new LinkedHashMap<>();

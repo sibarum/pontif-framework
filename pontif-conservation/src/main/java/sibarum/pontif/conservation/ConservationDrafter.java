@@ -198,6 +198,7 @@ public final class ConservationDrafter {
             case IrExpr.Lit l -> { }
             case IrExpr.Dec d -> { }
             case IrExpr.Chr c -> { }
+            case IrExpr.Str s -> { }
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
@@ -325,6 +326,7 @@ public final class ConservationDrafter {
             case IrExpr.Lit ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Dec ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Chr ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Str ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.DispatchRef ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Bool ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Var ignored -> wrapReturn(draftValue(expr, ctx), ctx);
@@ -408,6 +410,8 @@ public final class ConservationDrafter {
             case IrExpr.Dec d -> new Flow.Constant(d.value().toPlainString());
             case IrExpr.Chr c -> new Flow.Constant(
                     "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'");
+            case IrExpr.Str s -> new Flow.Constant(
+                    "\"" + sibarum.pontif.core.types.StringValue.render(s.value()) + "\"");
             // A metareference is built from statics only — no input content
             // flows into it. Its INVOCATION (a call through the binding) is
             // the residual case, per the Lambda/Apply ruling.
@@ -758,6 +762,9 @@ public final class ConservationDrafter {
         if ("Int".equals(base) || "Decimal".equals(base) || "Char".equals(base)) {
             return Capacity.NUMERIC;
         }
+        // String (the first Char collection) is held as one opaque OTHER atom
+        // for now — the collection conservation atom model is parked until a
+        // layer has jurisdiction over how a sequence's content is accounted.
         return Capacity.OTHER;
     }
 

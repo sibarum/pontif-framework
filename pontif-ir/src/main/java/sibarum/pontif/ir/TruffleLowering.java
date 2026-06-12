@@ -103,6 +103,7 @@ public final class TruffleLowering {
             case IrExpr.Lit l -> IntLiteral.of(l.value());
             case IrExpr.Dec d -> DecimalLiteral.of(d.value());
             case IrExpr.Chr c -> sibarum.pontif.ast.literal.CharLiteral.of(c.codePoint());
+            case IrExpr.Str s -> sibarum.pontif.ast.literal.StringLiteral.of(s.value());
             case IrExpr.DispatchRef d -> {
                 List<sibarum.pontif.core.types.Sort> keys = new ArrayList<>(d.keySorts().size());
                 try {

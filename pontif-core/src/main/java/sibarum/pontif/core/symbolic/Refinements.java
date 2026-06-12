@@ -28,7 +28,7 @@ public final class Refinements {
     private static boolean isConstant(SymExpr expr) {
         return expr instanceof SymExpr.Lit || expr instanceof SymExpr.Frac
                 || expr instanceof SymExpr.Dec || expr instanceof SymExpr.Chr
-                || expr instanceof SymExpr.Bool;
+                || expr instanceof SymExpr.Str || expr instanceof SymExpr.Bool;
     }
 
     /**
@@ -191,7 +191,7 @@ public final class Refinements {
         SymExpr v = simplifier.simplify(value);
         boolean concrete = v instanceof SymExpr.Lit || v instanceof SymExpr.Dec
                 || v instanceof SymExpr.Bool || v instanceof SymExpr.Chr
-                || v instanceof SymExpr.Record;
+                || v instanceof SymExpr.Str || v instanceof SymExpr.Record;
         if (!concrete) {
             return null;
         }
@@ -200,6 +200,7 @@ public final class Refinements {
             case "Decimal" -> v instanceof SymExpr.Dec || v instanceof SymExpr.Lit;
             case "Bool" -> v instanceof SymExpr.Bool;
             case "Char" -> v instanceof SymExpr.Chr;
+            case "String" -> v instanceof SymExpr.Str;
             default -> true;  // trait / shape-label / unknown — unconstrained
         };
         return ok ? null

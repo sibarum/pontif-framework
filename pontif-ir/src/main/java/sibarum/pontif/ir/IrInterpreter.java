@@ -55,6 +55,7 @@ public final class IrInterpreter {
             case IrExpr.Lit l -> l.value();
             case IrExpr.Dec d -> d.value();
             case IrExpr.Chr c -> new sibarum.pontif.core.types.CharValue(c.codePoint());
+            case IrExpr.Str s -> new sibarum.pontif.core.types.StringValue(s.value());
             // A metareference evaluates to a first-class dispatch — built
             // from statics only; invocation reruns registry dispatch.
             case IrExpr.DispatchRef d -> {
@@ -242,6 +243,12 @@ public final class IrInterpreter {
                 || r instanceof sibarum.pontif.core.types.CharValue) {
             return evalCharBinOp(op, l, r);
         }
+        // Strings order and compare lexicographically by code point. No
+        // arithmetic, no indexing, no String/Char or String/Int tower.
+        if (l instanceof sibarum.pontif.core.types.StringValue
+                || r instanceof sibarum.pontif.core.types.StringValue) {
+            return evalStringBinOp(op, l, r);
+        }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
             case MUL -> (Long) l * (Long) r;
@@ -306,6 +313,52 @@ public final class IrInterpreter {
                     "Operator '" + opSymbol(op.op()) + "' is not defined for Char — "
                             + "chars order and compare; they don't compute", op.origin());
         };
+    }
+
+    /**
+     * String operations: ordering and equality lexicographically by code
+     * point, both operands String. Arithmetic and logical ops on strings are
+     * errors, as are mixed String/non-String comparisons — fail closed.
+     * Concatenation is the stream {@code concat} combinator, not an operator.
+     */
+    private static Object evalStringBinOp(IrExpr.BinOp op, Object l, Object r) {
+        if (!(l instanceof sibarum.pontif.core.types.StringValue ls)
+                || !(r instanceof sibarum.pontif.core.types.StringValue rs)) {
+            throw new RuntimeCheckException(
+                    "String compares only with String — got " + l + " " + opSymbol(op.op())
+                            + " " + r + " (no String/Char or String/Int tower)", op.origin());
+        }
+        int c = compareStringsByCodePoint(ls.content(), rs.content());
+        return switch (op.op()) {
+            case LT -> c < 0;
+            case LE -> c <= 0;
+            case GT -> c > 0;
+            case GE -> c >= 0;
+            case EQ -> c == 0;
+            case NE -> c != 0;
+            // Code points are exact values — ~= coincides with == .
+            case APPROX -> c == 0;
+            case ADD, SUB, MUL, DIV, MOD, POW, AND, OR -> throw new RuntimeCheckException(
+                    "Operator '" + opSymbol(op.op()) + "' is not defined for String — "
+                            + "strings order and compare; they don't compute "
+                            + "(concatenation is the stream concat combinator)", op.origin());
+        };
+    }
+
+    /** Lexicographic by Unicode code point (not UTF-16 char) — see Cmp. */
+    private static int compareStringsByCodePoint(String a, String b) {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            int ca = a.codePointAt(i);
+            int cb = b.codePointAt(j);
+            if (ca != cb) {
+                return Integer.compare(ca, cb);
+            }
+            i += Character.charCount(ca);
+            j += Character.charCount(cb);
+        }
+        return Integer.compare(a.length() - i, b.length() - j);
     }
 
     private static String opSymbol(IrExpr.Op op) {
@@ -530,6 +583,9 @@ public final class IrInterpreter {
         if (value instanceof BigDecimal d) return SymExpr.dec(d);
         if (value instanceof sibarum.pontif.core.types.CharValue c) {
             return SymExpr.chr(c.codePoint());
+        }
+        if (value instanceof sibarum.pontif.core.types.StringValue s) {
+            return SymExpr.str(s.content());
         }
         if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
             return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());

@@ -8,7 +8,7 @@ import java.util.Map;
 
 public sealed interface SymExpr
         permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Chr,
-                SymExpr.Bool, SymExpr.Self, SymExpr.DispatchRef,
+                SymExpr.Str, SymExpr.Bool, SymExpr.Self, SymExpr.DispatchRef,
                 SymExpr.Add, SymExpr.Mul, SymExpr.Pow,
                 SymExpr.Cmp, SymExpr.And, SymExpr.Or,
                 SymExpr.Lam, SymExpr.App, SymExpr.Case,
@@ -19,6 +19,7 @@ public sealed interface SymExpr
     static Frac frac(long num, long denom) { return new Frac(num, denom); }
     static Dec dec(BigDecimal value) { return new Dec(value); }
     static Chr chr(int codePoint) { return new Chr(codePoint); }
+    static Str str(String value) { return new Str(value); }
     static Bool bool(boolean value) { return new Bool(value); }
     static Self self() { return Self.INSTANCE; }
     static Add add(SymExpr left, SymExpr right) { return new Add(left, right); }
@@ -83,6 +84,21 @@ public sealed interface SymExpr
      * narrows slice, not this one.
      */
     record Chr(int codePoint) implements SymExpr {}
+
+    /**
+     * String value leaf — the first Char <em>collection</em>. A value atom
+     * like {@link Lit}/{@link Chr}; the integer-only discharge engines abstain
+     * on it, and — unlike {@link Chr}, which is discrete and has a future
+     * integer-discharge narrows route — String has no such route, so the
+     * abstention is permanent. Storage only; the stream view is a later slice.
+     */
+    record Str(String value) implements SymExpr {
+        public Str {
+            if (value == null) {
+                throw new IllegalArgumentException("Str value must be non-null");
+            }
+        }
+    }
 
     record Bool(boolean value) implements SymExpr {}
 

@@ -18,6 +18,7 @@ public final class Substitute {
             case SymExpr.Frac f -> f;
             case SymExpr.Dec d -> d;
             case SymExpr.Chr c -> c;
+            case SymExpr.Str s -> s;
             case SymExpr.DispatchRef dr -> dr;
             case SymExpr.Bool b -> b;
             case SymExpr.Self s -> s;
@@ -57,6 +58,7 @@ public final class Substitute {
             case SymExpr.Frac f -> f;
             case SymExpr.Dec d -> d;
             case SymExpr.Chr c -> c;
+            case SymExpr.Str s -> s;
             case SymExpr.DispatchRef dr -> dr;
             case SymExpr.Bool b -> b;
             case SymExpr.Add(SymExpr l, SymExpr r) -> new SymExpr.Add(applySelf(l, value), applySelf(r, value));

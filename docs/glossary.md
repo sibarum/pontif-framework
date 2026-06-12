@@ -158,9 +158,24 @@ natural `Reversible` witness). Under the capacity law a Char is ~21 bits:
 branching spends one bit of many, never exhausting it (the numeric rule).
 Unlike `Decimal`, Char IS discrete — code points are integers — so Char
 narrows (`[Char:@=='a']`, code-point ranges) may legitimately route through
-integer discharge; that's the follow-up slice. Strings arrive later as the
-first Char **collection**, on the same collection atom model sorting waits
-for.
+integer discharge; that's the follow-up slice. See **String** for the first
+Char **collection**.
+
+**String** — The first Char **collection** (`streams.md`). Anatomy RULED
+*both, jurisdiction-marked*: a native-storage value (the Char analog of
+`Array` — storage is representation) and, as the design target, an inductive
+`Queue(Char)` view, mirroring the Array/Queue split of the Stream trait.
+Written `"..."` (escapes `\n \t \" \\`, full Unicode incl. astral). **Strings
+order and compare — lexicographically by code point — they don't compute**: no
+arithmetic, no indexing, no String/Char or String/Int tower (mixed fails
+closed). Concatenation is the `concat` **combinator**, not an operator, so it
+rides the Slice-2 `String -> Stream(Char)` view (a pure coercion — a literal's
+content is statically known, so no action-gate, unlike `Array`). Under the
+capacity law a String is one opaque `OTHER` atom for now: the **collection
+conservation atom model** (how a sequence's content is accounted) is parked
+until a layer has jurisdiction, and String is its eventual forcing-function —
+the same model the future sorting collection waits for. Slice 1 (storage-side
+value + literal + ordering) landed; the stream view is Slice 2.
 
 **Data-Conservative** — The headline conservation property, sort-aware under
 the **capacity law**: *measurement counts as conservation exactly when it

@@ -66,6 +66,8 @@ final class DecimalPromotion {
             // Char does NOT promote — there is no Char/Int tower; mixed
             // comparisons fail closed at the type/runtime layers.
             case IrExpr.Chr c -> c;
+            // String does NOT promote either — no tower of any kind.
+            case IrExpr.Str s -> s;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

@@ -69,6 +69,9 @@ public final class BoundAnalysisRules {
             // integers), so the narrows slice may legitimately admit Chr to
             // integer reasoning — this gate is where that ruling lands.
             case SymExpr.Chr unused -> true;
+            // Strings are non-numeric and (unlike Char) have no discrete
+            // integer route — the abstention is permanent.
+            case SymExpr.Str unused -> true;
             // Dispatch references are non-numeric atoms — abstain.
             case SymExpr.DispatchRef unused -> true;
             case SymExpr.Lit unused -> false;

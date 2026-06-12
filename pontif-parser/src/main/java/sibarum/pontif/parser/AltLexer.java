@@ -95,6 +95,13 @@ public final class AltLexer {
                 continue;
             }
 
+            // String literal: "..." — zero or more code points between double
+            // quotes (the first Char collection). Same escape set as Char.
+            if (c == '"') {
+                tokens.add(readString(startLine, startCol));
+                continue;
+            }
+
             // Operator (including '-' when not a sign, '=', '->')
             if (OP_START_CHARS.contains(c)) {
                 tokens.add(readOperator(startLine, startCol));
@@ -131,7 +138,7 @@ public final class AltLexer {
         if (tokens.isEmpty()) return false;
         AltToken last = tokens.get(tokens.size() - 1);
         return switch (last.kind()) {
-            case INTEGER, DECIMAL, CHAR, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
+            case INTEGER, DECIMAL, CHAR, STRING, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
             default -> false;
         };
     }
@@ -188,6 +195,55 @@ public final class AltLexer {
         }
         advance(); // closing quote
         return new AltToken(AltToken.Kind.CHAR, resolved, source, startLine, startCol);
+    }
+
+    /**
+     * Reads a string literal: zero or more code points (surrogate pairs
+     * welcome) between double quotes, with the v1 escape set
+     * ({@code \n \t \" \\}). The token text is the RESOLVED content (escapes
+     * decoded), so the parser reads it verbatim.
+     */
+    private AltToken readString(int startLine, int startCol) throws ParseException {
+        advance(); // opening quote
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            if (pos >= src.length()) {
+                throw new ParseException(
+                        "Unterminated string literal — expected closing \"",
+                        Origin.at(source, startLine, startCol));
+            }
+            char c = src.charAt(pos);
+            if (c == '"') {
+                advance(); // closing quote
+                return new AltToken(AltToken.Kind.STRING, sb.toString(), source, startLine, startCol);
+            }
+            if (c == '\\') {
+                advance();
+                if (pos >= src.length()) {
+                    throw new ParseException("Unterminated string literal",
+                            Origin.at(source, startLine, startCol));
+                }
+                char esc = src.charAt(pos);
+                sb.append(switch (esc) {
+                    case 'n' -> "\n";
+                    case 't' -> "\t";
+                    case '"' -> "\"";
+                    case '\\' -> "\\";
+                    default -> throw new ParseException(
+                            "Unknown escape '\\" + esc + "' in string literal — "
+                                    + "the escapes are \\n \\t \\\" \\\\",
+                            Origin.at(source, startLine, startCol));
+                });
+                advance();
+            } else {
+                int codePoint = src.codePointAt(pos);
+                sb.appendCodePoint(codePoint);
+                advance();
+                if (Character.charCount(codePoint) == 2) {
+                    advance(); // the low surrogate
+                }
+            }
+        }
     }
 
     /**

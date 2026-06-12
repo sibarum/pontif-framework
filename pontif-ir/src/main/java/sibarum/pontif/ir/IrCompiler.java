@@ -203,6 +203,7 @@ public final class IrCompiler {
             case IrExpr.Lit l -> { }
             case IrExpr.Dec d -> { }
             case IrExpr.Chr c -> { }
+            case IrExpr.Str s -> { }
             case IrExpr.Bool b -> { }
             case IrExpr.Var v -> { }
             case IrExpr.SelfRef s -> { }
@@ -301,6 +302,7 @@ public final class IrCompiler {
             // SortChecker's shape validation governs where they're allowed.
             case IrExpr.Dec d -> SymExpr.dec(d.value());
             case IrExpr.Chr c -> SymExpr.chr(c.codePoint());
+            case IrExpr.Str s -> SymExpr.str(s.value());
             case IrExpr.DispatchRef d -> {
                 List<Sort> keys = new ArrayList<>(d.keySorts().size());
                 for (IrSort k : d.keySorts()) keys.add(compileSort(k));

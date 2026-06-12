@@ -143,6 +143,7 @@ public final class ReceiptGraphPrinter {
             case SymExpr.Frac f -> f.num() + "/" + f.denom();
             case SymExpr.Dec d -> d.value().toPlainString();
             case SymExpr.Chr c -> "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'";
+            case SymExpr.Str s -> "\"" + sibarum.pontif.core.types.StringValue.render(s.value()) + "\"";
             case SymExpr.DispatchRef d -> {
                 StringBuilder sb = new StringBuilder(d.functionName()).append('[');
                 for (int i = 0; i < d.keySorts().size(); i++) {

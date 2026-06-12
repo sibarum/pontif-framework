@@ -30,11 +30,24 @@ public abstract class BinaryOp extends PontifNode {
                     "Operator applied to a Char operand — chars order and compare; "
                             + "they don't compute (got " + l + ", " + r + ")", origin());
         }
+        // Strings order and compare; they don't compute either (no arithmetic,
+        // no indexing — concatenation is the stream `concat` combinator).
+        if (!acceptsString() && (l instanceof sibarum.pontif.core.types.StringValue
+                || r instanceof sibarum.pontif.core.types.StringValue)) {
+            throw new RuntimeCheckException(
+                    "Operator applied to a String operand — strings order and compare; "
+                            + "they don't compute (got " + l + ", " + r + ")", origin());
+        }
         return combine(l, r);
     }
 
     /** Whether this node accepts Char operands (comparison nodes only). */
     protected boolean acceptsChar() {
+        return false;
+    }
+
+    /** Whether this node accepts String operands (comparison nodes only). */
+    protected boolean acceptsString() {
         return false;
     }
 
@@ -67,6 +80,7 @@ public abstract class BinaryOp extends PontifNode {
         if (v instanceof BigDecimal) return "Decimal";
         if (v instanceof Boolean) return "Bool";
         if (v instanceof sibarum.pontif.core.types.CharValue) return "Char";
+        if (v instanceof sibarum.pontif.core.types.StringValue) return "String";
         return v == null ? "null" : v.getClass().getSimpleName();
     }
 }

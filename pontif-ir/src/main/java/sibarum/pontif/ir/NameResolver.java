@@ -221,6 +221,7 @@ public final class NameResolver {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
             case IrExpr.Chr c -> c;
+            case IrExpr.Str s -> s;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

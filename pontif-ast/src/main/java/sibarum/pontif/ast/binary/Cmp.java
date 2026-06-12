@@ -29,6 +29,11 @@ public final class Cmp extends BinaryOp {
     }
 
     @Override
+    protected boolean acceptsString() {
+        return true;
+    }
+
+    @Override
     protected Object combine(Object leftValue, Object rightValue) {
         // Char compares only with Char, by code point — no Char/Int tower.
         if (leftValue instanceof sibarum.pontif.core.types.CharValue
@@ -40,6 +45,27 @@ public final class Cmp extends BinaryOp {
                                 + " " + op.name() + " " + rightValue, origin());
             }
             int c = Integer.compare(lc.codePoint(), rc.codePoint());
+            return switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+                case APPROX -> c == 0;  // code points are exact → ~= is ==
+            };
+        }
+        // String compares only with String, lexicographically by code point —
+        // no String/Char and no String/Int tower.
+        if (leftValue instanceof sibarum.pontif.core.types.StringValue
+                || rightValue instanceof sibarum.pontif.core.types.StringValue) {
+            if (!(leftValue instanceof sibarum.pontif.core.types.StringValue ls)
+                    || !(rightValue instanceof sibarum.pontif.core.types.StringValue rs)) {
+                throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
+                        "String compares only with String — got " + leftValue
+                                + " " + op.name() + " " + rightValue, origin());
+            }
+            int c = compareByCodePoint(ls.content(), rs.content());
             return switch (op) {
                 case LT -> c < 0;
                 case LE -> c <= 0;
@@ -76,5 +102,27 @@ public final class Cmp extends BinaryOp {
             case NE -> l != r;
             case APPROX -> l == r;  // no rounding → ~= is ==
         };
+    }
+
+    /**
+     * Lexicographic comparison by Unicode code point — not {@link
+     * String#compareTo}, which orders by UTF-16 char and so misranks astral
+     * code points relative to the BMP. Consistent with Char's code-point
+     * ordering: a String is a sequence of Chars, ordered the same way.
+     */
+    private static int compareByCodePoint(String a, String b) {
+        int i = 0;
+        int j = 0;
+        while (i < a.length() && j < b.length()) {
+            int ca = a.codePointAt(i);
+            int cb = b.codePointAt(j);
+            if (ca != cb) {
+                return Integer.compare(ca, cb);
+            }
+            i += Character.charCount(ca);
+            j += Character.charCount(cb);
+        }
+        // Shorter is less when it is a prefix of the longer.
+        return Integer.compare(a.length() - i, b.length() - j);
     }
 }

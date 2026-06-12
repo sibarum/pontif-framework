@@ -190,6 +190,9 @@ public final class CallNode extends PontifNode {
         if (value instanceof sibarum.pontif.core.types.CharValue c) {
             return SymExpr.chr(c.codePoint());
         }
+        if (value instanceof sibarum.pontif.core.types.StringValue s) {
+            return SymExpr.str(s.content());
+        }
         if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
             return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
         }

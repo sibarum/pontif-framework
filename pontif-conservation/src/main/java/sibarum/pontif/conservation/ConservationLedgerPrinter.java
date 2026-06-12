@@ -132,6 +132,8 @@ public final class ConservationLedgerPrinter {
             case sibarum.pontif.core.symbolic.SymExpr.Dec d -> d.value().toPlainString();
             case sibarum.pontif.core.symbolic.SymExpr.Chr c ->
                     "'" + sibarum.pontif.core.types.CharValue.render(c.codePoint()) + "'";
+            case sibarum.pontif.core.symbolic.SymExpr.Str s ->
+                    "\"" + sibarum.pontif.core.types.StringValue.render(s.value()) + "\"";
             case sibarum.pontif.core.symbolic.SymExpr.Bool b -> String.valueOf(b.value());
             case sibarum.pontif.core.symbolic.SymExpr.Cmp c ->
                     renderGuard(c.left()) + " " + switch (c.op()) {

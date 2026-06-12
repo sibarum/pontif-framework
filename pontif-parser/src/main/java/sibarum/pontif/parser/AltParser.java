@@ -1010,6 +1010,7 @@ public final class AltParser {
             case IrExpr.Lit l -> false;
             case IrExpr.Dec d -> false;
             case IrExpr.Chr c -> false;
+            case IrExpr.Str s -> false;
             case IrExpr.Bool b -> false;
             case IrExpr.Var v -> false;
             case IrExpr.DispatchRef d -> false;
@@ -1381,6 +1382,8 @@ public final class AltParser {
                     d.keySorts(), new IrSort.Named("_", d.origin()), d.origin());
             // Same stance for Char in the value slice: bare Char.
             case IrExpr.Chr c -> new IrSort.Named("Char", c.origin());
+            // Strings: bare String — no value-level narrowing in the value slice.
+            case IrExpr.Str s -> new IrSort.Named("String", s.origin());
             case IrExpr.Var v -> {
                 IrSort scoped = currentScope.get(v.name());
                 if (scoped != null) yield scoped;
@@ -3303,6 +3306,10 @@ public final class AltParser {
             case CHAR -> {
                 consume();
                 yield new IrExpr.Chr(t.text().codePointAt(0), t.origin());
+            }
+            case STRING -> {
+                consume();
+                yield new IrExpr.Str(t.text(), t.origin());
             }
             case IDENT -> {
                 if (t.text().equals("true")) {

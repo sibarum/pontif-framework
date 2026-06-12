@@ -742,6 +742,29 @@ conversion pair deferred (a bijection — future Reversible witness).
 may legitimately route through integer discharge; the gates to revisit are
 BoundAnalysisRules.containsFrac and the SymExpr.Chr abstention notes.
 
+**String LANDED (Slice 1 — value/literal; the first Char COLLECTION).**
+Anatomy RULED *both, jurisdiction-marked* (native-storage StringValue, the
+Char analog of Array, + an inductive Queue(Char) view as the design target —
+Array/Queue split). Slice 1 ships the storage half via the Char/Decimal
+playbook: `"..."` literals (full Unicode incl. astral; escapes `\n \t \" \\`)
+through the whole stack (StringValue → StringLiteral → IrExpr.Str → SymExpr.Str
+→ AltLexer.readString + Kind.STRING → AltParser), lexicographic-by-code-point
+ordering/equality on both backends (BinaryOp gained an `acceptsString` guard
+paralleling `acceptsChar`; Cmp/IrInterpreter compare by code point, NOT
+String.compareTo, so astral ranks correctly), constants rendered in both
+ledgers. Fences: strings order and compare — they don't compute (no arithmetic,
+no indexing); NO String/Char and NO String/Int tower (mixed fails closed); no
+promotion (DecimalPromotion identity). Engines abstain on `Str` PERMANENTLY —
+unlike Char, String has no discrete integer route. `String` is in
+SortChecker.PRIMITIVE_SORT_NAMES + ConstructionGate.PRIMITIVES; capacityOf
+leaves it at `OTHER` (the collection conservation atom model stays PARKED —
+String is its eventual forcing-function, the same model sorting waits for).
+Pinned by StringAltTest (12 tests). **Follow-up — Slice 2:** the pure
+`String -> Stream(Char)` view (decode code points into an Element/Leaf Queue —
+no action-gate; literals are statically known), which unlocks combinator
+`concat`/`map`/etc. over strings. Literal-field-patterns over String deferred;
+`ord`/`chr` still deferred (shared with Char).
+
 **Division in body position (fixed):** `/` and `%` in a function BODY now
 hoist in the receipts Drafter like calls (operator calls, per dispatch
 unification): fresh result var, UNREFINED sort — no false IH can attach, the

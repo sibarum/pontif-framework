@@ -46,7 +46,7 @@ import java.util.Set;
  */
 final class ConstructionGate {
 
-    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "Char", "Decimal");
+    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "Char", "Decimal", "String");
 
     private ConstructionGate() {}
 
@@ -102,6 +102,7 @@ final class ConstructionGate {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
             case IrExpr.Chr c -> c;
+            case IrExpr.Str s -> s;
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;

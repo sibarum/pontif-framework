@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 public sealed interface IrExpr
-        permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
+        permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Str, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess {
@@ -25,6 +25,7 @@ public sealed interface IrExpr
     static Lit lit(long value) { return new Lit(value, Origin.NONE); }
     static Dec dec(BigDecimal value) { return new Dec(value, Origin.NONE); }
     static Chr chr(int codePoint) { return new Chr(codePoint, Origin.NONE); }
+    static Str str(String value) { return new Str(value, Origin.NONE); }
     static Bool bool(boolean value) { return new Bool(value, Origin.NONE); }
     static Var var(String name) { return new Var(name, Origin.NONE); }
     static SelfRef self() { return new SelfRef(Origin.NONE); }
@@ -59,6 +60,19 @@ public sealed interface IrExpr
             if (!Character.isValidCodePoint(codePoint)) {
                 throw new IllegalArgumentException(
                         "Chr code point out of Unicode range: " + codePoint);
+            }
+        }
+    }
+
+    /**
+     * String literal — the first Char <em>collection</em>. Storage only
+     * (native-backed); ordered lexicographically by code point, no arithmetic
+     * and no indexing — the stream view is the iteration API (a later slice).
+     */
+    record Str(String value, Origin origin) implements IrExpr {
+        public Str {
+            if (value == null) {
+                throw new IllegalArgumentException("Str value must be non-null");
             }
         }
     }
