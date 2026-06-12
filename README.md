@@ -12,28 +12,29 @@ allowed to lie.
 
 ```pontif
 module ledger
-requires std.stream.{Element, Leaf}
 
 struct Account(balance:[Int:@>=0])
+struct Txns(amount:Int, rest:[Txns|Done])
+struct Done()
 
 method Account.deposit(n:Int):Account -> match n {
   [@>0]  -> Account(this.balance + n)
   [@<=0] -> this
 }
 
-function totalIn(q:[Element|Leaf]):Int -> match q {
-  [Element] -> q.head + totalIn(q.rest)
-  [Leaf]    -> 0
+function totalIn(ts:[Txns|Done]):Int -> match ts {
+  [Txns] -> ts.amount + totalIn(ts.rest)
+  [Done] -> 0
 }
 
-Account(0).deposit(totalIn(Element(100, Element(50, Leaf())))).balance   # → 150
+Account(0).deposit(totalIn(Txns(100, Txns(50, Done())))).balance   # → 150
 ```
 
 Most of the language is already on this page:
 
-- **`module ledger`** names the file's module; **`requires`** pulls names from
-  another module — here the builtin `std.stream`, giving us `Element` / `Leaf`,
-  the inductive queue.
+- **`module ledger`** names the file's module. **`Txns` / `Done`** are an
+  inductive list — a value is either a `Txns` (an amount plus the rest of the
+  list) or the empty `Done`; recursion over that union is how `totalIn` folds it.
 - **`struct Account(balance:[Int:@>=0])`** declares a record whose `balance`
   field is a *refined* type: an `Int` that is provably `>= 0`. The `[...]` wrap a
   type; the predicate inside is a real proof obligation, not a comment. A
@@ -44,7 +45,7 @@ Most of the language is already on this page:
 - **`method Account.deposit`** is namespaced to `Account` (more below). **`this`**
   is its receiver — distinct from `@`.
 - **`match`** arms *are types*: `[@>0]` and `[@<=0]` partition every `Int`, and
-  the compiler checks the partition is total. `[Element]` / `[Leaf]` discriminate
+  the compiler checks the partition is total. `[Txns]` / `[Done]` discriminate
   the union — the canonical sum-type fold, no tag field, no default arm.
 
 Everything below is an elaboration of these moves.

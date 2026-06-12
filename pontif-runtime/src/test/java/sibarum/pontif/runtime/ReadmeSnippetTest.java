@@ -59,21 +59,22 @@ class ReadmeSnippetTest {
     void readmeOpener_evaluatesTo150() {
         assertEquals("150", runGated("""
                 module ledger
-                requires std.stream.{Element, Leaf}
 
                 struct Account(balance:[Int:@>=0])
+                struct Txns(amount:Int, rest:[Txns|Done])
+                struct Done()
 
                 method Account.deposit(n:Int):Account -> match n {
                   [@>0]  -> Account(this.balance + n)
                   [@<=0] -> this
                 }
 
-                function totalIn(q:[Element|Leaf]):Int -> match q {
-                  [Element] -> q.head + totalIn(q.rest)
-                  [Leaf]    -> 0
+                function totalIn(ts:[Txns|Done]):Int -> match ts {
+                  [Txns] -> ts.amount + totalIn(ts.rest)
+                  [Done] -> 0
                 }
 
-                Account(0).deposit(totalIn(Element(100, Element(50, Leaf())))).balance
+                Account(0).deposit(totalIn(Txns(100, Txns(50, Done())))).balance
                 """));
     }
 
