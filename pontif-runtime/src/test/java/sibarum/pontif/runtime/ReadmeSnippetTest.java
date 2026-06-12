@@ -80,10 +80,12 @@ class ReadmeSnippetTest {
     // --- Functions, overloads, and proven returns ---------------------------
 
     @Test
-    void readmeNarrowingSnippet_evaluatesTo124() throws Exception {
-        String src = """
-                function factorial(n:[Int:0])  :Int -> 1
-                function factorial(n:[Int:@>0]):Int -> n * factorial(n-1)
+    void readmeNarrowingSnippet_evaluatesTo124() {
+        // Gated: factorial's [Int:@>=1] and inc's [Int:@>1] are real return
+        // obligations — this drives the return-verification gate, not just eval.
+        assertEquals("124", runGated("""
+                function factorial(n:[Int:0])  :[Int:@>=1] -> 1
+                function factorial(n:[Int:@>0]):[Int:@>=1] -> n * factorial(n-1)
 
                 function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
@@ -94,8 +96,7 @@ class ReadmeSnippetTest {
                 }
 
                 factorial(5) + inc(4) + sign(-7)
-                """;
-        assertEquals(124L, run(src));
+                """));
     }
 
     @Test

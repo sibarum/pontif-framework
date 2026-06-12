@@ -55,8 +55,8 @@ Sorts narrow by predicate, dispatch selects on the narrowing, and declared
 returns are proof obligations:
 
 ```pontif
-function factorial(n:[Int:0])  :Int -> 1
-function factorial(n:[Int:@>0]):Int -> n * factorial(n-1)
+function factorial(n:[Int:0])  :[Int:@>=1] -> 1
+function factorial(n:[Int:@>0]):[Int:@>=1] -> n * factorial(n-1)
 
 function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
 
@@ -80,7 +80,11 @@ factorial(5) + inc(4) + sign(-7)   # → 124
   an issuer closes it with sign / linear-bound / integer reasoning
   (`BuiltinIssuer`), and a notary accepts only what it cannot refute (`Notary`).
   A false claim — or a true one the engine can't prove and you supply no `proof`
-  for — rejects the program.
+  for — rejects the program. Both `factorial` clauses carry the same claim,
+  `[Int:@>=1]`, and it closes *inductively*: the recursive call's own
+  `[Int:@>=1]` is taken as the induction hypothesis, so `n > 0` (from the
+  parameter sort) and `factorial(n-1) >= 1` together discharge
+  `n * factorial(n-1) >= 1`.
 - **Match totality is enforced as a conservation rule.** A non-exhaustive match
   is a compile error *with the uncovered witness*; undecidable coverage demands a
   default arm. `_` desugars to the precise complement where computable.

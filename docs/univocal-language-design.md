@@ -172,17 +172,8 @@ assign trait Something:SizedNotZero {
 
 Unproven
 ```
-# Scenario: return refinement can't be proven natively.
-# So the return sort is prefixed with !! as so:
-function trueButUnproven(x:Int):[!!Int:@ >= -16] -> (x-3)*(x+5)
-
-# But while it's like this, it's necessary to match out the error:
-let value = (match trueButUnproven(...)
-  [!!] -> errorRecovery()
-  [x] -> x
-)
   
-# Or, define the function without the return sort:
+# define the function without the return sort:
 function proven(x:Int):[Int] -> (x-3)*(x+5)
 
 # To add a return type refinement, assign a proof to the function.
@@ -198,7 +189,7 @@ assign proof proven(x:Int):[
     [@>=3]  -> this(x) # region A: both factors >=0, interval mult gives @>=-16. "this" = the target function
     [@<=-6] -> this(x) # region C: both factors <=0, interval mult gives @>=-16
     [_]     -> this(x) # region B: the remainder is exactly [-5,2], peeled to singletons (min -16 at x=-1)
-  ) -> # In theory, same arrow syntax could pair any two semantics, here it's used for explicit coersion
+  ) -> # the same arrow syntax is used for any two semantics, here it's used for explicit coersion
   [Int:@ >= -16] # This refinement is now globally implicit for the function, if it verifies.
 ]
 
