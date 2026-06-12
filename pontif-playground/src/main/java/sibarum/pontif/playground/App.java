@@ -210,6 +210,7 @@ public final class App {
 
     private static Component buildUi() {
         Component runBtn    = Themed.iconButton(Icons.PLAY,     "Run",     Em.of(6f),   Variant.PRIMARY, 0, App::onRunClicked);
+        Component newBtn    = Themed.iconButton(Icons.FILE,     Em.of(2f), Variant.DEFAULT, 0, App::onNewClicked);
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
         Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, "Save As", Em.of(7.5f), Variant.DEFAULT, 0, App::onSaveAsClicked);
@@ -223,7 +224,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
+            List.of(runBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane
@@ -328,6 +329,16 @@ public final class App {
     }
 
     // --- File operations: must run on the GLFW main thread (FileDialog requirement). ---
+
+    /** Blank the editor and detach from any file — a fresh untitled document.
+     *  Replaces the buffer outright, like Open; there is no dirty-tracking, so
+     *  no save prompt (consistent with the rest of the toolbar). */
+    private static void onNewClicked() {
+        TextStates.setContent(codeText, "");
+        currentFile = null;
+        updateFilenameLabel();
+        Status.success("New file");
+    }
 
     private static void onOpenClicked() {
         FileDialog.open(window, PTF_FILTERS, dialogStartPath()).ifPresent(path -> {
