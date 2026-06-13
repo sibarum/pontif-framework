@@ -163,6 +163,7 @@ final class ConstructionGate {
             case IrExpr.Record r -> gateRecord(r, ctx, structs);
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), ctx, structs), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "ConstructionGate");
         };
     }
 

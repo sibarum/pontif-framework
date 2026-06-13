@@ -1024,6 +1024,8 @@ public final class AltParser {
                     || m.branches().stream().anyMatch(b -> containsSelfRef(b.result()));
             case IrExpr.Record r -> r.members().values().stream().anyMatch(AltParser::containsSelfRef);
             case IrExpr.FieldAccess fa -> containsSelfRef(fa.base());
+            case IrExpr.MethodCall mc -> containsSelfRef(mc.receiver())
+                    || mc.args().stream().anyMatch(AltParser::containsSelfRef);
         };
     }
 
@@ -1410,6 +1412,19 @@ public final class AltParser {
                 if (baseSort instanceof IrSort.Structural sp) {
                     IrSort fieldSort = sp.members().get(fa.fieldName());
                     if (fieldSort != null) yield fieldSort;
+                }
+                yield IrSort.named("_");
+            }
+            // A method call's RESULT type, best-effort: infer the receiver's
+            // base type and look up the declared return of `Type.method`. This
+            // is only TYPING (for parse-time desugars like destructuring-let);
+            // it stays order-best-effort (a method declared below yields "_"),
+            // while the call's ROUTING is order-independent in MethodResolver.
+            case IrExpr.MethodCall mc -> {
+                String recvType = baseSortName(inferMaximalSort(mc.receiver()));
+                if (recvType != null && !recvType.equals("_")) {
+                    IrSort ret = declaredFunctionReturns.get(recvType + "." + mc.methodName());
+                    if (ret != null) yield ret;
                 }
                 yield IrSort.named("_");
             }
@@ -2550,21 +2565,20 @@ public final class AltParser {
                 AltToken close = expect(AltToken.Kind.RPAREN);
                 Origin callOrigin = open.spanTo(close);
 
-                // Instance-method call routing: `receiver.method(args)`
-                // where receiver's inferred sort has a base name matching a
-                // declared method `Type.method`. Rewrites to
-                // `Call("Type.method", [receiver, ...args])`. The receiver
-                // itself gets the top-level-let rewrite first, so a let-bound
-                // value is invoked as a 0-arg call before being passed as
-                // `self`.
+                // Instance-method call: `receiver.method(args)` on a VALUE
+                // receiver becomes an unresolved MethodCall. MethodResolver (an
+                // IR pass) keys it to `Type.method` by the receiver's inferred
+                // type — after every declaration is registered, so resolution is
+                // order-independent (forward references, self- and mutual
+                // recursion all work). The receiver gets the top-level-let
+                // rewrite first (a let-bound value is invoked as a 0-arg call
+                // before becoming the receiver). A module- or type-qualified
+                // dotted name (`std.stream.concat`, `Point.zero`) is NOT a value
+                // receiver and stays a dotted Call (resolved by NameResolver).
                 if (expr instanceof IrExpr.FieldAccess fa) {
                     IrExpr receiver = rewriteTopLevelLetAccess(fa.base());
-                    String methodName = methodNameForReceiver(receiver, fa.fieldName());
-                    if (methodName != null) {
-                        List<IrExpr> rewrittenArgs = new ArrayList<>(args.size() + 1);
-                        rewrittenArgs.add(receiver);
-                        rewrittenArgs.addAll(args);
-                        expr = new IrExpr.Call(methodName, rewrittenArgs, callOrigin);
+                    if (isValueReceiver(receiver)) {
+                        expr = new IrExpr.MethodCall(receiver, fa.fieldName(), args, callOrigin);
                         continue;
                     }
                 }
@@ -2604,15 +2618,25 @@ public final class AltParser {
      * fully-qualified method name. Used by the instance-method call routing
      * in {@link #parsePrimaryWithPostfix}.
      */
-    private String methodNameForReceiver(IrExpr receiver, String field) {
-        IrSort receiverSort = inferMaximalSort(receiver);
-        String typeName = baseSortName(receiverSort);
-        if (typeName == null || typeName.equals("_") || typeName.equals("_record")
-                || typeName.equals(TUPLE_SENTINEL)) {
-            return null;
+    /**
+     * Whether {@code receiver} (already run through
+     * {@link #rewriteTopLevelLetAccess}) is a <em>value</em> expression — the
+     * left of an instance-method call — versus a module/type-qualified name.
+     * Anything that isn't a bare/dotted name is a value (a struct literal, a
+     * call result, a method-call result, a 0-arg let/function call). A
+     * dotted-name receiver is a value only when its head is a bound local or a
+     * top-level let; otherwise it names a module or a type ({@code std.stream},
+     * {@code Point}) and the call stays a dotted {@link IrExpr.Call}. This
+     * decision is independent of method declaration order.
+     */
+    private boolean isValueReceiver(IrExpr receiver) {
+        String dotted = extractDottedName(receiver);
+        if (dotted == null) {
+            return true;
         }
-        String methodName = typeName + "." + field;
-        return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
+        int dot = dotted.indexOf('.');
+        String head = dot < 0 ? dotted : dotted.substring(0, dot);
+        return currentScope.containsKey(head) || declaredTopLevelLets.containsKey(head);
     }
 
     /**

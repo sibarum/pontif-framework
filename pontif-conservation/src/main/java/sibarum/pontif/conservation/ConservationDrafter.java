@@ -190,6 +190,10 @@ public final class ConservationDrafter {
                 for (IrExpr v : r.members().values()) collectCallNames(v, out);
             }
             case IrExpr.FieldAccess fa -> collectCallNames(fa.base(), out);
+            case IrExpr.MethodCall mc -> {
+                collectCallNames(mc.receiver(), out);
+                for (IrExpr a : mc.args()) collectCallNames(a, out);
+            }
             case IrExpr.Apply app -> {
                 collectCallNames(app.fn(), out);
                 for (IrExpr a : app.args()) collectCallNames(a, out);
@@ -336,6 +340,7 @@ public final class ConservationDrafter {
             case IrExpr.Lambda ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Apply ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.FieldAccess ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.MethodCall ignored -> wrapReturn(draftValue(expr, ctx), ctx);
         };
     }
 
@@ -488,6 +493,7 @@ public final class ConservationDrafter {
             // (no-duplicate-edges); an overloaded callee is dispatch-as-Branch
             // over its candidates; an unsummarized callee (recursion, unknown)
             // is the located ignorance.
+            case IrExpr.MethodCall mc -> throw sibarum.pontif.ir.MethodResolver.unresolved(mc, "ConservationDrafter");
             case IrExpr.Call c -> {
                 List<Flow> argFlows = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) argFlows.add(draftValue(a, ctx));

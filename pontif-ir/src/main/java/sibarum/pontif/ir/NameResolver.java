@@ -270,6 +270,15 @@ public final class NameResolver {
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewrite(fa.base(), m, table), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> args = new ArrayList<>(mc.args().size());
+                for (IrExpr a : mc.args()) args.add(rewrite(a, m, table));
+                // The receiver/args names get FQN-resolved here; the method name
+                // stays bare and is resolved against the receiver type by
+                // MethodResolver (which keys it Type.method itself).
+                yield new IrExpr.MethodCall(
+                        rewrite(mc.receiver(), m, table), mc.methodName(), args, mc.origin());
+            }
         };
     }
 }

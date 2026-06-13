@@ -70,7 +70,11 @@ public final class ReceiptGraphReport {
             // imported proof vocabulary stays unresolved and every proof-rescued
             // branch would falsely render NOT DISCHARGED.
             IrModule linked = ModuleLinker.combineSingle(parsed);
-            IrModule resolved = AliasResolver.resolve(linked);
+            // Resolve instance-method calls (recv.m(args) → Call("Type.m", …))
+            // before drafting — the receipts drafter compiles expressions and
+            // would choke on the parser's transient MethodCall placeholder.
+            IrModule resolved = AliasResolver.resolve(
+                    sibarum.pontif.ir.MethodResolver.resolve(linked));
             ReceiptGraph graph = Drafter.draft(resolved);
             return new Result.Generated(render(sourceName, resolved, graph));
         } catch (CompileException ce) {

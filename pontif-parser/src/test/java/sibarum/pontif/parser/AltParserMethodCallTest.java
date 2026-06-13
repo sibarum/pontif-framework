@@ -15,9 +15,12 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * Tests for instance-method call routing and dotted-let auto-Call in
  * {@link AltParser}.
  *
- * <p>Instance methods: {@code receiver.method(args)} routes to
- * {@code Call("Type.method", [receiver, args...])} when the receiver's
- * inferred sort has a base name matching a declared method.
+ * <p>Instance methods: {@code receiver.method(args)} on a value receiver
+ * parses to an unresolved {@code MethodCall(receiver, "method", args)}. The
+ * type-directed rewrite to {@code Call("Type.method", [receiver, ...args])}
+ * happens later, in {@code MethodResolver} (an IR pass) — so it no longer
+ * depends on declaration order. Module/type-qualified dotted names
+ * ({@code Point.makeOrigin()}) stay {@link IrExpr.Call}s.
  *
  * <p>Dotted-let auto-Call: bare references to a let name (single-ident or
  * dotted) are rewritten to a 0-arg dispatch call. Field access on a let
@@ -32,7 +35,7 @@ class AltParserMethodCallTest {
     // --- Instance method calls ----------------------------------------------
 
     @Test
-    void methodCall_onParam_routesToTypeMethodWithSelfPrepended() throws Exception {
+    void methodCall_onParam_producesUnresolvedMethodCall() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
                 method Point.shifted(dx:Int, dy:Int):Point ->
@@ -41,15 +44,14 @@ class AltParserMethodCallTest {
                 """;
         IrModule m = parse(src);
         IrStmt.FunctionDecl f = (IrStmt.FunctionDecl) m.statements().get(2);
-        IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, f.body());
-        // Dispatch name is the type-qualified form.
-        assertEquals("Point.shifted", call.functionName());
-        // Args: receiver, then user-written args.
-        assertEquals(3, call.args().size());
-        IrExpr.Var receiver = assertInstanceOf(IrExpr.Var.class, call.args().get(0));
+        IrExpr.MethodCall mc = assertInstanceOf(IrExpr.MethodCall.class, f.body());
+        assertEquals("shifted", mc.methodName());
+        // Receiver is held separately (NOT folded into a name or prepended yet).
+        IrExpr.Var receiver = assertInstanceOf(IrExpr.Var.class, mc.receiver());
         assertEquals("p", receiver.name());
-        assertEquals(1L, ((IrExpr.Lit) call.args().get(1)).value());
-        assertEquals(2L, ((IrExpr.Lit) call.args().get(2)).value());
+        assertEquals(2, mc.args().size());
+        assertEquals(1L, ((IrExpr.Lit) mc.args().get(0)).value());
+        assertEquals(2L, ((IrExpr.Lit) mc.args().get(1)).value());
     }
 
     @Test
@@ -63,11 +65,11 @@ class AltParserMethodCallTest {
                 origin.magnitudeSq()
                 """;
         IrModule m = parse(src);
-        IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, m.main());
-        assertEquals("Point.magnitudeSq", call.functionName());
-        assertEquals(1, call.args().size());
+        IrExpr.MethodCall mc = assertInstanceOf(IrExpr.MethodCall.class, m.main());
+        assertEquals("magnitudeSq", mc.methodName());
+        assertEquals(0, mc.args().size());
         // Receiver is Call("origin", []), not Var("origin").
-        IrExpr.Call receiver = assertInstanceOf(IrExpr.Call.class, call.args().get(0));
+        IrExpr.Call receiver = assertInstanceOf(IrExpr.Call.class, mc.receiver());
         assertEquals("origin", receiver.functionName());
         assertEquals(0, receiver.args().size());
     }
@@ -82,10 +84,10 @@ class AltParserMethodCallTest {
                 origin().magnitudeSq()
                 """;
         IrModule m = parse(src);
-        IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, m.main());
-        assertEquals("Point.magnitudeSq", call.functionName());
+        IrExpr.MethodCall mc = assertInstanceOf(IrExpr.MethodCall.class, m.main());
+        assertEquals("magnitudeSq", mc.methodName());
         // Receiver is the nested Call to origin().
-        IrExpr.Call receiver = assertInstanceOf(IrExpr.Call.class, call.args().get(0));
+        IrExpr.Call receiver = assertInstanceOf(IrExpr.Call.class, mc.receiver());
         assertEquals("origin", receiver.functionName());
     }
 
@@ -107,20 +109,20 @@ class AltParserMethodCallTest {
     }
 
     @Test
-    void methodCall_unknownMethod_fallsBackToDottedCall() throws Exception {
-        // p has type Point but no method `nonexistent` is registered. The
-        // method-routing branch returns null; the existing path then builds
-        // Call("p.nonexistent", []) via extractDottedName. At runtime this
-        // fails (no such function), which is the correct user-level error.
+    void methodCall_unknownMethod_stillProducesMethodCall() throws Exception {
+        // The parser no longer decides whether the method exists — it always
+        // emits a MethodCall for a value receiver. MethodResolver (IR) is what
+        // reports "No method 'nonexistent' on type 'Point'".
         String src = """
                 struct Point(x:Int, y:Int)
                 function f(p:Point):Int -> p.nonexistent()
                 """;
         IrModule m = parse(src);
         IrStmt.FunctionDecl f = (IrStmt.FunctionDecl) m.statements().get(1);
-        IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, f.body());
-        // No method match → falls back to the raw dotted-name Call.
-        assertEquals("p.nonexistent", call.functionName());
+        IrExpr.MethodCall mc = assertInstanceOf(IrExpr.MethodCall.class, f.body());
+        assertEquals("nonexistent", mc.methodName());
+        IrExpr.Var receiver = assertInstanceOf(IrExpr.Var.class, mc.receiver());
+        assertEquals("p", receiver.name());
     }
 
     // --- Dotted-let auto-Call -----------------------------------------------

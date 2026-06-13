@@ -119,6 +119,7 @@ final class DecimalPromotion {
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), structs), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "DecimalPromotion");
         };
     }
 

@@ -98,6 +98,16 @@ public final class TruffleLowering {
         return new TruffleProgram(mainRoot.getCallTarget(), registry);
     }
 
+    /**
+     * Lower one expression to its execution-AST root for display/inspection —
+     * the exact node tree {@link #lowerExpr} builds, minus the CallTarget /
+     * RootNode / FunctionEntryNode execution wrappers and slot resolution
+     * (structure only; not runnable). Used by the IR/AST inspector report.
+     */
+    public PontifNode lowerForDisplay(IrExpr expr, CompiledModule module) {
+        return lowerExpr(expr, module, new FunctionRegistry());
+    }
+
     private PontifNode lowerExpr(IrExpr expr, CompiledModule module, FunctionRegistry registry) {
         PontifNode node = switch (expr) {
             case IrExpr.Lit l -> IntLiteral.of(l.value());
@@ -144,6 +154,7 @@ public final class TruffleLowering {
             case IrExpr.Match m -> lowerMatch(m, module, registry);
             case IrExpr.Record r -> lowerRecord(r, module, registry);
             case IrExpr.FieldAccess fa -> FieldAccessNode.of(lowerExpr(fa.base(), module, registry), fa.fieldName());
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "TruffleLowering");
         };
         node.withOrigin(expr.origin());
         return node;

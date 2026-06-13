@@ -100,6 +100,8 @@ public final class NarrowingInference {
             case IrExpr.Apply ignored -> null;
             case IrExpr.Lambda ignored -> null;
             case IrExpr.SelfRef ignored -> null;
+            // Unresolved until MethodResolver; can't narrow its result here.
+            case IrExpr.MethodCall ignored -> null;
         };
     }
 
@@ -359,6 +361,9 @@ public final class NarrowingInference {
             case IrExpr.Record r ->
                     r.members().values().stream()
                             .allMatch(v -> selfAccessesAreOnlyField(v, targetField));
+            case IrExpr.MethodCall mc ->
+                    selfAccessesAreOnlyField(mc.receiver(), targetField)
+                    && mc.args().stream().allMatch(a -> selfAccessesAreOnlyField(a, targetField));
             case IrExpr.Lit ignored -> true;
             case IrExpr.Dec ignored -> true;
             case IrExpr.Chr ignored -> true;
@@ -434,6 +439,15 @@ public final class NarrowingInference {
                 }
                 yield new IrExpr.Record(r.typeName(), newMembers, r.origin());
             }
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> newArgs = new ArrayList<>(mc.args().size());
+                for (IrExpr arg : mc.args()) {
+                    newArgs.add(substituteFieldAccessWithSelf(arg, targetField));
+                }
+                yield new IrExpr.MethodCall(
+                        substituteFieldAccessWithSelf(mc.receiver(), targetField),
+                        mc.methodName(), newArgs, mc.origin());
+            }
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
             case IrExpr.Chr c -> c;
@@ -484,6 +498,15 @@ public final class NarrowingInference {
                 }
                 yield new IrExpr.Apply(
                         substituteSelfWithFieldAccess(a.fn(), fieldName), newArgs, a.origin());
+            }
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> newArgs = new ArrayList<>(mc.args().size());
+                for (IrExpr arg : mc.args()) {
+                    newArgs.add(substituteSelfWithFieldAccess(arg, fieldName));
+                }
+                yield new IrExpr.MethodCall(
+                        substituteSelfWithFieldAccess(mc.receiver(), fieldName),
+                        mc.methodName(), newArgs, mc.origin());
             }
             case IrExpr.Lambda lam -> new IrExpr.Lambda(
                     lam.params(), lam.returnSort(),

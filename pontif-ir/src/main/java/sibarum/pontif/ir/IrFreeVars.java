@@ -68,6 +68,10 @@ public final class IrFreeVars {
                 }
             }
             case IrExpr.FieldAccess fa -> collect(fa.base(), bound, free);
+            case IrExpr.MethodCall mc -> {
+                collect(mc.receiver(), bound, free);
+                for (IrExpr a : mc.args()) collect(a, bound, free);
+            }
         }
     }
 }

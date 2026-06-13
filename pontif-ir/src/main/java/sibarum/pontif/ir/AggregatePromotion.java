@@ -166,6 +166,7 @@ final class AggregatePromotion {
             case IrExpr.Record r -> rewriteRecord(r, expected, structs, fns);
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), null, structs, fns), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "AggregatePromotion");
         };
     }
 

@@ -207,7 +207,22 @@ public final class PontifCompiler {
      * Runs the IR compile pipeline on an already-parsed module. Shared by
      * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
      */
-    private CompileResult compileModule(IrModule module, String sourceName) {
+    private CompileResult compileModule(IrModule rawModule, String sourceName) {
+        // Resolve instance-method calls up front so every consumer below — the
+        // IR compiler, the return-refinement gate, and the conservation gate —
+        // sees ordinary dispatch Calls rather than the parser's transient
+        // MethodCall placeholder. (IrCompiler runs MethodResolver too; on an
+        // already-resolved module that pass is a no-op.)
+        IrModule module;
+        try {
+            module = sibarum.pontif.ir.MethodResolver.resolve(rawModule);
+        } catch (CompileException ce) {
+            return new CompileResult.Failed(
+                    RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));
+        } catch (RuntimeException e) {
+            return new CompileResult.Failed(
+                    RunResult.error("Compile error: " + e.getMessage()));
+        }
         Simplifier simplifier = new Simplifier(simplifierRules);
         IrCompiler compiler = new IrCompiler(simplifier);
         CompiledModule compiled;

@@ -300,6 +300,12 @@ public final class AliasResolver {
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), resolved), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> args = new ArrayList<>(mc.args().size());
+                for (IrExpr a : mc.args()) args.add(rewriteExpr(a, resolved));
+                yield new IrExpr.MethodCall(
+                        rewriteExpr(mc.receiver(), resolved), mc.methodName(), args, mc.origin());
+            }
         };
     }
 

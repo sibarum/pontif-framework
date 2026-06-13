@@ -40,7 +40,10 @@ public final class ConservationReport {
         }
         try {
             IrModule linked = ModuleLinker.combineSingle(parsed);
-            IrModule resolved = AliasResolver.resolve(linked);
+            // Resolve instance-method calls before drafting (the drafter would
+            // otherwise hit the transient MethodCall placeholder).
+            IrModule resolved = AliasResolver.resolve(
+                    sibarum.pontif.ir.MethodResolver.resolve(linked));
             Ledger ledger = ConservationDrafter.draft(resolved);
             String text = "# Conservation ledger: " + sourceName + "\n\n"
                     + ConservationLedgerPrinter.print(ledger);

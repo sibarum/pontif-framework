@@ -162,6 +162,7 @@ public final class IrInterpreter {
                 }
                 yield rec.get(fa.fieldName(), fa.origin());  // re-throws the "no field" error
             }
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrInterpreter");
         };
     }
 

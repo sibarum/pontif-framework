@@ -30,6 +30,15 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
+        // Resolve instance-method calls (recv.m(args)) to dispatch calls
+        // (Call("Type.m", [recv, ...args])) using the receiver's inferred type,
+        // now that every declaration is in hand. Runs after AliasResolver (so
+        // receiver sorts are alias-free) and BEFORE SortChecker (which would
+        // otherwise reject the placeholder's FieldAccess). This is what makes
+        // method resolution order-independent — forward references, self- and
+        // mutual recursion all work.
+        resolved = MethodResolver.resolve(resolved);
+
         // Stamp anonymous aggregate literals with the struct name the context
         // asserts (let annotations, struct-typed params, return positions) —
         // checked construction with the redundant name elided. Runs BEFORE
@@ -248,6 +257,7 @@ public final class IrCompiler {
                 for (IrExpr v : r.members().values()) registerSortsInExpr(v, map);
             }
             case IrExpr.FieldAccess fa -> registerSortsInExpr(fa.base(), map);
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrCompiler");
         }
     }
 
@@ -346,6 +356,7 @@ public final class IrCompiler {
                 yield SymExpr.record(r.typeName(), members);
             }
             case IrExpr.FieldAccess fa -> SymExpr.fieldAccess(compileSymExpr(fa.base()), fa.fieldName());
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrCompiler");
         };
     }
 

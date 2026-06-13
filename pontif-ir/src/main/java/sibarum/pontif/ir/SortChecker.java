@@ -647,6 +647,10 @@ public final class SortChecker {
             case IrExpr.Var ignored -> {}
             case IrExpr.SelfRef ignored -> {}
             case IrExpr.DispatchRef ignored -> {}
+            case IrExpr.MethodCall mc -> {
+                validateSelfFieldAccesses(mc.receiver(), baseStruct, refOrigin);
+                for (IrExpr arg : mc.args()) validateSelfFieldAccesses(arg, baseStruct, refOrigin);
+            }
         }
     }
 
@@ -783,6 +787,7 @@ public final class SortChecker {
                     }
                 }
             }
+            case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "SortChecker");
         }
     }
 

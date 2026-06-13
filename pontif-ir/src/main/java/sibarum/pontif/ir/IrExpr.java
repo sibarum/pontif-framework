@@ -12,7 +12,7 @@ public sealed interface IrExpr
         permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Str, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
-                IrExpr.Record, IrExpr.FieldAccess {
+                IrExpr.Record, IrExpr.FieldAccess, IrExpr.MethodCall {
 
     Origin origin();
 
@@ -224,6 +224,28 @@ public sealed interface IrExpr
             if (fieldName == null || fieldName.isEmpty()) {
                 throw new IllegalArgumentException("FieldAccess field name must be non-empty");
             }
+        }
+    }
+
+    /**
+     * An unresolved instance-method call {@code receiver.methodName(args)}.
+     * <strong>Transient:</strong> the parser emits it (it cannot know the
+     * receiver's type or whether the method is declared yet), and
+     * {@link MethodResolver} eliminates it — rewriting to
+     * {@code Call("Type.methodName", [receiver, ...args])} — after every
+     * declaration is registered, so method resolution is order-independent
+     * (forward references, self- and mutual recursion all work). No phase past
+     * {@code MethodResolver} should ever see one.
+     */
+    record MethodCall(IrExpr receiver, String methodName, List<IrExpr> args, Origin origin) implements IrExpr {
+        public MethodCall {
+            if (receiver == null) {
+                throw new IllegalArgumentException("MethodCall receiver must be non-null");
+            }
+            if (methodName == null || methodName.isEmpty()) {
+                throw new IllegalArgumentException("MethodCall method name must be non-empty");
+            }
+            args = List.copyOf(args);
         }
     }
 }
