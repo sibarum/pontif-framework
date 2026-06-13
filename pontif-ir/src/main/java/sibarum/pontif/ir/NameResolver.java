@@ -167,7 +167,14 @@ public final class NameResolver {
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
                     attrs.put(e.getKey(), rewriteSort(e.getValue(), m, table));
                 }
-                yield new IrSort.Trait(resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, t.origin());
+                Map<String, IrSort> assoc = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.associatedTypes().entrySet()) {
+                    // bound may be null (unbounded `type X`); resolve a present bound.
+                    assoc.put(e.getKey(),
+                            e.getValue() == null ? null : rewriteSort(e.getValue(), m, table));
+                }
+                yield new IrSort.Trait(
+                        resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

@@ -1113,7 +1113,8 @@ public final class AltParser {
                         start.origin());
             }
             declaredTraits.add(name);
-            IrSort.Trait named = new IrSort.Trait(name, t.methods(), t.attributes(), t.origin());
+            IrSort.Trait named = new IrSort.Trait(
+                    name, t.methods(), t.attributes(), t.associatedTypes(), t.origin());
             for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
                 declaredFunctionReturns.put(
                         name + "." + e.getKey(), e.getValue().returnSort());
@@ -1869,14 +1870,39 @@ public final class AltParser {
         AltToken open = expect(AltToken.Kind.LBRACE);
         Map<String, IrSort.Method> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
+        // Associated types — member name → bound (null = unbounded `type X`; a
+        // sort = the bound `type X:R`). LinkedHashMap permits the null value.
+        Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
+            // `type X` / `type X:Bound` — an associated type declared with the
+            // `type` declarator (a type-level member, not a value member).
+            if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("type")) {
+                consume();  // `type`
+                AltToken varName = expect(AltToken.Kind.IDENT);
+                if (methods.containsKey(varName.text())
+                        || attributes.containsKey(varName.text())
+                        || associatedTypes.containsKey(varName.text())) {
+                    throw new ParseException(
+                            "Duplicate member '" + varName.text() + "' in trait body",
+                            varName.origin());
+                }
+                IrSort bound = null;
+                if (peek().kind() == AltToken.Kind.COLON) {
+                    consume();  // `:`
+                    bound = parseSort();   // the bound — `type X:R`
+                }
+                associatedTypes.put(varName.text(), bound);
+                first = false;
+                continue;
+            }
             AltToken memberName = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
             if (methods.containsKey(memberName.text())
-                    || attributes.containsKey(memberName.text())) {
+                    || attributes.containsKey(memberName.text())
+                    || associatedTypes.containsKey(memberName.text())) {
                 throw new ParseException(
                         "Duplicate member '" + memberName.text() + "' in trait body",
                         memberName.origin());
@@ -1893,7 +1919,8 @@ public final class AltParser {
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
         // Placeholder name; parseLet patches it with the binding's name.
-        return new IrSort.Trait("_pending", methods, attributes, typeTok.spanTo(close));
+        return new IrSort.Trait(
+                "_pending", methods, attributes, associatedTypes, typeTok.spanTo(close));
     }
 
     private IrSort parseBracketSort() throws ParseException {

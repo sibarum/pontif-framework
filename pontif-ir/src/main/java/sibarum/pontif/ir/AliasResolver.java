@@ -115,6 +115,14 @@ public final class AliasResolver {
                             ta.name(),
                             substituteResolved(ta.sort(), resolvedAliases),
                             ta.origin()));
+                } else if (ta.sort() instanceof IrSort.Trait) {
+                    // Preserve the trait with its body already shell-resolved:
+                    // self/mutual references became nominal trait shells during
+                    // pre-resolution (resolvedAliases holds that form), so
+                    // downstream sees `Trait` shells rather than bare `Named`
+                    // self-references — which a recursive trait needs to validate.
+                    newStatements.add(new IrStmt.TypeAlias(
+                            ta.name(), resolvedAliases.get(ta.name()), ta.origin()));
                 } else {
                     newStatements.add(ta);
                 }
@@ -219,7 +227,12 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
                     resolvedAttrs.put(e.getKey(), resolveSort(e.getValue(), aliases, path));
                 }
-                yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, t.origin());
+                Map<String, IrSort> resolvedAssoc = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.associatedTypes().entrySet()) {
+                    resolvedAssoc.put(e.getKey(),
+                            e.getValue() == null ? null : resolveSort(e.getValue(), aliases, path));
+                }
+                yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -364,7 +377,12 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
                     newAttrs.put(e.getKey(), substituteResolved(e.getValue(), resolved));
                 }
-                yield new IrSort.Trait(t.name(), newMethods, newAttrs, t.origin());
+                Map<String, IrSort> newAssoc = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : t.associatedTypes().entrySet()) {
+                    newAssoc.put(e.getKey(),
+                            e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
+                }
+                yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());

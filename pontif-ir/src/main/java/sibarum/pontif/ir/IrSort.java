@@ -121,7 +121,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      * what makes trait coercion free in both directions.
      */
     record Trait(String name, Map<String, IrSort.Method> methods,
-                 Map<String, IrSort> attributes, Origin origin) implements IrSort {
+                 Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                 Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -132,15 +133,29 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (attributes == null) {
                 throw new IllegalArgumentException("Trait attributes must be non-null");
             }
+            if (associatedTypes == null) {
+                throw new IllegalArgumentException("Trait associatedTypes must be non-null");
+            }
             methods = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(methods));
             attributes = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(attributes));
+            // Values may be null (an unbounded associated type `type X`); a
+            // non-null value is the bound (`type X:R`). LinkedHashMap permits
+            // null values — Map.copyOf would not.
+            associatedTypes = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(associatedTypes));
+        }
+
+        /** Back-compat: a trait with no associated types. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Origin origin) {
+            this(name, methods, attributes, Map.of(), origin);
         }
 
         /** Back-compat: a methods-only trait (no data attributes). */
         public Trait(String name, Map<String, IrSort.Method> methods, Origin origin) {
-            this(name, methods, Map.of(), origin);
+            this(name, methods, Map.of(), Map.of(), origin);
         }
     }
 

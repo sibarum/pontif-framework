@@ -85,6 +85,13 @@ public final class SortChecker {
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 validateTraitImpl(ti, traitContracts, functionReturns, structDefs);
+            } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
+                // Validate a trait DECLARATION end-to-end: its member sorts must
+                // reference only known sorts — primitives, declared types, or the
+                // trait's own `type X` associated types (scoped by the Trait case
+                // of validateSortNames). Catches `[Method():Undeclared]` while
+                // admitting `[Method():T]` for a declared `type T`.
+                validateSortNames(tr, structDefs);
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs);
@@ -440,16 +447,30 @@ public final class SortChecker {
 
     private static void validateSortNames(IrSort sort, Map<String, IrSort.Structural> structDefs)
             throws CompileException {
+        validateSortNames(sort, structDefs, Set.of());
+    }
+
+    /**
+     * @param typeVars in-scope associated-type names — the {@code type X}
+     *     members of an enclosing trait. A {@code Named} matching one of these
+     *     is a bound type variable, not an unknown sort. Empty at the top level;
+     *     extended by the {@link IrSort.Trait} case as it descends into a
+     *     trait's own member sorts.
+     */
+    private static void validateSortNames(
+            IrSort sort, Map<String, IrSort.Structural> structDefs, Set<String> typeVars)
+            throws CompileException {
         switch (sort) {
             case IrSort.Named n -> {
-                // A surviving Named is either a primitive or a nominal struct
-                // reference (structs are no longer inlined — see AliasResolver).
-                // Resolving by name against structDefs, rather than recursing
-                // into the struct body, is what keeps this terminating on a
-                // recursive type: struct Node(next:Node) validates without
-                // unrolling Node.
+                // A surviving Named is a primitive, a nominal struct reference
+                // (structs are no longer inlined — see AliasResolver), or an
+                // in-scope associated TYPE variable of an enclosing trait.
+                // Resolving by name, rather than recursing into the body, keeps
+                // this terminating on a recursive type: struct Node(next:Node)
+                // validates without unrolling Node.
                 if (!PRIMITIVE_SORT_NAMES.contains(n.name())
-                        && !structDefs.containsKey(n.name())) {
+                        && !structDefs.containsKey(n.name())
+                        && !typeVars.contains(n.name())) {
                     throw new CompileException(
                             "Unknown sort '" + n.name() + "' — not a primitive "
                                     + "and not a declared type (did you forget a "
@@ -486,28 +507,40 @@ public final class SortChecker {
             }
             case IrSort.Structural s -> {
                 for (IrSort member : s.members().values()) {
-                    validateSortNames(member, structDefs);
+                    validateSortNames(member, structDefs, typeVars);
                 }
             }
             case IrSort.Method f -> {
-                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs);
-                validateSortNames(f.returnSort(), structDefs);
+                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs, typeVars);
+                validateSortNames(f.returnSort(), structDefs, typeVars);
             }
             case IrSort.Dispatch d -> {
-                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs);
-                validateSortNames(d.returnSort(), structDefs);
+                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs, typeVars);
+                validateSortNames(d.returnSort(), structDefs, typeVars);
             }
             case IrSort.Trait t -> {
-                // Trait's name identifies the trait itself — not a reference
-                // to another sort. Method-contract sorts are Function sorts;
-                // recurse into them to validate param/return types.
-                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs);
+                // The trait's name identifies the trait — not a reference to
+                // another sort. Its `type X` associated types are bound type
+                // variables IN SCOPE for the trait's own member sorts, so a
+                // method like `[Method():T]` validates (T is the variable, not
+                // an unknown sort). Recurse into method/contract sorts with that
+                // extended scope; a present bound (`type X:R`) must itself name a
+                // known sort.
+                Set<String> inner = typeVars;
+                if (!t.associatedTypes().isEmpty()) {
+                    inner = new HashSet<>(typeVars);
+                    inner.addAll(t.associatedTypes().keySet());
+                }
+                for (IrSort bound : t.associatedTypes().values()) {
+                    if (bound != null) validateSortNames(bound, structDefs, inner);
+                }
+                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs, inner);
             }
             case IrSort.Union u -> {
-                for (IrSort b : u.branches()) validateSortNames(b, structDefs);
+                for (IrSort b : u.branches()) validateSortNames(b, structDefs, typeVars);
             }
             case IrSort.Intersection i -> {
-                for (IrSort b : i.branches()) validateSortNames(b, structDefs);
+                for (IrSort b : i.branches()) validateSortNames(b, structDefs, typeVars);
             }
         }
     }
