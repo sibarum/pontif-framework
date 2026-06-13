@@ -49,6 +49,7 @@ import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.pontif.playground.generated.Icons;
 import sibarum.pontif.runtime.ConservationReport;
+import sibarum.pontif.runtime.IrAstReport;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
@@ -88,8 +89,9 @@ public final class App {
             FileDialog.Filter.of("Pontif source", "ptf"),
             FileDialog.Filter.of("All files", "*"));
 
-    /** Index of the Receipts tab in the main tab strip (Editor = 0). */
-    private static final int REPORT_TAB = 1;
+    /** Tab indices in the main tab strip (Editor = 0). */
+    private static final int IR_AST_TAB = 1;
+    private static final int REPORT_TAB = 2;
 
     /** ASCII divider between the two report sections — the mono atlas is ASCII-only. */
     private static final String REPORT_DIVIDER = "=".repeat(72);
@@ -106,6 +108,7 @@ public final class App {
     private static Component.Text codeText;
     private static Component.Text filenameLabel;
     private static Component.Text reportText;
+    private static Component.Text irAstText;
 
     // Hoisted so file-dialog button handlers can reach it. Lifetime is
     // bounded by main()'s try-with-resources; handlers only fire while the
@@ -256,9 +259,22 @@ public final class App {
 
         Component reportPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, reportText, false, 1);
 
+        // Read-only inspector for the two compilation intermediates: the
+        // parsed IR tree and the lowered Truffle execution AST. Regenerated
+        // from the editor source on tab activation, so it never goes stale.
+        irAstText = new Component.Text(
+            "", MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
+            null, null, Em.of(0.5f),
+            null, false,
+            true, true, false, false, 1);
+
+        Component irAstPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, irAstText, false, 1);
+
         Property<Integer> activeTab = new Property<>(0);
         activeTab.subscribe(i -> {
-            if (i != null && i == REPORT_TAB) regenerateReports();
+            if (i == null) return;
+            if (i == IR_AST_TAB) regenerateIrAst();
+            else if (i == REPORT_TAB) regenerateReports();
         });
 
         Component tabs = Themed.tabs(
@@ -266,6 +282,7 @@ public final class App {
             Em.of(0.95f),
             List.of(
                 new Component.Tabs.TabPanel("Editor",   codePane),
+                new Component.Tabs.TabPanel("IR / AST", irAstPane),
                 new Component.Tabs.TabPanel("Receipts", reportPane)),
             activeTab,
             Variant.PRIMARY
@@ -310,6 +327,19 @@ public final class App {
      * so it's fine on the GLFW main thread (this runs from the tab-switch
      * callback).
      */
+    /** Fill the IR/AST inspector from the current editor source. Parsing and
+     *  lowering are bounded and fast, so this is fine on the GLFW main thread
+     *  (runs from the tab-switch callback, like {@link #regenerateReports}). */
+    private static void regenerateIrAst() {
+        String code = TextStates.contentOf(codeText);
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        String text = switch (IrAstReport.fromAltSource(code, sourceName)) {
+            case IrAstReport.Result.Generated g -> g.text();
+            case IrAstReport.Result.Failed f -> f.error();
+        };
+        TextStates.setContent(irAstText, text);
+    }
+
     private static void regenerateReports() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
