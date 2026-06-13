@@ -63,6 +63,10 @@ public final class AliasResolver {
                 // Struct definitions are nominal — kept by-reference, never
                 // entered into the inlining table — so abbreviations inline but
                 // struct references (incl. self-references) stay IrSort.Named.
+                // Traits ARE inlined (the common, non-recursive case relies on
+                // it for coercion/dispatch), but a trait that references ITSELF
+                // resolves the self-occurrence to a nominal trait shell rather
+                // than expanding forever — see resolveSort's cycle handling.
                 if (!(ta.sort() instanceof IrSort.Structural)) {
                     aliases.put(ta.name(), ta.sort());
                 }
@@ -152,6 +156,18 @@ public final class AliasResolver {
             case IrSort.Named n -> {
                 if (aliases.containsKey(n.name())) {
                     if (path.contains(n.name())) {
+                        // A trait that references itself (directly or mutually)
+                        // is a legitimate recursive type — an `Expr` trait whose
+                        // method returns `Expr`. Resolve the cyclic occurrence to
+                        // a nominal trait SHELL (name only) rather than expanding
+                        // forever: the full contract lives in the preserved
+                        // TypeAlias, and downstream identifies traits by name.
+                        // Only a constructor-free ABBREVIATION cycle
+                        // (`type A = [A|Int]`) is a real, non-contractive error.
+                        if (aliases.get(n.name()) instanceof IrSort.Trait) {
+                            yield new IrSort.Trait(
+                                    n.name(), Map.of(), Map.of(), n.origin());
+                        }
                         List<String> cyclePath = new ArrayList<>(path);
                         cyclePath.add(n.name());
                         throw new CompileException(
