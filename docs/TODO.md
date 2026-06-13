@@ -742,28 +742,62 @@ conversion pair deferred (a bijection — future Reversible witness).
 may legitimately route through integer discharge; the gates to revisit are
 BoundAnalysisRules.containsFrac and the SymExpr.Chr abstention notes.
 
-**String LANDED (Slice 1 — value/literal; the first Char COLLECTION).**
-Anatomy RULED *both, jurisdiction-marked* (native-storage StringValue, the
-Char analog of Array, + an inductive Queue(Char) view as the design target —
-Array/Queue split). Slice 1 ships the storage half via the Char/Decimal
-playbook: `"..."` literals (full Unicode incl. astral; escapes `\n \t \" \\`)
-through the whole stack (StringValue → StringLiteral → IrExpr.Str → SymExpr.Str
-→ AltLexer.readString + Kind.STRING → AltParser), lexicographic-by-code-point
+**String — Slice 1 LANDED (value/literal); plan RE-CUT 2026-06-12. Spec:
+`docs/strings.md`.** A native-storage StringValue (the Char analog of Array —
+storage is representation) with an inductive Queue(Char) view underneath.
+Slice 1 ships the value half via the Char/Decimal playbook: `"..."`/`'...'`
+literals (full Unicode incl. astral; escapes `\n \t \" \' \\`) through the
+whole stack (StringValue → StringLiteral → IrExpr.Str → SymExpr.Str →
+AltLexer.readString + Kind.STRING → AltParser), lexicographic-by-code-point
 ordering/equality on both backends (BinaryOp gained an `acceptsString` guard
 paralleling `acceptsChar`; Cmp/IrInterpreter compare by code point, NOT
 String.compareTo, so astral ranks correctly), constants rendered in both
-ledgers. Fences: strings order and compare — they don't compute (no arithmetic,
-no indexing); NO String/Char and NO String/Int tower (mixed fails closed); no
-promotion (DecimalPromotion identity). Engines abstain on `Str` PERMANENTLY —
-unlike Char, String has no discrete integer route. `String` is in
-SortChecker.PRIMITIVE_SORT_NAMES + ConstructionGate.PRIMITIVES; capacityOf
-leaves it at `OTHER` (the collection conservation atom model stays PARKED —
-String is its eventual forcing-function, the same model sorting waits for).
-Pinned by StringAltTest (12 tests). **Follow-up — Slice 2:** the pure
-`String -> Stream(Char)` view (decode code points into an Element/Leaf Queue —
-no action-gate; literals are statically known), which unlocks combinator
-`concat`/`map`/etc. over strings. Literal-field-patterns over String deferred;
+ledgers. `String` is in SortChecker.PRIMITIVE_SORT_NAMES +
+ConstructionGate.PRIMITIVES; capacityOf leaves it at `OTHER` (collection
+conservation atom model PARKED — String is its forcing-function). Pinned by
+StringAltTest (12 tests).
+
+**WITHDRAWN framing (were misunderstandings, not rulings):** "strings don't
+compute / no `+`", "concat is combinator-only", "no String/Char or String/Int
+coercion / mixed fails closed". Strings are **privileged** — they earn sugar
+the rest of the sequence substrate doesn't. What still holds: no indexing;
+by-code-point ordering; engines abstain on raw `Str`. The `acceptsString`
+mixed-arithmetic fence will be loosened where the re-cut requires (String+Int,
+String+Decimal).
+
+**Forward slices (`strings.md`):**
+- **Slice 2 — strings compute:** `+` as a plain operator overload
+  (String+String; String+Int renders the int; String+Decimal default-renders),
+  concatenation by adjacency-to-a-literal (sugar for `+`), and Char↔String
+  coercion (Char→String free; String→Char guarded length-1). Decimal display
+  formatting via the `value:["fmt"]` coercion (RULED: Excel-style `0`/`#`
+  per-position placeholders, half-even rounding, locale-self-describing radix;
+  **result type RULED = String**) rides alongside. Soft follow-up: the spelling
+  may move to `d.format("…")` if primitive instance methods land (below).
+- **Slice 3 — `String -> Queue(Char)` view:** the pure coercion (decode code
+  points into an Element/Leaf Queue; no action-gate). Substrate for transform
+  combinators (`map` etc.) and for parsing — NOT for concat (that's `+`).
+- **Slice 4 — string pattern matching as parsing:** `match s { [x:Int "+" r]
+  -> … }` over the char view; built-in Int/Decimal extractors (Decimal needs a
+  `digits.digits` form); mandatory default arm (grammar coverage isn't
+  determinable — accepted tradeoff); remainder var + `""` end-anchor.
+- **Slice 5 — `assign parser`:** custom per-type productions, paralleling
+  `assign trait`/`assign proof`; built-in Int/Decimal are pre-registered.
+- **Alongside (proof revamp):** remove the proof-surface `Leaf`/`Split`/
+  `Singletons`; the std.common/std.stream terminal `Leaf()` is untouched.
+
 `ord`/`chr` still deferred (shared with Char).
+
+**Instance methods on primitives (WANT — not yet designed).** Int, Decimal,
+Char, String, Bool should host instance methods (`d.format("0.00")`,
+`s.length()`), not force a separate library of free functions — it's a
+namespacing/discoverability gap. Method *resolution* is already receiver-sort →
+`Type.method`, so the call path isn't the blocker; what's missing is (a) a place
+to attach methods to a primitive (which has no struct/trait def) and (b) a
+**coherence answer** — primitives are language-owned, so the orphan rule
+forbids a user module adding `method Int.foo` unless we bless std-owned
+primitive methods (auto-in-scope) or carve out an extension-method rule.
+Upstreams the Decimal-format *spelling* (`d:["fmt"]` vs `d.format(…)`).
 
 **Division in body position (fixed):** `/` and `%` in a function BODY now
 hoist in the receipts Drafter like calls (operator calls, per dispatch

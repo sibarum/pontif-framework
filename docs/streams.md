@@ -239,25 +239,24 @@ they stay.
   skip license.
 - **Construction gate**: per-element judgment is the existing three-way
   generalized from record members to elements.
-- **String (RULED; Slice 1 LANDED)**: the first Char *collection*. **Anatomy
-  RULED both, jurisdiction-marked**: a native-storage `StringValue` (the Char
-  analog of Array — storage is representation) *and*, as the design target, an
-  inductive `Queue(Char)` view, mirroring the Array/Queue two-implementor
-  split. **Slice 1 (landed)** delivers the storage half — `"..."` double-quoted
-  literals (full Unicode incl. astral; escapes `\n \t \" \\`) through the whole
-  stack (`StringValue` → `StringLiteral` → `IrExpr.Str` → lexer `readString` →
-  alt parser), and ordering: strings order and compare **lexicographically by
-  code point** via `Cmp`, no String/Char and no String/Int tower (mixed fails
-  closed). Like Char, **strings order and compare; they don't compute** — no
-  arithmetic, no indexing. **Concatenation is the `concat` combinator**, not an
-  operator — so it (and the rest of the stream API) arrives with the **Slice 2**
-  `String -> Stream(Char)` view (a *pure* coercion: a literal's content is
-  statically known, unlike Array's runtime/reality content, so no action-gate).
-  The **collection conservation atom model** stays parked — a String is one
-  opaque `OTHER`-capacity atom for now (`capacityOf`), exactly the "pure side
-  may hold an array value opaquely" precedent; String is its eventual
-  forcing-function. "No array type" holds at the semantic level; storage is
-  representation.
+- **String (Slice 1 LANDED; spec now in `strings.md`)**: the first Char
+  *collection* — a native-storage `StringValue` (the Char analog of Array —
+  storage is representation) with an inductive `Queue(Char)` view underneath.
+  **Slice 1 (landed)** delivers the value half — `"..."`/`'...'` literals (full
+  Unicode incl. astral) through the whole stack (`StringValue` →
+  `StringLiteral` → `IrExpr.Str` → lexer `readString` → alt parser), and
+  ordering **lexicographically by code point** via `Cmp` (not `String.compareTo`,
+  so astral ranks correctly). **Strings are deliberately privileged** — unlike
+  the rest of the sequence substrate they get bespoke sugar (`+` as a plain
+  operator overload, concatenation by adjacency, later pattern-matching as
+  parsing); the Array/Queue austerity does **not** apply to them. The
+  `Queue(Char)` view is the operational substrate for transform combinators and
+  for parsing, **not** for concatenation (that's `+`), which is why it is a
+  later slice than the sugar. The **collection conservation atom model** stays
+  parked — a String is one opaque `OTHER`-capacity atom for now (`capacityOf`);
+  String is its eventual forcing-function. "No array type" holds at the
+  semantic level; storage is representation. See `strings.md` for the full
+  spec and slice plan.
 
 # Open questions (for red-pen)
 
