@@ -145,6 +145,29 @@ class ReadmeSnippetTest {
                 .compareTo((java.math.BigDecimal) result));
     }
 
+    // --- Traits: methods (the primary example) -------------------------------
+
+    @Test
+    void readmeTraitMethodSnippet_evaluatesTo107() {
+        assertEquals("107", runGated("""
+                let Greeter:Type{ greet:[Method():Int] }
+
+                struct Formal(rank:Int)
+                struct Casual(mood:Int)
+
+                assign trait Formal:Greeter {
+                  greet():Int -> this.rank + 100
+                }
+                assign trait Casual:Greeter {
+                  greet():Int -> this.mood
+                }
+
+                function announce(g:Greeter):Int -> g.greet()
+
+                announce(Formal(5)) + announce(Casual(2))
+                """));
+    }
+
     // --- Traits: DATA attributes + bidirectional coercion --------------------
 
     @Test

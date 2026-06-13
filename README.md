@@ -150,8 +150,39 @@ omission and is rejected.
 ## Traits — alternative interfaces
 
 A trait is a type whose members are declared by *name* with `Type{ ... }`, and a
-struct is fitted to it with `assign trait`. Members are typed **data attributes**
-as well as methods:
+struct is fitted to it with `assign trait`. Those members are **methods** — named
+contracts a type promises to satisfy — and typed **data attributes**.
+
+The method form is the heart of it: a trait names method signatures, each concrete
+type supplies its own implementation, and a function written against the trait
+dispatches to whichever implementation the runtime value carries:
+
+```pontif
+let Greeter:Type{ greet:[Method():Int] }
+
+struct Formal(rank:Int)
+struct Casual(mood:Int)
+
+assign trait Formal:Greeter {
+  greet():Int -> this.rank + 100
+}
+assign trait Casual:Greeter {
+  greet():Int -> this.mood
+}
+
+function announce(g:Greeter):Int -> g.greet()
+
+announce(Formal(5)) + announce(Casual(2))   # → 107
+```
+
+`greet:[Method():Int]` is the contract — a method from the receiver alone to `Int`,
+with the `this` parameter implicit. Each `assign trait` block supplies that one
+type's `greet`, and `announce(g:Greeter)` accepts *any* satisfier: the call
+`g.greet()` resolves to `Formal.greet` or `Casual.greet` by the concrete type the
+value carries. There is no inheritance and no vtable — trait dispatch is the same
+module-coherent multi-dispatch the rest of the language uses, keyed on the receiver.
+
+Members can also be typed **data attributes** — a pure projection of the struct:
 
 ```pontif
 let Heavyish:Type{ weight:[Int:@>0] }
