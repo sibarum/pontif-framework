@@ -51,7 +51,7 @@ final class DecimalPromotion {
                                 a.name(), a.params(), a.returnSort(),
                                 rewriteExpr(a.body(), structs), a.origin()));
                     }
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.origin());
+                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.typeBindings(), ti.origin());
                 }
                 default -> stmt;  // TypeAlias / Proof / Requires / Exports / NoOp
             });

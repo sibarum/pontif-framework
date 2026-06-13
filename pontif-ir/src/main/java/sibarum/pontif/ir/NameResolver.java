@@ -69,9 +69,14 @@ public final class NameResolver {
                                 ModuleSymbolTable.fqn(m, a.name()), rewriteParams(a.params(), m, table),
                                 rewriteSort(a.returnSort(), m, table), rewrite(a.body(), m, table), a.origin()));
                     }
+                    Map<String, IrSort> binds = new LinkedHashMap<>();
+                    for (Map.Entry<String, IrSort> e : ti.typeBindings().entrySet()) {
+                        binds.put(e.getKey(), rewriteSort(e.getValue(), m, table));
+                    }
                     yield new IrStmt.TraitImpl(
                             resolveTypeName(ti.typeName(), m, table, ti.origin()),
-                            resolveTypeName(ti.traitName(), m, table, ti.origin()), methods, attrs, ti.origin());
+                            resolveTypeName(ti.traitName(), m, table, ti.origin()),
+                            methods, attrs, binds, ti.origin());
                 }
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
                         resolveTypeName(ta.name(), m, table, ta.origin()),

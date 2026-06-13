@@ -97,8 +97,13 @@ public final class AliasResolver {
                 for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
                     rewrittenAttrs.add(rewriteFunctionDecl(a, resolvedAliases));
                 }
+                Map<String, IrSort> rewrittenBinds = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : ti.typeBindings().entrySet()) {
+                    rewrittenBinds.put(e.getKey(), substituteResolved(e.getValue(), resolvedAliases));
+                }
                 newStatements.add(new IrStmt.TraitImpl(
-                        ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs, ti.origin()));
+                        ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs,
+                        rewrittenBinds, ti.origin()));
             } else if (stmt instanceof IrStmt.TypeAlias ta) {
                 // Type aliases are kept downstream so SortChecker can see them:
                 // trait contracts for TraitImpl validation; struct definitions

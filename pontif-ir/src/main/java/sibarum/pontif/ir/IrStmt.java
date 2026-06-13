@@ -119,6 +119,7 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             String traitName,
             List<FunctionDecl> methods,
             List<FunctionDecl> attributeProducers,
+            java.util.Map<String, IrSort> typeBindings,
             Origin origin) implements IrStmt {
         public TraitImpl {
             if (typeName == null || typeName.isEmpty()) {
@@ -129,12 +130,23 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             }
             methods = List.copyOf(methods);
             attributeProducers = List.copyOf(attributeProducers);
+            // member name -> bound type supplied by `type X = [Sort]`. Map.copyOf
+            // is fine (bound sorts are never null here, unlike a trait's optional
+            // associated-type bound).
+            typeBindings = java.util.Map.copyOf(typeBindings);
+        }
+
+        /** Back-compat: an impl with no associated-type bindings. */
+        public TraitImpl(String typeName, String traitName,
+                         List<FunctionDecl> methods, List<FunctionDecl> attributeProducers,
+                         Origin origin) {
+            this(typeName, traitName, methods, attributeProducers, java.util.Map.of(), origin);
         }
 
         /** Back-compat: a methods-only impl (no provided data attributes). */
         public TraitImpl(String typeName, String traitName,
                          List<FunctionDecl> methods, Origin origin) {
-            this(typeName, traitName, methods, List.of(), origin);
+            this(typeName, traitName, methods, List.of(), java.util.Map.of(), origin);
         }
     }
 

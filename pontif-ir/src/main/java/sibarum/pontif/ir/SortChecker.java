@@ -134,6 +134,31 @@ public final class SortChecker {
                     ti.origin());
         }
 
+        // Associated types: each `type X` the trait declares must be bound
+        // exactly once (`type X = [Sort]`), and a binding for an undeclared
+        // associated type is over-assignment. The bound must name a known type.
+        for (String declared : contract.associatedTypes().keySet()) {
+            if (!ti.typeBindings().containsKey(declared)) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' is missing associated-type binding '" + declared
+                                + "' — trait declares `type " + declared
+                                + "`; supply `type " + declared + " = [...]`",
+                        ti.origin());
+            }
+        }
+        for (Map.Entry<String, IrSort> b : ti.typeBindings().entrySet()) {
+            if (!contract.associatedTypes().containsKey(b.getKey())) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' binds associated type '" + b.getKey()
+                                + "', which trait '" + ti.traitName()
+                                + "' does not declare — over-assignment",
+                        ti.origin());
+            }
+            validateSortNames(b.getValue(), structDefs);
+        }
+
         // Build short-name -> impl map (stripping the "Type." prefix).
         Map<String, IrStmt.FunctionDecl> implByShortName = new LinkedHashMap<>();
         String prefix = ti.typeName() + ".";
@@ -164,6 +189,37 @@ public final class SortChecker {
                                 + " (self + " + contractSig.paramSorts().size()
                                 + " from contract)",
                         impl.origin());
+            }
+            // Associated-type conformance: for a contract method that mentions an
+            // associated type, substitute this impl's bindings (T ↦ [Int]) into
+            // the contract signature and require the impl's own declared sorts to
+            // match the substituted contract — so `type T = [Int]` actually binds
+            // `evaluate:[Method():T]` to a `():Int` obligation. Methods that don't
+            // mention an associated type keep the prior arity-only check (so
+            // associated-type-free traits gain no new constraint).
+            if (mentionsAny(contractSig, contract.associatedTypes().keySet())) {
+                IrSort.Method want = (IrSort.Method)
+                        substituteTypeVars(contractSig, ti.typeBindings());
+                if (!sameBaseSort(impl.returnSort(), want.returnSort())) {
+                    throw new CompileException(
+                            "Method '" + impl.name() + "' returns "
+                                    + describeDomain(impl.returnSort())
+                                    + " but the trait contract (with the impl's type bindings)"
+                                    + " requires " + describeDomain(want.returnSort()),
+                            impl.origin());
+                }
+                for (int i = 0; i < want.paramSorts().size(); i++) {
+                    // impl param 0 is the injected `this`; user params follow.
+                    IrSort implParam = impl.params().get(i + 1).sort();
+                    if (!sameBaseSort(implParam, want.paramSorts().get(i))) {
+                        throw new CompileException(
+                                "Method '" + impl.name() + "' parameter " + (i + 1)
+                                        + " is " + describeDomain(implParam)
+                                        + " but the trait contract (with the impl's type"
+                                        + " bindings) requires " + describeDomain(want.paramSorts().get(i)),
+                                impl.origin());
+                    }
+                }
             }
         }
 
@@ -1008,6 +1064,64 @@ public final class SortChecker {
             case IrSort.Structural s -> s.name();
             default -> null;
         };
+    }
+
+    /** Whether {@code sort} references any of the given (associated-type) names. */
+    private static boolean mentionsAny(IrSort sort, Set<String> names) {
+        return switch (sort) {
+            case IrSort.Named n -> names.contains(n.name());
+            case IrSort.Refined r -> names.contains(r.name());
+            case IrSort.Method f -> f.paramSorts().stream().anyMatch(p -> mentionsAny(p, names))
+                    || mentionsAny(f.returnSort(), names);
+            case IrSort.Union u -> u.branches().stream().anyMatch(b -> mentionsAny(b, names));
+            case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> mentionsAny(b, names));
+            case IrSort.Structural s -> s.members().values().stream().anyMatch(mm -> mentionsAny(mm, names));
+            case IrSort.Dispatch d -> d.keySorts().stream().anyMatch(k -> mentionsAny(k, names))
+                    || mentionsAny(d.returnSort(), names);
+            case IrSort.Trait t -> false;  // a trait shell/ref doesn't name the variable
+        };
+    }
+
+    /**
+     * Substitutes associated-type variables with their per-impl bindings:
+     * a {@link IrSort.Named} whose name is a key in {@code bindings} becomes the
+     * bound sort. Used to make a trait's dependent contract concrete for one impl.
+     */
+    private static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
+        return switch (sort) {
+            case IrSort.Named n -> bindings.getOrDefault(n.name(), n);
+            case IrSort.Method f -> new IrSort.Method(
+                    f.paramSorts().stream().map(p -> substituteTypeVars(p, bindings)).toList(),
+                    substituteTypeVars(f.returnSort(), bindings), f.origin());
+            case IrSort.Union u -> new IrSort.Union(
+                    u.branches().stream().map(b -> substituteTypeVars(b, bindings)).toList(), u.origin());
+            case IrSort.Intersection i -> new IrSort.Intersection(
+                    i.branches().stream().map(b -> substituteTypeVars(b, bindings)).toList(), i.origin());
+            case IrSort.Dispatch d -> new IrSort.Dispatch(
+                    d.keySorts().stream().map(k -> substituteTypeVars(k, bindings)).toList(),
+                    substituteTypeVars(d.returnSort(), bindings), d.origin());
+            case IrSort.Structural s -> {
+                Map<String, IrSort> mem = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
+                    mem.put(e.getKey(), substituteTypeVars(e.getValue(), bindings));
+                }
+                yield new IrSort.Structural(
+                        s.name(), mem,
+                        s.baseSort() == null ? null : substituteTypeVars(s.baseSort(), bindings),
+                        s.origin());
+            }
+            // The name of a Refined is its base, not a reference; a Trait stays
+            // nominal. Neither is a substitution site in practice.
+            case IrSort.Refined r -> r;
+            case IrSort.Trait t -> t;
+        };
+    }
+
+    /** Conservative conformance: two sorts share a base name (both non-null). */
+    private static boolean sameBaseSort(IrSort a, IrSort b) {
+        String an = matchBaseName(a);
+        String bn = matchBaseName(b);
+        return an != null && an.equals(bn);
     }
 
     /**

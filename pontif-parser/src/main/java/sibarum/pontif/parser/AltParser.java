@@ -1564,7 +1564,25 @@ public final class AltParser {
 
         List<IrStmt.FunctionDecl> methods = new ArrayList<>();
         List<IrStmt.FunctionDecl> attributeProducers = new ArrayList<>();
+        // Associated-type bindings: `type X = [Sort]` — supplies the concrete
+        // type for the trait's `type X` member. Bound with `=` (a type, not a
+        // `->` producer value).
+        Map<String, IrSort> typeBindings = new LinkedHashMap<>();
         while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("type")) {
+                consume();  // `type`
+                AltToken varName = expect(AltToken.Kind.IDENT);
+                expect(AltToken.Kind.EQUALS);   // `=`
+                IrSort boundType = parseSort();  // the supplied type (`[Int]`)
+                if (typeBindings.containsKey(varName.text())) {
+                    throw new ParseException(
+                            "Duplicate associated-type binding '" + varName.text()
+                                    + "' in trait impl",
+                            varName.origin());
+                }
+                typeBindings.put(varName.text(), boundType);
+                continue;
+            }
             // A member is a METHOD if `(` follows its name (`ping():Int -> …`)
             // and an ATTRIBUTE producer if `:` does (`weight:Int -> …`). Both
             // are `member <- producer` arrows; only the `()` differs.
@@ -1577,7 +1595,8 @@ public final class AltParser {
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
         return new IrStmt.TraitImpl(
-                typeName, traitNameTok.text(), methods, attributeProducers, start.spanTo(close));
+                typeName, traitNameTok.text(), methods, attributeProducers,
+                typeBindings, start.spanTo(close));
     }
 
     /**
