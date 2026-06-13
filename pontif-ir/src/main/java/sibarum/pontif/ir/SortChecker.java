@@ -62,6 +62,14 @@ public final class SortChecker {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
         Map<String, IrSort.Structural> structDefs = TypeRegistry.collect(module);
+        // The declared trait-satisfaction relation (type satisfies trait), from
+        // every `assign trait` block — used to check associated-type bounds.
+        Set<String> satisfies = new HashSet<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.TraitImpl t) {
+                satisfies.add(t.typeName() + " " + t.traitName());
+            }
+        }
 
         // Struct is-a relationships (`struct Name:[Base:rel](fields)`): the base
         // must resolve, and a struct-base morphism must functionally pin every
@@ -84,7 +92,7 @@ public final class SortChecker {
                 validateSortNames(fd.returnSort(), structDefs);
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns, structDefs);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
                 // Validate a trait DECLARATION end-to-end: its member sorts must
                 // reference only known sorts — primitives, declared types, or the
@@ -124,7 +132,8 @@ public final class SortChecker {
             IrStmt.TraitImpl ti,
             Map<String, IrSort.Trait> traitContracts,
             Map<String, IrSort> functionReturns,
-            Map<String, IrSort.Structural> structDefs) throws CompileException {
+            Map<String, IrSort.Structural> structDefs,
+            Set<String> satisfies) throws CompileException {
         IrSort.Trait contract = traitContracts.get(ti.traitName());
         if (contract == null) {
             throw new CompileException(
@@ -157,6 +166,33 @@ public final class SortChecker {
                         ti.origin());
             }
             validateSortNames(b.getValue(), structDefs);
+        }
+
+        // Bound satisfaction (`type X:R`): the bound type the impl supplies must
+        // satisfy R — there must be an `assign trait <bound>:R` in scope (or the
+        // bound IS R). A type bound is a refinement on the type, checked the same
+        // way a value refinement is — fail-closed.
+        for (Map.Entry<String, IrSort> at : contract.associatedTypes().entrySet()) {
+            IrSort bound = at.getValue();
+            if (bound == null) continue;  // unbounded `type X`
+            IrSort binding = ti.typeBindings().get(at.getKey());
+            if (binding == null) continue;  // missing — already reported above
+            String boundType = boundName(binding);
+            String reqTrait = boundName(bound);
+            if (reqTrait == null) continue;  // unknown bound shape — nothing to check
+            boolean ok = boundType != null
+                    && (boundType.equals(reqTrait)
+                            || satisfies.contains(boundType + " " + reqTrait));
+            if (!ok) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' binds `type " + at.getKey() + " = "
+                                + describeDomain(binding) + "`, but trait '" + ti.traitName()
+                                + "' requires that type to satisfy '" + reqTrait
+                                + "' — no `assign trait " + boundType + ":" + reqTrait
+                                + "` is in scope",
+                        ti.origin());
+            }
         }
 
         // Build short-name -> impl map (stripping the "Type." prefix).
@@ -1114,6 +1150,17 @@ public final class SortChecker {
             // nominal. Neither is a substitution site in practice.
             case IrSort.Refined r -> r;
             case IrSort.Trait t -> t;
+        };
+    }
+
+    /** Nominal name of a sort, including a trait (which {@link #matchBaseName} omits). */
+    private static String boundName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            case IrSort.Trait t -> t.name();
+            default -> null;
         };
     }
 
