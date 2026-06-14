@@ -1071,6 +1071,13 @@ public final class AltParser {
             return parseDestructuringLetTop(start);
         }
         String name = parseDottedName();
+        // Optional `[type T, …]` slot for a parametric trait declaration
+        // (`let Expr[type T]:Type{…}`, docs/type-parameters.md §2.1). After the
+        // name, before the `:`. Consumed here; attached to the trait sort at the
+        // patch site below (ignored for non-trait lets).
+        Map<String, IrSort> traitTypeParams = peek().kind() == AltToken.Kind.LBRACKET
+                ? parseTypeParamSlot()
+                : new LinkedHashMap<>();
         if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
             return parseDictDecompositionLetTop(start, name);
         }
@@ -1128,7 +1135,8 @@ public final class AltParser {
             }
             declaredTraits.add(name);
             IrSort.Trait named = new IrSort.Trait(
-                    name, t.methods(), t.attributes(), t.associatedTypes(), t.origin());
+                    name, t.methods(), t.attributes(), t.associatedTypes(),
+                    traitTypeParams, t.origin());
             for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
                 declaredFunctionReturns.put(
                         name + "." + e.getKey(), e.getValue().returnSort());

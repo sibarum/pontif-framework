@@ -166,7 +166,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      */
     record Trait(String name, Map<String, IrSort.Method> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                 Origin origin) implements IrSort {
+                 Map<String, IrSort> typeParams, Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -180,6 +180,9 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (associatedTypes == null) {
                 throw new IllegalArgumentException("Trait associatedTypes must be non-null");
             }
+            if (typeParams == null) {
+                throw new IllegalArgumentException("Trait typeParams must be non-null");
+            }
             methods = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(methods));
             attributes = java.util.Collections.unmodifiableMap(
@@ -189,17 +192,30 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // null values — Map.copyOf would not.
             associatedTypes = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(associatedTypes));
+            // `[type T]` slot parameters on the trait (`let Expr[type T]:Type{…}`,
+            // docs/type-parameters.md §2.1) — distinct from associatedTypes:
+            // parameters are chosen from OUTSIDE (the user writes `Expr[Int]`),
+            // associated types are fixed by the implementor. Null = unbounded.
+            typeParams = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(typeParams));
         }
 
-        /** Back-compat: a trait with no associated types. */
+        /** Back-compat: a trait with no type parameters. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Origin origin) {
+            this(name, methods, attributes, associatedTypes, Map.of(), origin);
+        }
+
+        /** Back-compat: a trait with no associated types or type parameters. */
         public Trait(String name, Map<String, IrSort.Method> methods,
                      Map<String, IrSort> attributes, Origin origin) {
-            this(name, methods, attributes, Map.of(), origin);
+            this(name, methods, attributes, Map.of(), Map.of(), origin);
         }
 
         /** Back-compat: a methods-only trait (no data attributes). */
         public Trait(String name, Map<String, IrSort.Method> methods, Origin origin) {
-            this(name, methods, Map.of(), Map.of(), origin);
+            this(name, methods, Map.of(), Map.of(), Map.of(), origin);
         }
     }
 

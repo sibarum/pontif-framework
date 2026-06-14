@@ -179,7 +179,8 @@ public final class NameResolver {
                             e.getValue() == null ? null : rewriteSort(e.getValue(), m, table));
                 }
                 yield new IrSort.Trait(
-                        resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc, t.origin());
+                        resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
+                        t.typeParams(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

@@ -238,7 +238,8 @@ public final class AliasResolver {
                     resolvedAssoc.put(e.getKey(),
                             e.getValue() == null ? null : resolveSort(e.getValue(), aliases, path));
                 }
-                yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc, t.origin());
+                yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
+                        t.typeParams(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -390,7 +391,8 @@ public final class AliasResolver {
                     newAssoc.put(e.getKey(),
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
                 }
-                yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc, t.origin());
+                yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
+                        t.typeParams(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());

@@ -657,6 +657,7 @@ public final class SortChecker {
                 Set<String> inner = new HashSet<>(typeVars);
                 inner.add(IrSort.SELF_TYPE);
                 inner.addAll(t.associatedTypes().keySet());
+                inner.addAll(t.typeParams().keySet());
                 for (IrSort bound : t.associatedTypes().values()) {
                     if (bound != null) validateSortNames(bound, structDefs, inner);
                 }
