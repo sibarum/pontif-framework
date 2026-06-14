@@ -69,7 +69,25 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
     }
 
-    record Refined(String name, IrExpr predicate, Origin origin) implements IrSort {}
+    /**
+     * A refined sort {@code [Base:pred]}. {@code typeArgs} carries a parametric
+     * base's type arguments — {@code [Literal[Int]:@.value==value]} is
+     * {@code Refined("Literal", [Named("Int")], …)} (docs/type-parameters.md §2.3,
+     * the is-a-base reading). Empty for a non-parametric base; every existing
+     * {@code case IrSort.Refined} keeps matching, only the is-a-base check reads
+     * {@link #typeArgs()}.
+     */
+    record Refined(String name, List<IrSort> typeArgs, IrExpr predicate, Origin origin)
+            implements IrSort {
+        public Refined {
+            typeArgs = List.copyOf(typeArgs);
+        }
+
+        /** Back-compat: a non-parametric refined base (no type arguments). */
+        public Refined(String name, IrExpr predicate, Origin origin) {
+            this(name, List.of(), predicate, origin);
+        }
+    }
 
     /**
      * Struct sort. {@code baseSort} (nullable) carries the is-a relationship

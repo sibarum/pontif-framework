@@ -2160,14 +2160,30 @@ public final class AltParser {
         }
         AltToken baseTok = expect(AltToken.Kind.IDENT);
 
+        // Optional parametric application on the base — `Literal[Int]` inside a
+        // bracket sort (docs/type-parameters.md §2.3): an is-a base
+        // `[Literal[Int]]` (bare) or `[Literal[Int]:@.value==value]` (with the
+        // demotion morphism). The args are sorts.
+        List<IrSort> typeArgs = new ArrayList<>();
+        if (peek().kind() == AltToken.Kind.LBRACKET) {
+            expect(AltToken.Kind.LBRACKET);
+            boolean firstArg = true;
+            while (peek().kind() != AltToken.Kind.RBRACKET) {
+                if (!firstArg) expect(AltToken.Kind.COMMA);
+                typeArgs.add(parseSort());
+                firstArg = false;
+            }
+            expect(AltToken.Kind.RBRACKET);
+        }
+
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
             IrExpr pred = parseExpr();
             IrExpr cooked = applyPredicateSugar(pred);
-            return new IrSort.Refined(baseTok.text(), cooked, baseTok.origin());
+            return new IrSort.Refined(baseTok.text(), typeArgs, cooked, baseTok.origin());
         }
 
-        if (peek().kind() == AltToken.Kind.LPAREN) {
+        if (typeArgs.isEmpty() && peek().kind() == AltToken.Kind.LPAREN) {
             if (baseTok.text().equals("Method")) {
                 return parseFunctionSortBody(baseTok);
             }
@@ -2194,8 +2210,9 @@ public final class AltParser {
             return structural;
         }
 
-        // Bare name — `Int`, `Bool`, etc.
-        return new IrSort.Named(baseTok.text(), baseTok.origin());
+        // Bare name — `Int`, `Bool`, etc. — or a parametric application
+        // `Literal[Int]` (typeArgs non-empty).
+        return new IrSort.Named(baseTok.text(), typeArgs, baseTok.origin());
     }
 
     /**

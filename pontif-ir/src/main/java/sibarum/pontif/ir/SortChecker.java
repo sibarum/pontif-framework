@@ -646,6 +646,11 @@ public final class SortChecker {
                 }
             }
             case IrSort.Refined r -> {
+                // A parametric base's type arguments (`[Literal[Int]:…]`) are
+                // sorts — validate each in scope, like a Named application.
+                for (IrSort arg : r.typeArgs()) {
+                    validateSortNames(arg, structDefs, typeVars);
+                }
                 if (r.name().equals("Decimal")) {
                     // Decimal's refinement vocabulary is exactly three narrows —
                     // sign, range, and equality-up-to-precision — i.e. And-trees
@@ -755,7 +760,10 @@ public final class SortChecker {
                             + "`struct " + s.name() + "(value:" + baseName + ", …)`).",
                     s.origin());
         }
-        validateSortNames(base, structDefs);  // base resolves; @.field refs exist
+        // The base resolves; its `@.field` refs exist. The child's own `[type T]`
+        // parameters are in scope, so a forwarding base (`Wrapper[type T]:[Box[T]]`)
+        // validates — T is the child's variable.
+        validateSortNames(base, structDefs, s.typeParams().keySet());
         if (base instanceof IrSort.Refined r && structDefs.containsKey(r.name())) {
             IrSort.Structural baseStruct = structDefs.get(r.name());
             Set<String> pinned = new HashSet<>();
@@ -772,6 +780,160 @@ public final class SortChecker {
                 }
             }
         }
+        enforceParametricBase(s, base, baseName, structDefs);
+    }
+
+    /**
+     * For a PARAMETRIC is-a base (`struct IntLit:[Literal[Int]:…]`), the type
+     * argument is invariant: substituting it into the base struct's fields
+     * (`value:T` ⟹ `value:Int`), the child-side sort providing each base field
+     * must be EXACTLY that sort — not merely a refinement of it. A struct that
+     * declares it is-a {@code Literal[Int]} while holding a {@code value:Bool}
+     * (or a {@code value:[Int:@>0]}) is asserting a falsehood. Runs only when the
+     * base carries type arguments; a non-parametric base keeps its prior
+     * (lenient, name-pinning-only) behaviour.
+     */
+    private static void enforceParametricBase(
+            IrSort.Structural s, IrSort base, String baseName,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        List<IrSort> baseArgs = switch (base) {
+            case IrSort.Named n -> n.typeArgs();
+            case IrSort.Refined r -> r.typeArgs();
+            default -> List.of();
+        };
+        if (baseArgs.isEmpty() || baseName == null) return;
+        IrSort.Structural baseStruct = structDefs.get(baseName);
+        if (baseStruct == null) return;  // resolution already reported
+
+        List<String> bParams = new ArrayList<>(baseStruct.typeParams().keySet());
+        if (bParams.size() != baseArgs.size()) {
+            throw new CompileException(
+                    "struct '" + s.name() + "' is-a '" + baseName + "' applied to "
+                            + baseArgs.size() + " type argument(s), but '" + baseName
+                            + "' declares " + bParams.size() + " type parameter(s)",
+                    s.origin());
+        }
+        Map<String, IrSort> binds = new HashMap<>();
+        for (int i = 0; i < bParams.size(); i++) binds.put(bParams.get(i), baseArgs.get(i));
+
+        // How each base field is provided on the child: a morphism pin
+        // (`@.f == <expr>`) names the child expression; absent a morphism, a
+        // same-named child field provides it directly.
+        Map<String, IrExpr> pins = new HashMap<>();
+        if (base instanceof IrSort.Refined r) collectPinnedFieldExprs(r.predicate(), pins);
+
+        for (Map.Entry<String, IrSort> bf : baseStruct.members().entrySet()) {
+            String field = bf.getKey();
+            IrSort want = substituteTypeVars(bf.getValue(), binds);  // base field, concretized
+            IrSort childSort;
+            IrExpr pin = pins.get(field);
+            if (pin instanceof IrExpr.Var v) {
+                childSort = s.members().get(v.name());
+            } else if (pin == null) {
+                childSort = s.members().get(field);  // bare base: match by name
+            } else {
+                childSort = null;  // pinned to a non-field expression — can't compare here
+            }
+            if (childSort == null) continue;  // undeterminable / totality is the pinning check's job
+            if (!sortsExactlyEqual(childSort, want)) {
+                throw new CompileException(
+                        "struct '" + s.name() + "' is-a '" + baseName + "' but the field "
+                                + "providing base field '" + field + "' is "
+                                + describeDomain(childSort) + ", which is not exactly the "
+                                + "base's " + describeDomain(want) + " (a parametric is-a "
+                                + "base's type argument is invariant — the sorts must match "
+                                + "exactly, not merely refine).",
+                        s.origin());
+            }
+        }
+    }
+
+    /**
+     * Records each top-level {@code @.F == <expr>} conjunct as {@code F -> expr}
+     * (and {@code <expr> == @.F} symmetrically), so the is-a-base check can find
+     * the child expression a base field is pinned to.
+     */
+    private static void collectPinnedFieldExprs(IrExpr pred, Map<String, IrExpr> out) {
+        if (pred instanceof IrExpr.BinOp op) {
+            switch (op.op()) {
+                case AND -> {
+                    collectPinnedFieldExprs(op.left(), out);
+                    collectPinnedFieldExprs(op.right(), out);
+                }
+                case EQ -> {
+                    String l = selfFieldName(op.left());
+                    if (l != null) out.put(l, op.right());
+                    String rhs = selfFieldName(op.right());
+                    if (rhs != null) out.put(rhs, op.left());
+                }
+                default -> { }
+            }
+        }
+    }
+
+    /**
+     * Exact structural sort equality, ignoring {@link sibarum.pontif.core.Origin}.
+     * Used by the parametric is-a-base check (the type argument is invariant): a
+     * refinement is NOT equal to its bare base, and two different bases never
+     * match. Conservative on shapes it can't compare (returns false).
+     */
+    private static boolean sortsExactlyEqual(IrSort a, IrSort b) {
+        if (a == b) return true;
+        return switch (a) {
+            case IrSort.Named na -> b instanceof IrSort.Named nb
+                    && na.name().equals(nb.name())
+                    && sortListsExactlyEqual(na.typeArgs(), nb.typeArgs());
+            case IrSort.Refined ra -> b instanceof IrSort.Refined rb
+                    && ra.name().equals(rb.name())
+                    && sortListsExactlyEqual(ra.typeArgs(), rb.typeArgs())
+                    && exprExactlyEqual(ra.predicate(), rb.predicate());
+            case IrSort.Method ma -> b instanceof IrSort.Method mb
+                    && sortListsExactlyEqual(ma.paramSorts(), mb.paramSorts())
+                    && sortsExactlyEqual(ma.returnSort(), mb.returnSort());
+            case IrSort.Dispatch da -> b instanceof IrSort.Dispatch db
+                    && sortListsExactlyEqual(da.keySorts(), db.keySorts())
+                    && sortsExactlyEqual(da.returnSort(), db.returnSort());
+            case IrSort.Union ua -> b instanceof IrSort.Union ub
+                    && sortListsExactlyEqual(ua.branches(), ub.branches());
+            case IrSort.Intersection ia -> b instanceof IrSort.Intersection ib
+                    && sortListsExactlyEqual(ia.branches(), ib.branches());
+            case IrSort.Structural sa -> b instanceof IrSort.Structural sb
+                    && sa.name().equals(sb.name());  // nominal identity
+            case IrSort.Trait ta -> b instanceof IrSort.Trait tb && ta.name().equals(tb.name());
+        };
+    }
+
+    private static boolean sortListsExactlyEqual(List<IrSort> a, List<IrSort> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            if (!sortsExactlyEqual(a.get(i), b.get(i))) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Structural equality of refinement-predicate expressions, ignoring origin.
+     * Covers the node shapes a refinement predicate uses (comparisons of
+     * {@code @}/fields/literals); unrecognised shapes compare false
+     * (conservative — the is-a-base check then rejects a match it can't confirm).
+     */
+    private static boolean exprExactlyEqual(IrExpr a, IrExpr b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        return switch (a) {
+            case IrExpr.Lit la -> b instanceof IrExpr.Lit lb && la.value() == lb.value();
+            case IrExpr.Bool ba -> b instanceof IrExpr.Bool bb && ba.value() == bb.value();
+            case IrExpr.Var va -> b instanceof IrExpr.Var vb && va.name().equals(vb.name());
+            case IrExpr.SelfRef sa -> b instanceof IrExpr.SelfRef;
+            case IrExpr.FieldAccess fa -> b instanceof IrExpr.FieldAccess fb
+                    && fa.fieldName().equals(fb.fieldName())
+                    && exprExactlyEqual(fa.base(), fb.base());
+            case IrExpr.BinOp oa -> b instanceof IrExpr.BinOp ob
+                    && oa.op() == ob.op()
+                    && exprExactlyEqual(oa.left(), ob.left())
+                    && exprExactlyEqual(oa.right(), ob.right());
+            default -> false;
+        };
     }
 
     /** Collects base fields F appearing as a top-level {@code @.F == …} conjunct. */
@@ -1249,9 +1411,13 @@ public final class SortChecker {
                         s.baseSort() == null ? null : substituteTypeVars(s.baseSort(), bindings),
                         s.origin());
             }
-            // The name of a Refined is its base, not a reference; a Trait stays
-            // nominal. Neither is a substitution site in practice.
-            case IrSort.Refined r -> r;
+            // A Refined's name is its base, not a substitution site; but a
+            // parametric base's type args (`[Literal[T]:…]`) are substituted.
+            case IrSort.Refined r -> r.typeArgs().isEmpty() ? r : new IrSort.Refined(
+                    r.name(),
+                    r.typeArgs().stream().map(a -> substituteTypeVars(a, bindings)).toList(),
+                    r.predicate(), r.origin());
+            // A Trait stays nominal.
             case IrSort.Trait t -> t;
         };
     }

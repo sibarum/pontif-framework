@@ -158,9 +158,24 @@ impl picks the local name; an arity mismatch is an error), so there is no
 must-match-the-struct's-spelling rule. Mechanically the impl scopes its `[type T]`
 over the trait args and method sigs, then zips the trait's declared `[type E]`
 against the supplied args (`E↦T` or `E↦Int`) and substitutes into the contract
-before matching. The struct-is-a-parametric-base form (`struct IntLit:[Literal[Int]]`)
-is the same parametric-application sort in the `:[…]` slot, and is a separate
-(later) consumer of the same machinery.
+before matching.
+
+**Parametric is-a base (`struct IntLit:[Literal[Int]](…)`) — RULED 2026-06-14.**
+The same parametric-application sort also lands in a struct's `:[…]` is-a slot,
+where the base is a parametric *struct* (the extension/subtype regime, not trait
+satisfaction). Two surfaces, both supported: bare (`:[Literal[Int]]`) and with a
+demotion morphism (`:[Literal[Int]:@.value==value]`). Here the type argument is
+**invariant**: substituting it into the base struct's fields (`value:T` ⟹
+`value:Int`), the child's field providing each base field must be **exactly** that
+sort — a refinement of it (`[Int:@>0]`) or a different base (`Bool`) is a
+falsehood and is rejected. (Contrast §3.4's *covariant* subtyping between two
+parametric instances — that is assignability `Stream[Lit] ⊆ Stream[Expr]`; this is
+a struct *asserting its own identity*, where the carried argument must be honest,
+hence exact.) This enforcement is NEW relative to non-parametric extension (which
+only name-pins base fields, never checks their sorts) and runs only when the base
+carries type arguments, so non-parametric extension is unchanged.
+`IrSort.Refined` gains a `typeArgs` list (back-compat, like `Named`) to carry the
+base's arguments through to the check.
 
 ## 2.2 Inferred at the call; explicit when you must widen (RULED 2026-06-14)
 

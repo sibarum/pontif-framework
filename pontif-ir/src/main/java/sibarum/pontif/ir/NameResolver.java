@@ -148,13 +148,25 @@ public final class NameResolver {
         return t;  // primitive handled above / unknown / sole-owner-unimported — leave bare for SortChecker
     }
 
+    /** FQN-rewrites each sort in a parametric application's type-argument list. */
+    private static List<IrSort> rewriteSortArgs(
+            List<IrSort> args, String m, ModuleSymbolTable table) throws CompileException {
+        if (args.isEmpty()) return args;
+        List<IrSort> out = new ArrayList<>(args.size());
+        for (IrSort a : args) out.add(rewriteSort(a, m, table));
+        return out;
+    }
+
     /** Recursively FQN-rewrites every type name appearing in a sort. */
     private static IrSort rewriteSort(IrSort sort, String m, ModuleSymbolTable table)
             throws CompileException {
         return switch (sort) {
-            case IrSort.Named n -> new IrSort.Named(resolveTypeName(n.name(), m, table, n.origin()), n.origin());
+            case IrSort.Named n -> new IrSort.Named(
+                    resolveTypeName(n.name(), m, table, n.origin()),
+                    rewriteSortArgs(n.typeArgs(), m, table), n.origin());
             case IrSort.Refined r -> new IrSort.Refined(
-                    resolveTypeName(r.name(), m, table, r.origin()), r.predicate(), r.origin());
+                    resolveTypeName(r.name(), m, table, r.origin()),
+                    rewriteSortArgs(r.typeArgs(), m, table), r.predicate(), r.origin());
             case IrSort.Structural s -> {
                 Map<String, IrSort> members = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {
@@ -163,7 +175,8 @@ public final class NameResolver {
                 IrSort base = s.baseSort() == null
                         ? null : rewriteSort(s.baseSort(), m, table);
                 yield new IrSort.Structural(
-                        resolveTypeName(s.name(), m, table, s.origin()), members, base, s.origin());
+                        resolveTypeName(s.name(), m, table, s.origin()), members, base,
+                        s.typeParams(), s.origin());
             }
             case IrSort.Method f -> {
                 List<IrSort> ps = new ArrayList<>(f.paramSorts().size());
