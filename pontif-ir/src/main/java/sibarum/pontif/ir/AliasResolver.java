@@ -93,25 +93,46 @@ public final class AliasResolver {
                 for (IrStmt.FunctionDecl m : ti.methods()) {
                     rewrittenMethods.add(rewriteFunctionDecl(m, resolvedAliases));
                 }
+                // The trait's applied args.
+                List<IrSort> rewrittenTraitArgs = new ArrayList<>(ti.traitTypeArgs().size());
+                for (IrSort a : ti.traitTypeArgs()) {
+                    rewrittenTraitArgs.add(substituteResolved(a, resolvedAliases));
+                }
+                // A producer's return obligation was adopted from the trait's
+                // attribute sort at parse time (`value:T` from a parametric
+                // trait), so it mentions the trait's `[type E]` parameters.
+                // Concretize them with the impl's applied args (E↦Int / E↦T)
+                // so every downstream consumer — SortChecker AND the return gate
+                // (Drafter) — sees the actual obligation, not the abstract one.
+                Map<String, IrSort> traitParamBinds = new HashMap<>();
+                if (!rewrittenTraitArgs.isEmpty()
+                        && resolvedAliases.get(ti.traitName()) instanceof IrSort.Trait trDef) {
+                    List<String> tps = new ArrayList<>(trDef.typeParams().keySet());
+                    for (int i = 0; i < tps.size() && i < rewrittenTraitArgs.size(); i++) {
+                        traitParamBinds.put(tps.get(i), rewrittenTraitArgs.get(i));
+                    }
+                }
                 List<IrStmt.FunctionDecl> rewrittenAttrs = new ArrayList<>(ti.attributeProducers().size());
                 for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-                    rewrittenAttrs.add(rewriteFunctionDecl(a, resolvedAliases));
+                    IrStmt.FunctionDecl ra = rewriteFunctionDecl(a, resolvedAliases);
+                    if (!traitParamBinds.isEmpty()) {
+                        ra = new IrStmt.FunctionDecl(
+                                ra.name(), ra.params(),
+                                SortChecker.substituteTypeVars(ra.returnSort(), traitParamBinds),
+                                ra.body(), ra.origin(), ra.topLevelLet(), ra.typeParams());
+                    }
+                    rewrittenAttrs.add(ra);
                 }
                 Map<String, IrSort> rewrittenBinds = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : ti.typeBindings().entrySet()) {
                     rewrittenBinds.put(e.getKey(), substituteResolved(e.getValue(), resolvedAliases));
                 }
-                // The impl's own `[type T]` bounds and the trait's applied args
-                // are sorts too — resolve abbreviation refs in them (a forwarded
-                // variable `T` or concrete `Int` simply stays).
+                // The impl's own `[type T]` bounds — resolve abbreviation refs (a
+                // forwarded variable `T` or concrete `Int` simply stays).
                 Map<String, IrSort> rewrittenParams = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : ti.typeParams().entrySet()) {
                     rewrittenParams.put(e.getKey(),
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolvedAliases));
-                }
-                List<IrSort> rewrittenTraitArgs = new ArrayList<>(ti.traitTypeArgs().size());
-                for (IrSort a : ti.traitTypeArgs()) {
-                    rewrittenTraitArgs.add(substituteResolved(a, resolvedAliases));
                 }
                 newStatements.add(new IrStmt.TraitImpl(
                         ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs,

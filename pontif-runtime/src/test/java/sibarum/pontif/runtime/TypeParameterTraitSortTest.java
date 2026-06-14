@@ -156,6 +156,38 @@ class TypeParameterTraitSortTest {
     }
 
     @Test
+    void concreteImpl_satisfiesParametricAttributeWithProducer() {
+        // No `value` field; a producer computes it. The trait's `value:T`
+        // substitutes E↦Int, so the producer's `value:Int` return satisfies it.
+        compiles("""
+                let Literal[type T]:Type{
+                  value:T
+                }
+                struct IntLit(raw:Int)
+                assign trait IntLit:Literal[Int]{
+                  value:Int -> this.raw
+                }
+                0
+                """);
+    }
+
+    @Test
+    void parametricImpl_satisfiesAttributeWithForwardingProducer() {
+        // The producer forwards the impl's variable T; the trait's `value:T`
+        // (E↦T) matches the producer's `value:T` return.
+        compiles("""
+                let Holder[type E]:Type{
+                  value:E
+                }
+                struct Wrap[type T](inner:T)
+                assign trait Wrap[type T]:Holder[T]{
+                  value:T -> this.inner
+                }
+                0
+                """);
+    }
+
+    @Test
     void impl_withoutBinder_treatsForwardedNameAsUnknown() {
         // No `[type T]` binder, so `T` in `Producer[T]` is NOT a variable — it
         // is read as a concrete type name, which is unknown. This is the binder
