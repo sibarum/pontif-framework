@@ -235,7 +235,70 @@ final class ConstructionGate {
                 }
             }
         }
+        deriveAndCheckTypeParams(r, decl, members, ctx, structs);
         return new IrExpr.Record(r.typeName(), members, checks, r.origin());
+    }
+
+    /**
+     * Type-parameter derivation at construction (docs/type-parameters.md §3.1,
+     * §3.3): for a parametric struct, each `type T` is recovered by matching the
+     * field sorts that mention it against the constructor arguments' concrete
+     * sorts — "the field is the witness." A parameter the arguments bind two
+     * different ways (`Pair(1, true)` — `T` as Int and as Bool) is a compile
+     * error: the arguments disagree on the type. Pure check; no rewrite — the
+     * value already carries its concrete field types at runtime.
+     */
+    private static void deriveAndCheckTypeParams(
+            IrExpr.Record r, IrSort.Structural decl, Map<String, IrExpr> members,
+            InferenceContext ctx, Map<String, IrSort.Structural> structs)
+            throws CompileException {
+        if (decl.typeParams().isEmpty()) return;
+        Set<String> params = decl.typeParams().keySet();
+        Map<String, String> bound = new LinkedHashMap<>();
+        for (Map.Entry<String, IrExpr> en : members.entrySet()) {
+            IrSort field = decl.members().get(en.getKey());
+            if (field == null) continue;
+            IrSort arg = argSort(en.getValue(), ctx, structs);
+            if (arg == null) continue;
+            unifyTypeParams(field, arg, params, bound, r);
+        }
+    }
+
+    /**
+     * One-directional match of a field sort (the lens, which may mention type
+     * parameters) against an argument's concrete sort, recording each
+     * parameter's concrete base name into {@code bound} and throwing when a
+     * parameter is bound two incompatible ways. Bare `T` binds to the argument's
+     * base; a parametric application `Element[T]` unifies positionally against a
+     * concrete `Element[Int]`. Shapes it can't match are skipped (best-effort —
+     * the derivation only needs one witness per parameter).
+     */
+    private static void unifyTypeParams(
+            IrSort lens, IrSort concrete, Set<String> params,
+            Map<String, String> bound, IrExpr.Record r) throws CompileException {
+        if (!(lens instanceof IrSort.Named ln)) return;
+        if (ln.typeArgs().isEmpty() && params.contains(ln.name())) {
+            String c = baseName(concrete);
+            if (c == null) return;
+            String prev = bound.putIfAbsent(ln.name(), c);
+            if (prev != null && !prev.equals(c)) {
+                throw new CompileException(
+                        "Type parameter '" + ln.name() + "' of '" + r.typeName()
+                                + "' is bound to both '" + prev + "' and '" + c
+                                + "' — the constructor arguments disagree on the type",
+                        r.origin());
+            }
+            return;
+        }
+        // Parametric application: `Element[T]` vs a concrete `Element[Int]` —
+        // unify the type arguments positionally when heads and arity agree.
+        if (!ln.typeArgs().isEmpty() && concrete instanceof IrSort.Named cn
+                && cn.name().equals(ln.name())
+                && cn.typeArgs().size() == ln.typeArgs().size()) {
+            for (int i = 0; i < ln.typeArgs().size(); i++) {
+                unifyTypeParams(ln.typeArgs().get(i), cn.typeArgs().get(i), params, bound, r);
+            }
+        }
     }
 
     /**
