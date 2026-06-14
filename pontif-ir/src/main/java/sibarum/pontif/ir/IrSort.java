@@ -48,7 +48,26 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         return new Intersection(branches, Origin.NONE);
     }
 
-    record Named(String name, Origin origin) implements IrSort {}
+    /**
+     * A named type reference, optionally applied to type arguments:
+     * {@code Int} is {@code Named("Int", [])}, a type variable {@code T} is
+     * {@code Named("T", [])}, and a parametric application {@code Element[Int]}
+     * is {@code Named("Element", [Named("Int", [])])}
+     * (docs/type-parameters.md §2.3). A bare reference and an applied one share
+     * this one variant — the head name plus its (possibly empty) type arguments —
+     * so every existing {@code case IrSort.Named} keeps matching; only code that
+     * cares about the arguments reads {@link #typeArgs()}.
+     */
+    record Named(String name, List<IrSort> typeArgs, Origin origin) implements IrSort {
+        public Named {
+            typeArgs = List.copyOf(typeArgs);
+        }
+
+        /** Back-compat: a bare named reference with no type arguments. */
+        public Named(String name, Origin origin) {
+            this(name, List.of(), origin);
+        }
+    }
 
     record Refined(String name, IrExpr predicate, Origin origin) implements IrSort {}
 

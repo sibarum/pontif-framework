@@ -1837,6 +1837,25 @@ public final class AltParser {
             if (peek(1).kind() == AltToken.Kind.LBRACE && declaredStructs.containsKey(t.text())) {
                 return parseConstructionPinSort();
             }
+            // `Name[arg, …]` — a parametric type application
+            // (docs/type-parameters.md §2.3): `Element[Int]`, `Element[T]`. The
+            // args are sorts. A bare `name[…]` (no `$`) is free here —
+            // metareferences are `$`-prefixed. Distinct from the `[type T]`
+            // declaration slot, which is parsed by parseTypeParamSlot at decl
+            // sites, never inside a sort.
+            if (peek(1).kind() == AltToken.Kind.LBRACKET) {
+                AltToken nameTok = consume();      // the head name
+                expect(AltToken.Kind.LBRACKET);
+                List<IrSort> typeArgs = new ArrayList<>();
+                boolean first = true;
+                while (peek().kind() != AltToken.Kind.RBRACKET) {
+                    if (!first) expect(AltToken.Kind.COMMA);
+                    typeArgs.add(parseSort());
+                    first = false;
+                }
+                AltToken close = expect(AltToken.Kind.RBRACKET);
+                return new IrSort.Named(nameTok.text(), typeArgs, nameTok.spanTo(close));
+            }
             // Bare-ident sugar: `Int` ≡ `[Int]`.
             AltToken nameTok = consume();
             return new IrSort.Named(nameTok.text(), nameTok.origin());

@@ -580,6 +580,11 @@ public final class SortChecker {
                                     + "'struct " + n.name() + "(...)' declaration?)",
                             n.origin());
                 }
+                // Type arguments of a parametric application (`Element[Int]`,
+                // `Element[T]`) are themselves sorts — validate each in scope.
+                for (IrSort arg : n.typeArgs()) {
+                    validateSortNames(arg, structDefs, typeVars);
+                }
             }
             case IrSort.Refined r -> {
                 if (r.name().equals("Decimal")) {
@@ -1129,7 +1134,8 @@ public final class SortChecker {
     /** Whether {@code sort} references any of the given (associated-type) names. */
     private static boolean mentionsAny(IrSort sort, Set<String> names) {
         return switch (sort) {
-            case IrSort.Named n -> names.contains(n.name());
+            case IrSort.Named n -> names.contains(n.name())
+                    || n.typeArgs().stream().anyMatch(a -> mentionsAny(a, names));
             case IrSort.Refined r -> names.contains(r.name());
             case IrSort.Method f -> f.paramSorts().stream().anyMatch(p -> mentionsAny(p, names))
                     || mentionsAny(f.returnSort(), names);
@@ -1149,7 +1155,16 @@ public final class SortChecker {
      */
     private static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
         return switch (sort) {
-            case IrSort.Named n -> bindings.getOrDefault(n.name(), n);
+            case IrSort.Named n -> {
+                // A bound type variable is replaced wholesale; otherwise the head
+                // stays and any type arguments are substituted (`Element[T]` with
+                // T↦Int becomes `Element[Int]`).
+                if (bindings.containsKey(n.name())) yield bindings.get(n.name());
+                if (n.typeArgs().isEmpty()) yield n;
+                yield new IrSort.Named(n.name(),
+                        n.typeArgs().stream().map(a -> substituteTypeVars(a, bindings)).toList(),
+                        n.origin());
+            }
             case IrSort.Method f -> new IrSort.Method(
                     f.paramSorts().stream().map(p -> substituteTypeVars(p, bindings)).toList(),
                     substituteTypeVars(f.returnSort(), bindings), f.origin());

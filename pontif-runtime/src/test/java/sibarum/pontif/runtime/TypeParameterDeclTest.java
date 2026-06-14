@@ -61,4 +61,48 @@ class TypeParameterDeclTest {
                 """);
         assertTrue(f.error().text().contains("Unknown sort 'T'"), () -> f.error().text());
     }
+
+    // --- `Name[Arg]` parametric application (slice 1b-i) ---
+
+    @Test
+    void parametricApplication_inValidatedPosition_resolves() {
+        // Box[Int] as a function-param sort: head Box known, arg Int known.
+        compiles("""
+                struct Box[type T](value:T)
+                function f(b:Box[Int]):Int -> 1
+                0
+                """);
+    }
+
+    @Test
+    void recursiveParametricStruct_declares() {
+        // The self-application `Node[T]` inside the struct's own field parses and
+        // stays nominal (no unrolling), like any recursive struct.
+        compiles("""
+                struct Node[type T](value:T, next:Node[T])
+                0
+                """);
+    }
+
+    @Test
+    void parametricApplication_unknownTypeArg_isRejected() {
+        // The type argument is itself a sort and is validated — `Bad` is unknown.
+        PontifCompiler.CompileResult.Failed f = rejects("""
+                struct Box[type T](value:T)
+                function f(b:Box[Bad]):Int -> 1
+                0
+                """);
+        assertTrue(f.error().text().contains("Unknown sort 'Bad'"), () -> f.error().text());
+    }
+
+    @Test
+    void parametricApplication_unscopedTypeVarArg_isRejected() {
+        // `T` is not a type parameter of f, so `Box[T]` references an unknown sort.
+        PontifCompiler.CompileResult.Failed f = rejects("""
+                struct Box[type T](value:T)
+                function f(b:Box[T]):Int -> 1
+                0
+                """);
+        assertTrue(f.error().text().contains("Unknown sort 'T'"), () -> f.error().text());
+    }
 }

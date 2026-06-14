@@ -122,7 +122,8 @@ public record InferenceContext(
     /** Whether {@code sort} references any of the given associated-type names. */
     private static boolean mentionsAssociatedType(IrSort sort, Set<String> names) {
         return switch (sort) {
-            case IrSort.Named n -> names.contains(n.name());
+            case IrSort.Named n -> names.contains(n.name())
+                    || n.typeArgs().stream().anyMatch(a -> mentionsAssociatedType(a, names));
             case IrSort.Refined r -> names.contains(r.name());
             case IrSort.Method m -> mentionsAssociatedType(m.returnSort(), names)
                     || m.paramSorts().stream().anyMatch(p -> mentionsAssociatedType(p, names));
@@ -150,7 +151,10 @@ public record InferenceContext(
                     IrSort bound = assoc.get(n.name());
                     yield bound != null ? bound : n;
                 }
-                yield n;
+                if (n.typeArgs().isEmpty()) yield n;
+                yield new IrSort.Named(n.name(),
+                        n.typeArgs().stream().map(a -> existentialize(a, assoc)).toList(),
+                        n.origin());
             }
             case IrSort.Method m -> new IrSort.Method(
                     m.paramSorts().stream().map(p -> existentialize(p, assoc)).toList(),
