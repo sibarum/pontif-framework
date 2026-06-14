@@ -85,24 +85,17 @@ class TypeParameterDeclTest {
     }
 
     @Test
-    void parametricApplication_unknownTypeArg_isRejected() {
-        // The type argument is itself a sort and is validated — `Bad` is unknown.
+    void unknownTypeArg_inReturnPosition_isRejected() {
+        // Type arguments are validated where inline destructuring does NOT apply.
+        // A return sort is not a destructure site (§2.4 — destructuring projects
+        // from an argument), so an unknown arg there is still an unknown sort.
+        // (In a *param* sort, `Box[Bad]` would instead bind `Bad` as a
+        // destructured type variable — see TypeParameterDestructureTest.)
         PontifCompiler.CompileResult.Failed f = rejects("""
                 struct Box[type T](value:T)
-                function f(b:Box[Bad]):Int -> 1
-                0
+                function f(x:Int):Box[Bad] -> x
+                f(0)
                 """);
         assertTrue(f.error().text().contains("Unknown sort 'Bad'"), () -> f.error().text());
-    }
-
-    @Test
-    void parametricApplication_unscopedTypeVarArg_isRejected() {
-        // `T` is not a type parameter of f, so `Box[T]` references an unknown sort.
-        PontifCompiler.CompileResult.Failed f = rejects("""
-                struct Box[type T](value:T)
-                function f(b:Box[T]):Int -> 1
-                0
-                """);
-        assertTrue(f.error().text().contains("Unknown sort 'T'"), () -> f.error().text());
     }
 }

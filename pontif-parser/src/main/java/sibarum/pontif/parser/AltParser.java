@@ -626,6 +626,12 @@ public final class AltParser {
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        // Inline destructuring (docs/type-parameters.md §2.4): a bare unknown name
+        // appearing as a TYPE ARGUMENT in a param sort (`b:Box[T]`) introduces a
+        // type variable, merged into the slot params so it scopes identically.
+        // (A top-level param name like `y:E` is NOT collected — an unknown sort
+        // there is a typo, not a binder.)
+        for (IrParam p : params) collectInlineTypeVars(p.sort(), typeParams);
         // A bare-operator function is a binary operator — exactly two operands
         // (left, right). The legacy `Type.op` form is naturally binary too
         // (receiver + one param), so this only guards the new bare form.
@@ -1763,6 +1769,32 @@ public final class AltParser {
      * Returns name → bound, a {@code null} bound meaning an unbounded
      * {@code type T}. Assumes the next token is the opening {@code [}.
      */
+    private static final java.util.Set<String> PRIMITIVE_SORTS =
+            java.util.Set.of("Int", "Bool", "Char", "Decimal", "String");
+
+    /**
+     * Collects inline-destructured type variables (docs/type-parameters.md §2.4)
+     * from {@code sort} into {@code typeParams}: a bare name appearing as a type
+     * ARGUMENT (`Box[T]`) that names no known sort — not a primitive, declared
+     * struct, trait, or alias, and not already a type parameter — is a fresh
+     * destructured variable (bound unbounded, {@code null}). Recurses through
+     * nesting; only argument positions are collected, never a sort's own head.
+     */
+    private void collectInlineTypeVars(IrSort sort, Map<String, IrSort> typeParams) {
+        if (!(sort instanceof IrSort.Named n)) return;
+        for (IrSort arg : n.typeArgs()) {
+            if (arg instanceof IrSort.Named an && an.typeArgs().isEmpty()
+                    && !PRIMITIVE_SORTS.contains(an.name())
+                    && !declaredStructs.containsKey(an.name())
+                    && !declaredTraits.contains(an.name())
+                    && !declaredSortAliases.contains(an.name())
+                    && !typeParams.containsKey(an.name())) {
+                typeParams.put(an.name(), null);
+            }
+            collectInlineTypeVars(arg, typeParams);
+        }
+    }
+
     private Map<String, IrSort> parseTypeParamSlot() throws ParseException {
         expect(AltToken.Kind.LBRACKET);
         Map<String, IrSort> params = new LinkedHashMap<>();
