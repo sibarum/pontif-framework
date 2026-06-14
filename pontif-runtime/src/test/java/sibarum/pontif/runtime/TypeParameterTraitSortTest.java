@@ -141,6 +141,21 @@ class TypeParameterTraitSortTest {
     }
 
     @Test
+    void concreteImpl_satisfiesParametricDataAttributeWithField() {
+        // The trait's data attribute `value:T` substitutes E↦Int, so the field
+        // `value:Int` on IntLit satisfies it — an empty impl body.
+        compiles("""
+                let Literal[type T]:Type{
+                  value:T
+                }
+                struct IntLit(value:Int)
+                assign trait IntLit:Literal[Int]{
+                }
+                0
+                """);
+    }
+
+    @Test
     void impl_withoutBinder_treatsForwardedNameAsUnknown() {
         // No `[type T]` binder, so `T` in `Producer[T]` is NOT a variable — it
         // is read as a concrete type name, which is unknown. This is the binder

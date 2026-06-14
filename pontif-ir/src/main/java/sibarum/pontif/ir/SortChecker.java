@@ -355,7 +355,10 @@ public final class SortChecker {
 
         for (Map.Entry<String, IrSort> e : contract.attributes().entrySet()) {
             String attrName = e.getKey();
-            IrSort attrSort = e.getValue();
+            // A parametric trait's attribute sort mentions its `[type E]`
+            // parameters (`value:T`); concretize them with the impl's bindings
+            // (E↦Int) before checking the field, exactly as the method sigs are.
+            IrSort attrSort = substituteTypeVars(e.getValue(), typeVarSubst);
             boolean hasField = fields.containsKey(attrName);
             boolean hasProducer = producerByShortName.containsKey(attrName);
 
