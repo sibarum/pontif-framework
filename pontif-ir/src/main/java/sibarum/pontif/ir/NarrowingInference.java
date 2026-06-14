@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Computes the narrowed sort of an expression — what's known about the
@@ -169,6 +170,25 @@ public final class NarrowingInference {
         for (IrExpr arg : c.args()) {
             argNarrowings.add(infer(arg, ctx));
         }
+        // Call-site type-parameter derivation (docs/type-parameters.md §3.1): for
+        // a parametric function, unify its declared param sorts (the lens) against
+        // the argument narrowings to bind its `[type E]` parameters, then
+        // substitute into the return — so `idd(-5):E` resolves to `[Int:@==-5]`,
+        // the precise result the caller observes. Single-overload only (a generic
+        // function isn't overloaded); StaticDispatch handles everything else. The
+        // inverse of substituteTypeVars: a one-directional match that binds.
+        if (overloads.size() == 1 && !overloads.get(0).typeParams().isEmpty()) {
+            IrStmt.FunctionDecl decl = overloads.get(0);
+            Map<String, IrSort> bindings = new LinkedHashMap<>();
+            List<IrParam> ps = decl.params();
+            for (int i = 0; i < ps.size() && i < argNarrowings.size(); i++) {
+                IrSort an = argNarrowings.get(i);
+                if (an != null) {
+                    unifyTypeArgs(ps.get(i).sort(), an, decl.typeParams().keySet(), bindings);
+                }
+            }
+            return substituteTypeArgs(decl.returnSort(), bindings);
+        }
         // Call-site return narrowing: an `assign proof` grants a return per region,
         // so if the argument narrowings land in one proof's region, its granted
         // return is what this call observes (a more precise result than the declared
@@ -184,6 +204,56 @@ public final class NarrowingInference {
             return resolved.returnSort();
         }
         return ctx.functionReturns().get(c.functionName());
+    }
+
+    /**
+     * One-directional match of a parameter sort (the lens, mentioning type
+     * parameters) against an argument's narrowing, recording each parameter's
+     * concrete sort into {@code out} (first occurrence wins — conflicts are the
+     * construction gate's beat, not inference's). Bare {@code E} binds to the
+     * whole narrowing; a parametric {@code Box[E]} unifies positionally against a
+     * concrete {@code Box[Int]}.
+     */
+    private static void unifyTypeArgs(
+            IrSort lens, IrSort concrete, Set<String> params, Map<String, IrSort> out) {
+        if (!(lens instanceof IrSort.Named ln)) return;
+        if (ln.typeArgs().isEmpty()) {
+            if (params.contains(ln.name())) out.putIfAbsent(ln.name(), concrete);
+            return;
+        }
+        if (concrete instanceof IrSort.Named cn
+                && cn.name().equals(ln.name())
+                && cn.typeArgs().size() == ln.typeArgs().size()) {
+            for (int i = 0; i < ln.typeArgs().size(); i++) {
+                unifyTypeArgs(ln.typeArgs().get(i), cn.typeArgs().get(i), params, out);
+            }
+        }
+    }
+
+    /** Substitutes the derived type-parameter bindings into a (return) sort. */
+    private static IrSort substituteTypeArgs(IrSort sort, Map<String, IrSort> bindings) {
+        if (bindings.isEmpty()) return sort;
+        return switch (sort) {
+            case IrSort.Named n -> {
+                if (bindings.containsKey(n.name())) yield bindings.get(n.name());
+                if (n.typeArgs().isEmpty()) yield n;
+                yield new IrSort.Named(n.name(),
+                        n.typeArgs().stream().map(a -> substituteTypeArgs(a, bindings)).toList(),
+                        n.origin());
+            }
+            case IrSort.Union u -> new IrSort.Union(
+                    u.branches().stream().map(b -> substituteTypeArgs(b, bindings)).toList(), u.origin());
+            case IrSort.Intersection i -> new IrSort.Intersection(
+                    i.branches().stream().map(b -> substituteTypeArgs(b, bindings)).toList(), i.origin());
+            case IrSort.Method m -> new IrSort.Method(
+                    m.paramSorts().stream().map(p -> substituteTypeArgs(p, bindings)).toList(),
+                    substituteTypeArgs(m.returnSort(), bindings), m.origin());
+            case IrSort.Dispatch d -> new IrSort.Dispatch(
+                    d.keySorts().stream().map(k -> substituteTypeArgs(k, bindings)).toList(),
+                    substituteTypeArgs(d.returnSort(), bindings), d.origin());
+            // Refined's base is not a variable; Structural/Trait stay nominal.
+            default -> sort;
+        };
     }
 
     /** Probe body for the region pseudo-overloads — unused by StaticDispatch (it reads only params/return). */
