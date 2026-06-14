@@ -609,8 +609,21 @@ public final class SortChecker {
                 validateSelfFieldAccesses(r.predicate(), baseStruct, r.origin());
             }
             case IrSort.Structural s -> {
+                // A struct's `[type T]` parameters are bound type variables IN
+                // SCOPE for its own field sorts (and is-a), so `value:T`
+                // validates (T is the variable, not an unknown sort) — exactly as
+                // the Trait case scopes associated types. A present bound
+                // (`[type T:R]`) must itself name a known sort.
+                Set<String> inner = typeVars;
+                if (!s.typeParams().isEmpty()) {
+                    inner = new HashSet<>(typeVars);
+                    inner.addAll(s.typeParams().keySet());
+                }
+                for (IrSort bound : s.typeParams().values()) {
+                    if (bound != null) validateSortNames(bound, structDefs, inner);
+                }
                 for (IrSort member : s.members().values()) {
-                    validateSortNames(member, structDefs, typeVars);
+                    validateSortNames(member, structDefs, inner);
                 }
             }
             case IrSort.Method f -> {

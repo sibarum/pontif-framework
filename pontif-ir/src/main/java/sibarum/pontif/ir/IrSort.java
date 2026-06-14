@@ -63,7 +63,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      * validation only at this slice; the demotion coercion it licenses is a
      * later slice.
      */
-    record Structural(String name, Map<String, IrSort> members, IrSort baseSort, Origin origin) implements IrSort {
+    record Structural(String name, Map<String, IrSort> members, IrSort baseSort,
+                      Map<String, IrSort> typeParams, Origin origin) implements IrSort {
         public Structural {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Structural sort name must be non-empty");
@@ -71,17 +72,30 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (members == null) {
                 throw new IllegalArgumentException("Structural sort members must be non-null");
             }
+            if (typeParams == null) {
+                throw new IllegalArgumentException("Structural sort typeParams must be non-null");
+            }
             // LinkedHashMap preserves field declaration order — critical for
             // destructure desugaring, which walks fields in declared order so
             // that `let x = p.x in let y = p.y in body` reads top-to-bottom in
             // the same order the user wrote the struct decl. Map.copyOf does
             // NOT preserve order.
             members = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(members));
+            // Type parameters (`struct Box[type T](…)`), name → bound; a null
+            // value is an unbounded `type T`. Declaration order preserved, and
+            // null values permitted (so LinkedHashMap, not Map.copyOf), exactly
+            // like {@link Trait#associatedTypes}.
+            typeParams = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(typeParams));
         }
 
-        /** Back-compat: a plain struct with no declared base-sort (is-a). */
+        /** Back-compat: a struct with a declared base-sort but no type parameters. */
+        public Structural(String name, Map<String, IrSort> members, IrSort baseSort, Origin origin) {
+            this(name, members, baseSort, java.util.Map.of(), origin);
+        }
+
+        /** Back-compat: a plain struct with no declared base-sort (is-a) and no type parameters. */
         public Structural(String name, Map<String, IrSort> members, Origin origin) {
-            this(name, members, null, origin);
+            this(name, members, null, java.util.Map.of(), origin);
         }
     }
 

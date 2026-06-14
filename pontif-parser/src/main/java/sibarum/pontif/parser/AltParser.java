@@ -1709,6 +1709,12 @@ public final class AltParser {
     private IrStmt parseStruct() throws ParseException {
         AltToken start = expectKeyword("struct");
         AltToken nameTok = expect(AltToken.Kind.IDENT);
+        // Optional `[type T, …]` — the type-parameter slot (docs/type-parameters.md
+        // §2.1), directly after the name and before the is-a/fields. A bare `[`
+        // here is unambiguous: the is-a uses `:[…]` (colon), fields use `(…)`.
+        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+                ? parseTypeParamSlot()
+                : new LinkedHashMap<>();
         // Optional `:[Base:rel]` — the is-a relationship (S2). The parsed sort
         // (Named / Refined / Union) is stored whole on the Structural; its
         // refinement predicate, if any, is the demotion morphism. SortChecker
@@ -1737,9 +1743,45 @@ public final class AltParser {
                             + "is built in and cannot be redeclared",
                     nameTok.origin());
         }
-        IrSort.Structural structSort = new IrSort.Structural(nameTok.text(), members, baseSort, origin);
+        IrSort.Structural structSort =
+                new IrSort.Structural(nameTok.text(), members, baseSort, typeParams, origin);
         declaredStructs.put(nameTok.text(), structSort);
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
+    }
+
+    /**
+     * Parses the {@code [type T, type R, …]} type-parameter slot that sits
+     * directly after a struct/function/trait name (docs/type-parameters.md §2.1).
+     * Returns name → bound, a {@code null} bound meaning an unbounded
+     * {@code type T}. Assumes the next token is the opening {@code [}.
+     */
+    private Map<String, IrSort> parseTypeParamSlot() throws ParseException {
+        expect(AltToken.Kind.LBRACKET);
+        Map<String, IrSort> params = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACKET) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            if (peek().kind() != AltToken.Kind.IDENT || !peek().text().equals("type")) {
+                throw new ParseException(
+                        "type-parameter slot expects `type NAME`; got '" + peek().text() + "'",
+                        peek().origin());
+            }
+            consume();  // `type`
+            AltToken nameTok = expect(AltToken.Kind.IDENT);
+            IrSort bound = null;
+            if (peek().kind() == AltToken.Kind.COLON) {
+                consume();  // `:`
+                bound = parseSort();   // the bound — `[type T:R]`
+            }
+            if (params.containsKey(nameTok.text())) {
+                throw new ParseException(
+                        "Duplicate type parameter '" + nameTok.text() + "'", nameTok.origin());
+            }
+            params.put(nameTok.text(), bound);
+            first = false;
+        }
+        expect(AltToken.Kind.RBRACKET);
+        return params;
     }
 
     // --- Sorts ---
