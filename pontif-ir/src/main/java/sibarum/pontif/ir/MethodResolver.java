@@ -117,7 +117,8 @@ public final class MethodResolver {
                 ? null
                 : rewriteExpr(fd.body(), bodyCtx, methodKeys, structs);
         return new IrStmt.FunctionDecl(
-                fd.name(), fd.params(), fd.returnSort(), body, fd.origin(), fd.topLevelLet());
+                fd.name(), fd.params(), fd.returnSort(), body, fd.origin(), fd.topLevelLet(),
+                fd.typeParams());
     }
 
     private static IrExpr rewriteExpr(

@@ -616,6 +616,12 @@ public final class AltParser {
     private IrStmt parseFunction() throws ParseException {
         AltToken start = expectKeyword("function");
         String name = parseDeclarationName();
+        // Optional `[type E, …]` type-parameter slot (docs/type-parameters.md
+        // §2.1), after the name and before the value params. A bare `[` here is
+        // the slot; value params follow in `(…)`.
+        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+                ? parseTypeParamSlot()
+                : new LinkedHashMap<>();
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
@@ -644,7 +650,8 @@ public final class AltParser {
                 IrExpr body = wrapParamDestructures(parseExpr(), destrs);
                 declaredFunctionReturns.put(name, returnSort);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
-                return new IrStmt.FunctionDecl(name, params, returnSort, body, start.origin());
+                return new IrStmt.FunctionDecl(
+                        name, params, returnSort, body, start.origin(), false, typeParams);
             } finally {
                 currentScope.clear();
                 currentScope.putAll(savedScope);
@@ -661,7 +668,8 @@ public final class AltParser {
                 IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
                 declaredFunctionReturns.put(name, effReturn);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
-                return new IrStmt.FunctionDecl(name, params, effReturn, body, start.origin());
+                return new IrStmt.FunctionDecl(
+                        name, params, effReturn, body, start.origin(), false, typeParams);
             }
             throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
         }

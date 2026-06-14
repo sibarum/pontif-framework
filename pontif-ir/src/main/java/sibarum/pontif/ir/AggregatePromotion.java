@@ -50,7 +50,7 @@ final class AggregatePromotion {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         fd.name(), fd.params(), fd.returnSort(),
                         rewriteExpr(fd.body(), fd.returnSort(), structs, fns), fd.origin(),
-                        fd.topLevelLet());
+                        fd.topLevelLet(), fd.typeParams());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl m : ti.methods()) {

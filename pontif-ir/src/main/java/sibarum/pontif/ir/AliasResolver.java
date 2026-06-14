@@ -265,7 +265,8 @@ public final class AliasResolver {
         IrSort newReturn = substituteResolved(fd.returnSort(), resolved);
         IrExpr newBody = rewriteExpr(fd.body(), resolved);
         return new IrStmt.FunctionDecl(
-                fd.name(), newParams, newReturn, newBody, fd.origin(), fd.topLevelLet());
+                fd.name(), newParams, newReturn, newBody, fd.origin(), fd.topLevelLet(),
+                fd.typeParams());
     }
 
     // --- Expression rewriting (touches sort references inside Let, Lambda, Match patterns) ---

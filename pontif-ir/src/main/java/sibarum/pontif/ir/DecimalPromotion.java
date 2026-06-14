@@ -37,7 +37,8 @@ final class DecimalPromotion {
             out.add(switch (stmt) {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         fd.name(), fd.params(), fd.returnSort(),
-                        rewriteExpr(fd.body(), structs), fd.origin(), fd.topLevelLet());
+                        rewriteExpr(fd.body(), structs), fd.origin(), fd.topLevelLet(),
+                        fd.typeParams());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl m : ti.methods()) {

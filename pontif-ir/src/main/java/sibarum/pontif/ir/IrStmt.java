@@ -3,6 +3,7 @@ package sibarum.pontif.ir;
 import sibarum.pontif.core.Origin;
 
 import java.util.List;
+import java.util.Map;
 
 public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
 
@@ -69,19 +70,35 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             IrSort returnSort,
             IrExpr body,
             Origin origin,
-            boolean topLevelLet) implements IrStmt {
+            boolean topLevelLet,
+            Map<String, IrSort> typeParams) implements IrStmt {
         public FunctionDecl {
             params = List.copyOf(params);
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Function name must be non-empty");
             }
+            if (typeParams == null) {
+                throw new IllegalArgumentException("Function typeParams must be non-null");
+            }
+            // `[type E]` slot params (docs/type-parameters.md §2.1), name → bound
+            // (null = unbounded). Null values permitted (so LinkedHashMap, not
+            // Map.copyOf), order preserved, like Structural.typeParams.
+            typeParams = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(typeParams));
         }
 
-        /** Ordinary function declaration — everything that isn't a top-level let. */
+        /** Back-compat: a function with no type parameters. */
+        public FunctionDecl(
+                String name, List<IrParam> params, IrSort returnSort,
+                IrExpr body, Origin origin, boolean topLevelLet) {
+            this(name, params, returnSort, body, origin, topLevelLet, java.util.Map.of());
+        }
+
+        /** Ordinary function declaration — not a top-level let, no type parameters. */
         public FunctionDecl(
                 String name, List<IrParam> params, IrSort returnSort,
                 IrExpr body, Origin origin) {
-            this(name, params, returnSort, body, origin, false);
+            this(name, params, returnSort, body, origin, false, java.util.Map.of());
         }
     }
 

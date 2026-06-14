@@ -86,7 +86,8 @@ final class ConstructionGate {
         }
         return new IrStmt.FunctionDecl(
                 fd.name(), fd.params(), fd.returnSort(),
-                rewriteExpr(fd.body(), ctx, structs), fd.origin(), fd.topLevelLet());
+                rewriteExpr(fd.body(), ctx, structs), fd.origin(), fd.topLevelLet(),
+                fd.typeParams());
     }
 
     /**

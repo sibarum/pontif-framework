@@ -55,7 +55,7 @@ public final class NameResolver {
                 case IrStmt.FunctionDecl fd -> new IrStmt.FunctionDecl(
                         ModuleSymbolTable.fqn(m, fd.name()), rewriteParams(fd.params(), m, table),
                         rewriteSort(fd.returnSort(), m, table), rewrite(fd.body(), m, table), fd.origin(),
-                        fd.topLevelLet());
+                        fd.topLevelLet(), fd.typeParams());
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl mm : ti.methods()) {

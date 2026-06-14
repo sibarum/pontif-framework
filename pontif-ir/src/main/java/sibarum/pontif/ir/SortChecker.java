@@ -85,11 +85,16 @@ public final class SortChecker {
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 Map<String, IrSort> typeEnv = new HashMap<>();
+                // The function's `[type E]` parameters are bound type variables in
+                // scope for its param and return sorts (docs/type-parameters.md
+                // §2.1), so `x:E` validates — exactly as a struct/trait scopes its
+                // own type params.
+                Set<String> fnTypeVars = fd.typeParams().keySet();
                 for (IrParam p : fd.params()) {
-                    validateSortNames(p.sort(), structDefs);
+                    validateSortNames(p.sort(), structDefs, fnTypeVars);
                     typeEnv.put(p.name(), p.sort());
                 }
-                validateSortNames(fd.returnSort(), structDefs);
+                validateSortNames(fd.returnSort(), structDefs, fnTypeVars);
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies);
