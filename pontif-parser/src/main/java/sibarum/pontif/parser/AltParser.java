@@ -1769,6 +1769,20 @@ public final class AltParser {
             return parseBracketSort();
         }
         if (t.kind() == AltToken.Kind.IDENT) {
+            // `this.type` — the self-type (the receiver's runtime-actual concrete
+            // type; docs/associated-types.md §7.3). A reserved sentinel sort:
+            // `this` is the instance, `.type` projects its type. Meaningful only
+            // in a trait contract's member sorts (scoped there by SortChecker);
+            // elsewhere it validates as an unknown sort.
+            if (t.text().equals("this")
+                    && peek(1).kind() == AltToken.Kind.DOT
+                    && peek(2).kind() == AltToken.Kind.IDENT
+                    && peek(2).text().equals("type")) {
+                consume();              // this
+                consume();              // .
+                AltToken typeTok = consume();   // type
+                return new IrSort.Named(IrSort.SELF_TYPE, t.spanTo(typeTok));
+            }
             // `Type{...}` — trait literal at sort level. The trait's name is
             // empty here (it's anonymous); parseLet patches it with the
             // let-binding's name before producing the TypeAlias.

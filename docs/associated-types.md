@@ -1,10 +1,22 @@
 Associated Types in Traits
 ===
 
-Status: DRAFT (2026-06-13) — design proposal, not implemented. Markers:
-**RULED** = settled elsewhere and assumed here; **PROPOSED** = this doc's
-recommendation awaiting a ruling; **OPEN** = undecided; **GOTCHA** = a concrete
-parser/compiler obstacle with a file:line citation.
+Status: LANDED (2026-06-13). Slices 1–4 plus the §3.2 existential-boundary
+consumption shipped; what remains is the separate free-type-parameter arc (§6.5)
+and the three OPEN decisions in §7. Per-section status is called out inline
+(**LANDED** / **PROPOSED** / **OPEN**); the original design markers are kept for
+provenance: **RULED** = settled elsewhere and assumed here; **PROPOSED** = this
+doc's recommendation (now mostly landed — see §6); **OPEN** = still undecided;
+**GOTCHA** = a concrete parser/compiler obstacle with a file:line citation (G1–G9
+are resolved in code unless noted).
+
+What landed, by commit: `e1e8cda` recursive traits (slice 1, G5); `2a8287d`
+the `type X` declaration (slice 2, G4); `c26254f` the impl bind + per-impl
+substitution (slice 3, G2/G3/G6); `3ed2844` bound-at-bind checking (slice 4,
+G9); and the existential-boundary consumption (§3.2, the second half of slice 4 —
+existentialize a contract method's associated-type return to its bound in
+`InferenceContext.fromModule`, so `b.get().describe()` types through `R`). Tests:
+`RecursiveTraitTest`, `AssociatedType{Decl,Bind,Bound,Existential}Test`.
 
 # 1. Motivation
 
@@ -173,7 +185,7 @@ trait's member sorts, then checks Lit's impl against the substituted contract:
 match. This is a scoped, structural substitution — analogous to `AliasResolver`
 but keyed by one impl's type bindings (GOTCHA G6).
 
-## 3.2 At the existential boundary (PROPOSED)
+## 3.2 At the existential boundary (LANDED)
 
 A value of *static* type `Expr` (the bare trait) has a `T` that is unknown
 *statically* but **known at runtime** (§3.4) and **bounded by `R`** if the
@@ -350,37 +362,86 @@ takes — *free* type parameters on functions/structs — is the separate next a
 - Runtime: nothing for associated types (G7); free type *parameters* would need a
   type-witness (§3.4) — out of scope.
 
-# 6. Slice plan (PROPOSED)
+# 6. Slice plan
 
 1. **Recursive traits** (G5) — nominalize trait references in `AliasResolver`.
    Small, self-contained, independently useful; unblocks the `Expr`
-   self-reference and any recursive trait. Pin with a test. **Do first.**
+   self-reference and any recursive trait. **LANDED** (`e1e8cda`,
+   `RecursiveTraitTest`).
 2. **`type X` declaration** (lexer keyword + G4) — parse `type X` in a trait,
    scope the name, validate a trait *declaration* with `type T` and a `T`-in-any-
    position signature end-to-end (no impl yet). Representation carries the
-   (still-unchecked) bound slot.
+   (still-unchecked) bound slot. **LANDED** (`2a8287d`, `AssociatedTypeDeclTest`).
 3. **The bind** (G2 + G3 + G6) — the `type X = [Sort]` impl syntax, the
    `typeBindings` representation, per-impl substitution + contract check. Makes
-   `Lit:Expr` work. Existential use (§3.2) falls out: returns-of-`T` flow as
-   (still-unbounded) existentials; concrete receivers fully unrestricted.
-4. **Bounds** (G9) — `type X:R` declarations, checked-at-bind via `TraitRegistry`,
-   and `R`-interface use of `T`-typed values. This is what makes existentials
-   *useful* (not just passable).
-5. **(Later, separate arc)** free type parameters on functions/structs with a
-   runtime type-witness (§3.4); the `let P:Type[…]` → `type P = […]` replacement.
+   `Lit:Expr` work. **LANDED** (`c26254f`, `AssociatedTypeBindTest`).
+4. **Bounds** (G9) — `type X:R` declarations, checked-at-bind via the
+   trait-satisfaction relation, and `R`-interface use of `T`-typed values. This
+   is what makes existentials *useful* (not just passable). **LANDED** in two
+   parts: bound-at-bind checking (`3ed2844`, `AssociatedTypeBoundTest`); and the
+   §3.2 existential-boundary consumption (`AssociatedTypeExistentialTest`) —
+   `InferenceContext.fromModule` registers each contract method whose return
+   mentions an associated type under the call key `Trait.method` (consulted only
+   when the receiver is the bare trait — a concrete receiver resolves to
+   `ConcreteType.method`), with the return *existentialized* to its bound, so
+   `b.get().describe()` types through `R`'s interface and dispatches to the
+   concrete impl at runtime. An unbounded `type X` existential stays opaque.
+5. **(Later, separate arc — NOT done)** free type parameters on functions/structs
+   with a runtime type-witness (§3.4); the `let P:Type[…]` → `type P = […]`
+   replacement.
+6. **The self-type return — `this.type`** (decision §7.3). A contract method that
+   is *type-preserving* (returns the implementor's own concrete type, e.g.
+   `copy:[Method():this.type]`) is spelled with `this.type` — the runtime-actual
+   type of the receiver instance. **LANDED** (`AssociatedTypeSelfTypeTest`).
+   Reserved sentinel sort `IrSort.SELF_TYPE` (`"this.type"` — un-spellable as a
+   user name); parsed in `AltParser.parseSort`; scoped over a trait's member
+   sorts in `SortChecker.validateSortNames` (like an associated-type name); per
+   impl, substituted `this.type → <implType>` so the existing conformance check
+   enforces that `copy` really returns its own type (the type-preservation gate,
+   free — a sibling type is rejected); at the bare-trait boundary,
+   `InferenceContext.fromModule` existentializes `this.type` to the owning trait,
+   so `e.copy()` on `e:Expr` flows out as `Expr` (usable through the trait), while
+   `Lit(5).copy()` keeps the concrete `Lit` (no downcast). Contrast `:TraitName`
+   (slice 4), which promises only trait-membership — the right return for a *non*
+   type-preserving method like `simplify`.
 
-# 7. Open decisions
+# 7. Decisions (resolved 2026-06-13)
 
-1. **`type X = [Int]` RHS form:** require the bracket (`[Int]`, recommended —
-   bracket-law-consistent) or also accept bare `type X = Int`?
-2. **`type` vs `Type` proximity:** keep the lowercase declarator alongside the
-   `Type{…}`/`Type[…]` metatype constructor, or reconcile the naming (does the
-   metatype eventually re-spell in terms of `type`)?
-3. **Existential return / `Self`:** is `simplify():Expr` (returns *some* Expr) the
-   intended return, or is a `Self` reference (the implementor's own concrete type)
-   also wanted? `Self` is the natural companion to associated types and would let
-   `simplify` return the same node type — worth deciding alongside, though
-   implementable later.
+1. **`type X = […]` RHS form — RESOLVED: not a real choice.** Brackets mark
+   *refinements*, not bare base sorts (the bracket/paren law, restated). A bare
+   base name takes no brackets — `type X = Int`, exactly like `let x:Int` and a
+   bare `:Int` return; a *refinement* brackets — `type X = [Int:@>0]`, like
+   `let x:[Int:@>0]`. The bind RHS is just another sort position and follows the
+   same rule; there is no bind-specific bracket requirement.
+2. **`type` vs `Type` — RESOLVED: keep separate, by design.** The casing *is* the
+   disambiguator: lowercase = keyword/declarator (`type`, `method`, `function`),
+   Capitalized = a sort/kind (`Type`, `Method`, `Function`). `Type` is one kind
+   among potentially other type-able kinds, so `type X` (introduce) beside
+   `Type{…}` (construct) is consistency, not collision. Not to be reconciled.
+3. **The self-type return — RESOLVED: `:TraitName` for the semantic existential,
+   `:this.type` for the type-preserving impl type. No `Self`, no `@@`.**
+   - `:TraitName` (e.g. `simplify:[Method():Expr]`) returns *some* value of the
+     trait — the bounded existential. Already landed (slices 1 + 4). Name
+     self-reference is **not** an antipattern *here*: the antipattern is about
+     hierarchies (a base method forgetting a subtype's identity), and Pontif
+     traits are **flat** — a trait cannot extend a trait — so naming the trait
+     forgets nothing. **Load-bearing invariant: traits stay flat.** If traits ever
+     gain extension, `:Name` self-reference reintroduces the precision loss.
+   - `:this.type` returns the *runtime-actual* type of the receiver instance — the
+     type-preserving "Self," without the `Self` keyword. `this` = the instance,
+     `.type` = its concrete type (the `typeName` tag the value already carries —
+     a real runtime projection, no-lie-grounded). Reserving `type` as a keyword is
+     what makes `.type` safe: it can never be a user field, so `this.type` is
+     unambiguous. Slice 6.
+   - `@` is untouched — it stays the *value-level* refinement-self inside a
+     predicate (`[Int:@>0]`). `@`-as-a-sort was rejected (it conflated value vs
+     type, immediate vs owning scope, and runtime vs semantic — `this.type`
+     resolves all three by construction, since `this` is definitionally a runtime
+     instance). `@@` was rejected (glyph-counting, illegible).
+   - No clash with the `Type[…]` metatype: `Type[…]` takes a *type* (`[]`, the type
+     side); `this` is exclusively a constructed *instance*, so `Type[this]` is a
+     kind error, not a rival spelling. `this.type` is the unique value→type
+     crossing (`.`, the value side); the bracket/paren law keeps the two disjoint.
 
 *(The earlier "what does `evaluate` mean / which direction" decision is
 **retired** — `T` is usable in any position, so both readings are simply valid

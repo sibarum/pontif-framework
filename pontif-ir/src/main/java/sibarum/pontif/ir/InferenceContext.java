@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Read-only context for {@link NarrowingInference}. Carries the
@@ -92,10 +93,79 @@ public record InferenceContext(
                 }
             } else if (stmt instanceof IrStmt.ReturnProof rp) {
                 returnProofs.computeIfAbsent(rp.functionName(), k -> new ArrayList<>()).add(rp);
+            } else if (stmt instanceof IrStmt.TypeAlias ta
+                    && ta.sort() instanceof IrSort.Trait t) {
+                // Existential boundary (docs/associated-types.md §3.2, §7.3). A
+                // contract method whose return mentions an associated type or
+                // `this.type`, called on a *bare-trait* receiver, resolves to the
+                // call key `Trait.method` — a *concrete* receiver resolves to
+                // `ConcreteType.method` instead, so this entry is consulted only
+                // at the existential boundary. Its registered return is the type
+                // variable *existentialized*: an associated type `∃T:R` to its
+                // bound `R` (usable as `R` — a chained `b.get().describe()` types
+                // through R; unbounded stays opaque), and `this.type` to the
+                // owning trait (so `e.copy()` on `e:Expr` flows out as `Expr`).
+                Map<String, IrSort> exVars = new LinkedHashMap<>(t.associatedTypes());
+                exVars.put(IrSort.SELF_TYPE, IrSort.named(t.name()));
+                for (Map.Entry<String, IrSort.Method> m : t.methods().entrySet()) {
+                    IrSort ret = m.getValue().returnSort();
+                    if (mentionsAssociatedType(ret, exVars.keySet())) {
+                        returns.put(t.name() + "." + m.getKey(), existentialize(ret, exVars));
+                    }
+                }
             }
         }
         Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
         return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs);
+    }
+
+    /** Whether {@code sort} references any of the given associated-type names. */
+    private static boolean mentionsAssociatedType(IrSort sort, Set<String> names) {
+        return switch (sort) {
+            case IrSort.Named n -> names.contains(n.name());
+            case IrSort.Refined r -> names.contains(r.name());
+            case IrSort.Method m -> mentionsAssociatedType(m.returnSort(), names)
+                    || m.paramSorts().stream().anyMatch(p -> mentionsAssociatedType(p, names));
+            case IrSort.Union u -> u.branches().stream().anyMatch(b -> mentionsAssociatedType(b, names));
+            case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> mentionsAssociatedType(b, names));
+            case IrSort.Dispatch d -> mentionsAssociatedType(d.returnSort(), names)
+                    || d.keySorts().stream().anyMatch(k -> mentionsAssociatedType(k, names));
+            default -> false;
+        };
+    }
+
+    /**
+     * Replaces each associated-type name in {@code sort} with its declared
+     * bound (the {@code R} in {@code type T:R}) — the type-level reading of the
+     * {@code refine} operator. A name bound to {@code null} (unbounded
+     * {@code type T}) is left as-is: the existential stays opaque, with no
+     * interface to call into. Structural recursion mirrors
+     * {@code SortChecker.substituteTypeVars}, but maps a name to its bound
+     * rather than to a per-impl binding.
+     */
+    private static IrSort existentialize(IrSort sort, Map<String, IrSort> assoc) {
+        return switch (sort) {
+            case IrSort.Named n -> {
+                if (assoc.containsKey(n.name())) {
+                    IrSort bound = assoc.get(n.name());
+                    yield bound != null ? bound : n;
+                }
+                yield n;
+            }
+            case IrSort.Method m -> new IrSort.Method(
+                    m.paramSorts().stream().map(p -> existentialize(p, assoc)).toList(),
+                    existentialize(m.returnSort(), assoc), m.origin());
+            case IrSort.Union u -> new IrSort.Union(
+                    u.branches().stream().map(b -> existentialize(b, assoc)).toList(), u.origin());
+            case IrSort.Intersection i -> new IrSort.Intersection(
+                    i.branches().stream().map(b -> existentialize(b, assoc)).toList(), i.origin());
+            case IrSort.Dispatch d -> new IrSort.Dispatch(
+                    d.keySorts().stream().map(k -> existentialize(k, assoc)).toList(),
+                    existentialize(d.returnSort(), assoc), d.origin());
+            // Refined/Structural/Trait: an associated type appears as a bare
+            // Named in practice; these aren't substitution sites for this slice.
+            default -> sort;
+        };
     }
 
     /** Returns a new context with the given name bound to {@code sort}. */

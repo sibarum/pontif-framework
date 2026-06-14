@@ -205,6 +205,17 @@ public final class SortChecker {
             implByShortName.put(shortName, m);
         }
 
+        // The type variables to substitute when checking a dependent contract
+        // method against this impl: the `type X` associated types (bound by the
+        // impl's `type X = […]`) plus the implicit `this.type` self-type, which
+        // every impl binds to its own concrete type. Substituting `this.type ↦
+        // <implType>` and requiring the impl's `copy` to match IS the type-
+        // preservation gate (a `copy` that returns a sibling type fails to match).
+        Set<String> typeVarNames = new HashSet<>(contract.associatedTypes().keySet());
+        typeVarNames.add(IrSort.SELF_TYPE);
+        Map<String, IrSort> typeVarSubst = new HashMap<>(ti.typeBindings());
+        typeVarSubst.put(IrSort.SELF_TYPE, IrSort.named(ti.typeName()));
+
         // Verify every contract method has a matching impl with self-prepended arity.
         for (Map.Entry<String, IrSort.Method> e : contract.methods().entrySet()) {
             String methodName = e.getKey();
@@ -226,16 +237,16 @@ public final class SortChecker {
                                 + " from contract)",
                         impl.origin());
             }
-            // Associated-type conformance: for a contract method that mentions an
-            // associated type, substitute this impl's bindings (T ↦ [Int]) into
-            // the contract signature and require the impl's own declared sorts to
-            // match the substituted contract — so `type T = [Int]` actually binds
-            // `evaluate:[Method():T]` to a `():Int` obligation. Methods that don't
-            // mention an associated type keep the prior arity-only check (so
-            // associated-type-free traits gain no new constraint).
-            if (mentionsAny(contractSig, contract.associatedTypes().keySet())) {
+            // Type-variable conformance: for a contract method that mentions an
+            // associated type or `this.type`, substitute this impl's bindings
+            // (T ↦ [Int], this.type ↦ <implType>) into the contract signature and
+            // require the impl's own declared sorts to match — so `type T = [Int]`
+            // binds `evaluate:[Method():T]` to a `():Int` obligation, and
+            // `copy:[Method():this.type]` binds to a `():<implType>` obligation.
+            // Methods that mention neither keep the prior arity-only check.
+            if (mentionsAny(contractSig, typeVarNames)) {
                 IrSort.Method want = (IrSort.Method)
-                        substituteTypeVars(contractSig, ti.typeBindings());
+                        substituteTypeVars(contractSig, typeVarSubst);
                 if (!sameBaseSort(impl.returnSort(), want.returnSort())) {
                     throw new CompileException(
                             "Method '" + impl.name() + "' returns "
@@ -618,11 +629,11 @@ public final class SortChecker {
                 // an unknown sort). Recurse into method/contract sorts with that
                 // extended scope; a present bound (`type X:R`) must itself name a
                 // known sort.
-                Set<String> inner = typeVars;
-                if (!t.associatedTypes().isEmpty()) {
-                    inner = new HashSet<>(typeVars);
-                    inner.addAll(t.associatedTypes().keySet());
-                }
+                // Every trait implicitly scopes `this.type` (the self-type) over
+                // its own member sorts, alongside any `type X` associated types.
+                Set<String> inner = new HashSet<>(typeVars);
+                inner.add(IrSort.SELF_TYPE);
+                inner.addAll(t.associatedTypes().keySet());
                 for (IrSort bound : t.associatedTypes().values()) {
                     if (bound != null) validateSortNames(bound, structDefs, inner);
                 }

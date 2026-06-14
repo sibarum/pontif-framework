@@ -7,6 +7,17 @@ import java.util.Map;
 
 public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Method, IrSort.Dispatch, IrSort.Trait, IrSort.Union, IrSort.Intersection {
 
+    /**
+     * Reserved sentinel sort name for the {@code this.type} self-type (the
+     * type-preserving return — docs/associated-types.md §7.3). Carried as an
+     * {@link Named} with this name; the embedded dot makes it un-spellable as a
+     * user struct/trait name, so it never collides. In a trait contract it is in
+     * scope like an associated-type variable; per impl it substitutes to the
+     * implementor's own concrete type; at the bare-trait boundary it
+     * existentializes to the owning trait.
+     */
+    String SELF_TYPE = "this.type";
+
     Origin origin();
 
     static Named named(String name) {
