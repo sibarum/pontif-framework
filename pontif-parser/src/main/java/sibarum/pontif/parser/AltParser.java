@@ -1577,12 +1577,39 @@ public final class AltParser {
         AltToken start = expectKeyword("assign");
         expectKeyword("trait");
         AltToken typeNameTok = expect(AltToken.Kind.IDENT);
+        // The impl's own `[type T]` binder (`assign trait Element[type T]:…`,
+        // docs/type-parameters.md §2.1): it INTRODUCES T as a variable into the
+        // impl's scope — the toggle that tells `Stream[T]` apart from a concrete
+        // `Stream[SomeType]`. Reuses the decl-site slot parser.
+        Map<String, IrSort> implTypeParams = peek().kind() == AltToken.Kind.LBRACKET
+                ? parseTypeParamSlot()
+                : new LinkedHashMap<>();
         expect(AltToken.Kind.COLON);
         AltToken traitNameTok = expect(AltToken.Kind.IDENT);
+        // Type arguments applied to the trait (`…:Stream[T]` / `…:Stream[Int]`):
+        // a plain sort list, not a binder — the `[T]` here is a USE of the
+        // variable bound by the slot above (or a concrete type).
+        List<IrSort> traitTypeArgs = new ArrayList<>();
+        if (peek().kind() == AltToken.Kind.LBRACKET) {
+            expect(AltToken.Kind.LBRACKET);
+            boolean firstArg = true;
+            while (peek().kind() != AltToken.Kind.RBRACKET) {
+                if (!firstArg) expect(AltToken.Kind.COMMA);
+                traitTypeArgs.add(parseSort());
+                firstArg = false;
+            }
+            expect(AltToken.Kind.RBRACKET);
+        }
         expect(AltToken.Kind.LBRACE);
 
         String typeName = typeNameTok.text();
-        IrSort selfSort = new IrSort.Named(typeName, typeNameTok.origin());
+        // `this` is the (possibly parametric) subject — `Element[T]` when the
+        // impl binds `[type T]`, so the self-type carries its variables.
+        List<IrSort> selfArgs = new ArrayList<>(implTypeParams.size());
+        for (String tp : implTypeParams.keySet()) {
+            selfArgs.add(new IrSort.Named(tp, typeNameTok.origin()));
+        }
+        IrSort selfSort = new IrSort.Named(typeName, selfArgs, typeNameTok.origin());
 
         List<IrStmt.FunctionDecl> methods = new ArrayList<>();
         List<IrStmt.FunctionDecl> attributeProducers = new ArrayList<>();
@@ -1618,7 +1645,7 @@ public final class AltParser {
         AltToken close = expect(AltToken.Kind.RBRACE);
         return new IrStmt.TraitImpl(
                 typeName, traitNameTok.text(), methods, attributeProducers,
-                typeBindings, start.spanTo(close));
+                typeBindings, implTypeParams, traitTypeArgs, start.spanTo(close));
     }
 
     /**

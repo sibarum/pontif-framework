@@ -63,7 +63,8 @@ public final class StructLiteralRewriter {
                                 a.name(), a.params(), a.returnSort(),
                                 rewriteExpr(a.body(), structs), a.origin()));
                     }
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.typeBindings(), ti.origin());
+                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs,
+                            ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
                 }
                 case IrStmt.Proof p -> new IrStmt.Proof(
                         p.functionName(), rewriteExpr(p.proofTree(), structs), p.origin());

@@ -137,6 +137,8 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             List<FunctionDecl> methods,
             List<FunctionDecl> attributeProducers,
             java.util.Map<String, IrSort> typeBindings,
+            java.util.Map<String, IrSort> typeParams,
+            List<IrSort> traitTypeArgs,
             Origin origin) implements IrStmt {
         public TraitImpl {
             if (typeName == null || typeName.isEmpty()) {
@@ -151,6 +153,25 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             // is fine (bound sorts are never null here, unlike a trait's optional
             // associated-type bound).
             typeBindings = java.util.Map.copyOf(typeBindings);
+            // The impl's own `[type T]` binder (`assign trait Element[type T]:…`,
+            // docs/type-parameters.md §2.1) — name → bound, null = unbounded; in
+            // scope over the trait args and the method sigs. Distinct from
+            // typeBindings (which binds the TRAIT's associated types). LinkedHashMap
+            // permits null bounds, like a struct's typeParams.
+            typeParams = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(typeParams));
+            // The type arguments applied to the trait name (`…:Stream[T]` → [T],
+            // `…:Stream[Int]` → [Int]); empty for a non-parametric trait. Each is
+            // matched against the trait's declared `[type E]` parameters.
+            traitTypeArgs = List.copyOf(traitTypeArgs);
+        }
+
+        /** Back-compat: a non-parametric impl (no `[type T]` binder, no trait args). */
+        public TraitImpl(String typeName, String traitName,
+                         List<FunctionDecl> methods, List<FunctionDecl> attributeProducers,
+                         java.util.Map<String, IrSort> typeBindings, Origin origin) {
+            this(typeName, traitName, methods, attributeProducers, typeBindings,
+                    java.util.Map.of(), List.of(), origin);
         }
 
         /** Back-compat: an impl with no associated-type bindings. */

@@ -6,9 +6,11 @@ import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.predicates.SatResult;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -200,6 +202,44 @@ public final class SortChecker {
             }
         }
 
+        // The impl's own `[type T]` variables (`assign trait Element[type T]:…`,
+        // docs/type-parameters.md §2.1) are in scope for the trait args, the
+        // impl's type-param bounds, and the method/producer sorts — the binder
+        // is what tells `Stream[T]` (a variable forwarded) apart from a concrete
+        // `Stream[SomeType]`. If the subject struct is itself parametric, the
+        // impl must bind the same number of variables (no claiming a different
+        // arity than the struct declares).
+        Set<String> implTypeVars = ti.typeParams().keySet();
+        IrSort.Structural subjectStruct = structDefs.get(ti.typeName());
+        if (!ti.typeParams().isEmpty() && subjectStruct != null
+                && ti.typeParams().size() != subjectStruct.typeParams().size()) {
+            throw new CompileException(
+                    "Trait impl '" + ti.typeName() + " : " + ti.traitName() + "' binds "
+                            + ti.typeParams().size() + " type parameter(s), but '"
+                            + ti.typeName() + "' declares " + subjectStruct.typeParams().size(),
+                    ti.origin());
+        }
+        for (IrSort bound : ti.typeParams().values()) {
+            if (bound != null) validateSortNames(bound, structDefs, implTypeVars);
+        }
+
+        // A parametric trait is concretized by the impl's applied type arguments
+        // (`…:Stream[T]` / `…:Stream[Int]`): the count must match the trait's
+        // declared `[type E]` parameters, and each arg must name a known sort or
+        // an in-scope impl variable.
+        List<String> traitParams = new ArrayList<>(contract.typeParams().keySet());
+        if (traitParams.size() != ti.traitTypeArgs().size()) {
+            throw new CompileException(
+                    "Trait impl '" + ti.typeName() + " : " + ti.traitName() + "' supplies "
+                            + ti.traitTypeArgs().size() + " type argument(s), but trait '"
+                            + ti.traitName() + "' declares " + traitParams.size()
+                            + " type parameter(s)",
+                    ti.origin());
+        }
+        for (IrSort arg : ti.traitTypeArgs()) {
+            validateSortNames(arg, structDefs, implTypeVars);
+        }
+
         // Build short-name -> impl map (stripping the "Type." prefix).
         Map<String, IrStmt.FunctionDecl> implByShortName = new LinkedHashMap<>();
         String prefix = ti.typeName() + ".";
@@ -220,6 +260,14 @@ public final class SortChecker {
         typeVarNames.add(IrSort.SELF_TYPE);
         Map<String, IrSort> typeVarSubst = new HashMap<>(ti.typeBindings());
         typeVarSubst.put(IrSort.SELF_TYPE, IrSort.named(ti.typeName()));
+        // A parametric trait's `[type E]` parameters bind to the impl's applied
+        // arguments (`Stream[T]` ⟹ E↦T, `Stream[Int]` ⟹ E↦Int), so a contract
+        // sig like `head:[Method():E]` becomes `head:[Method():T]` / `…:Int]`
+        // before being matched against the impl's own declared sorts.
+        for (int i = 0; i < traitParams.size(); i++) {
+            typeVarNames.add(traitParams.get(i));
+            typeVarSubst.put(traitParams.get(i), ti.traitTypeArgs().get(i));
+        }
 
         // Verify every contract method has a matching impl with self-prepended arity.
         for (Map.Entry<String, IrSort.Method> e : contract.methods().entrySet()) {
@@ -346,25 +394,28 @@ public final class SortChecker {
             }
         }
 
-        // Validate the impl method + producer bodies themselves.
+        // Validate the impl method + producer bodies themselves. The impl's
+        // `[type T]` variables are in scope for their param/return sorts (so
+        // `head(this):T` validates — T is the bound variable, not an unknown).
         for (IrStmt.FunctionDecl m : ti.methods()) {
-            validateImplBody(m, functionReturns, structDefs);
+            validateImplBody(m, functionReturns, structDefs, implTypeVars);
         }
         for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-            validateImplBody(a, functionReturns, structDefs);
+            validateImplBody(a, functionReturns, structDefs, implTypeVars);
         }
     }
 
     private static void validateImplBody(
             IrStmt.FunctionDecl m,
             Map<String, IrSort> functionReturns,
-            Map<String, IrSort.Structural> structDefs) throws CompileException {
+            Map<String, IrSort.Structural> structDefs,
+            Set<String> typeVars) throws CompileException {
         Map<String, IrSort> typeEnv = new HashMap<>();
         for (IrParam p : m.params()) {
-            validateSortNames(p.sort(), structDefs);
+            validateSortNames(p.sort(), structDefs, typeVars);
             typeEnv.put(p.name(), p.sort());
         }
-        validateSortNames(m.returnSort(), structDefs);
+        validateSortNames(m.returnSort(), structDefs, typeVars);
         checkExpr(m.body(), typeEnv, functionReturns, structDefs);
     }
 
@@ -1158,8 +1209,12 @@ public final class SortChecker {
      * Substitutes associated-type variables with their per-impl bindings:
      * a {@link IrSort.Named} whose name is a key in {@code bindings} becomes the
      * bound sort. Used to make a trait's dependent contract concrete for one impl.
+     *
+     * <p>Package-private so {@link AliasResolver} can reuse it when inlining a
+     * parametric trait reference ({@code Stream[Int]} ⟹ substitute {@code E↦Int}
+     * into the trait's member sorts; docs/type-parameters.md §2.3).
      */
-    private static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
+    static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
         return switch (sort) {
             case IrSort.Named n -> {
                 // A bound type variable is replaced wholesale; otherwise the head

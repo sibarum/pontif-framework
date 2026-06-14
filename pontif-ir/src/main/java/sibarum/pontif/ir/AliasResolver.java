@@ -101,9 +101,21 @@ public final class AliasResolver {
                 for (Map.Entry<String, IrSort> e : ti.typeBindings().entrySet()) {
                     rewrittenBinds.put(e.getKey(), substituteResolved(e.getValue(), resolvedAliases));
                 }
+                // The impl's own `[type T]` bounds and the trait's applied args
+                // are sorts too — resolve abbreviation refs in them (a forwarded
+                // variable `T` or concrete `Int` simply stays).
+                Map<String, IrSort> rewrittenParams = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort> e : ti.typeParams().entrySet()) {
+                    rewrittenParams.put(e.getKey(),
+                            e.getValue() == null ? null : substituteResolved(e.getValue(), resolvedAliases));
+                }
+                List<IrSort> rewrittenTraitArgs = new ArrayList<>(ti.traitTypeArgs().size());
+                for (IrSort a : ti.traitTypeArgs()) {
+                    rewrittenTraitArgs.add(substituteResolved(a, resolvedAliases));
+                }
                 newStatements.add(new IrStmt.TraitImpl(
                         ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs,
-                        rewrittenBinds, ti.origin()));
+                        rewrittenBinds, rewrittenParams, rewrittenTraitArgs, ti.origin()));
             } else if (stmt instanceof IrStmt.TypeAlias ta) {
                 // Type aliases are kept downstream so SortChecker can see them:
                 // trait contracts for TraitImpl validation; struct definitions
@@ -189,9 +201,16 @@ public final class AliasResolver {
                     }
                     List<String> nextPath = new ArrayList<>(path);
                     nextPath.add(n.name());
-                    yield resolveSort(aliases.get(n.name()), aliases, nextPath);
+                    IrSort resolved = resolveSort(aliases.get(n.name()), aliases, nextPath);
+                    // A parametric reference (`Stream[Int]`) inlines the trait
+                    // body with its type parameters substituted; resolve the
+                    // args against the alias table first (docs/type-parameters.md §2.3).
+                    if (n.typeArgs().isEmpty()) yield resolved;
+                    List<IrSort> resolvedArgs = new ArrayList<>(n.typeArgs().size());
+                    for (IrSort a : n.typeArgs()) resolvedArgs.add(resolveSort(a, aliases, path));
+                    yield applyTypeArgs(resolved, resolvedArgs, n);
                 }
-                yield n;  // not an alias, primitive or unknown name
+                yield n;  // not an alias, primitive or unknown name (incl. nominal structs)
             }
             case IrSort.Refined r ->
                     // Keep refined sorts as-is — name is the refinement base, not a reference to substitute.
@@ -351,9 +370,19 @@ public final class AliasResolver {
      * For compound sorts (Structural, Function), recurse into children.
      * Refined is returned as-is (per the policy above).
      */
-    private static IrSort substituteResolved(IrSort sort, Map<String, IrSort> resolved) {
+    private static IrSort substituteResolved(IrSort sort, Map<String, IrSort> resolved)
+            throws CompileException {
         return switch (sort) {
-            case IrSort.Named n -> resolved.getOrDefault(n.name(), n);
+            case IrSort.Named n -> {
+                IrSort target = resolved.get(n.name());
+                if (target == null) yield n;  // nominal struct / primitive / unknown
+                if (n.typeArgs().isEmpty()) yield target;  // bare alias reference
+                // Parametric reference (`Stream[Int]`): inline the trait body with
+                // its type parameters substituted (docs/type-parameters.md §2.3).
+                List<IrSort> args = new ArrayList<>(n.typeArgs().size());
+                for (IrSort a : n.typeArgs()) args.add(substituteResolved(a, resolved));
+                yield applyTypeArgs(target, args, n);
+            }
             case IrSort.Refined r -> r;
             case IrSort.Structural s -> {
                 Map<String, IrSort> newMembers = new LinkedHashMap<>();
@@ -405,5 +434,58 @@ public final class AliasResolver {
                 yield new IrSort.Intersection(newBranches, i.origin());
             }
         };
+    }
+
+    /**
+     * Apply a parametric reference's type arguments to its resolved alias body.
+     * {@code Stream[Int]} resolving to {@code Trait Stream[type E]{…E…}}
+     * substitutes {@code E↦Int} into the inlined body (docs/type-parameters.md
+     * §2.3). Only traits are inlined and parametric (structs stay nominal, so
+     * {@code Element[Int]} never reaches here); applying args to a
+     * non-parametric alias, or supplying the wrong count, is an error caught at
+     * inline time — SortChecker never sees the (now inlined) reference.
+     */
+    private static IrSort applyTypeArgs(IrSort target, List<IrSort> args, IrSort.Named ref)
+            throws CompileException {
+        if (!(target instanceof IrSort.Trait tr) || tr.typeParams().isEmpty()) {
+            throw new CompileException(
+                    "Type '" + ref.name() + "' is not parametric but is applied to "
+                            + args.size() + " type argument(s)",
+                    ref.origin());
+        }
+        List<String> params = new ArrayList<>(tr.typeParams().keySet());
+        if (params.size() != args.size()) {
+            throw new CompileException(
+                    "Parametric type '" + ref.name() + "' expects " + params.size()
+                            + " type argument(s) but got " + args.size(),
+                    ref.origin());
+        }
+        Map<String, IrSort> binds = new HashMap<>();
+        for (int i = 0; i < params.size(); i++) binds.put(params.get(i), args.get(i));
+        return substituteTraitBody(tr, binds);
+    }
+
+    /**
+     * Substitute type-parameter bindings through a trait's member sorts,
+     * yielding a trait with no remaining parameters (they are now bound). The
+     * member sorts ({@link IrSort.Method} contracts, attribute/associated-type
+     * sorts) are substituted via {@link SortChecker#substituteTypeVars}; the
+     * trait's nominal {@code name} is preserved.
+     */
+    private static IrSort.Trait substituteTraitBody(IrSort.Trait tr, Map<String, IrSort> binds) {
+        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort.Method> e : tr.methods().entrySet()) {
+            methods.put(e.getKey(), (IrSort.Method) SortChecker.substituteTypeVars(e.getValue(), binds));
+        }
+        Map<String, IrSort> attrs = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort> e : tr.attributes().entrySet()) {
+            attrs.put(e.getKey(), SortChecker.substituteTypeVars(e.getValue(), binds));
+        }
+        Map<String, IrSort> assoc = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort> e : tr.associatedTypes().entrySet()) {
+            assoc.put(e.getKey(),
+                    e.getValue() == null ? null : SortChecker.substituteTypeVars(e.getValue(), binds));
+        }
+        return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.origin());
     }
 }

@@ -73,10 +73,22 @@ public final class NameResolver {
                     for (Map.Entry<String, IrSort> e : ti.typeBindings().entrySet()) {
                         binds.put(e.getKey(), rewriteSort(e.getValue(), m, table));
                     }
+                    // The impl's `[type T]` bounds and the trait's applied args
+                    // are sorts: resolve qualified names in them. A forwarded
+                    // type variable (`T`) is not a known type name, so it stays.
+                    Map<String, IrSort> implParams = new LinkedHashMap<>();
+                    for (Map.Entry<String, IrSort> e : ti.typeParams().entrySet()) {
+                        implParams.put(e.getKey(),
+                                e.getValue() == null ? null : rewriteSort(e.getValue(), m, table));
+                    }
+                    List<IrSort> traitArgs = new ArrayList<>(ti.traitTypeArgs().size());
+                    for (IrSort a : ti.traitTypeArgs()) {
+                        traitArgs.add(rewriteSort(a, m, table));
+                    }
                     yield new IrStmt.TraitImpl(
                             resolveTypeName(ti.typeName(), m, table, ti.origin()),
                             resolveTypeName(ti.traitName(), m, table, ti.origin()),
-                            methods, attrs, binds, ti.origin());
+                            methods, attrs, binds, implParams, traitArgs, ti.origin());
                 }
                 case IrStmt.TypeAlias ta -> new IrStmt.TypeAlias(
                         resolveTypeName(ta.name(), m, table, ta.origin()),

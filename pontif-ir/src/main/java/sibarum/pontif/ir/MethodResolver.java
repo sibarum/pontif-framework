@@ -97,7 +97,8 @@ public final class MethodResolver {
                 for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
                     producers.add(rewriteFunction(a, ctx, methodKeys, structs));
                 }
-                yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, producers, ti.typeBindings(), ti.origin());
+                yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, producers,
+                        ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
             }
             // TypeAlias carries no expression; Proof/ReturnProof trees are
             // symbolic (never method calls) and stay verbatim.

@@ -130,6 +130,38 @@ kind-guessing: **slot before `:Type{}`** = parameter, **member inside `{}`** =
 associated. Both are the same `type` declarator; reach for a parameter when the
 caller picks, an associated type when the implementor determines it.
 
+**Impls carry their own `[type T]` binder (RULED 2026-06-14).** When a parametric
+struct satisfies a parametric trait, the impl restates the slot after the subject
+name, and the bound variable is forwarded into the trait's bracket:
+
+```pontif
+struct Element[type T](head:T, rest:[Element[T]|Leaf])
+let    Stream[type E]:Type{ head:[Method():E] }
+
+assign trait Element[type T]:Stream[T] {   # [type T] BINDS T; [T] forwards it
+    head():T -> this.head                   # `this` is Element[T]; method sigs use T
+}
+assign trait IntList:Stream[Int] {          # no binder → Int is a concrete arg
+    head():Int -> this.head
+}
+```
+
+The binder is **load-bearing, not ceremony**: it is the toggle that tells a
+*forwarded variable* `Stream[T]` apart from a *concrete* `Stream[SomeType]`.
+Without it, `T` in `Stream[T]` is read as a concrete type name (and rejected as
+unknown if none exists) — there is no lookup into the subject's parameters to
+guess from. This keeps the "a name is a variable only where a `[type T]` slot put
+it in scope" rule universal: an impl is its own scope, so it introduces its own
+variable rather than being the one exception that inherits silently. The binder is
+**positional** against the subject's declared arity (like a lambda param — the
+impl picks the local name; an arity mismatch is an error), so there is no
+must-match-the-struct's-spelling rule. Mechanically the impl scopes its `[type T]`
+over the trait args and method sigs, then zips the trait's declared `[type E]`
+against the supplied args (`E↦T` or `E↦Int`) and substitutes into the contract
+before matching. The struct-is-a-parametric-base form (`struct IntLit:[Literal[Int]]`)
+is the same parametric-application sort in the `:[…]` slot, and is a separate
+(later) consumer of the same machinery.
+
 ## 2.2 Inferred at the call; explicit when you must widen (RULED 2026-06-14)
 
 The brackets bind at the declaration and **apply at the call** — exactly as
@@ -421,8 +453,15 @@ combinators) follow.
    hypothetical: it is how the trait-applied sort `[Stream[Int]]` is spelled, and
    the cleaner Stream story — `struct Element[type T]` implements `Stream[T]`, the
    struct parameter flowing into the trait's). Coexists with associated types,
-   distinguished by position (§2.1). The literal desugar (`(1,2,3) : [Stream[Int]]`)
-   lands here.
+   distinguished by position (§2.1).
+   - **3a (LANDED)** — the `[type T]` trait declaration slot + member scoping.
+   - **3b (LANDED)** — the trait-application sort `[Stream[Int]]` (AliasResolver
+     inlines a parametric trait reference, substituting `E↦Int` with an arity
+     check; structs stay nominal) + parametric impls (`assign trait
+     Element[type T]:Stream[T]`, the impl's `[type T]` binder forwarded into the
+     trait; §2.1). The struct-is-a-parametric-base form (`IntLit:[Literal[Int]]`)
+     reuses the same sort but in the `:[…]` slot — a later consumer.
+   - **3c (TODO)** — the literal desugar (`(1,2,3) : [Stream[Int]]`).
 4. **`let P:Type[…]` → `type P = […]`** — retire the value-shaped sort-alias form
    (`AltParser.java:1066`) in favour of the declarator. Pure consolidation, lowest
    priority; do last so the migration is mechanical.

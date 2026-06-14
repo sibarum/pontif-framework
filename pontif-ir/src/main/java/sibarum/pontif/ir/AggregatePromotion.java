@@ -64,7 +64,8 @@ final class AggregatePromotion {
                                 a.name(), a.params(), a.returnSort(),
                                 rewriteExpr(a.body(), a.returnSort(), structs, fns), a.origin()));
                     }
-                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs, ti.typeBindings(), ti.origin());
+                    yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs,
+                            ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
                 }
                 default -> stmt;  // TypeAlias / Proof / Requires / Exports / NoOp
             });
