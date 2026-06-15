@@ -37,26 +37,18 @@ class IterationConstructTest {
         return new IrInterpreter(simp).eval(compiled);
     }
 
-    /** Builds an {@code Element/Leaf} source chain from integer literals. */
+    /** Builds a native stream source — a positional record (tuple) — from literals. */
     private static IrExpr intChain(long... vals) {
-        IrExpr chain = new IrExpr.Record("Leaf", Map.of(), Origin.NONE);
-        for (int i = vals.length - 1; i >= 0; i--) {
-            Map<String, IrExpr> m = new LinkedHashMap<>();
-            m.put("head", IrExpr.lit(vals[i]));
-            m.put("rest", chain);
-            chain = new IrExpr.Record("Element", m, Origin.NONE);
-        }
-        return chain;
+        Map<String, IrExpr> m = new LinkedHashMap<>();
+        for (int i = 0; i < vals.length; i++) m.put("_" + i, IrExpr.lit(vals[i]));
+        return new IrExpr.Record("_tuple", m, Origin.NONE);
     }
 
-    /** Walks a sealed {@code Element/Leaf} chain into its list of head values. */
+    /** A sealed stream is a positional record; its elements are its member values. */
     private static List<Object> heads(Object chain) {
-        List<Object> out = new ArrayList<>();
-        while (chain instanceof RecordValue rv && "Element".equals(rv.typeName())) {
-            out.add(rv.get("head", Origin.NONE));
-            chain = rv.get("rest", Origin.NONE);
-        }
-        return out;
+        return chain instanceof RecordValue rv
+                ? new ArrayList<>(rv.members().values())
+                : new ArrayList<>();
     }
 
     private static final IrSort ANY_INT = IrSort.named("Int");

@@ -529,8 +529,15 @@ variant; the inner records are NOT `IrExpr` variants (keeps the switch ripple to
 single case per site).
 
 - **IrExpr.java** [real] — the variant + inner records.
-- **IrInterpreter** [real] — fold eval for STREAM (seal → `Element/Leaf` chain) +
-  ACCUMULATOR (seal → final value). KEYED/rewrite throw.
+- **IrInterpreter** [real] — fold eval. **Streams are NATIVE** (a positional
+  record / tuple), NOT `Element/Leaf` (James 2026-06-15: trees use recursion,
+  streams are native): the source is iterated as a positional record's members in
+  order, and a STREAM output seals to a tuple `(_0, _1, …)`. ACCUMULATOR seals to
+  its final revision. KEYED/rewrite throw. The result is the queryable completed
+  result — a single output returned directly, else a record keyed by output name
+  (its fields are the native streams). The **stream literal** is the tuple form
+  `(1,2,3)` (already-existing syntax). REVISIT: the completed-iterator wrapper
+  (`.stream()` / chaining) and a dedicated `Stream` type over the Source contract.
 - **AliasResolver / NameResolver / MethodResolver / AggregatePromotion /
   DecimalPromotion / ConstructionGate / StructLiteralRewriter / NarrowingInference
   / IrFreeVars** — structural recursion into source/inits/writes/patterns.

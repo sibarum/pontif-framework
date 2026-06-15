@@ -193,9 +193,17 @@ public final class IrInterpreter {
             }
         }
 
-        Object cur = eval(it.source(), env, module);
-        while (cur instanceof RecordValue rv && "Element".equals(rv.typeName())) {
-            Object element = rv.get("head", it.origin());
+        // A stream is a positional record (a tuple literal `(1,2,3)`); iterate its
+        // members in order. (Element/Leaf cons-chains are retired here — trees use
+        // recursion, streams are native; docs/iteration.md §7.1, James 2026-06-15.)
+        Object srcVal = eval(it.source(), env, module);
+        if (!(srcVal instanceof RecordValue srcRec)) {
+            throw new RuntimeCheckException(
+                    "Iterate: source must be a stream (a positional record / tuple), got "
+                            + (srcVal == null ? "null" : srcVal.getClass().getSimpleName()),
+                    it.origin());
+        }
+        for (Object element : srcRec.members().values()) {
             Environment frame = env.extend(it.element(), element);
             for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
                 frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)
@@ -223,15 +231,10 @@ public final class IrInterpreter {
             }
             if (!matched) throw new RuntimeCheckException(
                     "Iterate: no arm matched element " + element, it.origin());
-            cur = rv.get("rest", it.origin());
-        }
-        if (!(cur instanceof RecordValue end && "Leaf".equals(end.typeName()))) {
-            throw new RuntimeCheckException(
-                    "Iterate: source must be an Element/Leaf chain (slice 1), ended at " + cur,
-                    it.origin());
         }
 
-        // Seal each output and return: a single output directly, else a record.
+        // Seal each output and return: a single output directly, else a record
+        // keyed by output name (the queryable completed result).
         java.util.Map<String, Object> result = new LinkedHashMap<>();
         for (IrExpr.OutputSpec os : it.outputs()) {
             result.put(os.name(), os.kind() == IrExpr.OutputKind.STREAM
@@ -242,16 +245,11 @@ public final class IrInterpreter {
         return new RecordValue(result);
     }
 
-    /** Seals an accumulated stream into an {@code Element/Leaf} chain (slice-1 sequence value). */
+    /** Seals an accumulated stream into a positional record (tuple) — the native sequence value. */
     private static Object sealStream(java.util.List<Object> elems) {
-        Object chain = new RecordValue("Leaf", new LinkedHashMap<>());
-        for (int i = elems.size() - 1; i >= 0; i--) {
-            java.util.Map<String, Object> m = new LinkedHashMap<>();
-            m.put("head", elems.get(i));
-            m.put("rest", chain);
-            chain = new RecordValue("Element", m);
-        }
-        return chain;
+        java.util.Map<String, Object> m = new LinkedHashMap<>();
+        for (int i = 0; i < elems.size(); i++) m.put("_" + i, elems.get(i));
+        return new RecordValue("_tuple", m);
     }
 
     private Object evalMatch(IrExpr.Match match, Environment env, CompiledModule module) {

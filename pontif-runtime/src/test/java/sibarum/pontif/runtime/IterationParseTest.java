@@ -18,9 +18,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * The iteration construct's <em>alt-syntax</em> surface (docs/iteration.md §8),
- * slice 1 — map + filter. Parses `iter(src).{…} { match value … }` end-to-end:
- * AltParser → {@link sibarum.pontif.ir.IrExpr.Iterate} → IrInterpreter. (The
- * reference S-expr parser stays sugar-free; this sugar is alt-only.)
+ * slice 1 — map + filter, over a NATIVE stream (a tuple literal `(1,2,3)`; no
+ * Element/Leaf — trees use recursion, streams are native; James 2026-06-15).
+ * Parses `iter(src).{…} { match value … }` end-to-end (AltParser →
+ * {@link sibarum.pontif.ir.IrExpr.Iterate} → IrInterpreter) and inspects the
+ * completed result's streams.
  */
 class IterationParseTest {
 
@@ -31,71 +33,62 @@ class IterationParseTest {
         return new IrInterpreter(simp).eval(compiled);
     }
 
-    private static List<Object> heads(Object chain) {
-        List<Object> out = new ArrayList<>();
-        while (chain instanceof RecordValue rv && "Element".equals(rv.typeName())) {
-            out.add(rv.get("head", Origin.NONE));
-            chain = rv.get("rest", Origin.NONE);
-        }
-        return out;
+    /** A sealed stream is a positional record; its elements are its member values. */
+    private static List<Object> elems(Object stream) {
+        return stream instanceof RecordValue rv
+                ? new ArrayList<>(rv.members().values())
+                : List.of();
     }
-
-    private static final String STREAM_DECLS = """
-            struct Leaf()
-            struct Element(head:Int, rest:[Element|Leaf])
-            """;
 
     @Test
     void map_doublesEachElement() throws Exception {
-        // Pure map: only `value` destructured; the bare-value arm → default stream.
-        Object r = run(STREAM_DECLS + """
-                iter(Element(1, Element(2, Element(3, Leaf())))).{value} {
+        // Pure map: only `value`; the bare-value arm → default stream. Single
+        // output ⇒ returned directly.
+        Object r = run("""
+                iter((1, 2, 3)).{value} {
                   match value
                     [_] -> value * 2
                 }
                 """);
-        assertEquals(List.of(2L, 4L, 6L), heads(r));  // single output → returned directly
+        assertEquals(List.of(2L, 4L, 6L), elems(r));
     }
 
     @Test
     void filter_partitionsAcceptAndReject() throws Exception {
-        // accept/reject → two streams; nothing erased.
-        RecordValue r = (RecordValue) run(STREAM_DECLS + """
-                iter(Element(1, Element(2, Element(3, Leaf())))).{value, accept, reject} {
+        RecordValue r = (RecordValue) run("""
+                iter((1, 2, 3)).{value, accept, reject} {
                   match value
                     [@>1] -> accept(value)
                     [_]   -> reject(value)
                 }
                 """);
-        assertEquals(List.of(2L, 3L), heads(r.get("accept", Origin.NONE)));
-        assertEquals(List.of(1L), heads(r.get("reject", Origin.NONE)));
+        assertEquals(List.of(2L, 3L), elems(r.get("accept", Origin.NONE)));
+        assertEquals(List.of(1L), elems(r.get("reject", Origin.NONE)));
     }
 
     @Test
     void filterAndMap_acceptCarriesATransform() throws Exception {
-        // accept(v)/reject(v) carry a (transformed) value ⇒ filter AND map.
-        RecordValue r = (RecordValue) run(STREAM_DECLS + """
-                iter(Element(1, Element(2, Element(3, Leaf())))).{value, accept, reject} {
+        RecordValue r = (RecordValue) run("""
+                iter((1, 2, 3)).{value, accept, reject} {
                   match value
                     [@>1] -> accept(value * 10)
                     [_]   -> reject(value)
                 }
                 """);
-        assertEquals(List.of(20L, 30L), heads(r.get("accept", Origin.NONE)));
-        assertEquals(List.of(1L), heads(r.get("reject", Origin.NONE)));
+        assertEquals(List.of(20L, 30L), elems(r.get("accept", Origin.NONE)));
+        assertEquals(List.of(1L), elems(r.get("reject", Origin.NONE)));
     }
 
     @Test
     void filter_boolArmsRouteCurrentValue() throws Exception {
-        // bool arms are the skip disposition — legal because accept/reject are in scope.
-        RecordValue r = (RecordValue) run(STREAM_DECLS + """
-                iter(Element(1, Element(2, Element(3, Leaf())))).{value, accept, reject} {
+        RecordValue r = (RecordValue) run("""
+                iter((0, 1, 2)).{value, accept, reject} {
                   match value
                     [0] -> false
                     [_] -> true
                 }
                 """);
-        assertEquals(List.of(1L, 2L, 3L), heads(r.get("accept", Origin.NONE)));
-        assertEquals(List.of(), heads(r.get("reject", Origin.NONE)));
+        assertEquals(List.of(1L, 2L), elems(r.get("accept", Origin.NONE)));
+        assertEquals(List.of(0L), elems(r.get("reject", Origin.NONE)));
     }
 }

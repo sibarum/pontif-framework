@@ -3275,14 +3275,14 @@ public final class AltParser {
             throw new ParseException(
                     "Iterator block must destructure `value` (the current element)", start.origin());
         }
-        // Slice-1 element-sort inference (so refinement-pattern shorthands like
-        // `[0]`/`[@>1]` get a base): if the source's struct has a `head` field,
-        // `value` has that sort. REVISIT (docs/iteration.md §10): real element-type
-        // inference from the Source contract; for now this covers Element/Leaf.
+        // Element-sort inference (so refinement-pattern shorthands like `[0]` /
+        // `[@>1]` get a base): a stream is a positional record (a tuple literal
+        // `(1,2,3)`), so the element sort is its first member's. REVISIT
+        // (docs/iteration.md §10): real element-type inference from the Source
+        // contract (heterogeneous streams, non-literal sources).
         IrSort valueSort = null;
-        String srcBase = baseSortName(inferMaximalSort(source));
-        if (srcBase != null && declaredStructs.containsKey(srcBase)) {
-            valueSort = declaredStructs.get(srcBase).members().get("head");
+        if (inferMaximalSort(source) instanceof IrSort.Structural st && !st.members().isEmpty()) {
+            valueSort = st.members().values().iterator().next();
         }
         // `{ match value <arms> }` — `value` scoped so the match infers its base.
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
