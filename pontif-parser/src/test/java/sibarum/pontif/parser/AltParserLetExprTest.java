@@ -165,7 +165,7 @@ class AltParserLetExprTest {
         // value is Int, annotation says Bool — should error at parse time.
         ParseException ex = assertThrows(ParseException.class, () ->
                 parseFunctionBody("let m:Bool = 5 m"));
-        assertTrue(ex.getMessage().toLowerCase().contains("base sort mismatch"),
+        assertTrue(ex.getMessage().toLowerCase().contains("different types"),
                 () -> "Unexpected: " + ex.getMessage());
     }
 

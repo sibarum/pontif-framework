@@ -139,7 +139,7 @@ class AltParserLetTest {
         String src = "struct Point(x:Int, y:Int)\nlet p:Int = Point(0, 0)";
         ParseException ex = assertThrows(ParseException.class, () ->
                 AltParser.parseModule(src, "t"));
-        assertTrue(ex.getMessage().toLowerCase().contains("base sort mismatch"),
+        assertTrue(ex.getMessage().toLowerCase().contains("different types"),
                 () -> "Unexpected: " + ex.getMessage());
     }
 

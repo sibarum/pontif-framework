@@ -176,7 +176,7 @@ class LetClaimGateTest {
         CompileResult result = compiler.compileAlt("let m:Bool = 5\nm", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
-        assertTrue(failed.error().text().contains("base sort mismatch"),
+        assertTrue(failed.error().text().contains("different types"),
                 () -> "Expected the parser's base check; got: " + failed.error().text());
     }
 

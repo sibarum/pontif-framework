@@ -704,14 +704,6 @@ public final class AltParser {
     }
 
     /** A short, user-facing rendering of a sort for diagnostics. */
-    private static String describeSort(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> "[" + r.name() + ":...]";
-            default -> sort.getClass().getSimpleName();
-        };
-    }
-
     /**
      * Method declaration: {@code method Type.name(params):RetSort [-> body]}.
      * Desugars to {@code function Type.name(self:Type, params):RetSort [-> body]}.
@@ -1240,9 +1232,9 @@ public final class AltParser {
                     traitUpcast = true;
                 } else {
                     throw new ParseException(
-                            "let '" + name + "' declared as " + declaredSort
-                                    + " but value's inferred sort is " + inferredSort
-                                    + " (base sort mismatch)",
+                            "let '" + name + "' is declared " + describeSort(declaredSort)
+                                    + " but its value is " + describeSort(inferredSort)
+                                    + " — these are different types.",
                             start.origin());
                 }
             }
@@ -3130,9 +3122,9 @@ public final class AltParser {
                     && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
                 throw new ParseException(
-                        "let '" + name + "' declared as " + declaredSort
-                                + " but value's inferred sort is " + inferred
-                                + " (base sort mismatch)",
+                        "let '" + name + "' is declared " + describeSort(declaredSort)
+                                + " but its value is " + describeSort(inferred)
+                                + " — these are different types.",
                         start.origin());
             }
         }
@@ -3587,6 +3579,52 @@ public final class AltParser {
             if (s != null) return baseSortName(s);
         }
         return null;
+    }
+
+    /** A compact, human-readable rendering of a sort for error messages. */
+    private static String describeSort(IrSort s) {
+        return switch (s) {
+            case IrSort.Named n -> {
+                if (n.typeArgs().isEmpty()) yield n.name();
+                StringBuilder sb = new StringBuilder(n.name()).append("[");
+                for (int i = 0; i < n.typeArgs().size(); i++) {
+                    if (i > 0) sb.append(", ");
+                    sb.append(describeSort(n.typeArgs().get(i)));
+                }
+                yield sb.append("]").toString();
+            }
+            case IrSort.Refined r -> r.name();  // base only; the predicate is elided for readability
+            case IrSort.Structural st -> {
+                if (!TUPLE_SENTINEL.equals(st.name())) yield st.name();
+                StringBuilder sb = new StringBuilder("(");
+                boolean first = true;
+                for (IrSort m : st.members().values()) {
+                    if (!first) sb.append(", ");
+                    sb.append(describeSort(m));
+                    first = false;
+                }
+                yield sb.append(")").toString();
+            }
+            case IrSort.Method m -> "Method(…)";
+            case IrSort.Dispatch d -> "Dispatch(…)";
+            case IrSort.Union u -> {
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < u.branches().size(); i++) {
+                    if (i > 0) sb.append(" | ");
+                    sb.append(describeSort(u.branches().get(i)));
+                }
+                yield sb.toString();
+            }
+            case IrSort.Intersection i -> {
+                StringBuilder sb = new StringBuilder();
+                for (int j = 0; j < i.branches().size(); j++) {
+                    if (j > 0) sb.append(" & ");
+                    sb.append(describeSort(i.branches().get(j)));
+                }
+                yield sb.toString();
+            }
+            case IrSort.Trait t -> t.name();
+        };
     }
 
     private static String baseSortName(IrSort sort) {
