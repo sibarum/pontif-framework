@@ -548,8 +548,14 @@ single case per site).
 - **Drafter / ConservationDrafter / ConservationProofs** **[REVISIT]** — throw
   "Iterate: not yet"; the return/conservation gates don't reason about the
   construct yet (§5 work item).
-- **Parser (AltParser)** **[REVISIT / blocked on syntax]** — no surface syntax;
-  the construct is hand-built in tests only.
+- **Parser (AltParser)** — **map+filter slice LANDED** (`iter(src).{value, accept,
+  reject} { match value … }` → the node; `accept(e)`/`reject(e)`/bool/bare-value
+  dispositions lower to writes; `IterationParseTest`). **[REVISIT]**: `index`,
+  fold (`current`/`next`), group-by (`put`); the completed-iterator result
+  (`.stream()`/`.total`/chaining — currently returns the raw stream(s)); the
+  conservation guardrails; and refinement-shorthand bases (`[0]`/`[@>1]`) rely on
+  a slice-1 head-field element-sort heuristic until real Source-contract
+  element-type inference lands.
 
 Deferred semantics (independent of the ripple): KEYED + `rewrite` output kinds
 (§2.4, §2.6); the `Source` trait abstraction (slice 1 iterates a concrete source);
