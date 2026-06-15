@@ -219,6 +219,44 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    // --- Type parameters — generics without erasure --------------------------
+
+    @Test
+    void readmeTypeParamCarrierSnippet_evaluatesTo10() {
+        assertEquals("10", runGated("""
+                struct Box[type T](value:T)
+                function open(b:Box[Int]):Int -> b.value
+                function id[type E](x:E):E -> x
+
+                id(open(Box(7))) + id(3)
+                """));
+    }
+
+    @Test
+    void readmeParametricTraitSnippet_evaluatesTo42() {
+        assertEquals("42", runGated("""
+                let Container[type E]:Type{ get:[Method():E] }
+
+                struct Box[type T](value:T)
+
+                assign trait Box[type T]:Container[T] {
+                  get():T -> this.value
+                }
+
+                Box(42).get()
+                """));
+    }
+
+    @Test
+    void readmeParametricIsaBaseSnippet_evaluatesTo9() {
+        assertEquals("9", runGated("""
+                struct Literal[type T](value:T)
+                struct IntLit:[Literal[Int]:@.value==value](value:Int)
+
+                IntLit(9).value
+                """));
+    }
+
     // --- Operator overloading ------------------------------------------------
 
     @Test

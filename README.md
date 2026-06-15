@@ -275,6 +275,48 @@ cover the major use cases:
 None subsumes another; the type system's job is to keep them honest, not to merge
 them.
 
+## Type parameters — generics without erasure
+
+A `[type T]` slot after a name makes a function, struct, or trait *parametric*.
+Pontif never erases types — every value carries its concrete type — so a generic
+needs no runtime witness, no dictionary, no monomorphized copy: **the value is its
+own evidence.** The parameter is derived from the value at construction and
+inferred at the call.
+
+```pontif
+struct Box[type T](value:T)              # T is carried by the field
+function open(b:Box[Int]):Int -> b.value
+function id[type E](x:E):E -> x          # E inferred at each call
+
+id(open(Box(7))) + id(3)                 # → 10
+```
+
+A trait can be parametric too, and a struct forwards its *own* parameter into the
+trait it satisfies — so the element type rides each value, per value:
+
+```pontif
+let Container[type E]:Type{ get:[Method():E] }
+
+struct Box[type T](value:T)
+
+assign trait Box[type T]:Container[T] {
+  get():T -> this.value
+}
+
+Box(42).get()                            # T = Int from the field → 42
+```
+
+The same parametric sort is honest in an **is-a** base, where the type argument is
+*invariant*: a struct that claims it is-a `Literal[Int]` must really hold an `Int`
+— not a refinement of one, and not a `Bool`.
+
+```pontif
+struct Literal[type T](value:T)
+struct IntLit:[Literal[Int]:@.value==value](value:Int)
+
+IntLit(9).value                          # → 9
+```
+
 ## The operator algebra
 
 The brackets are not ad-hoc punctuation. The subject `@` combines with three
