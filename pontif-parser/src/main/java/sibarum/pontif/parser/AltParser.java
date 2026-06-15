@@ -1194,6 +1194,7 @@ public final class AltParser {
         boolean intToDecimal = false;
         boolean demotion = false;
         boolean traitUpcast = false;
+        boolean streamAutobox = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferredSort);
@@ -1230,6 +1231,14 @@ public final class AltParser {
                     // The value keeps its concrete type at runtime, so trait-view
                     // attribute access resolves to fields/producers.
                     traitUpcast = true;
+                } else if ("Stream".equals(declaredBase) && TUPLE_SENTINEL.equals(inferredBase)) {
+                    // tuple → Stream[T]: the one-way autobox (docs/iteration.md §8.6) —
+                    // a clean forget of the tuple's arity/positional identity (in the
+                    // cast law's lose-freely family), gated by every element being
+                    // convertible to T. Figurative for now (a base-level element check
+                    // here); the multi-dispatch promotion path will replace it.
+                    requireStreamElements(declaredSort, inferredSort, start.origin());
+                    streamAutobox = true;
                 } else {
                     throw new ParseException(
                             "let '" + name + "' is declared " + describeSort(declaredSort)
@@ -1246,7 +1255,7 @@ public final class AltParser {
         // 0-arg return sort, where it would be an obligation the integer-
         // only discharge kernel can never prove. Otherwise keep the tighter
         // inferred narrowing as before.
-        IrSort binding = demotion || traitUpcast
+        IrSort binding = demotion || traitUpcast || streamAutobox
                 ? declaredSort
                 : declaredSort != null
                 && "_record".equals(baseSortName(inferredSort))
@@ -1262,7 +1271,7 @@ public final class AltParser {
         // The promotion-sugar case is exempt: the stamped record's own
         // construction gate judgment IS the claim check.
         IrExpr fnBody = value;
-        if (declaredSort != null && !"_record".equals(baseSortName(inferredSort))) {
+        if (declaredSort != null && !"_record".equals(baseSortName(inferredSort)) && !streamAutobox) {
             fnBody = new IrExpr.LetIn(
                     name, binding, value,
                     new IrExpr.Var(name, start.origin()),
@@ -3579,6 +3588,32 @@ public final class AltParser {
             if (s != null) return baseSortName(s);
         }
         return null;
+    }
+
+    /**
+     * The figurative tuple→{@code Stream[T]} element gate (docs/iteration.md §8.6):
+     * every member of the tuple must be convertible to {@code T}. Base-level for
+     * now (exact base, plus the lossless Int→Decimal embedding); the multi-dispatch
+     * promotion path will subsume it.
+     */
+    private static void requireStreamElements(IrSort declaredStream, IrSort tupleSort, Origin o)
+            throws ParseException {
+        IrSort elemType = declaredStream instanceof IrSort.Named sn && !sn.typeArgs().isEmpty()
+                ? sn.typeArgs().get(0) : null;
+        String tBase = elemType == null ? null : baseSortName(elemType);
+        if (tBase == null || !(tupleSort instanceof IrSort.Structural st)) return;
+        int idx = 0;
+        for (IrSort m : st.members().values()) {
+            String mBase = baseSortName(m);
+            boolean ok = tBase.equals(mBase) || ("Decimal".equals(tBase) && "Int".equals(mBase));
+            if (!ok) {
+                throw new ParseException(
+                        "Cannot box this tuple as Stream[" + describeSort(elemType) + "]: element "
+                                + idx + " is " + describeSort(m) + ", not " + describeSort(elemType),
+                        o);
+            }
+            idx++;
+        }
     }
 
     /** A compact, human-readable rendering of a sort for error messages. */

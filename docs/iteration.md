@@ -500,6 +500,35 @@ Still open:
 - **`Source` trait now vs array-first** (§2.3).
 - **the conservation checks themselves** (§4) — still the SortChecker REVISIT (§10).
 
+## 8.6 `Stream[T]` and the tuple autobox (RULED 2026-06-15, James)
+
+A `Stream[T]` is a distinct type — the homogeneous, variable-length sequence —
+*not* a tuple. A tuple **autoboxes** into `Stream[T]` by a **one-way cast in the
+cast law's lose-freely / fabricate-never family** ([[project_subtypes]]):
+
+- the tuple `(1,2,3,4)` knows it is *exactly four, at positions `_0.._3`*;
+  `Stream[T]` knows only *"homogeneous `T`, some count."* So the cast **forgets the
+  arity / positional identity** (a clean forget — free), and is **irreversible**
+  precisely because the reverse would have to *fabricate* "it is a 4-tuple"
+  (forbidden). It is therefore *not* coercion (reversible) and *not* a wrapper
+  `Stream(tuple)` (no tuple identity survives — gone, not boxed).
+- it is **element-gated**: the box is licensed iff every member is convertible to
+  `T` (the tuple's independently-typed slots all land in the single `T`).
+
+When the multi-dispatch **promotion** machinery is complete, this *is* that cast
+and should run on it. Until then it is **figurative** — a bespoke conversion at the
+boundary, conceptually identical, swapped for the promotion path later.
+
+**Slice (figurative) — LANDED.** `Stream` is a recognized parametric type
+(SortChecker `BUILTIN_PARAMETRIC_TYPES`); a `let x:Stream[T] = (…)` claim where the
+value is a tuple autoboxes (AltParser `requireStreamElements`: base-level element
+gate, plus the lossless Int→Decimal embedding), one-way only (no `Stream[T]` →
+tuple). The runtime value stays the native positional record; the claim is the
+parse-time gate (no separate runtime `Stream` check). `iter` accepts a `Stream[T]`
+binding as a source. REVISIT: ride the real promotion logic; full element coercion
+(not just base); the expression-level `let … in …` path (only the top-level/
+statement `let` autoboxes today).
+
 # 9. Costs (honest)
 
 - The Drafter/return gate must learn the bounded-fold construct (§5) — real work,

@@ -80,6 +80,30 @@ class IterationParseTest {
     }
 
     @Test
+    void streamAnnotation_autoboxesTuple_andIterates() throws Exception {
+        // A tuple autoboxes into Stream[Int] (one-way, element-gated); iter then
+        // consumes that Stream binding.
+        Object r = run("""
+                let s:Stream[Int] = (1, 2, 3)
+                iter(s).{value} {
+                  match value
+                    [_] -> value * 2
+                }
+                """);
+        assertEquals(List.of(2L, 4L, 6L), elems(r));
+    }
+
+    @Test
+    void streamAnnotation_heterogeneousTuple_isRejected() {
+        sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
+                sibarum.pontif.parser.ParseException.class,
+                () -> AltParser.parseModule("let s:Stream[Int] = (1, true, 3)\ns\n", "iter.ptf"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                ex.getMessage().contains("Cannot box") && ex.getMessage().contains("Bool"),
+                () -> ex.getMessage());
+    }
+
+    @Test
     void filter_boolArmsRouteCurrentValue() throws Exception {
         RecordValue r = (RecordValue) run("""
                 iter((0, 1, 2)).{value, accept, reject} {

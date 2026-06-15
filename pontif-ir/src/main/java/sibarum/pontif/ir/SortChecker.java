@@ -58,6 +58,14 @@ public final class SortChecker {
             "Int", "Bool", "Decimal", "Char", "String",
             "_", "_record", "_tuple");
 
+    /**
+     * Compiler-known parametric types that are valid in a sort position even
+     * though they are not declared structs. {@code Stream[T]} is the homogeneous
+     * sequence a tuple autoboxes into (docs/iteration.md §8.6); figurative for now
+     * (no member contract checked here — the autobox's element gate is the check).
+     */
+    private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
+
     private SortChecker() {}
 
     public static void check(IrModule module) throws CompileException {
@@ -631,6 +639,7 @@ public final class SortChecker {
                 // this terminating on a recursive type: struct Node(next:Node)
                 // validates without unrolling Node.
                 if (!PRIMITIVE_SORT_NAMES.contains(n.name())
+                        && !BUILTIN_PARAMETRIC_TYPES.contains(n.name())
                         && !structDefs.containsKey(n.name())
                         && !typeVars.contains(n.name())) {
                     throw new CompileException(
