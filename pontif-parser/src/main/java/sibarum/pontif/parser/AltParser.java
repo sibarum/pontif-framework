@@ -1040,6 +1040,10 @@ public final class AltParser {
             case IrExpr.FieldAccess fa -> containsSelfRef(fa.base());
             case IrExpr.MethodCall mc -> containsSelfRef(mc.receiver())
                     || mc.args().stream().anyMatch(AltParser::containsSelfRef);
+            case IrExpr.Iterate it -> containsSelfRef(it.source())
+                    || it.outputs().stream().anyMatch(o -> o.init() != null && containsSelfRef(o.init()))
+                    || it.arms().stream().anyMatch(a -> a.writes().stream().anyMatch(
+                            w -> containsSelfRef(w.value()) || (w.key() != null && containsSelfRef(w.key()))));
         };
     }
 
@@ -1451,6 +1455,9 @@ public final class AltParser {
                 }
                 yield IrSort.named("_");
             }
+            // REVISIT (docs/iteration.md §10): infer the output tuple's sort;
+            // for now the iteration construct's maximal sort is unknown ("_").
+            case IrExpr.Iterate it -> IrSort.named("_");
             case IrExpr.BinOp op -> {
                 // Decimal arithmetic yields a bare Decimal (no value refinement —
                 // see the Dec literal case). Int arithmetic and all comparisons

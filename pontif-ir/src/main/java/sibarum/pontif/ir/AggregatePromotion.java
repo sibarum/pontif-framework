@@ -168,6 +168,9 @@ final class AggregatePromotion {
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), null, structs, fns), fa.fieldName(), fa.origin());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "AggregatePromotion");
+            // REVISIT (docs/iteration.md §10): pass-through — no aggregate stamping
+            // into the source / arm writes yet (slice 1 builds those explicitly).
+            case IrExpr.Iterate it -> it;
         };
     }
 

@@ -133,6 +133,22 @@ public final class IrPrinter {
                 printExpr(sb, mc.receiver(), d + 1);
                 for (IrExpr a : mc.args()) printExpr(sb, a, d + 1);
             }
+            case IrExpr.Iterate it -> {
+                line(sb, d, "Iterate as " + it.element() + at(it.origin()));
+                line(sb, d + 1, "source");
+                printExpr(sb, it.source(), d + 2);
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    line(sb, d + 1, "output " + os.name() + " : " + os.kind());
+                    if (os.init() != null) printExpr(sb, os.init(), d + 2);
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    line(sb, d + 1, "arm " + sort(arm.pattern()));
+                    for (IrExpr.Write w : arm.writes()) {
+                        line(sb, d + 2, "write -> " + w.output());
+                        printExpr(sb, w.value(), d + 3);
+                    }
+                }
+            }
         }
     }
 

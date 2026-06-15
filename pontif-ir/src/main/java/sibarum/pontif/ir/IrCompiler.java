@@ -258,6 +258,22 @@ public final class IrCompiler {
             }
             case IrExpr.FieldAccess fa -> registerSortsInExpr(fa.base(), map);
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrCompiler");
+            case IrExpr.Iterate it -> {
+                // Register the source, accumulator inits, arm patterns (the
+                // interpreter resolves them via CompiledModule.sortFor), and the
+                // write values' sorts.
+                registerSortsInExpr(it.source(), map);
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    if (os.init() != null) registerSortsInExpr(os.init(), map);
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    registerSort(arm.pattern(), map);
+                    for (IrExpr.Write w : arm.writes()) {
+                        if (w.key() != null) registerSortsInExpr(w.key(), map);
+                        registerSortsInExpr(w.value(), map);
+                    }
+                }
+            }
         }
     }
 
@@ -357,6 +373,8 @@ public final class IrCompiler {
             }
             case IrExpr.FieldAccess fa -> SymExpr.fieldAccess(compileSymExpr(fa.base()), fa.fieldName());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrCompiler");
+            case IrExpr.Iterate it -> throw new CompileException(
+                    "Iteration inside refinement predicates is not supported", it.origin());
         };
     }
 

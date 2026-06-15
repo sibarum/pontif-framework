@@ -209,6 +209,9 @@ public final class ConservationDrafter {
             // Creating a metareference is not a call — invocation through a
             // binding is the residual case, handled at the Call site.
             case IrExpr.DispatchRef d -> { }
+            // REVISIT (docs/iteration.md §10): no call-site collection inside the
+            // iteration construct yet (slice 1 has no proofs over iterations).
+            case IrExpr.Iterate it -> { }
         };
     }
 
@@ -341,6 +344,7 @@ public final class ConservationDrafter {
             case IrExpr.Apply ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.FieldAccess ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.MethodCall ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Iterate ignored -> wrapReturn(draftValue(expr, ctx), ctx);
         };
     }
 
@@ -494,6 +498,10 @@ public final class ConservationDrafter {
             // over its candidates; an unsummarized callee (recursion, unknown)
             // is the located ignorance.
             case IrExpr.MethodCall mc -> throw sibarum.pontif.ir.MethodResolver.unresolved(mc, "ConservationDrafter");
+            // REVISIT (docs/iteration.md §10, §5): the receipt drafter does not
+            // reason about the bounded-fold construct yet (no proofs over it).
+            case IrExpr.Iterate it -> throw new UnsupportedOperationException(
+                    "Iterate: conservation drafting not yet implemented (docs/iteration.md §10)");
             case IrExpr.Call c -> {
                 List<Flow> argFlows = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) argFlows.add(draftValue(a, ctx));

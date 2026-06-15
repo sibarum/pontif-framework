@@ -163,7 +163,95 @@ public final class IrInterpreter {
                 yield rec.get(fa.fieldName(), fa.origin());  // re-throws the "no field" error
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrInterpreter");
+            case IrExpr.Iterate it -> evalIterate(it, env, module);
         };
+    }
+
+    /**
+     * Evaluates the iteration construct (docs/iteration.md) as a pure fold over a
+     * source. Slice 1: the source is an {@code Element/Leaf} chain; output kinds
+     * STREAM (sealed to an {@code Element/Leaf} chain) and ACCUMULATOR (sealed to
+     * its final revision) are supported; KEYED/REWRITE throw. A frame binds the
+     * current element and each accumulator's PRIOR revision (the read side of its
+     * pair, §2.5); stream outputs are write-only (not bound). No conservation
+     * checking yet (§10 REVISIT) — empty write set = the element is simply not
+     * placed.
+     */
+    private Object evalIterate(IrExpr.Iterate it, Environment env, CompiledModule module) {
+        java.util.Map<String, java.util.List<Object>> streams = new LinkedHashMap<>();
+        java.util.Map<String, Object> accumulators = new LinkedHashMap<>();
+        java.util.Map<String, IrExpr.OutputKind> kinds = new LinkedHashMap<>();
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            kinds.put(os.name(), os.kind());
+            switch (os.kind()) {
+                case STREAM -> streams.put(os.name(), new ArrayList<>());
+                case ACCUMULATOR -> accumulators.put(os.name(),
+                        os.init() == null ? null : eval(os.init(), env, module));
+                default -> throw new RuntimeCheckException(
+                        "Iterate: output kind " + os.kind() + " not yet implemented (slice 1)",
+                        it.origin());
+            }
+        }
+
+        Object cur = eval(it.source(), env, module);
+        while (cur instanceof RecordValue rv && "Element".equals(rv.typeName())) {
+            Object element = rv.get("head", it.origin());
+            Environment frame = env.extend(it.element(), element);
+            for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
+                frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)
+            }
+            SymExpr sym = toSymExpr(element);
+            boolean matched = false;
+            for (IrExpr.Arm arm : it.arms()) {
+                Sort pat = module.sortFor(arm.pattern());
+                if (Refinements.satisfies(sym, pat, checker(module)) instanceof ProofResult.Passed) {
+                    for (IrExpr.Write w : arm.writes()) {
+                        Object v = eval(w.value(), frame, module);
+                        IrExpr.OutputKind k = kinds.get(w.output());
+                        if (k == null) throw new RuntimeCheckException(
+                                "Iterate: write to unknown output '" + w.output() + "'", it.origin());
+                        switch (k) {
+                            case STREAM -> streams.get(w.output()).add(v);
+                            case ACCUMULATOR -> accumulators.put(w.output(), v);  // write next (read prior was via frame)
+                            default -> throw new RuntimeCheckException(
+                                    "Iterate: write to " + k + " not yet implemented (slice 1)", it.origin());
+                        }
+                    }
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) throw new RuntimeCheckException(
+                    "Iterate: no arm matched element " + element, it.origin());
+            cur = rv.get("rest", it.origin());
+        }
+        if (!(cur instanceof RecordValue end && "Leaf".equals(end.typeName()))) {
+            throw new RuntimeCheckException(
+                    "Iterate: source must be an Element/Leaf chain (slice 1), ended at " + cur,
+                    it.origin());
+        }
+
+        // Seal each output and return: a single output directly, else a record.
+        java.util.Map<String, Object> result = new LinkedHashMap<>();
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            result.put(os.name(), os.kind() == IrExpr.OutputKind.STREAM
+                    ? sealStream(streams.get(os.name()))
+                    : accumulators.get(os.name()));
+        }
+        if (result.size() == 1) return result.values().iterator().next();
+        return new RecordValue(result);
+    }
+
+    /** Seals an accumulated stream into an {@code Element/Leaf} chain (slice-1 sequence value). */
+    private static Object sealStream(java.util.List<Object> elems) {
+        Object chain = new RecordValue("Leaf", new LinkedHashMap<>());
+        for (int i = elems.size() - 1; i >= 0; i--) {
+            java.util.Map<String, Object> m = new LinkedHashMap<>();
+            m.put("head", elems.get(i));
+            m.put("rest", chain);
+            chain = new RecordValue("Element", m);
+        }
+        return chain;
     }
 
     private Object evalMatch(IrExpr.Match match, Environment env, CompiledModule module) {

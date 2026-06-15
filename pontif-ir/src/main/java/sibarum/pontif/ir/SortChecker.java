@@ -1027,6 +1027,8 @@ public final class SortChecker {
                 validateSelfFieldAccesses(mc.receiver(), baseStruct, refOrigin);
                 for (IrExpr arg : mc.args()) validateSelfFieldAccesses(arg, baseStruct, refOrigin);
             }
+            // An iteration construct never appears inside a refinement predicate.
+            case IrExpr.Iterate ignored -> {}
         }
     }
 
@@ -1164,6 +1166,28 @@ public final class SortChecker {
                 }
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "SortChecker");
+            case IrExpr.Iterate it -> {
+                // Light validation: the source, output inits, arm patterns, and
+                // write expressions reference only known sorts. (checkExpr's Var
+                // case is already lenient, so element/accumulator names need no
+                // binding here.) REVISIT (docs/iteration.md §10): the conservation
+                // checks — no-bare-drop §4, exactly-one-placement / accounting,
+                // output-kind vs write agreement, home-vs-observe — are NOT yet
+                // enforced.
+                checkExpr(it.source(), typeEnv, functionReturns, structDefs);
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    if (os.init() != null) {
+                        checkExpr(os.init(), typeEnv, functionReturns, structDefs);
+                    }
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    validateSortNames(arm.pattern(), structDefs);
+                    for (IrExpr.Write w : arm.writes()) {
+                        if (w.key() != null) checkExpr(w.key(), typeEnv, functionReturns, structDefs);
+                        checkExpr(w.value(), typeEnv, functionReturns, structDefs);
+                    }
+                }
+            }
         }
     }
 

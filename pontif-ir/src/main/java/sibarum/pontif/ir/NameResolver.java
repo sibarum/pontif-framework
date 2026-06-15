@@ -317,6 +317,25 @@ public final class NameResolver {
                 yield new IrExpr.MethodCall(
                         rewrite(mc.receiver(), m, table), mc.methodName(), args, mc.origin());
             }
+            case IrExpr.Iterate it -> {
+                List<IrExpr.OutputSpec> outs = new ArrayList<>(it.outputs().size());
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    outs.add(new IrExpr.OutputSpec(os.name(), os.kind(),
+                            os.init() == null ? null : rewrite(os.init(), m, table)));
+                }
+                List<IrExpr.Arm> arms = new ArrayList<>(it.arms().size());
+                for (IrExpr.Arm arm : it.arms()) {
+                    List<IrExpr.Write> ws = new ArrayList<>(arm.writes().size());
+                    for (IrExpr.Write w : arm.writes()) {
+                        ws.add(new IrExpr.Write(w.output(),
+                                w.key() == null ? null : rewrite(w.key(), m, table),
+                                rewrite(w.value(), m, table)));
+                    }
+                    arms.add(new IrExpr.Arm(rewriteSort(arm.pattern(), m, table), ws));
+                }
+                yield new IrExpr.Iterate(
+                        rewrite(it.source(), m, table), it.element(), outs, arms, it.origin());
+            }
         };
     }
 }

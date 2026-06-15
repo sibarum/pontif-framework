@@ -383,6 +383,25 @@ public final class AliasResolver {
                 yield new IrExpr.MethodCall(
                         rewriteExpr(mc.receiver(), resolved), mc.methodName(), args, mc.origin());
             }
+            case IrExpr.Iterate it -> {
+                List<IrExpr.OutputSpec> outs = new ArrayList<>(it.outputs().size());
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    outs.add(new IrExpr.OutputSpec(os.name(), os.kind(),
+                            os.init() == null ? null : rewriteExpr(os.init(), resolved)));
+                }
+                List<IrExpr.Arm> arms = new ArrayList<>(it.arms().size());
+                for (IrExpr.Arm arm : it.arms()) {
+                    List<IrExpr.Write> ws = new ArrayList<>(arm.writes().size());
+                    for (IrExpr.Write w : arm.writes()) {
+                        ws.add(new IrExpr.Write(w.output(),
+                                w.key() == null ? null : rewriteExpr(w.key(), resolved),
+                                rewriteExpr(w.value(), resolved)));
+                    }
+                    arms.add(new IrExpr.Arm(substituteResolved(arm.pattern(), resolved), ws));
+                }
+                yield new IrExpr.Iterate(
+                        rewriteExpr(it.source(), resolved), it.element(), outs, arms, it.origin());
+            }
         };
     }
 

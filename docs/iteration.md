@@ -239,11 +239,35 @@ input; everything it **writes** is an output:
   position projection); the **caller's lexical scope** (closure over *immutable*
   values, §6); each accumulator's **prior revision** (the read side of its pair,
   §2.5).
-- **writes (outputs)** — the §1 dispositions: **placement** (write the element,
-  transformed or not, to one stream; default = the primary output, §1.1),
-  **observation** (read prior + write next on an accumulator pair), **emission**
-  (an extra, provenance-tracked write). **Exactly one placement per element** is
-  the conservation law (§4).
+- **writes (outputs)** — see §2.8. **Exactly one placement per element** (or
+  accumulator absorption) is the conservation law (§4).
+
+## 2.8 The arm result — write commands (RULED 2026-06-15, James)
+
+Each output stream is a **name in scope**. An arm's result is not a value; it is a
+set of **writes**, each one *"send `value` to the output `os`"* — and the OS's
+**kind** supplies the effect, so there is nothing to tag:
+
+- to a **stream** → append; to a **keyed-stream** → route by key; to an
+  **accumulator** → revise (the prior is read from the same name, §2.5).
+
+So `Place` / `Observe` / `Emit` collapse into **one write command**. An arm
+resolves to **one write, a tuple of writes (you may write to two), or none**.
+"Place the element" vs "emit an extra" is not a command distinction — both are
+writes; provenance is the ledger's job (§4), not the command's.
+
+**No-op (the empty write set) is valid in the representation, fenced by
+conservation (RULED).** It is always *expressible*; whether a given no-op is
+*legal* is the §4 check, not a syntax rule:
+
+- with a default/primary output (§1.1), an empty arm means *the default placement
+  fires* — not a drop;
+- without one (a pure fold; a filter that must route everything), an empty arm
+  that leaves the element **unaccounted** is a **compile error** — never a silent
+  loss.
+
+The AST is lenient (no-op is a node); the checker is strict (it rejects only the
+no-ops that would erase). That is the no-lie law in the right place.
 
 # 3. The unification (PROPOSED)
 
@@ -405,3 +429,45 @@ Purely to make §1–§4 legible; every token here is a placeholder.
 
 None of these block the surface-syntax design; they are the implementation arc
 that follows a ratified model.
+
+# 10. Implementation status & revisit checklist (slice 1)
+
+**Slice 1 (no syntax): a hand-constructable `IrExpr.Iterate` that runs on the
+IrInterpreter path.** Decision (James, 2026-06-15): minimal-runnable, *minimize
+rework*; fill coverage everywhere once the surface syntax is finalized. This
+checklist is the contract — every site touched is listed, marked **[real]**
+(handled for slice 1) or **[REVISIT]** (stubbed / deferred, must be completed).
+
+Node shape (slice 1): `IrExpr.Iterate(source, element, outputs, arms, origin)`,
+where `outputs` are `OutputSpec(name, kind, init)` (`kind ∈ {STREAM, ACCUMULATOR}`
+for slice 1; KEYED + rewrite deferred), and each `arm` is `Arm(pattern, writes)`
+with `writes = [Write(output, value)]` (empty = no-op). One new sealed `IrExpr`
+variant; the inner records are NOT `IrExpr` variants (keeps the switch ripple to a
+single case per site).
+
+- **IrExpr.java** [real] — the variant + inner records.
+- **IrInterpreter** [real] — fold eval for STREAM (seal → `Element/Leaf` chain) +
+  ACCUMULATOR (seal → final value). KEYED/rewrite throw.
+- **AliasResolver / NameResolver / MethodResolver / AggregatePromotion /
+  DecimalPromotion / ConstructionGate / StructLiteralRewriter / NarrowingInference
+  / IrFreeVars** — structural recursion into source/inits/writes/patterns.
+  **[REVISIT]**: confirm each is *semantically* right once syntax lands (e.g.
+  AggregatePromotion stamping inside arm writes; NarrowingInference inferring the
+  result tuple type rather than returning unknown).
+- **SortChecker** **[REVISIT]** — slice 1 only validates sub-sorts/children; the
+  real conservation checks (no-bare-drop §4, exactly-one-placement / accounting,
+  output-kind/write agreement, home-vs-observe §1-open) are NOT yet enforced.
+- **IrCompiler** [real-ish] — register sorts in children so the IrInterpreter path
+  runs. **[REVISIT]**: real lowering/compilation of the construct.
+- **IrPrinter** [real] — placeholder rendering (don't block error paths).
+- **TruffleLowering** **[REVISIT]** — throws "Iterate: not yet"; the Truffle path
+  is unsupported until coverage.
+- **Drafter / ConservationDrafter / ConservationProofs** **[REVISIT]** — throw
+  "Iterate: not yet"; the return/conservation gates don't reason about the
+  construct yet (§5 work item).
+- **Parser (AltParser)** **[REVISIT / blocked on syntax]** — no surface syntax;
+  the construct is hand-built in tests only.
+
+Deferred semantics (independent of the ripple): KEYED + `rewrite` output kinds
+(§2.4, §2.6); the `Source` trait abstraction (slice 1 iterates a concrete source);
+decisions #1/#2 from §8.

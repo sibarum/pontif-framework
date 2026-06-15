@@ -72,6 +72,23 @@ public final class IrFreeVars {
                 collect(mc.receiver(), bound, free);
                 for (IrExpr a : mc.args()) collect(a, bound, free);
             }
+            case IrExpr.Iterate it -> {
+                // `element` and the accumulator names are bound inside the body;
+                // the source and accumulator inits are evaluated outside it.
+                collect(it.source(), bound, free);
+                java.util.Set<String> inner = new java.util.HashSet<>(bound);
+                inner.add(it.element());
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    if (os.init() != null) collect(os.init(), bound, free);
+                    if (os.kind() == IrExpr.OutputKind.ACCUMULATOR) inner.add(os.name());
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    for (IrExpr.Write w : arm.writes()) {
+                        if (w.key() != null) collect(w.key(), inner, free);
+                        collect(w.value(), inner, free);
+                    }
+                }
+            }
         }
     }
 }

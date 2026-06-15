@@ -103,6 +103,9 @@ public final class NarrowingInference {
             case IrExpr.SelfRef ignored -> null;
             // Unresolved until MethodResolver; can't narrow its result here.
             case IrExpr.MethodCall ignored -> null;
+            // REVISIT (docs/iteration.md §10): no result-narrowing for the
+            // iteration construct yet (would infer the output tuple's sort).
+            case IrExpr.Iterate ignored -> null;
         };
     }
 
@@ -441,6 +444,7 @@ public final class NarrowingInference {
             case IrExpr.Bool ignored -> true;
             case IrExpr.Var ignored -> true;
             case IrExpr.DispatchRef ignored -> true;
+            case IrExpr.Iterate ignored -> false;  // REVISIT (docs/iteration.md §10)
         };
     }
 
@@ -526,6 +530,7 @@ public final class NarrowingInference {
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
             case IrExpr.DispatchRef d -> d;
+            case IrExpr.Iterate it -> it;  // REVISIT (docs/iteration.md §10)
         };
     }
 
@@ -608,6 +613,7 @@ public final class NarrowingInference {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.DispatchRef d -> d;
+            case IrExpr.Iterate it -> it;  // REVISIT (docs/iteration.md §10)
         };
     }
 

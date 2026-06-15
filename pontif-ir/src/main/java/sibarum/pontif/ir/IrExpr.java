@@ -12,7 +12,8 @@ public sealed interface IrExpr
         permits IrExpr.Lit, IrExpr.Dec, IrExpr.Chr, IrExpr.Str, IrExpr.Bool, IrExpr.Var, IrExpr.SelfRef,
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
-                IrExpr.Record, IrExpr.FieldAccess, IrExpr.MethodCall {
+                IrExpr.Record, IrExpr.FieldAccess, IrExpr.MethodCall,
+                IrExpr.Iterate {
 
     Origin origin();
 
@@ -246,6 +247,77 @@ public sealed interface IrExpr
                 throw new IllegalArgumentException("MethodCall method name must be non-empty");
             }
             args = List.copyOf(args);
+        }
+    }
+
+    /**
+     * The iteration construct (docs/iteration.md): drive a total per-element
+     * matcher over a read-stream {@code source}, the body writing to named
+     * write-streams ({@code outputs}); the result is the tuple/record of their
+     * sealed values. No surface syntax yet — hand-constructed in tests (slice 1).
+     *
+     * <p>One {@code IrExpr} variant; {@link OutputSpec}/{@link Arm}/{@link Write}
+     * are plain records (not variants), so an exhaustive {@code IrExpr} switch
+     * needs a single new case. The sub-expressions a pass must recurse into are
+     * {@code source}, each {@code OutputSpec.init}, and each {@code Write.key} /
+     * {@code Write.value}; the patterns are {@code Arm.pattern} sorts.
+     */
+    record Iterate(IrExpr source, String element, List<OutputSpec> outputs,
+                   List<Arm> arms, Origin origin) implements IrExpr {
+        public Iterate {
+            if (source == null) {
+                throw new IllegalArgumentException("Iterate source must be non-null");
+            }
+            if (element == null || element.isEmpty()) {
+                throw new IllegalArgumentException("Iterate element binding must be non-empty");
+            }
+            outputs = List.copyOf(outputs);
+            arms = List.copyOf(arms);
+        }
+    }
+
+    /** Output-stream kinds (docs/iteration.md §2.4). Slice-1 eval: STREAM + ACCUMULATOR. */
+    enum OutputKind { STREAM, KEYED, ACCUMULATOR, REWRITE }
+
+    /**
+     * A declared output stream: a {@code name} in the iteration's scope, a
+     * {@code kind} that supplies the write effect, and (for ACCUMULATOR) an
+     * {@code init} value; null for the kinds that start empty.
+     */
+    record OutputSpec(String name, OutputKind kind, IrExpr init) {
+        public OutputSpec {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("OutputSpec name must be non-empty");
+            }
+            if (kind == null) {
+                throw new IllegalArgumentException("OutputSpec kind must be non-null");
+            }
+        }
+    }
+
+    /** One arm of the per-element matcher: a {@code pattern} and its writes (empty = no-op). */
+    record Arm(IrSort pattern, List<Write> writes) {
+        public Arm {
+            if (pattern == null) {
+                throw new IllegalArgumentException("Arm pattern must be non-null");
+            }
+            writes = List.copyOf(writes);
+        }
+    }
+
+    /**
+     * A single write command — *send {@code value} to the output {@code output}*.
+     * The output's {@link OutputKind} supplies the effect (append / route-by-key /
+     * revise). {@code key} is non-null only for a KEYED target.
+     */
+    record Write(String output, IrExpr key, IrExpr value) {
+        public Write {
+            if (output == null || output.isEmpty()) {
+                throw new IllegalArgumentException("Write output must be non-empty");
+            }
+            if (value == null) {
+                throw new IllegalArgumentException("Write value must be non-null");
+            }
         }
     }
 }

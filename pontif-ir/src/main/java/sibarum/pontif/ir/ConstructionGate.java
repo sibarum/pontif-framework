@@ -166,6 +166,9 @@ final class ConstructionGate {
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), ctx, structs), fa.fieldName(), fa.origin());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "ConstructionGate");
+            // REVISIT (docs/iteration.md §10): no construction-claim gating inside
+            // the source / arm writes yet (slice 1 builds those explicitly).
+            case IrExpr.Iterate it -> it;
         };
     }
 

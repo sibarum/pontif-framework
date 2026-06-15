@@ -128,6 +128,9 @@ public final class StructLiteralRewriter {
                 yield new IrExpr.MethodCall(
                         rewriteExpr(mc.receiver(), structs), mc.methodName(), args, mc.origin());
             }
+            // REVISIT (docs/iteration.md §10): no struct-literal rewriting inside
+            // the source / arm writes yet (slice 1 builds those explicitly).
+            case IrExpr.Iterate it -> it;
         };
     }
 

@@ -155,6 +155,10 @@ public final class TruffleLowering {
             case IrExpr.Record r -> lowerRecord(r, module, registry);
             case IrExpr.FieldAccess fa -> FieldAccessNode.of(lowerExpr(fa.base(), module, registry), fa.fieldName());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "TruffleLowering");
+            // REVISIT (docs/iteration.md §10): the Truffle path does not lower the
+            // iteration construct yet; the IrInterpreter path is slice 1.
+            case IrExpr.Iterate it -> throw new UnsupportedOperationException(
+                    "Iterate: Truffle lowering not yet implemented (docs/iteration.md §10)");
         };
         node.withOrigin(expr.origin());
         return node;

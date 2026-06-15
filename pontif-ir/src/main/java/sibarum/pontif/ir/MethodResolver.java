@@ -187,6 +187,9 @@ public final class MethodResolver {
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
                     rewriteExpr(fa.base(), ctx, methodKeys, structs), fa.fieldName(), fa.origin());
             case IrExpr.MethodCall mc -> resolveMethodCall(mc, ctx, methodKeys, structs);
+            // REVISIT (docs/iteration.md §10): method calls inside the source /
+            // arm writes are not resolved yet (slice 1 avoids them).
+            case IrExpr.Iterate it -> it;
         };
     }
 
