@@ -300,6 +300,16 @@ declared outputs.
 The construct is checked against the conservation discipline
 ([[project_conservation_receipts]], [[project_pontif_no_lie]]):
 
+**The law is "no *silent* erase," not "no erase" (RULED 2026-06-15, James).** A
+system in which nothing can be destroyed is a memory leak with extra steps —
+destruction is as necessary as creation. The discipline is not that information
+*cannot* be lost, but that loss is **explicit and detectable**: a function may use
+only the `accept` stream and drop the `reject`, and the system can point at exactly
+where and what was discarded. Conservation makes information loss *traceable and
+auditable*; it forbids *lying about* loss, not loss itself. (When iterators chain,
+the reject stream is carried alongside the accept chain, so the discard stays
+locatable until something explicitly drops it.)
+
 - **No loss:** matcher totality + "every element is accounted for" (placed, or —
   per §3's open — consumed into an accumulator). A bare drop is **not
   expressible** (§1.1); removal is routing to a named residue.
@@ -370,52 +380,125 @@ machinery just landed (`type-parameters.md` slices 1–3b): the element sort `E`
 a trait type parameter; a typed literal's elements are gate-checked against `E`.
 So this builds *on* that arc rather than reopening it.
 
-# 8. Open decisions & syntax slots
+# 8. The surface (PROPOSED 2026-06-15, James)
 
-**Semantic decisions (need a ruling):**
+Syntax is James's; this records the proposal converged on this session. The spine:
+**semantics are determined entirely by the destructuring** — one keyword, `iter`,
+and the member set you pull from it *is* the capability set.
 
-1. Outputs **declared vs inferred** (§2.4). Lean: explicit-but-terse.
-2. **No bare drop** — removal is routing to a named output (§4). Lean: yes.
-3. **`Source` trait now vs array-first** (§2.3). Lean: trait now.
-4. **`rewrite` placement** — in this construct vs alongside structural recursion
-   (§2.6). OPEN; settle after the flat cases.
+## 8.1 `iter` and the member vocabulary
 
-Resolved this session: the **read/write-stream primitive + seal** (§2.1–2.2,
-answers the UNKNOWN); **fold = a per-frame-sealed read/write pair** (§2.5, which
-also resolves fold-without-a-stream, §3).
-
-**SYNTAX-SLOT (James's to design) — at minimum:**
-
-- the construct keyword/header and how the **source** and **current element /
-  index** are bound;
-- how **outputs** are named and their **kinds + inits** given (or the inference
-  rule, per decision #1);
-- the **placement** disposition (`element → output`), **routing** (which output),
-  **observation** (accumulator revision, reading the prior), and **emission**
-  (extra element) spellings;
-- how the construct's **result** (the output tuple/record) is received.
-
-## 8.1 Disposable strawman (NOT a proposal — semantics only)
-
-Purely to make §1–§4 legible; every token here is a placeholder.
+`iter(src)` wraps a raw source into an iterator over its elements; you destructure
+the members you need, then a block:
 
 ```
-‹each› xs ‹as e, i› {
-  [Int:@>0] -> e            # default placement of (possibly transformed) e
-  _         -> e ‹→ rejected›   # routing: place into the `rejected` stream
-}
-# filter: result is ‹(kept, rejected)› — two streams, nothing erased
-
-‹each› xs ‹as e› ‹fold total = 0› {
-  _ -> ‹total + e›          # observation: revise the accumulator; element consumed into it
-}
-# fold: result is the final `total`, no stream output
-
-‹each› xs ‹as e› {
-  _ -> e ‹+ emit (e * 2)›   # placement of e AND an emission (provenance: e*2)
-}
-# append/insert: one stream, two elements out per element in (the extra is a creation)
+let dest = iter(src).{value, index, …} { match value … }
 ```
+
+The members are a fixed vocabulary, split into READS (inputs) and WRITES (outputs):
+
+| Member | Role | Read/Write |
+|--------|------|------------|
+| `value` | the current element | read |
+| `index` | the current position | read (not writable — §0.1 / James's ruling) |
+| `accept`, `reject` | filter routing (two streams) | write |
+| `current`, `next` | the fold pair — prior revision / next revision | read `current`, write `next` |
+| `put` | group-by (`put(key, value)`) | write (keyed) |
+
+There is **no mode prefix** (`iter.filter` / `iter.fold` are retired): which
+members you destructure *is* the mode, and they compose —
+`{current, next, reject, value}` is filter-and-fold in one pass.
+
+## 8.2 The body: arms return dispositions (RULED 2026-06-15)
+
+The block matches `value`. An arm **returns a value, and that value is a
+*disposition*** — no side-effects, no void writes: `accept` / `reject` / `next` /
+`put` are pure functions that *construct* a disposition, the arm returns it, and
+the construct folds the returned dispositions into the outputs ("no function
+without a return type"). A **bare value** is itself a disposition — *emit to the
+default stream* (map-is-default). Multiple writes in a frame = a **tuple of
+dispositions** (§2.8's "single or tuple"):
+
+```
+# filter (+map): accept(v)/reject(v) carry a value, so this filters AND maps.
+iter(src).{accept, reject, value} { match value
+  [0] -> reject(value)
+  [_] -> accept(value) }
+
+# bare bool is the skip disposition — ONLY when accept/reject are in scope;
+# elsewhere a bool arm is ordinary data (→ Stream[Bool]).
+iter(src).{accept, reject, value} { match value
+  [0] -> false
+  [_] -> true }
+
+# fold: current = prior revision, next(…) = next revision (the §2.5 pair).
+iter(src).{current, next, value} { match value
+  [@>0] -> next(current + value)
+  [_]   -> next(current) }
+
+# map + count = fold + map: a TUPLE of dispositions per arm.
+iter(src).{value, current, next} { match value
+  [_] -> (next(current + 1), value * 2) }   # fold the count, emit value*2 to default
+```
+
+The default stream is populated by exactly the arms that return a bare value — no
+vestigial empty stream when arms only fold/route.
+
+## 8.3 The completed iterator — result and chaining (RULED 2026-06-15)
+
+A block's result is a **completed iterator** — a value of the same kind it
+consumed, carrying the sealed outputs as named attributes, so it is both
+*queryable* and *chainable*:
+
+```
+let it     = iter(src).{value} { match value [_] -> value * 2 }
+let stream = it.stream()                  # query: extract the default stream
+let next   = it.{accept, reject} { … }    # chain: iterate it again (it IS a source)
+```
+
+This is §2.2's **seal made a first-class value**: the sealed outputs *are* a new
+iterator, so input-type = output-type and pipelines compose with no glue (stage N
+feeds stage N+1). Read-side attributes: `.stream()` (default), `.accepted` /
+`.rejected` (filter), and the fold's aggregate — **named at the destructure**
+(requires-style) so it is not sum-specific:
+
+```
+iter(src).{total = (current, next), value} { match value [_] -> next(current + value) }
+# → it.total
+```
+
+## 8.4 Block scoping — alignment, not a feature
+
+`x.{a, b} { … }` reads as "destructure `a, b`; the `{ … }` is a block where they
+are in scope and don't leak" — a Ruby-block-ish reading. We do **not** build a
+general block feature; `iter` (and a completed iterator) is a recognized special
+form, and this is the *alignment story* (lens, not cage), as with `requires` /
+`exports`. The `iter` keyword + the destructure-then-braces shape is what lets the
+parser emit the `Iterate` node and enforce the guardrails (totality; write-only
+outputs; only valid capability members). `(iter(src) -> it) { … it.value …
+it.accept() … }` is an equivalent surface (bind instead of destructure) lowering
+to the same node.
+
+## 8.5 Desugar to the node, and what's still open
+
+Each member maps onto the slice-1 node (§10): `value`/`index` → per-frame read
+bindings; `accept`/`reject` → two STREAM outputs; `current`/`next` → one
+ACCUMULATOR (read prior / write next); `put` → one KEYED output; a bare value →
+the primary/default STREAM. An arm's returned disposition (or tuple) desugars to
+its `Write` list; a bare value → `Write(default, value)`. **No IR change — pure
+surface sugar.**
+
+Resolved this session: read/write-stream primitive + seal (§2.1–2.2); fold = a
+per-frame read/write pair (§2.5); outputs declared by destructuring; no mode
+prefix; arms return dispositions (§8.2); result = a completed iterator (§8.3);
+"no *silent* erase" (§4).
+
+Still open:
+- **read-side attribute names** — aggregate default `.total` vs user-named (§8.3);
+  `.accepted`/`.rejected` vs `.accept`/`.reject`.
+- **`rewrite` / tree traversal** (§2.6) — placement TBD.
+- **`Source` trait now vs array-first** (§2.3).
+- **the conservation checks themselves** (§4) — still the SortChecker REVISIT (§10).
 
 # 9. Costs (honest)
 
