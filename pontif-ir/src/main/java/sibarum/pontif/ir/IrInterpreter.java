@@ -320,6 +320,14 @@ public final class IrInterpreter {
         // to Decimal — the lossless direction of the embedding, matching the
         // static sort (inferMaximalSort already types mixed arithmetic Decimal).
         // Non-numeric operands meeting a Decimal stay a clear error.
+        // A String operand wins, checked BEFORE Decimal/Char: `+` concatenates,
+        // rendering the other operand (so `"x=" + d` concatenates rather than
+        // trying to promote the String to Decimal); ordering/equality still
+        // require both operands String.
+        if (l instanceof sibarum.pontif.core.types.StringValue
+                || r instanceof sibarum.pontif.core.types.StringValue) {
+            return evalStringBinOp(op, l, r);
+        }
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
             return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op), op.origin());
         }
@@ -329,12 +337,6 @@ public final class IrInterpreter {
         if (l instanceof sibarum.pontif.core.types.CharValue
                 || r instanceof sibarum.pontif.core.types.CharValue) {
             return evalCharBinOp(op, l, r);
-        }
-        // Strings order and compare lexicographically by code point. No
-        // arithmetic, no indexing, no String/Char or String/Int tower.
-        if (l instanceof sibarum.pontif.core.types.StringValue
-                || r instanceof sibarum.pontif.core.types.StringValue) {
-            return evalStringBinOp(op, l, r);
         }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
@@ -403,12 +405,17 @@ public final class IrInterpreter {
     }
 
     /**
-     * String operations: ordering and equality lexicographically by code
-     * point, both operands String. Arithmetic and logical ops on strings are
-     * errors, as are mixed String/non-String comparisons — fail closed.
-     * Concatenation is the stream {@code concat} combinator, not an operator.
+     * String operations. {@code +} is concatenation: at least one operand is a
+     * String and the other (Int/Decimal/Char/Bool/String) is rendered to its
+     * canonical string (strings.md slice 2). Ordering/equality compare
+     * lexicographically by code point and require BOTH operands String (no
+     * String/Int tower). Other arithmetic/logical ops are errors — fail closed.
      */
     private static Object evalStringBinOp(IrExpr.BinOp op, Object l, Object r) {
+        if (op.op() == IrExpr.Op.ADD) {
+            return new sibarum.pontif.core.types.StringValue(
+                    renderForConcat(l, op) + renderForConcat(r, op));
+        }
         if (!(l instanceof sibarum.pontif.core.types.StringValue ls)
                 || !(r instanceof sibarum.pontif.core.types.StringValue rs)) {
             throw new RuntimeCheckException(
@@ -425,11 +432,29 @@ public final class IrInterpreter {
             case NE -> c != 0;
             // Code points are exact values — ~= coincides with == .
             case APPROX -> c == 0;
+            // ADD handled above; the rest don't compute over strings.
             case ADD, SUB, MUL, DIV, MOD, POW, AND, OR -> throw new RuntimeCheckException(
                     "Operator '" + opSymbol(op.op()) + "' is not defined for String — "
-                            + "strings order and compare; they don't compute "
-                            + "(concatenation is the stream concat combinator)", op.origin());
+                            + "strings order and compare; only '+' concatenates", op.origin());
         };
+    }
+
+    /**
+     * Renders an operand of a String {@code +} to its canonical string form:
+     * a String verbatim, an Int/Decimal/Char/Bool to its display. Decimal uses
+     * plain (non-scientific) notation, matching its literal form.
+     */
+    private static String renderForConcat(Object v, IrExpr.BinOp op) {
+        if (v instanceof sibarum.pontif.core.types.StringValue s) return s.content();
+        if (v instanceof Long n) return Long.toString(n);
+        if (v instanceof java.math.BigDecimal d) return d.toPlainString();
+        if (v instanceof sibarum.pontif.core.types.CharValue c) {
+            return new String(Character.toChars(c.codePoint()));
+        }
+        if (v instanceof Boolean b) return b.toString();
+        throw new RuntimeCheckException(
+                "Cannot concatenate " + (v == null ? "null" : v.getClass().getSimpleName())
+                        + " with a String", op.origin());
     }
 
     /** Lexicographic by Unicode code point (not UTF-16 char) — see Cmp. */

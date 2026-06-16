@@ -102,9 +102,23 @@ class StringAltTest {
 
     @Test
     void arithmeticOnStrings_failsClosed() {
+        // `+` now concatenates (slice 2); the other arithmetic ops still fail
+        // closed — strings order, compare, and concatenate, nothing more.
         RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
-                () -> run("\"a\" + \"b\""));
-        assertTrue(e.getMessage().contains("don't compute"), () -> e.getMessage());
+                () -> run("\"a\" * \"b\""));
+        assertTrue(e.getMessage().contains("not defined for String"), () -> e.getMessage());
+    }
+
+    @Test
+    void concatenation_rendersAndJoins() throws Exception {
+        // String + String, and `+` rendering an Int / Decimal operand (slice 2).
+        assertString("abcd", run("\"ab\" + \"cd\""));
+        assertString("n=5", run("\"n=\" + 5"));
+        assertString("3 items", run("3 + \" items\""));
+        assertString("n=5, d=1.5", run("""
+                function describe(n:Int, d:Decimal):String -> "n=" + n + ", d=" + d
+                describe(5, 1.5)
+                """));
     }
 
     @Test

@@ -1776,6 +1776,12 @@ public final class SortChecker {
                     IrSort rs = inferSort(op.right(), typeEnv, functionReturns, structDefs);
                     String lb = ls == null ? null : matchBaseName(ls);
                     String rb = rs == null ? null : matchBaseName(rs);
+                    // `+` with a String operand is concatenation: the other operand
+                    // (Int/Decimal/Char/String) is rendered to its string form and
+                    // the result is a String (strings.md slice 2).
+                    if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
+                        yield IrSort.named("String");
+                    }
                     if ("Decimal".equals(lb) || "Decimal".equals(rb)) yield IrSort.named("Decimal");
                     if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
                     yield null;
