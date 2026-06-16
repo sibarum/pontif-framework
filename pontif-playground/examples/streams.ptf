@@ -1,0 +1,2 @@
+let test:Stream[Int] = (1,2,3,4)
+

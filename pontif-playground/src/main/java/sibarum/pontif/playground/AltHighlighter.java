@@ -56,12 +56,19 @@ final class AltHighlighter {
     private static final Color PAREN_BG = new Color(0.30f, 0.85f, 0.40f, 0.20f);
 
     // Identifier rainbow: every non-keyword identifier is tinted by a hue
-    // hashed from its name — same name, same color, everywhere. Saturation
-    // and value are fixed (readable on the dark theme); only hue varies.
-    // Builtin sort names (Int, Bool, ...) hash like everything else — no
-    // exclusion list to go stale; they simply have stable colors too.
+    // hashed from its name — same name, same color, everywhere. Saturation is
+    // fixed; the VALUE is solved per-hue so every color lands at the same
+    // human-perceived brightness (IDENT_TARGET_LUMA) instead of yellow/green
+    // glaring and blue/red receding at a fixed value. Only hue varies in the
+    // result's brightness-to-eye. Builtin sort names (Int, Bool, ...) hash
+    // like everything else — no exclusion list to go stale.
     private static final float IDENT_SATURATION = 0.55f;
-    private static final float IDENT_VALUE = 0.95f;
+    // Rec. 601 perceived-luma target every identifier color is normalized to,
+    // so the rainbow reads at one even brightness on the dark theme. Set a
+    // touch above the dimmest hues' reachable luma at this saturation (deep
+    // blue/red, which sit at their max rather than clamping the target down);
+    // the brighter hues are dimmed to meet it.
+    private static final float IDENT_TARGET_LUMA = 0.72f;
 
     /** Foreground token spans + background block spans for one pass. */
     record Styles(List<TextStyle> foreground, List<TextStyle> background) {}
@@ -147,10 +154,11 @@ final class AltHighlighter {
             } else if (isIdentStart(c)) {
                 int start = i;
                 while (i < n && isIdentPart(content.charAt(i))) i++;
-                // Keywords keep the editor's default color — structure words
-                // stay quiet; only user-defined names get the hue rainbow.
+                // Reserved words keep the editor's default color — structure
+                // words stay quiet; only user-defined names get the hue
+                // rainbow.
                 String word = content.substring(start, i);
-                if (!AltParser.KEYWORDS.contains(word)) {
+                if (!isReserved(word, content, start)) {
                     fg.add(new TextStyle(start, i, identColor(word)));
                 }
             } else {
@@ -359,13 +367,26 @@ final class AltHighlighter {
     /**
      * Stable per-name color: the hue is hashed from the identifier text
      * (Fibonacci-scrambled — String.hashCode alone clusters short names),
-     * saturation and value fixed. Same name → same color, every occurrence,
-     * every session.
+     * saturation fixed, and the value chosen so the color hits a constant
+     * PERCEIVED brightness regardless of hue. Same name → same color, every
+     * occurrence, every session.
+     *
+     * <p>Luma is linear in HSV value at fixed hue and saturation (every RGB
+     * channel scales with value), so the value that hits the target luma is
+     * just {@code target / lumaAtFullValue}, capped at 1 for the rare hue too
+     * dim to reach it.
      */
     private static Color identColor(String name) {
         int h = name.hashCode() * 0x9E3779B9;
         float hue = ((h >>> 8) & 0xFFFFFF) / (float) 0x1000000 * 360f;
-        return hsv(hue, IDENT_SATURATION, IDENT_VALUE);
+        float lumaAtFull = luma(hsv(hue, IDENT_SATURATION, 1f));
+        float value = Math.min(1f, IDENT_TARGET_LUMA / lumaAtFull);
+        return hsv(hue, IDENT_SATURATION, value);
+    }
+
+    /** Human-perceived brightness — Rec. 601 luma weights on the gamma RGB. */
+    private static float luma(Color c) {
+        return 0.299f * c.r() + 0.587f * c.g() + 0.114f * c.b();
     }
 
     /** HSV → RGB at alpha 1. Hue in degrees [0, 360). */
@@ -473,6 +494,31 @@ final class AltHighlighter {
             }
         }
         return -1;                              // unterminated
+    }
+
+    /**
+     * Whether an identifier should render in the neutral default color rather
+     * than the user-name rainbow. Three sources, all reserved: the parser's
+     * {@link AltParser#KEYWORDS}; the contextual receiver {@code this}; and the
+     * reserved {@code type} accessor in {@code this.type} (recognized
+     * positionally — {@code type} elsewhere is an ordinary name). The last two
+     * are NOT parser keywords (so they can't go in {@code KEYWORDS} without
+     * disturbing name validation), hence this highlighter-local check.
+     */
+    private static boolean isReserved(String word, String content, int start) {
+        if (AltParser.KEYWORDS.contains(word)) return true;
+        if (word.equals("this")) return true;
+        return word.equals("type") && precededByThisDot(content, start);
+    }
+
+    /** True when the identifier at {@code start} is immediately preceded by
+     *  {@code this.} (contiguous, as field/accessor syntax is written). */
+    private static boolean precededByThisDot(String content, int start) {
+        int dot = start - 1;
+        if (dot < 0 || content.charAt(dot) != '.') return false;
+        int s = dot;
+        while (s > 0 && isIdentPart(content.charAt(s - 1))) s--;
+        return content.substring(s, dot).equals("this");
     }
 
     // ASCII predicates matching AltLexer's identifier rules: start is a

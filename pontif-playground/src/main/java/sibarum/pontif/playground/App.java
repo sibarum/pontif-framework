@@ -19,6 +19,7 @@ import sibarum.dasum.gui.core.input.ScrollStates;
 import sibarum.dasum.gui.core.input.ScrollbarController;
 import sibarum.dasum.gui.core.input.TabsController;
 import sibarum.dasum.gui.core.input.TextInputController;
+import sibarum.dasum.gui.core.input.TextState;
 import sibarum.dasum.gui.core.input.TextStates;
 import sibarum.dasum.gui.core.input.TextStyleStates;
 import sibarum.dasum.gui.core.layout.HitTest;
@@ -27,6 +28,7 @@ import sibarum.dasum.gui.core.layout.Layout;
 import sibarum.dasum.gui.core.layout.LayoutResult;
 import sibarum.dasum.gui.core.layout.PixelRect;
 import sibarum.dasum.gui.core.layout.Render;
+import sibarum.dasum.gui.core.overlay.Anchor;
 import sibarum.dasum.gui.core.overlay.OverlayStack;
 import sibarum.dasum.gui.core.reactive.Property;
 import sibarum.dasum.gui.core.render.Batcher;
@@ -60,6 +62,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 
 import static sibarum.dasum.gui.natives.gl.Gl.GL_COLOR_BUFFER_BIT;
 
@@ -79,6 +82,10 @@ public final class App {
     private static final Color EDITOR_BG   = new Color(0.07f, 0.09f, 0.13f, 1f);
     private static final Color CODE_FG     = new Color(0.92f, 0.94f, 0.97f, 1f);
     private static final Color LABEL_FG    = new Color(0.70f, 0.75f, 0.82f, 1f);
+    // System-menu overlay palette (mirrors the status log dialog).
+    private static final Color MENU_BG       = new Color(0.10f, 0.12f, 0.16f, 1f);
+    private static final Color MENU_TITLE_FG = new Color(0.92f, 0.94f, 0.97f, 1f);
+    private static final Color MENU_HINT_FG  = new Color(0.65f, 0.70f, 0.78f, 0.85f);
 
     /** Font group key for the monospace atlas (registered alongside the primary one). */
     private static final String MONO_FONT_GROUP = "mono";
@@ -109,6 +116,9 @@ public final class App {
     private static Component.Text filenameLabel;
     private static Component.Text reportText;
     private static Component.Text irAstText;
+    // Last-published cursor string, so the per-frame refresh only writes the
+    // ribbon's docked field when the caret actually moved.
+    private static String lastCursorText = null;
 
     // Hoisted so file-dialog button handlers can reach it. Lifetime is
     // bounded by main()'s try-with-resources; handlers only fire while the
@@ -118,12 +128,25 @@ public final class App {
     private static Component pressTarget = null;
     private static Path currentFile = null;
 
+    /** Background persistence: recovery autosave + session-file writer. Created
+     *  in {@link #main} once the state directory is confirmed writable. */
+    private static SessionManager session;
+
     private static final PontifCompiler COMPILER = new PontifCompiler();
     private static final PontifRunner RUNNER = new PontifRunner();
 
     public static void main(String[] args) {
+        // Per-user state directory + the previous session (if any). Read before
+        // the window is created so its size can be restored at creation time.
+        boolean stateEnabled = AppPaths.ensureDirs();
+        SessionState restored = stateEnabled
+                ? SessionState.read(AppPaths.sessionFile()).orElse(null)
+                : null;
+        int initW = (restored != null && restored.hasGeometry()) ? restored.windowWidth : 1100;
+        int initH = (restored != null && restored.hasGeometry()) ? restored.windowHeight : 720;
+
         try (GlfwContext ctx = GlfwContext.init();
-             Window win = Window.create(1100, 720, "Pontif Playground");
+             Window win = Window.create(initW, initH, "Pontif Playground");
              Batcher batcher = new Batcher();
              CursorManager cursors = new CursorManager(win.handle().address())) {
             window = win;
@@ -133,6 +156,8 @@ public final class App {
             cursors.init();
             EmContext.setDpiScale(win.contentScaleX());
             applyTheme();
+            restoreWindowGeometry(win, restored);
+            session = new SessionManager(stateEnabled);
 
             try (Texture primaryTexture = Texture.fromPngResource("/dasum/atlas/primary.png");
                  Texture monoTexture    = Texture.fromPngResource("/dasum/atlas/mono.png");
@@ -151,7 +176,20 @@ public final class App {
                 Component root = Status.wrap(buildUi());
                 wireInput(win, cursors);
 
+                // Restore the previously-open file, then surface any recovery for it.
+                initializeDocument(restored);
+
                 EventLoop loop = new EventLoop(win, () -> {
+                    // The caret moves only via input that triggers a redraw, so
+                    // refreshing the indicator at the top of the frame catches
+                    // every move; it writes the label only on change.
+                    updateCursorIndicator();
+                    // Sample window placement each frame for the session file;
+                    // the manager only writes when it actually changed.
+                    int[] winPos  = win.position();
+                    int[] winSize = win.size();
+                    session.updateGeometry(winPos[0], winPos[1], winSize[0], winSize[1], win.isMaximized());
+
                     int fbW = win.framebufferWidth();
                     int fbH = win.framebufferHeight();
                     float[] projection = Projection.orthoTopLeft(fbW, fbH);
@@ -187,7 +225,14 @@ public final class App {
                     }
                     batcher.endFrame(projection);
                 });
-                loop.run();
+                session.start();
+                try {
+                    loop.run();
+                } finally {
+                    // Final flush catches edits made within the last tick window;
+                    // recovery copies for unsaved work intentionally remain on disk.
+                    session.flushAndStop();
+                }
             }
         }
     }
@@ -217,6 +262,7 @@ public final class App {
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
         Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, "Save As", Em.of(7.5f), Variant.DEFAULT, 0, App::onSaveAsClicked);
+        Component systemBtn = Themed.iconButton(Icons.SETTINGS, "System", Em.of(7f), Variant.DEFAULT, 0, App::openSystemMenu);
 
         filenameLabel = new Component.Text(
             UNTITLED_LABEL, FontGroups.DEFAULT, Em.of(0.9f), LABEL_FG,
@@ -227,7 +273,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel),
+            List.of(runBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel, systemBtn),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane
@@ -242,8 +288,8 @@ public final class App {
         // every content change (keystroke, file open), plus one initial
         // publish so the default content is colored before the first edit.
         // Registered against codeText's final identity (after withLineNumbers).
-        TextStates.onContentChange(codeText, App::applyHighlight);
-        applyHighlight(DEFAULT_CODE);
+        TextStates.onContentChange(codeText, App::onEditorContentChanged);
+        onEditorContentChanged(DEFAULT_CODE);
 
         Component codePane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
 
@@ -340,6 +386,31 @@ public final class App {
         TextStates.setContent(irAstText, text);
     }
 
+    /** Recompute the editor's 1-based line/column from the caret offset and
+     *  publish it to the status ribbon's docked field — only when it changed,
+     *  so an unmoved caret costs nothing. Same GLFW thread as input, so the
+     *  read is safe. */
+    private static void updateCursorIndicator() {
+        if (codeText == null) return;
+        TextState ts = TextStates.of(codeText);
+        String content = TextStates.contentOf(codeText);
+        int caret = Math.max(0, Math.min(ts.caretIndex, content.length()));
+        int line = 1;
+        int lineStart = 0;
+        for (int i = 0; i < caret; i++) {
+            if (content.charAt(i) == '\n') {
+                line++;
+                lineStart = i + 1;
+            }
+        }
+        int col = caret - lineStart + 1;
+        String text = "Ln " + line + ", Col " + col;
+        if (!text.equals(lastCursorText)) {
+            lastCursorText = text;
+            Status.setDockedMessage(text);
+        }
+    }
+
     private static void regenerateReports() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
@@ -367,21 +438,36 @@ public final class App {
         TextStates.setContent(codeText, "");
         currentFile = null;
         updateFilenameLabel();
+        if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), "", null);
         Status.success("New file");
     }
 
     private static void onOpenClicked() {
-        FileDialog.open(window, PTF_FILTERS, dialogStartPath()).ifPresent(path -> {
-            try {
-                String content = Files.readString(path, StandardCharsets.UTF_8);
-                TextStates.setContent(codeText, content);
-                currentFile = path;
-                updateFilenameLabel();
-                Status.success("Opened " + path.getFileName());
-            } catch (IOException e) {
+        FileDialog.open(window, PTF_FILTERS, dialogStartPath()).ifPresent(path -> loadFile(path, true));
+    }
+
+    /** Read {@code path} into the editor and adopt it as the current document.
+     *  Shared by the Open button and startup session restore; {@code announce}
+     *  controls whether success/failure flashes in the status ribbon (startup
+     *  restore stays quiet). Returns whether the load succeeded. */
+    private static boolean loadFile(Path path, boolean announce) {
+        try {
+            String content = Files.readString(path, StandardCharsets.UTF_8);
+            TextStates.setContent(codeText, content);  // fires onEditorContentChanged → snapshot + highlight
+            currentFile = path;
+            updateFilenameLabel();
+            if (session != null) {
+                session.onDocumentChanged(RecoveryStore.keyFor(path), content,
+                        path.toAbsolutePath().normalize().toString());
+            }
+            if (announce) Status.success("Opened " + path.getFileName());
+            return true;
+        } catch (IOException e) {
+            if (announce) {
                 Status.error("Error opening " + path.getFileName() + ": " + e.getMessage(), path.toString());
             }
-        });
+            return false;
+        }
     }
 
     private static void onSaveClicked() {
@@ -389,24 +475,34 @@ public final class App {
             onSaveAsClicked();
             return;
         }
-        writeCurrent(currentFile);
+        writeCurrent(currentFile, RecoveryStore.keyFor(currentFile));
     }
 
     private static void onSaveAsClicked() {
+        // Capture the key of the document as it stands now (untitled, or the
+        // previous file) so its recovery copy is cleared even when Save As
+        // redirects to a different path.
+        String prevKey = RecoveryStore.keyFor(currentFile);
         String defaultName = currentFile != null
                 ? currentFile.getFileName().toString()
                 : DEFAULT_FILE_NAME;
         FileDialog.save(window, PTF_FILTERS, dialogStartPath(), defaultName).ifPresent(path -> {
             currentFile = path;
             updateFilenameLabel();
-            writeCurrent(path);
+            writeCurrent(path, prevKey);
         });
     }
 
-    private static void writeCurrent(Path path) {
+    private static void writeCurrent(Path path, String prevKey) {
         try {
             String content = TextStates.contentOf(codeText);
             Files.writeString(path, content, StandardCharsets.UTF_8);
+            // Saving clears the recovery copy: the on-disk file is now the
+            // source of truth, so there's nothing unsaved to recover.
+            if (session != null) {
+                session.onSaved(prevKey, RecoveryStore.keyFor(path), content,
+                        path.toAbsolutePath().normalize().toString());
+            }
             Status.success("Saved " + path.getFileName());
         } catch (IOException e) {
             Status.error("Error saving " + path.getFileName() + ": " + e.getMessage(), path.toString());
@@ -425,6 +521,103 @@ public final class App {
                 ? UNTITLED_LABEL
                 : currentFile.getFileName().toString();
         TextStates.setContent(filenameLabel, label);
+    }
+
+    // --- Session restore + crash recovery (GLFW main thread) ---
+
+    /** Single content-change sink: refresh syntax highlighting and publish the
+     *  latest text to the recovery autosave snapshot. */
+    private static void onEditorContentChanged(String content) {
+        applyHighlight(content);
+        if (session != null) session.onContentChanged(content);
+    }
+
+    /** Apply restored window size/position/maximized state before the first
+     *  frame. Size is already applied at creation; this adds position and the
+     *  maximized toggle. No-op when there's nothing to restore. */
+    private static void restoreWindowGeometry(Window win, SessionState restored) {
+        if (restored == null) return;
+        if (restored.hasGeometry()) win.setSize(restored.windowWidth, restored.windowHeight);
+        if (restored.hasPosition()) win.setPosition(restored.windowX, restored.windowY);
+        if (restored.maximized) win.maximize();
+    }
+
+    /** Adopt the startup document: the untitled default, or the file from the
+     *  last session if it still exists, then flag any recovery available for
+     *  whichever document ended up active. */
+    private static void initializeDocument(SessionState restored) {
+        // The editor currently holds DEFAULT_CODE as an untitled buffer.
+        if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), DEFAULT_CODE, null);
+
+        if (restored != null && restored.openFile != null) {
+            Path path = Path.of(restored.openFile);
+            if (Files.isReadable(path)) loadFile(path, false);
+        }
+
+        String activeKey = RecoveryStore.keyFor(currentFile);
+        if (session != null && session.hasRecovery(activeKey)) {
+            Status.info("Unsaved changes from a previous session are available for "
+                    + documentDisplayName() + " — open the System menu to recover.");
+        }
+    }
+
+    private static String documentDisplayName() {
+        return currentFile == null ? UNTITLED_LABEL : currentFile.getFileName().toString();
+    }
+
+    /** Modal System menu: recover the current file (when a recovery exists) and
+     *  purge all recovery files. Reuses the overlay machinery the status log
+     *  dialog uses; dismissed by Close, click-outside, or ESC. */
+    private static void openSystemMenu() {
+        if (OverlayStack.isActive()) return;  // don't stack on another overlay
+
+        String key = RecoveryStore.keyFor(currentFile);
+        boolean hasRecovery = session != null && session.hasRecovery(key);
+
+        java.util.List<Component> rows = new java.util.ArrayList<>();
+        rows.add(new Component.Text("System", Em.of(1.15f), MENU_TITLE_FG));
+
+        if (hasRecovery) {
+            rows.add(new Component.Text(
+                    "A recovery copy of " + documentDisplayName() + " is available.",
+                    Em.of(0.9f), MENU_HINT_FG));
+            rows.add(Themed.iconButton(Icons.ROTATE_CCW, "Recover current file",
+                    Em.of(18f), Variant.PRIMARY, 0, App::onRecoverClicked));
+        } else {
+            rows.add(new Component.Text(
+                    "No recovery available for " + documentDisplayName() + ".",
+                    Em.of(0.9f), MENU_HINT_FG));
+        }
+        rows.add(Themed.iconButton(Icons.TRASH_2, "Purge all recovery files",
+                Em.of(18f), Variant.DEFAULT, 0, App::onPurgeAllClicked));
+        rows.add(Themed.button("Close", Em.of(18f), Variant.DEFAULT, 0, OverlayStack::pop));
+
+        Component panel = new Component.Flex(
+                Em.of(26f), Em.AUTO, Em.of(1f), MENU_BG,
+                Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.of(0.6f),
+                rows, false, 0);
+        OverlayStack.push(new OverlayStack.Overlay(panel, Anchor.CENTER, true, () -> {}));
+    }
+
+    private static void onRecoverClicked() {
+        String key = RecoveryStore.keyFor(currentFile);
+        Optional<String> recovered = session == null ? Optional.empty() : session.recover(key);
+        OverlayStack.pop();
+        if (recovered.isEmpty()) {
+            Status.warn("No recovery available for " + documentDisplayName());
+            return;
+        }
+        // Replaces the editor buffer; the same file stays open. The recovered
+        // text now differs from disk, so it's treated as unsaved until saved
+        // (at which point the recovery copy is deleted).
+        TextStates.setContent(codeText, recovered.get());
+        Status.success("Recovered " + documentDisplayName() + " — save to keep the changes.");
+    }
+
+    private static void onPurgeAllClicked() {
+        int removed = session == null ? 0 : session.purgeAll();
+        OverlayStack.pop();
+        Status.success("Purged " + removed + " recovery file" + (removed == 1 ? "" : "s"));
     }
 
     // --- Input wiring: GLFW callbacks → framework controllers ---

@@ -1,0 +1,50 @@
+# n is the Real part. zexp is the exponent of 0.
+struct Traction(n:Decimal, zexp:Decimal)
+
+method Traction.inv():Traction ->
+  let this.{n, zexp}
+  match n {		
+    [0.0] -> Traction(0,-zexp-1)
+    [_]   -> Traction(1.0/n,-zexp)
+  }
+
+method Traction.neg():Traction ->
+  let this.{n, zexp}
+  match zexp {		
+    [0.0] -> Traction(-n, 1.0/(zexp+1))
+    [_]   -> Traction(-n, 1.0/zexp)
+  }
+
+function +(
+    t1:[Traction.{n->n1, zexp->zexp1}], 
+    t2:[Traction.{n->n2, zexp->zexp2}]
+  ):Traction ->
+  Traction(
+		    n1+n2,
+    zexp1+zexp2
+  )
+
+function -(
+    t1:Traction, 
+    t2:Traction
+  ):Traction ->
+  t1+t2.neg()
+    
+    
+
+function *(
+    t1:[Traction.{n->n1, zexp->zexp1}], 
+    t2:[Traction.{n->n2, zexp->zexp2}]
+  ):Traction ->
+  Traction(
+		    n1*n2,
+    zexp1+zexp2
+  )
+
+function /(
+    t1:Traction, 
+    t2:Traction
+  ):Traction ->
+  t1*t2.inv()
+
+Traction(5,1)+Traction(4,1)
