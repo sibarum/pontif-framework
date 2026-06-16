@@ -525,9 +525,10 @@ value is a tuple autoboxes (AltParser `requireStreamElements`: base-level elemen
 gate, plus the lossless Int→Decimal embedding), one-way only (no `Stream[T]` →
 tuple). The runtime value stays the native positional record; the claim is the
 parse-time gate (no separate runtime `Stream` check). `iter` accepts a `Stream[T]`
-binding as a source. REVISIT: ride the real promotion logic; full element coercion
-(not just base); the expression-level `let … in …` path (only the top-level/
-statement `let` autoboxes today).
+binding as a source. Both `let` paths autobox — the statement-level `let` and the
+expression-position `let` (a `let` in a function body; Pontif's `let` has no `in`
+keyword). REVISIT: ride the real promotion logic; full element coercion (not just
+base sort).
 
 # 9. Costs (honest)
 
