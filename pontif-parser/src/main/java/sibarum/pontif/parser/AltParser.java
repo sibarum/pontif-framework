@@ -3118,6 +3118,7 @@ public final class AltParser {
         IrExpr value = parseExpr();
         IrSort inferred = inferMaximalSort(value);
         boolean intToDecimal = false;
+        boolean streamAutobox = false;
         if (declaredSort != null) {
             String declaredBase = baseSortName(declaredSort);
             String inferredBase = baseSortName(inferred);
@@ -3130,15 +3131,21 @@ public final class AltParser {
                     && !inferredBase.equals("_record")
                     && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
-                throw new ParseException(
-                        "let '" + name + "' is declared " + describeSort(declaredSort)
-                                + " but its value is " + describeSort(inferred)
-                                + " — these are different types.",
-                        start.origin());
+                if ("Stream".equals(declaredBase) && TUPLE_SENTINEL.equals(inferredBase)) {
+                    // tuple → Stream[T] autobox (docs/iteration.md §8.6), same as parseLet.
+                    requireStreamElements(declaredSort, inferred, start.origin());
+                    streamAutobox = true;
+                } else {
+                    throw new ParseException(
+                            "let '" + name + "' is declared " + describeSort(declaredSort)
+                                    + " but its value is " + describeSort(inferred)
+                                    + " — these are different types.",
+                            start.origin());
+                }
             }
         }
         IrSort binding = declaredSort != null
-                && ("_record".equals(baseSortName(inferred)) || intToDecimal)
+                && ("_record".equals(baseSortName(inferred)) || intToDecimal || streamAutobox)
                 ? declaredSort
                 : inferred;
         IrSort prevBinding = currentScope.get(name);
@@ -3152,8 +3159,10 @@ public final class AltParser {
             else currentScope.remove(name);
         }
         // The declared sort travels as the binding's claim — judged by the
-        // construction gate three-way, like a constructor argument.
-        return new IrExpr.LetIn(name, binding, value, body, start.origin(), declaredSort);
+        // construction gate three-way, like a constructor argument. The stream
+        // autobox is gated at parse time (§8.6), so it carries no runtime claim.
+        return new IrExpr.LetIn(name, binding, value, body, start.origin(),
+                streamAutobox ? null : declaredSort);
     }
 
     /**

@@ -94,6 +94,12 @@ class IterationParseTest {
     }
 
     @Test
+    void streamAnnotation_inExpressionLet_autoboxes() throws Exception {
+        // The expression-position `let` (inside a function body) autoboxes too.
+        assertEquals(0L, run("function f():Int -> let s:Stream[Int] = (1, 2, 3) 0\nf()\n"));
+    }
+
+    @Test
     void streamAnnotation_heterogeneousTuple_isRejected() {
         sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 sibarum.pontif.parser.ParseException.class,
