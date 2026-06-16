@@ -304,4 +304,54 @@ class ReceiptGraphReportTest {
         String text = generate(src, "match-on-call.ptf");
         assertTrue(text.contains("f("), () -> text);
     }
+
+    @Test
+    void nestedMatchInArmBody_buildsGraph() {
+        // A match nested in an arm body is a value-position match — it must be
+        // hoisted out of the linear kernel, not abort the draft.
+        String src = """
+                module m
+                function h(x:Int):Int -> match x
+                  [@>0] -> (match x [@>5] -> 1  [_] -> 2)
+                  [_] -> 0
+                h(7)
+                """;
+        String text = generate(src, "nested-match.ptf");
+        assertTrue(text.contains("h("), () -> text);
+    }
+
+    @Test
+    void underscoreArm_dischargesLikeExplicitArm() {
+        // `[_]` is the bracketed default arm: its region is the complement of the
+        // explicit arms WITHIN the scrutinee's sort, so it discharges exactly what
+        // the equivalent explicit arm would (here factorial's @>=1).
+        String src = """
+                module m
+                function fac(n:[Int:@>=0]):[Int:@>=1] -> match n
+                  [@==0] -> 1
+                  [_] -> n * fac(n - 1)
+                fac(4)
+                """;
+        String text = generate(src, "underscore-arm.ptf");
+        assertTrue(text.contains("discharged") && !text.contains("NOT DISCHARGED"),
+                () -> "the `[_]` arm's complement region (@>=1) must discharge:\n" + text);
+    }
+
+    @Test
+    void discontiguousUnderscore_dischargesViaCaseSplit() {
+        // `[_]` after [@==0] and [@==5] is the discontiguous region
+        // [1,4] ∪ [6,∞) — the discharge case-splits the disjunction and proves
+        // @>=1 on each piece.
+        String src = """
+                module m
+                function g(n:[Int:@>=0]):[Int:@>=1] -> match n
+                  [@==0] -> 1
+                  [@==5] -> 1
+                  [_] -> n
+                g(4)
+                """;
+        String text = generate(src, "discontiguous-underscore.ptf");
+        assertTrue(text.contains("discharged") && !text.contains("NOT DISCHARGED"),
+                () -> "the discontiguous `[_]` region must discharge via case-split:\n" + text);
+    }
 }

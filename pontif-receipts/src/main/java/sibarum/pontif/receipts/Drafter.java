@@ -379,8 +379,24 @@ public final class Drafter {
                 calls.add(new CallRef(stepName, List.of(), new Var(varName, resultSort)));
                 yield IrExpr.var(varName);
             }
-            // Leaves and forms not yet call-hoisted (Apply/Lambda/Match nested
-            // in a body equation are rare; transcribed as-is for now).
+            // A match in a VALUE position (an arm body, a let value, …) is
+            // control flow, not a linear-kernel term — compileSymExpr rejects it
+            // ("Match inside refinement predicate"), which would abort the whole
+            // draft. Hoist it like a call: a fresh r_k carrying the match's
+            // narrowing (the same-base union of its arm results — sound, since the
+            // value IS one arm's), so the body equation stays linear and the inner
+            // result is at worst opaque, never a crash. (A faithful sub-node per
+            // arm, like the iteration step node, is a later refinement.)
+            case IrExpr.Match mm -> {
+                String varName = "r_" + (callCounter[0]++);
+                IrSort narrowing = NarrowingInference.infer(mm, ctx);
+                Sort resultSort = narrowing != null
+                        ? IrCompiler.compileSort(narrowing) : Sort.of("_");
+                calls.add(new CallRef("match", List.of(), new Var(varName, resultSort)));
+                yield IrExpr.var(varName);
+            }
+            // Leaves and forms not yet call-hoisted (Apply/Lambda nested in a body
+            // equation are rare; transcribed as-is for now).
             default -> expr;
         };
     }

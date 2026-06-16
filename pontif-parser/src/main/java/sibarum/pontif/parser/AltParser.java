@@ -3374,10 +3374,24 @@ public final class AltParser {
                             result));
                 } else {
                     IrSort pattern = parsePattern();
-                    checkTupleArity(scrutinee, pattern);
                     expect(AltToken.Kind.ARROW);
                     IrExpr result = parseExpr();
-                    branches.add(new IrExpr.MatchBranch(pattern, result));
+                    // `[_]` parses as the universal Named("_") — the bracketed
+                    // spelling of the default arm. Treat it exactly like bare `_`
+                    // so its region becomes the computed complement of the other
+                    // arms, not an unconstrained wildcard (otherwise a `[_]` arm
+                    // is strictly weaker than the equivalent explicit arm, and
+                    // proofs that should discharge over its region don't).
+                    if (pattern instanceof IrSort.Named u && u.name().equals("_")) {
+                        defaultArmIndex = branches.size();
+                        defaultArmOrigin = pattern.origin();
+                        defaultArmResult = result;
+                        branches.add(new IrExpr.MatchBranch(
+                                new IrSort.Named("__default_placeholder", pattern.origin()), result));
+                    } else {
+                        checkTupleArity(scrutinee, pattern);
+                        branches.add(new IrExpr.MatchBranch(pattern, result));
+                    }
                 }
             }
             if (braced) expect(AltToken.Kind.RBRACE);
@@ -3453,7 +3467,13 @@ public final class AltParser {
         // contract (heterogeneous streams, non-literal sources).
         IrSort valueSort = null;
         if (inferMaximalSort(source) instanceof IrSort.Structural st && !st.members().isEmpty()) {
-            valueSort = st.members().values().iterator().next();
+            // The element's BASE sort, not the first member's value-singleton:
+            // `value` ranges over every element, so it must not inherit the first
+            // literal's refinement (e.g. [Int:@==1]) — that would over-narrow the
+            // scrutinee and, now that `[_]` is the complement within the
+            // scrutinee's sort, make a `[_]` arm match only the first element.
+            String base = baseSortName(st.members().values().iterator().next());
+            if (base != null) valueSort = IrSort.named(base);
         }
         // `{ match value <arms> }` — `value` scoped so the match infers its base.
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
