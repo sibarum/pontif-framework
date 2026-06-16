@@ -8,6 +8,25 @@ subsystems bolted together but one idea seen from different angles. The name is
 the thesis: the compiler *pontificates*, and is held to its word — it is never
 allowed to lie.
 
+## Contents
+
+- [Read it top to bottom](#read-it-top-to-bottom)
+- [Functions, overloads, and proven returns](#functions-overloads-and-proven-returns)
+- [Structs and methods](#structs-and-methods)
+- [Traits — alternative interfaces](#traits--alternative-interfaces)
+- [Type extension — a richer type](#type-extension--a-richer-type)
+- [Three models, one need](#three-models-one-need)
+- [Type parameters — generics without erasure](#type-parameters--generics-without-erasure)
+- [The operator algebra](#the-operator-algebra)
+- [Operator overloading](#operator-overloading)
+- [Proofs and synthesis](#proofs-and-synthesis)
+- [Conservation receipts — the second ledger](#conservation-receipts--the-second-ledger)
+- [The compiler](#the-compiler)
+- [Modules](#modules)
+- [Status](#status)
+- [Build and test](#build-and-test)
+- [License](#license)
+
 ## Read it top to bottom
 
 ```pontif
