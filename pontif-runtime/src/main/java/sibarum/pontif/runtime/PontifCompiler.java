@@ -23,6 +23,7 @@ import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
 import sibarum.pontif.receipts.ReturnProofBinding;
 import sibarum.pontif.runtime.module.ModuleLinker;
+import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -91,12 +92,29 @@ public final class PontifCompiler {
     }
 
     /**
-     * Compile the alt syntax (see {@code docs/alternative-syntax.ptf}). The
-     * playground and any alt-syntax-aware caller use this entry point. The
-     * IR compile path is shared with {@link #compile} — only the frontend
-     * differs.
+     * Compile the alt syntax (see {@code docs/alternative-syntax.ptf}) with no
+     * sibling-module resolution — only builtin {@code requires} are honored.
+     * Equivalent to {@link #compileAlt(String, String, java.nio.file.Path)} with
+     * a {@code null} directory; kept for callers (and tests) compiling a buffer
+     * with no on-disk home.
      */
     public CompileResult compileAlt(String source, String sourceName) {
+        return compileAlt(source, sourceName, null);
+    }
+
+    /**
+     * Compile the alt syntax, resolving sibling {@code requires} demand-driven
+     * from {@code resolveDir}. The playground passes the open file's directory,
+     * so a script can import its neighbors while an unrelated broken file in the
+     * same directory is never parsed (see {@link ModuleResolver}). A
+     * {@code null} {@code resolveDir} honors only builtin requires.
+     *
+     * <p>A file with no {@code requires} stays on the bare single-file path,
+     * byte-for-byte unchanged. The resolve/link rule is shared with the
+     * receipt-graph, conservation, and IR reports so Run and the inspector views
+     * never disagree about whether a file was linked.
+     */
+    public CompileResult compileAlt(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule module;
         try {
             module = AltParser.parseModule(source, sourceName);
@@ -107,15 +125,9 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + e.getMessage()));
         }
-        // A file that `requires` anything (e.g. builtin proof types from
-        // std.proof) opts into the module pipeline: link it so the required
-        // builtins are injected, imports validated, and names FQN-resolved. A
-        // file with no `requires` stays on the bare single-file path,
-        // byte-for-byte unchanged. The link/skip rule is shared with the
-        // receipt-graph report via ModuleLinker.combineSingle.
         IrModule linked;
         try {
-            linked = ModuleLinker.combineSingle(module);
+            linked = ModuleResolver.resolveAndCombine(module, resolveDir);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));

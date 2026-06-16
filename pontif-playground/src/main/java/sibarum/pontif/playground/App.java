@@ -344,10 +344,13 @@ public final class App {
     private static void onRunClicked() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        // Resolve sibling `requires` from the open file's directory; captured on
+        // the main thread so the worker doesn't race a file change.
+        Path resolveDir = resolveDir();
         long startNs = System.nanoTime();
         Thread worker = new Thread(() -> {
             PontifRunner.RunResult result = RUNNER.run(
-                    COMPILER.compileAlt(code, sourceName),
+                    COMPILER.compileAlt(code, sourceName, resolveDir),
                     PontifRunner.Engine.INTERPRETER);
             long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             if (result.isError()) {
@@ -379,11 +382,17 @@ public final class App {
     private static void regenerateIrAst() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
-        String text = switch (IrAstReport.fromAltSource(code, sourceName)) {
+        String text = switch (IrAstReport.fromAltSource(code, sourceName, resolveDir())) {
             case IrAstReport.Result.Generated g -> g.text();
             case IrAstReport.Result.Failed f -> f.error();
         };
         TextStates.setContent(irAstText, text);
+    }
+
+    /** Directory used to resolve sibling {@code requires} for the open file —
+     *  its parent dir, or null for an unsaved/untitled buffer (builtins only). */
+    private static Path resolveDir() {
+        return currentFile != null ? currentFile.getParent() : null;
     }
 
     /** Recompute the editor's 1-based line/column from the caret offset and
@@ -414,13 +423,14 @@ public final class App {
     private static void regenerateReports() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        Path resolveDir = resolveDir();
 
-        String receipts = switch (ReceiptGraphReport.fromAltSource(code, sourceName)) {
+        String receipts = switch (ReceiptGraphReport.fromAltSource(code, sourceName, resolveDir)) {
             case ReceiptGraphReport.Result.Generated g -> g.text();
             case ReceiptGraphReport.Result.Failed f ->
                     "# Receipt-graph report: " + sourceName + "\n\n" + f.error() + "\n";
         };
-        String conservation = switch (ConservationReport.fromAltSource(code, sourceName)) {
+        String conservation = switch (ConservationReport.fromAltSource(code, sourceName, resolveDir)) {
             case ConservationReport.Result.Generated g -> g.text();
             case ConservationReport.Result.Failed f ->
                     "# Conservation ledger: " + sourceName + "\n\n" + f.error() + "\n";

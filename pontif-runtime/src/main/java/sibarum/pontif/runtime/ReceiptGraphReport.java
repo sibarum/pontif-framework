@@ -16,7 +16,7 @@ import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
-import sibarum.pontif.runtime.module.ModuleLinker;
+import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -54,6 +54,15 @@ public final class ReceiptGraphReport {
      * {@link Result.Failed}.
      */
     public static Result fromAltSource(String source, String sourceName) {
+        return fromAltSource(source, sourceName, null);
+    }
+
+    /**
+     * As {@link #fromAltSource(String, String)} but resolving sibling
+     * {@code requires} from {@code resolveDir} (the open file's directory) —
+     * mirrors the compiler's Run path so the Receipts view and Run agree.
+     */
+    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule parsed;
         try {
             parsed = AltParser.parseModule(source, sourceName);
@@ -63,13 +72,12 @@ public final class ReceiptGraphReport {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
         try {
-            // Link first when the file `requires` anything (e.g. builtin proof
-            // types from std.proof) — the SAME rule the compiler's Run path uses
-            // (ModuleLinker.combineSingle), so the Receipts view and Run never
-            // disagree about whether a branch discharged. Without this the
-            // imported proof vocabulary stays unresolved and every proof-rescued
-            // branch would falsely render NOT DISCHARGED.
-            IrModule linked = ModuleLinker.combineSingle(parsed);
+            // Resolve + link first when the file `requires` anything — the SAME
+            // rule the compiler's Run path uses (ModuleResolver.resolveAndCombine),
+            // so the Receipts view and Run never disagree about whether a branch
+            // discharged. Without this the imported vocabulary stays unresolved
+            // and every proof-rescued branch would falsely render NOT DISCHARGED.
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
             // Resolve instance-method calls (recv.m(args) → Call("Type.m", …))
             // before drafting — the receipts drafter compiles expressions and
             // would choke on the parser's transient MethodCall placeholder.

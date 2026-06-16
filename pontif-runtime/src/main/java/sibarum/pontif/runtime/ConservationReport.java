@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
-import sibarum.pontif.runtime.module.ModuleLinker;
+import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,6 +32,12 @@ public final class ConservationReport {
 
     /** Drafts and renders the conservation report for alt-syntax source. Never throws. */
     public static Result fromAltSource(String source, String sourceName) {
+        return fromAltSource(source, sourceName, null);
+    }
+
+    /** As {@link #fromAltSource(String, String)} but resolving sibling
+     *  {@code requires} from {@code resolveDir} — mirrors the Run path. */
+    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule parsed;
         try {
             parsed = AltParser.parseModule(source, sourceName);
@@ -39,7 +45,7 @@ public final class ConservationReport {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
         try {
-            IrModule linked = ModuleLinker.combineSingle(parsed);
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
             // Resolve instance-method calls before drafting (the drafter would
             // otherwise hit the transient MethodCall placeholder).
             IrModule resolved = AliasResolver.resolve(

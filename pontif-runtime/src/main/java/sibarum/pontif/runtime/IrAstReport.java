@@ -13,7 +13,7 @@ import sibarum.pontif.ir.IrPrinter;
 import sibarum.pontif.ir.TruffleLowering;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
-import sibarum.pontif.runtime.module.ModuleLinker;
+import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.util.List;
 import java.util.Map;
@@ -48,6 +48,12 @@ public final class IrAstReport {
     private IrAstReport() {}
 
     public static Result fromAltSource(String source, String sourceName) {
+        return fromAltSource(source, sourceName, null);
+    }
+
+    /** As {@link #fromAltSource(String, String)} but resolving sibling
+     *  {@code requires} from {@code resolveDir} — mirrors the Run path. */
+    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         StringBuilder out = new StringBuilder();
         out.append("# IR — ").append(sourceName).append("\n\n");
 
@@ -73,7 +79,7 @@ public final class IrAstReport {
 
         IrModule linked;
         try {
-            linked = ModuleLinker.combineSingle(parsed);
+            linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
         } catch (CompileException ce) {
             out.append("(not generated — link failed").append(located(ce.origin())).append(")\n  ")
                     .append(ce.getMessage()).append('\n');
