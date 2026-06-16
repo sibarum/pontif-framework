@@ -391,8 +391,17 @@ public final class ConservationDrafter {
         return switch (pattern) {
             case IrSort.Refined r -> true;
             case IrSort.Named n -> !n.name().equals("_");
-            case IrSort.Structural s ->
-                    !"_tuple".equals(s.name()) && !"_record".equals(s.name());
+            // A declared nominal name discriminates (its claim is tested); an
+            // anonymous positional/record pattern (_tuple/_record) discriminates
+            // iff one of its components does — so a tuple of struct patterns like
+            // [(Traction(0.0, z1), …)] is refutable, not silently irrefutable, and
+            // the per-component constraints become tracked discriminants.
+            case IrSort.Structural s -> {
+                if (!"_tuple".equals(s.name()) && !"_record".equals(s.name())) {
+                    yield true;
+                }
+                yield s.members().values().stream().anyMatch(ConservationDrafter::isRefutable);
+            }
             default -> false;
         };
     }

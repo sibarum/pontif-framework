@@ -116,6 +116,27 @@ public final class Drafter {
             fnBody = l.value();
         }
 
+        // A `match <non-variable> { … }` desugars to `let __s = <value> in
+        // match __s { … }` (desugarStructuralDestructure binds a non-Var
+        // scrutinee once). The drafter recognizes a match only when the body is
+        // a syntactic Match, so peel the wrapper and draft the inner match with
+        // __s bound to the (renamed) value below — its field reads then compile
+        // to projections on the value (e.g. this.normalize().n). The scrutinee
+        // call is inlined symbolically rather than hoisted to a CallRef: a match
+        // scrutinee carries no return obligation, so no inductive hypothesis is
+        // lost. Without this the wrapper falls to the SymExpr kernel, which
+        // rejects the embedded match and aborts the whole draft.
+        String inlinedLetName = null;
+        IrExpr inlinedLetValue = null;
+        if (fnBody instanceof IrExpr.LetIn l
+                && l.body() instanceof IrExpr.Match m
+                && m.scrutinee() instanceof IrExpr.Var sv
+                && sv.name().equals(l.name())) {
+            inlinedLetName = l.name();
+            inlinedLetValue = l.value();
+            fnBody = m;
+        }
+
         // Build params + a rename map (body's IrExpr.Var("n") → SymExpr.Var("n_0")).
         List<Param> params = new ArrayList<>(fd.params().size());
         Map<String, SymExpr> renameBindings = new HashMap<>();
@@ -127,6 +148,14 @@ public final class Drafter {
             // Seed the param under its ORIGINAL name so call-arg narrowing
             // inference (which sees the un-renamed body) can resolve it.
             ctx = ctx.withVar(p.name(), p.sort());
+        }
+
+        // Bind the peeled match scrutinee's let-var to its renamed value, so the
+        // inner match's `__s` references (scrutinee + the destructure's field
+        // reads) compile to the value (e.g. __s.n -> Traction.normalize(this_0).n).
+        if (inlinedLetName != null) {
+            renameBindings.put(inlinedLetName,
+                    Substitute.apply(IrCompiler.compileSymExpr(inlinedLetValue), renameBindings));
         }
 
         // The return refinement may reference parameters (e.g. a spec-only

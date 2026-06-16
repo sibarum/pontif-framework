@@ -513,4 +513,26 @@ class ConservationReportTest {
         assertFalse(NoHalt.of(ledger).containsKey("m"),
                 "dead-flow calls are invisible to the walk — the documented miss");
     }
+
+    @Test
+    void tupleOfConstrainedStructs_discriminates_notIrrefutable() throws Exception {
+        // A tuple pattern whose components carry literal constraints (n==0)
+        // DOES discriminate — isRefutable must look inside the tuple, so the
+        // branch records the n fields as consulted rather than reading
+        // "branch (irrefutable)".
+        String src = """
+                struct P(n:Int, k:Int)
+                function pick(a:P, b:P):Int -> match (a, b)
+                  [(P(0, j), P(0, m))] -> j + m
+                  [(P(i, j), P(x, m))] -> i + x
+                pick(P(0,1), P(0,2))
+                """;
+        ConservationGraph g = graph(ledger("tuple-discriminates", src), "pick");
+        boolean discriminates = g.nodes().values().stream().anyMatch(
+                n -> n instanceof sibarum.pontif.conservation.FlowNode.Branch b
+                        && !b.discriminants().isEmpty());
+        assertTrue(discriminates,
+                "the tuple-of-structs match discriminates on n — isRefutable must "
+                        + "look inside the tuple, not treat _tuple as irrefutable");
+    }
 }

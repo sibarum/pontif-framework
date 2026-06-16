@@ -286,4 +286,22 @@ class ReceiptGraphReportTest {
         String text = Files.readString(path);
         assertTrue(text.contains("error"), () -> "Failure artifact should record the error:\n" + text);
     }
+
+    @Test
+    void matchOnCallScrutinee_buildsGraph() {
+        // A `match someCall()` desugars to `let __s = someCall() in match __s`;
+        // the drafter must see through that wrapper. Without it, the embedded
+        // match reaches the SymExpr kernel ("Match inside refinement predicate")
+        // and aborts the WHOLE draft — the receipt view goes blank for the file.
+        String src = """
+                module m
+                struct P(a:Int, b:Int)
+                method P.id():P -> P(this.a, this.b)
+                function f(p:P):Int -> match p.id()
+                  [P(x, y)] -> x + y
+                f(P(1, 2))
+                """;
+        String text = generate(src, "match-on-call.ptf");
+        assertTrue(text.contains("f("), () -> text);
+    }
 }
