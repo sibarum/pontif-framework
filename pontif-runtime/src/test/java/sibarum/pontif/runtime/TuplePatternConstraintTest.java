@@ -81,4 +81,31 @@ class TuplePatternConstraintTest {
                 f((3, 4))
                 """));
     }
+
+    @Test
+    void constructorComponents_bindNestedFields() {
+        // A tuple of struct patterns: a pinned slot constrains, and inner field
+        // binders (y, n, m) reach the arm body through the recursive destructure.
+        assertEquals("7", run("""
+                struct P(a:Int, b:Int)
+                function f(p:[(P, P)]):Int -> match p {
+                  [(P(0, y), P(n, m))] -> y + n + m
+                  [_]                  -> -1
+                }
+                f((P(0, 3), P(2, 2)))
+                """));
+    }
+
+    @Test
+    void constructorComponents_noMatchFallsThrough() {
+        // _0 must be a P with a==0; (P(1,_), _) misses and takes the default arm.
+        assertEquals("-1", run("""
+                struct P(a:Int, b:Int)
+                function f(p:[(P, P)]):Int -> match p {
+                  [(P(0, y), P(n, m))] -> y + n + m
+                  [_]                  -> -1
+                }
+                f((P(1, 3), P(2, 2)))
+                """));
+    }
 }

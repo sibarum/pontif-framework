@@ -2240,8 +2240,9 @@ public final class AltParser {
      * Parses a match/destructure pattern — a sort, but with
      * {@link #parsingTuplePattern} set so a tuple {@code (a, b)} reads its
      * elements as positional binders / {@code _} discards rather than as
-     * component sorts. Restores the flag afterwards (patterns don't nest a
-     * tuple-pattern inside a component in Slice 1).
+     * component sorts. A constructor component ({@code (Traction(n,z), …)})
+     * nests and binds via the recursive destructure desugar; a nested bare
+     * tuple component still occupies-but-binds-nothing. Restores the flag after.
      */
     private IrSort parsePattern() throws ParseException {
         boolean prev = parsingTuplePattern;
@@ -2315,11 +2316,36 @@ public final class AltParser {
                             new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
                             t.origin()));
                     discards.add(key);
-                } else if (t.kind() == AltToken.Kind.LBRACKET || t.kind() == AltToken.Kind.LPAREN) {
+                } else if (t.kind() == AltToken.Kind.IDENT
+                        && peek(1).kind() == AltToken.Kind.LPAREN) {
+                    // A constructor/struct destructure as a tuple element
+                    // ([(Traction(n, z), Traction(0.0, 0.0))]) — reuse the
+                    // bracket-branch struct-pattern machinery. The slot is
+                    // occupied by the nested Structural sort; its inner fields
+                    // bind via the recursive destructure desugar (the renames /
+                    // literal constraints are recorded against the inner sort).
+                    // NOT a tuple-level discard — the nested pattern binds.
+                    AltToken baseTok = consume();
+                    expect(AltToken.Kind.LPAREN);
+                    java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
+                    Map<String, String> innerRenames = new LinkedHashMap<>();
+                    Map<String, IrSort> innerMembers = parseStructFields(
+                            baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
+                    expect(AltToken.Kind.RPAREN);
+                    IrSort.Structural inner = new IrSort.Structural(
+                            baseTok.text(), innerMembers, baseTok.origin());
+                    if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
+                    if (!innerRenames.isEmpty()) destructureRenames.put(inner, innerRenames);
+                    members.put(key, inner);
+                } else if (t.kind() == AltToken.Kind.LBRACKET) {
                     // An explicit refinement-sort constraint ([Decimal:0.0],
-                    // [Int:@>0]) or a nested tuple — occupies the slot, binds nothing.
+                    // [Int:@>0]) — occupies the slot, binds nothing.
                     members.put(key, parseSort());
                     discards.add(key);
+                } else if (t.kind() == AltToken.Kind.LPAREN) {
+                    // A nested tuple ([((a, b), c)]) — binds its components via
+                    // the recursive destructure desugar; NOT a discard.
+                    members.put(key, parseTupleSortBody(t));
                 } else {
                     AltToken binder = expect(AltToken.Kind.IDENT);
                     members.put(key, IrSort.named("_"));  // sort resolved from scrutinee
@@ -2329,6 +2355,10 @@ public final class AltParser {
                         renames.put(key, binder.text());
                     }
                 }
+            } else if (peek().kind() == AltToken.Kind.LPAREN) {
+                // A nested tuple TYPE ([((Int, Int), Int)]) — parseSort can't
+                // start at '(', so recurse here (parity with the pattern path).
+                members.put(key, parseTupleSortBody(peek()));
             } else {
                 members.put(key, parseSort());        // type position: a real sort
             }
@@ -2467,6 +2497,37 @@ public final class AltParser {
                 : null;
     }
 
+    /**
+     * Resolves the declared field name at positional {@code clauseIndex} of a
+     * struct pattern, with the standard guards (struct declared, index in range,
+     * slot not already given by name). Shared by the positional clauses that
+     * occupy a slot without a leading field name — nested patterns and
+     * refinement constraints.
+     */
+    private String positionalField(
+            String typeName, int clauseIndex, Map<String, IrSort> members, Origin o)
+            throws ParseException {
+        IrSort.Structural decl = patternShapeFor(typeName);
+        if (decl == null) {
+            throw new ParseException(
+                    "A positional pattern inside [" + typeName + "(...)] requires '"
+                            + typeName + "' to be declared before this point", o);
+        }
+        List<String> order = new ArrayList<>(decl.members().keySet());
+        if (clauseIndex >= order.size()) {
+            throw new ParseException(
+                    "Too many fields for struct '" + typeName + "' ("
+                            + order.size() + " declared)", o);
+        }
+        String posField = order.get(clauseIndex);
+        if (members.containsKey(posField)) {
+            throw new ParseException(
+                    "Field '" + posField + "' is given both by name and by position in ["
+                            + typeName + "(...)]", o);
+        }
+        return posField;
+    }
+
     private Map<String, IrSort> parseStructFields(String typeName, Origin typeOrigin,
             java.util.Set<String> literalFieldsOut, Map<String, String> renamesOut)
             throws ParseException {
@@ -2521,6 +2582,47 @@ public final class AltParser {
                 members.put(posField, new IrSort.Refined(base,
                         new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
                         t.origin()));
+                literalFieldsOut.add(posField);
+                first = false;
+                continue;
+            }
+            // A nested constructor pattern as a field ([Outer(Inner(x, y), c)]) —
+            // reuse parseStructFields; the slot maps positionally and its inner
+            // fields bind via the recursive destructure desugar (renames /
+            // literal constraints recorded against the inner sort). NOT a
+            // struct-level literal/discard. Parity with tuple components.
+            if (t.kind() == AltToken.Kind.IDENT && peek(1).kind() == AltToken.Kind.LPAREN) {
+                String posField = positionalField(typeName, clauseIndex, members, t.origin());
+                AltToken baseTok = consume();
+                expect(AltToken.Kind.LPAREN);
+                java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
+                Map<String, String> innerRenames = new LinkedHashMap<>();
+                Map<String, IrSort> innerMembers = parseStructFields(
+                        baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
+                expect(AltToken.Kind.RPAREN);
+                IrSort.Structural inner = new IrSort.Structural(
+                        baseTok.text(), innerMembers, baseTok.origin());
+                if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
+                if (!innerRenames.isEmpty()) destructureRenames.put(inner, innerRenames);
+                members.put(posField, inner);
+                first = false;
+                continue;
+            }
+            // A nested tuple pattern as a field ([Pair((a, b), c)]) — binds its
+            // components via the recursive desugar. NOT a struct-level discard.
+            if (t.kind() == AltToken.Kind.LPAREN) {
+                String posField = positionalField(typeName, clauseIndex, members, t.origin());
+                members.put(posField, parseTupleSortBody(t));
+                first = false;
+                continue;
+            }
+            // A positional refinement constraint as a field ([P([Int:@>0], y)]) —
+            // constrains the slot, binds nothing (like a literal); parity with a
+            // tuple's [Int:@>0] component. (A by-name `field:[…]` narrowing is the
+            // separate COLON path below, ruled honest narrowing not a pattern.)
+            if (t.kind() == AltToken.Kind.LBRACKET) {
+                String posField = positionalField(typeName, clauseIndex, members, t.origin());
+                members.put(posField, parseSort());
                 literalFieldsOut.add(posField);
                 first = false;
                 continue;
@@ -3110,23 +3212,47 @@ public final class AltParser {
         String synthetic = "__destructure$" + (syntheticCounter++);
         IrSort valueSort = inferMaximalSort(value);
         declaredTopLevelLets.put(synthetic, valueSort);
-        java.util.Set<String> constrainedOnly =
-                literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
-        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
-        for (Map.Entry<String, IrSort> e : sp.members().entrySet()) {
-            if (constrainedOnly.contains(e.getKey())) {
-                continue;  // literal field: constrains the match, binds nothing
-            }
-            String binder = renames.getOrDefault(e.getKey(), e.getKey());
+        // Collect every leaf binder (recursively through nested patterns), then
+        // emit one accessor per binder. The accessor's body re-runs the full
+        // pattern match and returns that binder — and desugarStructuralDestructure
+        // (via wrapDestructureBindings) binds nested binders too, so a leaf like
+        // `x` in `[Outer(Inner(x, y), c)]` reads as `synthetic._<inner>._<x>`.
+        List<Map.Entry<String, IrSort>> binders = new ArrayList<>();
+        collectPatternBinders(sp, binders);
+        for (Map.Entry<String, IrSort> b : binders) {
+            String binder = b.getKey();
             IrExpr accessor = desugarStructuralDestructure(
                     new IrExpr.Call(synthetic, List.of(), start.origin()),
                     List.of(new IrExpr.MatchBranch(sp, new IrExpr.Var(binder, start.origin()))),
                     start.origin());
-            declaredTopLevelLets.put(binder, e.getValue());
+            declaredTopLevelLets.put(binder, b.getValue());
             pendingTopLevelDecls.add(new IrStmt.FunctionDecl(
-                    binder, List.of(), e.getValue(), accessor, start.origin(), true));
+                    binder, List.of(), b.getValue(), accessor, start.origin(), true));
         }
         return new IrStmt.FunctionDecl(synthetic, List.of(), valueSort, value, start.origin(), true);
+    }
+
+    /**
+     * Collects every leaf binder a structural pattern introduces, recursing
+     * through nested struct/tuple patterns — the binder name (after renames) and
+     * its sort. Mirrors {@link #wrapDestructureBindings}' walk: a nested
+     * Structural member recurses; a literal-/{@code _}-constrained field binds
+     * nothing; everything else is a leaf binder.
+     */
+    private void collectPatternBinders(
+            IrSort.Structural sp, List<Map.Entry<String, IrSort>> out) {
+        java.util.Set<String> constrainedOnly =
+                literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
+        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        for (Map.Entry<String, IrSort> e : sp.members().entrySet()) {
+            if (e.getValue() instanceof IrSort.Structural nested) {
+                collectPatternBinders(nested, out);
+            } else if (constrainedOnly.contains(e.getKey())) {
+                // constrains the match, binds nothing
+            } else {
+                out.add(Map.entry(renames.getOrDefault(e.getKey(), e.getKey()), e.getValue()));
+            }
+        }
     }
 
     private IrExpr parseLetExpr() throws ParseException {
@@ -3549,28 +3675,7 @@ public final class AltParser {
         for (IrExpr.MatchBranch b : branches) {
             IrExpr result = b.result();
             if (b.pattern() instanceof IrSort.Structural sp) {
-                // Wrap in reverse so the first field becomes the outermost let.
-                // Literal-constrained fields ([Ternion(z, 0, w)]) constrain the
-                // match but bind nothing — skipped here so the field name isn't
-                // silently shadowed.
-                java.util.Set<String> constrainedOnly =
-                        literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
-                Map<String, String> renames =
-                        destructureRenames.getOrDefault(sp, Map.of());
-                List<Map.Entry<String, IrSort>> entries =
-                        new ArrayList<>(sp.members().entrySet());
-                for (int i = entries.size() - 1; i >= 0; i--) {
-                    Map.Entry<String, IrSort> e = entries.get(i);
-                    if (constrainedOnly.contains(e.getKey())) {
-                        continue;
-                    }
-                    result = new IrExpr.LetIn(
-                            renames.getOrDefault(e.getKey(), e.getKey()),
-                            e.getValue(),
-                            new IrExpr.FieldAccess(scrutineeRef, e.getKey(), Origin.NONE),
-                            result,
-                            Origin.NONE);
-                }
+                result = wrapDestructureBindings(sp, scrutineeRef, result);
             }
             IrSort pattern = b.pattern();
             // A native-anatomy pattern ([Decimal(u, s)]) matches the CARRIER,
@@ -3602,6 +3707,42 @@ public final class AltParser {
         // callee's return, etc.).
         IrSort scrutineeSort = inferMaximalSort(scrutinee);
         return new IrExpr.LetIn(outerLetName, scrutineeSort, scrutinee, match, matchOrigin);
+    }
+
+    /**
+     * Wraps {@code result} with the let-bindings a structural pattern
+     * introduces, threading the {@code accessPath} so NESTED struct patterns
+     * bind too: in {@code [(Traction(n1,z1), Traction(n2,z2))]} the element
+     * {@code Traction(n1,z1)} binds {@code n1 = scrutinee._0.n},
+     * {@code z1 = scrutinee._0.zexp}. Reverse order so the first field is the
+     * outermost let. A literal-/{@code _}-constrained field constrains the match
+     * but binds nothing (skipped, so the name isn't silently shadowed); a
+     * member that is itself a Structural pattern recurses regardless.
+     */
+    private IrExpr wrapDestructureBindings(
+            IrSort.Structural sp, IrExpr accessPath, IrExpr result) {
+        java.util.Set<String> constrainedOnly =
+                literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
+        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        List<Map.Entry<String, IrSort>> entries = new ArrayList<>(sp.members().entrySet());
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            Map.Entry<String, IrSort> e = entries.get(i);
+            IrExpr fieldAccess = new IrExpr.FieldAccess(accessPath, e.getKey(), Origin.NONE);
+            if (e.getValue() instanceof IrSort.Structural nested) {
+                result = wrapDestructureBindings(nested, fieldAccess, result);
+            } else if (constrainedOnly.contains(e.getKey())) {
+                // literal / `_` constraint: matches, binds nothing.
+                continue;
+            } else {
+                result = new IrExpr.LetIn(
+                        renames.getOrDefault(e.getKey(), e.getKey()),
+                        e.getValue(),
+                        fieldAccess,
+                        result,
+                        Origin.NONE);
+            }
+        }
+        return result;
     }
 
     /**
