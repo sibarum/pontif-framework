@@ -1,6 +1,7 @@
 package sibarum.pontif.ir;
 
 import org.junit.jupiter.api.Test;
+import sibarum.pontif.core.Origin;
 
 import java.util.List;
 import java.util.Map;
@@ -354,6 +355,73 @@ class NarrowingInferenceTest {
                 IrExpr.fieldAccess(IrExpr.var("p"), "x"),
                 InferenceContext.of(Map.of("p", IrSort.structural("Point",
                         Map.of("x", IrSort.named("Int"), "y", IrSort.named("Int")))))));
+    }
+
+    // --- Iteration construct (docs/iteration.md) -----------------------------
+
+    /**
+     * map: one default stream, the arm transforming the element. The element
+     * is narrowed by the arm pattern ({@code [@>=0]}), so {@code e + 1} narrows
+     * to {@code [Int:@>=1]} and the result is {@code Stream[Int:@>=1]} — the
+     * element-quantified narrowing (∀ element ⟹ stream-of-refined).
+     */
+    @Test
+    void iterate_map_narrowsToStreamOfTransformedElement() {
+        IrExpr.Arm arm = new IrExpr.Arm(
+                intGe(0),
+                List.of(new IrExpr.Write("default", null,
+                        IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("e"), IrExpr.lit(1)))));
+        IrExpr.Iterate it = new IrExpr.Iterate(
+                IrExpr.var("xs"), "e",
+                List.of(new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null)),
+                List.of(arm), Origin.NONE);
+
+        IrSort result = NarrowingInference.infer(it, InferenceContext.empty());
+        assertEquals(new IrSort.Named("Stream", List.of(intGe(1)), Origin.NONE), result);
+    }
+
+    /**
+     * filter: two streams, each arm placing the element verbatim into one. Each
+     * stream's element sort lifts the routing arm's pattern, so the completed
+     * result is the anonymous record {@code {accept: Stream[Int:@>0],
+     * reject: Stream[Int:@<=0]}} (mirrors evalIterate's multi-output seal).
+     */
+    @Test
+    void iterate_filter_narrowsToRecordOfRefinedStreams() {
+        IrSort pos = IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        IrSort nonPos = IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.LE, IrExpr.self(), IrExpr.lit(0)));
+        IrExpr.Iterate it = new IrExpr.Iterate(
+                IrExpr.var("xs"), "e",
+                List.of(new IrExpr.OutputSpec("accept", IrExpr.OutputKind.STREAM, null),
+                        new IrExpr.OutputSpec("reject", IrExpr.OutputKind.STREAM, null)),
+                List.of(
+                        new IrExpr.Arm(pos, List.of(new IrExpr.Write("accept", null, IrExpr.var("e")))),
+                        new IrExpr.Arm(nonPos, List.of(new IrExpr.Write("reject", null, IrExpr.var("e"))))),
+                Origin.NONE);
+
+        Map<String, IrSort> expectedMembers = new java.util.LinkedHashMap<>();
+        expectedMembers.put("accept", new IrSort.Named("Stream", List.of(pos), Origin.NONE));
+        expectedMembers.put("reject", new IrSort.Named("Stream", List.of(nonPos), Origin.NONE));
+        assertEquals(IrSort.structural("_record", expectedMembers),
+                NarrowingInference.infer(it, InferenceContext.empty()));
+    }
+
+    /**
+     * An un-narrowable written value (an opaque call) still types the result as
+     * a {@code Stream} — never {@code _}; the element type is simply unknown.
+     */
+    @Test
+    void iterate_unknownElement_narrowsToBareStream() {
+        IrExpr.Arm arm = new IrExpr.Arm(
+                IrSort.named("Int"),
+                List.of(new IrExpr.Write("default", null, IrExpr.call("opaque", List.of()))));
+        IrExpr.Iterate it = new IrExpr.Iterate(
+                IrExpr.var("xs"), "e",
+                List.of(new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null)),
+                List.of(arm), Origin.NONE);
+
+        assertEquals(new IrSort.Named("Stream", List.of(), Origin.NONE),
+                NarrowingInference.infer(it, InferenceContext.empty()));
     }
 
     // --- Helpers -------------------------------------------------------------

@@ -1176,13 +1176,9 @@ public final class SortChecker {
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "SortChecker");
             case IrExpr.Iterate it -> {
-                // Light validation: the source, output inits, arm patterns, and
-                // write expressions reference only known sorts. (checkExpr's Var
-                // case is already lenient, so element/accumulator names need no
-                // binding here.) REVISIT (docs/iteration.md §10): the conservation
-                // checks — no-bare-drop §4, exactly-one-placement / accounting,
-                // output-kind vs write agreement, home-vs-observe — are NOT yet
-                // enforced.
+                // The source, output inits, arm patterns, and write expressions
+                // reference only known sorts. (checkExpr's Var case is lenient, so
+                // element/accumulator names need no binding here.)
                 checkExpr(it.source(), typeEnv, functionReturns, structDefs);
                 for (IrExpr.OutputSpec os : it.outputs()) {
                     if (os.init() != null) {
@@ -1196,6 +1192,100 @@ public final class SortChecker {
                         checkExpr(w.value(), typeEnv, functionReturns, structDefs);
                     }
                 }
+                // The always-on conservation discipline (§4): output-kind/write
+                // agreement and no-silent-erase. (home-vs-observe ownership and
+                // fold-carry content accounting stay deferred — docs/iteration.md §10.)
+                checkIterationConservation(it);
+            }
+        }
+    }
+
+    /**
+     * The iteration construct's structural conservation discipline
+     * (docs/iteration.md §4, §2.8) — always enforced, never an opt-in property,
+     * because "no silent erase" is the no-lie law. Two laws over the per-element
+     * arms (slice 1: STREAM + ACCUMULATOR outputs):
+     *
+     * <ul>
+     *   <li><b>Output-kind / write agreement.</b> A KEYED write carries a key;
+     *       every other write does not. An ACCUMULATOR declares an init value;
+     *       the empty-on-start kinds (STREAM/KEYED/REWRITE) declare none. Every
+     *       write names a declared output.
+     *   <li><b>No silent erase.</b> Each arm accounts for the element: places it
+     *       into exactly one stream, OR absorbs it into an accumulator, OR — an
+     *       empty arm — falls through to the default/primary stream when one
+     *       exists. An unaccounted arm is a bare drop (a compile error, never a
+     *       silent loss); placing into two streams is an emission (a creation —
+     *       a later slice), not a free copy.
+     * </ul>
+     *
+     * <p>Sound for the STREAM/ACCUMULATOR arms that parse today; the
+     * conservation graph (pontif-conservation) drafts the matching ledger
+     * entries for audit. Content-flow absorption accounting for genuine folds
+     * is a later slice (docs/iteration.md §10).
+     */
+    private static void checkIterationConservation(IrExpr.Iterate it) throws CompileException {
+        Map<String, IrExpr.OutputKind> kinds = new java.util.LinkedHashMap<>();
+        boolean hasDefaultStream = false;
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            kinds.put(os.name(), os.kind());
+            boolean isAccumulator = os.kind() == IrExpr.OutputKind.ACCUMULATOR;
+            if (isAccumulator && os.init() == null) {
+                throw new CompileException(
+                        "Iteration accumulator '" + os.name() + "' needs an initial value.",
+                        it.origin());
+            }
+            if (!isAccumulator && os.init() != null) {
+                throw new CompileException(
+                        "Iteration output '" + os.name() + "' (" + os.kind()
+                                + ") starts empty — it must not declare an initial value.",
+                        it.origin());
+            }
+            if (os.kind() == IrExpr.OutputKind.STREAM && os.name().equals("default")) {
+                hasDefaultStream = true;
+            }
+        }
+        for (int i = 0; i < it.arms().size(); i++) {
+            IrExpr.Arm arm = it.arms().get(i);
+            java.util.Set<String> placements = new java.util.LinkedHashSet<>();
+            int absorptions = 0;
+            for (IrExpr.Write w : arm.writes()) {
+                IrExpr.OutputKind kind = kinds.get(w.output());
+                if (kind == null) {
+                    throw new CompileException(
+                            "Iteration arm #" + (i + 1) + " writes to undeclared output '"
+                                    + w.output() + "'.", it.origin());
+                }
+                boolean keyed = kind == IrExpr.OutputKind.KEYED;
+                if (keyed && w.key() == null) {
+                    throw new CompileException(
+                            "Write to keyed output '" + w.output() + "' needs a key.", it.origin());
+                }
+                if (!keyed && w.key() != null) {
+                    throw new CompileException(
+                            "Write to '" + w.output() + "' (" + kind
+                                    + ") must not carry a key.", it.origin());
+                }
+                switch (kind) {
+                    case STREAM, KEYED, REWRITE -> placements.add(w.output());
+                    case ACCUMULATOR -> absorptions++;
+                }
+            }
+            if (placements.size() > 1) {
+                throw new CompileException(
+                        "Iteration arm #" + (i + 1) + " places the element into "
+                                + placements.size() + " streams " + placements
+                                + " — slice 1 places each element once; routing it to a"
+                                + " second stream is an emission (a creation), a later slice"
+                                + " (docs/iteration.md §4).", it.origin());
+            }
+            if (placements.isEmpty() && absorptions == 0 && !hasDefaultStream) {
+                throw new CompileException(
+                        "Iteration arm #" + (i + 1) + " accounts for nothing — the element is"
+                                + " neither placed into a stream nor absorbed, and there is no"
+                                + " default stream. A bare drop is not expressible; route"
+                                + " removal to a named output (docs/iteration.md §4).",
+                        it.origin());
             }
         }
     }

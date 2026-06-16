@@ -103,9 +103,7 @@ public final class NarrowingInference {
             case IrExpr.SelfRef ignored -> null;
             // Unresolved until MethodResolver; can't narrow its result here.
             case IrExpr.MethodCall ignored -> null;
-            // REVISIT (docs/iteration.md §10): no result-narrowing for the
-            // iteration construct yet (would infer the output tuple's sort).
-            case IrExpr.Iterate ignored -> null;
+            case IrExpr.Iterate it -> inferIterate(it, ctx);
         };
     }
 
@@ -319,6 +317,71 @@ public final class NarrowingInference {
         return sameBaseUnion(armResults);
     }
 
+    // --- Iteration construct (docs/iteration.md) ---------------------------
+
+    /**
+     * Iteration result narrowing — the map+filter logic. Each output stream's
+     * element sort is the same-base union, across the arms writing to it, of
+     * each written value's narrowing taken under the arm's pattern as the
+     * <em>element hypothesis</em> ({@code element → arm.pattern()}, mirroring
+     * {@link #inferMatch}). This is the element-quantified narrowing
+     * (∀ element ⟹ stream-of-refined): a filter arm {@code [@>0]} writing the
+     * element verbatim lifts to {@code Stream[Int:@>0]}; a map arm transforming
+     * the element lifts the transformed narrowing.
+     *
+     * <p>The seal mirrors {@link IrInterpreter}'s {@code evalIterate}: a single
+     * output (map; a one-stream filter) narrows to {@code Stream[T']} directly;
+     * multiple outputs (filter's {@code accept}/{@code reject}) to an anonymous
+     * {@code _record} keyed by output name. An output whose element sort can't
+     * be derived narrows to a bare {@code Stream} (never {@code _} — the result
+     * is a stream regardless).
+     */
+    private static IrSort inferIterate(IrExpr.Iterate it, InferenceContext ctx) {
+        Map<String, List<IrSort>> writtenByOutput = new LinkedHashMap<>();
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            writtenByOutput.put(os.name(), new ArrayList<>());
+        }
+        for (IrExpr.Arm arm : it.arms()) {
+            InferenceContext armCtx = ctx.withVar(it.element(), arm.pattern());
+            for (IrExpr.Write w : arm.writes()) {
+                List<IrSort> bucket = writtenByOutput.get(w.output());
+                // A write to an undeclared output is SortChecker's beat, not ours.
+                if (bucket != null) bucket.add(infer(w.value(), armCtx));
+            }
+        }
+        Map<String, IrSort> streamSorts = new LinkedHashMap<>();
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            // Slice 1: only STREAM outputs parse. A non-stream output (ACCUMULATOR
+            // and friends — not yet reachable) has no stream element sort.
+            IrSort elem = os.kind() == IrExpr.OutputKind.STREAM
+                    ? unionOrNull(writtenByOutput.get(os.name()))
+                    : null;
+            streamSorts.put(os.name(), streamSort(elem));
+        }
+        if (streamSorts.size() == 1) {
+            return streamSorts.values().iterator().next();
+        }
+        return IrSort.structural("_record", streamSorts);
+    }
+
+    /** {@code Stream[elem]}, or bare {@code Stream} when the element sort is unknown. */
+    private static IrSort streamSort(IrSort elem) {
+        return new IrSort.Named("Stream", elem == null ? List.of() : List.of(elem), Origin.NONE);
+    }
+
+    /**
+     * Same-base union of the bucket, or {@code null} if it's empty, holds any
+     * un-narrowable ({@code null}) entry, or spans bases. Guards {@code null}s
+     * up front since {@link #sameBaseUnion} doesn't.
+     */
+    private static IrSort unionOrNull(List<IrSort> sorts) {
+        if (sorts == null || sorts.isEmpty()) return null;
+        for (IrSort s : sorts) {
+            if (s == null) return null;
+        }
+        return sameBaseUnion(sorts);
+    }
+
     // --- Record literal narrowing (Phase C) --------------------------------
 
     /**
@@ -444,7 +507,10 @@ public final class NarrowingInference {
             case IrExpr.Bool ignored -> true;
             case IrExpr.Var ignored -> true;
             case IrExpr.DispatchRef ignored -> true;
-            case IrExpr.Iterate ignored -> false;  // REVISIT (docs/iteration.md §10)
+            // An iteration is a stream/tuple value, never a predicate term
+            // (IrCompiler.compileSymExpr rejects one inside a refinement), so
+            // this @-walk never reaches it; disqualify conservatively.
+            case IrExpr.Iterate ignored -> false;
         };
     }
 
@@ -530,7 +596,10 @@ public final class NarrowingInference {
             case IrExpr.Var v -> v;
             case IrExpr.SelfRef s -> s;
             case IrExpr.DispatchRef d -> d;
-            case IrExpr.Iterate it -> it;  // REVISIT (docs/iteration.md §10)
+            // Unreachable in practice: an iteration can't appear inside a
+            // refinement predicate (IrCompiler.compileSymExpr forbids it), and
+            // these helpers only ever walk predicates — nothing to substitute.
+            case IrExpr.Iterate it -> it;
         };
     }
 
@@ -613,7 +682,10 @@ public final class NarrowingInference {
             case IrExpr.Bool b -> b;
             case IrExpr.Var v -> v;
             case IrExpr.DispatchRef d -> d;
-            case IrExpr.Iterate it -> it;  // REVISIT (docs/iteration.md §10)
+            // Unreachable in practice: an iteration can't appear inside a
+            // refinement predicate (IrCompiler.compileSymExpr forbids it), and
+            // these helpers only ever walk predicates — nothing to substitute.
+            case IrExpr.Iterate it -> it;
         };
     }
 

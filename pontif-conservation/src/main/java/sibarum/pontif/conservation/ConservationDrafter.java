@@ -209,9 +209,20 @@ public final class ConservationDrafter {
             // Creating a metareference is not a call — invocation through a
             // binding is the residual case, handled at the Call site.
             case IrExpr.DispatchRef d -> { }
-            // REVISIT (docs/iteration.md §10): no call-site collection inside the
-            // iteration construct yet (slice 1 has no proofs over iterations).
-            case IrExpr.Iterate it -> { }
+            // Recurse into the source, accumulator inits, and each write's
+            // key/value so a callee reached only through an arm is topo-sorted.
+            case IrExpr.Iterate it -> {
+                collectCallNames(it.source(), out);
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    if (os.init() != null) collectCallNames(os.init(), out);
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    for (IrExpr.Write w : arm.writes()) {
+                        if (w.key() != null) collectCallNames(w.key(), out);
+                        collectCallNames(w.value(), out);
+                    }
+                }
+            }
         };
     }
 
@@ -408,6 +419,54 @@ public final class ConservationDrafter {
     }
 
     /**
+     * The bounded fold (docs/iteration.md §4, §6): a per-frame, frame-uniform
+     * placement of the current element into named output streams. Drafts the
+     * source (provenance), then a {@link FlowNode.Branch} that consults the
+     * source and discriminates on the element, each arm a {@link
+     * FlowNode.Construction} placing the element (or a transform) into its
+     * written outputs. One frame represents all frames (§6), so the element is
+     * a <em>local representative atom</em> bound for the arm bodies, NOT a
+     * function input — the source→element collection-atom equivalence stays
+     * parked (see the {@code OTHER}-capacity note below).
+     *
+     * <p>Output kinds beyond slice-1 streams (ACCUMULATOR carry, KEYED,
+     * REWRITE) fail closed to a {@link Flow.Residual}: their ledgers aren't
+     * drafted yet, so the construct is located ignorance rather than a
+     * fabricated placement. The structural no-silent-erase law (§4) is enforced
+     * separately and always, in {@code SortChecker}.
+     */
+    private static Flow draftIterate(IrExpr.Iterate it, Ctx ctx) throws CompileException {
+        Flow source = draftValue(it.source(), ctx);
+        for (IrExpr.OutputSpec os : it.outputs()) {
+            if (os.kind() != IrExpr.OutputKind.STREAM) {
+                return new Flow.Residual(
+                        "iterate output '" + os.name() + "' (" + os.kind()
+                                + ") — conservation not yet drafted (docs/iteration.md §10)",
+                        touchesOf(source, ctx));
+            }
+        }
+        AttributePath elementPath = AttributePath.of(it.element());
+        Flow prevElem = ctx.env.put(it.element(), new Flow.Verbatim(elementPath));
+        IrExpr elementScrutinee = new IrExpr.Var(it.element(), it.origin());
+        List<Arm> arms = new ArrayList<>(it.arms().size());
+        for (IrExpr.Arm arm : it.arms()) {
+            String label = armLabel(arm.pattern(), elementScrutinee, ctx);
+            Map<String, Flow> placements = new LinkedHashMap<>();
+            for (IrExpr.Write w : arm.writes()) {
+                placements.put(w.output(), draftValue(w.value(), ctx));
+            }
+            String kid = ctx.freshId("k");
+            ctx.add(new FlowNode.Construction(kid, "iterate frame", placements));
+            arms.add(new Arm(label, new Flow.FromNode(kid)));
+        }
+        if (prevElem != null) ctx.env.put(it.element(), prevElem);
+        else ctx.env.remove(it.element());
+        String brId = ctx.freshId("br");
+        ctx.add(new FlowNode.Branch(brId, List.of(source), arms));
+        return new Flow.FromNode(brId);
+    }
+
+    /**
      * Value position. Exhaustive over the sealed IR — the standing
      * completeness proof; the residual cases are exactly the algebra's ruled
      * ones: lambda, application, unresolved call.
@@ -498,10 +557,11 @@ public final class ConservationDrafter {
             // over its candidates; an unsummarized callee (recursion, unknown)
             // is the located ignorance.
             case IrExpr.MethodCall mc -> throw sibarum.pontif.ir.MethodResolver.unresolved(mc, "ConservationDrafter");
-            // REVISIT (docs/iteration.md §10, §5): the receipt drafter does not
-            // reason about the bounded-fold construct yet (no proofs over it).
-            case IrExpr.Iterate it -> throw new UnsupportedOperationException(
-                    "Iterate: conservation drafting not yet implemented (docs/iteration.md §10)");
+            // The bounded fold generates ledger entries — it is NOT opaque to the
+            // drafter (docs/iteration.md §4): consult the source, discriminate on
+            // the element, each arm PLACES the element (or a transform) into named
+            // output streams.
+            case IrExpr.Iterate it -> draftIterate(it, ctx);
             case IrExpr.Call c -> {
                 List<Flow> argFlows = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) argFlows.add(draftValue(a, ctx));

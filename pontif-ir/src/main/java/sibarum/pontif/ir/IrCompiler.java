@@ -373,6 +373,12 @@ public final class IrCompiler {
             }
             case IrExpr.FieldAccess fa -> SymExpr.fieldAccess(compileSymExpr(fa.base()), fa.fieldName());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrCompiler");
+            // An iteration is a stream/tuple value, not a predicate term — it can
+            // never legitimately appear inside a refinement predicate, so the
+            // linear kernel rejects it here. The receipt Drafter hoists every
+            // iteration out to a step Node *before* compileSymExpr sees the body
+            // (Drafter.hoistCalls), so this throw fences predicate-position misuse
+            // only, never the well-formed fold (docs/iteration.md §5).
             case IrExpr.Iterate it -> throw new CompileException(
                     "Iteration inside refinement predicates is not supported", it.origin());
         };

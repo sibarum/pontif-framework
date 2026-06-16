@@ -74,7 +74,7 @@ public final class Drafter {
         List<Node> roots = new ArrayList<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                roots.add(draftFunction(fd, baseCtx));
+                draftFunction(fd, baseCtx, roots);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 // A trait attribute producer (`weight:[Int:@>0] -> 1`) lowers to a
                 // 0-user-arg function `Type.weight(this):[Int:@>0] -> 1`. Draft it
@@ -83,7 +83,7 @@ public final class Drafter {
                 // attribute's refinement). Methods are validated elsewhere
                 // (SortChecker.checkExpr) and not drafted here.
                 for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-                    roots.add(draftFunction(a, baseCtx));
+                    draftFunction(a, baseCtx, roots);
                 }
             }
         }
@@ -98,7 +98,8 @@ public final class Drafter {
      * vars ({@code r_1}, {@code r_2}, …) are allocated by a per-function
      * counter shared across all branches.
      */
-    private static Node draftFunction(IrStmt.FunctionDecl fd, InferenceContext baseCtx)
+    private static void draftFunction(
+            IrStmt.FunctionDecl fd, InferenceContext baseCtx, List<Node> out)
             throws CompileException {
         int callIndex = 0;
 
@@ -150,11 +151,27 @@ public final class Drafter {
         // Sub-call result vars start at r_1 (r_0 is the function result).
         int[] callCounter = {1};
 
-        List<Branch> branches = fnBody instanceof IrExpr.Match match
-                ? draftMatchBranches(match, resultVar, renameBindings, ctx, callCounter)
-                : List.of(draftUnconditionalBranch(fnBody, resultVar, renameBindings, ctx, callCounter));
+        // Sink for synthesized iteration step Nodes (`<fn>$iter$<k>`) hoisted
+        // out of the body — see hoistCalls' Iterate case.
+        StepSink sink = new StepSink(fd.name(), new int[]{0}, new ArrayList<>());
 
-        return new Node(fd.name(), params, resultVar, branches);
+        List<Branch> branches = fnBody instanceof IrExpr.Match match
+                ? draftMatchBranches(match, resultVar, renameBindings, ctx, callCounter, sink)
+                : List.of(draftUnconditionalBranch(fnBody, resultVar, renameBindings, ctx, callCounter, sink));
+
+        out.add(new Node(fd.name(), params, resultVar, branches));
+        out.addAll(sink.steps());
+    }
+
+    /**
+     * Carries the enclosing name, a shared step counter, and the sink list for
+     * synthesized iteration step Nodes, so a hoisted {@link IrExpr.Iterate} can
+     * emit a uniquely-named {@code <enclosing>$iter$<k>} sibling root.
+     */
+    private record StepSink(String enclosing, int[] counter, List<Node> steps) {
+        String freshStepName() {
+            return enclosing + "$iter$" + (counter[0]++);
+        }
     }
 
     /**
@@ -178,10 +195,10 @@ public final class Drafter {
      */
     private static Branch draftUnconditionalBranch(
             IrExpr body, Var resultVar, Map<String, SymExpr> renameBindings,
-            InferenceContext ctx, int[] callCounter)
+            InferenceContext ctx, int[] callCounter, StepSink sink)
             throws CompileException {
         List<CallRef> calls = new ArrayList<>();
-        SymExpr rhs = transcribeBody(body, renameBindings, ctx, callCounter, calls);
+        SymExpr rhs = transcribeBody(body, renameBindings, ctx, callCounter, calls, sink);
         InitialReceipt bodyReceipt = new InitialReceipt(
                 SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
         return new Branch(Optional.empty(), List.of(bodyReceipt), calls);
@@ -200,7 +217,7 @@ public final class Drafter {
      */
     private static List<Branch> draftMatchBranches(
             IrExpr.Match match, Var resultVar, Map<String, SymExpr> renameBindings,
-            InferenceContext ctx, int[] callCounter)
+            InferenceContext ctx, int[] callCounter, StepSink sink)
             throws CompileException {
         SymExpr scrutinee = Substitute.apply(
                 IrCompiler.compileSymExpr(match.scrutinee()), renameBindings);
@@ -215,7 +232,7 @@ public final class Drafter {
                 guard = Optional.of(Substitute.applySelf(predicate, scrutinee));
             }
             List<CallRef> calls = new ArrayList<>();
-            SymExpr rhs = transcribeBody(arm.result(), renameBindings, ctx, callCounter, calls);
+            SymExpr rhs = transcribeBody(arm.result(), renameBindings, ctx, callCounter, calls, sink);
             InitialReceipt bodyReceipt = new InitialReceipt(
                     SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
             branches.add(new Branch(guard, List.of(bodyReceipt), calls));
@@ -231,9 +248,9 @@ public final class Drafter {
      */
     private static SymExpr transcribeBody(
             IrExpr body, Map<String, SymExpr> renameBindings,
-            InferenceContext ctx, int[] callCounter, List<CallRef> calls)
+            InferenceContext ctx, int[] callCounter, List<CallRef> calls, StepSink sink)
             throws CompileException {
-        IrExpr hoisted = hoistCalls(body, renameBindings, ctx, callCounter, calls);
+        IrExpr hoisted = hoistCalls(body, renameBindings, ctx, callCounter, calls, sink);
         return Substitute.apply(IrCompiler.compileSymExpr(hoisted), renameBindings);
     }
 
@@ -249,13 +266,13 @@ public final class Drafter {
      */
     private static IrExpr hoistCalls(
             IrExpr expr, Map<String, SymExpr> renameBindings,
-            InferenceContext ctx, int[] callCounter, List<CallRef> calls)
+            InferenceContext ctx, int[] callCounter, List<CallRef> calls, StepSink sink)
             throws CompileException {
         return switch (expr) {
             case IrExpr.Call c -> {
                 List<IrExpr> hoistedArgs = new ArrayList<>(c.args().size());
                 for (IrExpr a : c.args()) {
-                    hoistedArgs.add(hoistCalls(a, renameBindings, ctx, callCounter, calls));
+                    hoistedArgs.add(hoistCalls(a, renameBindings, ctx, callCounter, calls, sink));
                 }
                 String varName = "r_" + (callCounter[0]++);
                 Sort returnSort = resolveCallReturnSort(c, ctx);
@@ -280,8 +297,8 @@ public final class Drafter {
             case IrExpr.BinOp op when op.op() == IrExpr.Op.DIV
                     || op.op() == IrExpr.Op.MOD
                     || op.op() == IrExpr.Op.POW -> {
-                IrExpr left = hoistCalls(op.left(), renameBindings, ctx, callCounter, calls);
-                IrExpr right = hoistCalls(op.right(), renameBindings, ctx, callCounter, calls);
+                IrExpr left = hoistCalls(op.left(), renameBindings, ctx, callCounter, calls, sink);
+                IrExpr right = hoistCalls(op.right(), renameBindings, ctx, callCounter, calls, sink);
                 String varName = "r_" + (callCounter[0]++);
                 List<SymExpr> argBindings = List.of(
                         Substitute.apply(IrCompiler.compileSymExpr(left), renameBindings),
@@ -295,29 +312,125 @@ public final class Drafter {
             }
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(),
-                    hoistCalls(op.left(), renameBindings, ctx, callCounter, calls),
-                    hoistCalls(op.right(), renameBindings, ctx, callCounter, calls),
+                    hoistCalls(op.left(), renameBindings, ctx, callCounter, calls, sink),
+                    hoistCalls(op.right(), renameBindings, ctx, callCounter, calls, sink),
                     op.origin());
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
-                    hoistCalls(fa.base(), renameBindings, ctx, callCounter, calls),
+                    hoistCalls(fa.base(), renameBindings, ctx, callCounter, calls, sink),
                     fa.fieldName(), fa.origin());
             case IrExpr.Record r -> {
                 java.util.Map<String, IrExpr> members = new LinkedHashMap<>();
                 for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
                     members.put(e.getKey(),
-                            hoistCalls(e.getValue(), renameBindings, ctx, callCounter, calls));
+                            hoistCalls(e.getValue(), renameBindings, ctx, callCounter, calls, sink));
                 }
                 yield new IrExpr.Record(r.typeName(), members, r.origin());
             }
             case IrExpr.LetIn l -> new IrExpr.LetIn(
                     l.name(), l.declaredSort(),
-                    hoistCalls(l.value(), renameBindings, ctx, callCounter, calls),
-                    hoistCalls(l.body(), renameBindings, ctx, callCounter, calls),
+                    hoistCalls(l.value(), renameBindings, ctx, callCounter, calls, sink),
+                    hoistCalls(l.body(), renameBindings, ctx, callCounter, calls, sink),
                     l.origin(), l.claim());
+            // The bounded fold is hoisted like a call (docs/iteration.md §5/§6: it
+            // IS a fold). Synthesize a named per-frame step Node `<fn>$iter$<k>`
+            // (one branch per arm, the element pattern as guard) and replace the
+            // iteration with a fresh r_k carrying its completed-result narrowing —
+            // exactly how a recursive call's result var carries the return
+            // narrowing. A stream isn't a SymExpr term, so the CallRef takes no
+            // arg bindings and claims nothing about the source — like the DIV
+            // hoist above. Removes the downstream compileSymExpr throw (the
+            // Iterate never reaches the linear kernel).
+            case IrExpr.Iterate it -> {
+                String stepName = sink.freshStepName();
+                draftIterationStep(it, stepName, ctx, sink);
+                String varName = "r_" + (callCounter[0]++);
+                IrSort narrowing = NarrowingInference.infer(it, ctx);
+                Sort resultSort = narrowing != null
+                        ? IrCompiler.compileSort(narrowing) : Sort.of("_");
+                calls.add(new CallRef(stepName, List.of(), new Var(varName, resultSort)));
+                yield IrExpr.var(varName);
+            }
             // Leaves and forms not yet call-hoisted (Apply/Lambda/Match nested
             // in a body equation are rare; transcribed as-is for now).
             default -> expr;
         };
+    }
+
+    /**
+     * Drafts a bounded fold (docs/iteration.md) as a named per-frame step Node
+     * {@code <enclosing>$iter$<k>} — a sibling root that the artifact renders as
+     * a distinct unit and that proof binding can target by name (a later slice).
+     * One {@link Branch} per arm: the arm's pattern (a refinement on the element)
+     * becomes the branch guard with {@code @} bound to {@code element_0}, exactly
+     * as {@link #draftMatchBranches} treats a match scrutinee. A slice-1 arm
+     * carries one write; its value is the per-frame body equation
+     * {@code r_0 = value}. Which output a write routes to is the conservation
+     * graph's concern (§4), not the receipt algebra's, so it isn't modelled here.
+     */
+    private static void draftIterationStep(
+            IrExpr.Iterate it, String stepName, InferenceContext ctx, StepSink sink)
+            throws CompileException {
+        String elemVar = it.element() + "_0";
+        Map<String, SymExpr> rename = new HashMap<>();
+        rename.put(it.element(), SymExpr.var(elemVar));
+
+        Sort elemSort = elementParamSort(it, ctx);
+        List<Param> params = List.of(new Param(elemVar, elemSort));
+        Var resultVar = new Var("r_0", elemSort);
+
+        // Nested iterations inside arm values emit their own steps under this
+        // step's name; sub-call result vars within an arm start at r_1.
+        StepSink innerSink = new StepSink(stepName, sink.counter(), sink.steps());
+        int[] stepCounter = {1};
+
+        List<Branch> branches = new ArrayList<>(it.arms().size());
+        for (IrExpr.Arm arm : it.arms()) {
+            Optional<SymExpr> guard = Optional.empty();
+            if (arm.pattern() instanceof IrSort.Refined refined) {
+                SymExpr predicate = Substitute.apply(
+                        IrCompiler.compileSymExpr(refined.predicate()), rename);
+                guard = Optional.of(Substitute.applySelf(predicate, SymExpr.var(elemVar)));
+            }
+            List<CallRef> calls = new ArrayList<>();
+            List<InitialReceipt> receipts = new ArrayList<>();
+            // Slice-1 arms carry exactly one write. Extra writes (not produced by
+            // the slice-1 parser) and no-op arms add no body equation — placement
+            // accounting is §4's job, not the receipt algebra's.
+            if (arm.writes().size() == 1) {
+                SymExpr rhs = transcribeBody(
+                        arm.writes().get(0).value(), rename, ctx, stepCounter, calls, innerSink);
+                receipts.add(new InitialReceipt(
+                        SymExpr.cmp(SymExpr.var("r_0"), SymExpr.CmpOp.EQ, rhs)));
+            }
+            branches.add(new Branch(guard, receipts, calls));
+        }
+        sink.steps().add(new Node(stepName, params, resultVar, branches));
+    }
+
+    /**
+     * The element param's sort for a step Node: the source's element sort when
+     * derivable (a {@code Stream[E]} narrowing or a positional-record's first
+     * member), else the base of an arm's refinement pattern, else unknown. Not
+     * load-bearing for slice 1 (no proof binds the step yet) — it documents the
+     * per-frame input.
+     */
+    private static Sort elementParamSort(IrExpr.Iterate it, InferenceContext ctx)
+            throws CompileException {
+        IrSort src = NarrowingInference.infer(it.source(), ctx);
+        IrSort elem = null;
+        if (src instanceof IrSort.Named n && "Stream".equals(n.name()) && !n.typeArgs().isEmpty()) {
+            elem = n.typeArgs().get(0);
+        } else if (src instanceof IrSort.Structural st && !st.members().isEmpty()) {
+            elem = st.members().values().iterator().next();
+        }
+        if (elem != null) {
+            return Sort.of(IrCompiler.compileSort(elem).name());
+        }
+        for (IrExpr.Arm arm : it.arms()) {
+            if (arm.pattern() instanceof IrSort.Refined r) return Sort.of(r.name());
+            if (arm.pattern() instanceof IrSort.Named nn) return Sort.of(nn.name());
+        }
+        return Sort.of("_");
     }
 
     /**

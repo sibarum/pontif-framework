@@ -5,6 +5,7 @@ import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
+import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
@@ -19,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The iteration construct (docs/iteration.md), slice 1 — NO surface syntax yet,
@@ -116,5 +119,43 @@ class IterationConstructTest {
         RecordValue rec = (RecordValue) run(it);
         assertEquals(List.of(10L, 20L, 30L), heads(rec.get("kept", Origin.NONE)));
         assertEquals(3L, rec.get("count", Origin.NONE));
+    }
+
+    // --- Conservation §4 (no silent erase), enforced by SortChecker ----------
+
+    /**
+     * A bare drop is not expressible: an arm that writes nothing, with no
+     * default stream to fall through to, leaves the element unaccounted — a
+     * compile error, never a silent loss (docs/iteration.md §4).
+     */
+    @Test
+    void bareDrop_isRejected() {
+        IrExpr it = new IrExpr.Iterate(
+                intChain(1, 2, 3), "e",
+                List.of(new IrExpr.OutputSpec("kept", IrExpr.OutputKind.STREAM, null)),
+                List.of(new IrExpr.Arm(ANY_INT, List.of())),  // no write, no default
+                Origin.NONE);
+        CompileException ex = assertThrows(CompileException.class, () -> run(it));
+        assertTrue(ex.getMessage().contains("accounts for nothing"),
+                () -> "expected a bare-drop error, got: " + ex.getMessage());
+    }
+
+    /**
+     * Placing the same element into two streams is an emission (a creation),
+     * not a free copy — rejected in slice 1 (docs/iteration.md §4).
+     */
+    @Test
+    void placingIntoTwoStreams_isRejected() {
+        IrExpr it = new IrExpr.Iterate(
+                intChain(1, 2, 3), "e",
+                List.of(new IrExpr.OutputSpec("accept", IrExpr.OutputKind.STREAM, null),
+                        new IrExpr.OutputSpec("reject", IrExpr.OutputKind.STREAM, null)),
+                List.of(new IrExpr.Arm(ANY_INT, List.of(
+                        new IrExpr.Write("accept", null, IrExpr.var("e")),
+                        new IrExpr.Write("reject", null, IrExpr.var("e"))))),
+                Origin.NONE);
+        CompileException ex = assertThrows(CompileException.class, () -> run(it));
+        assertTrue(ex.getMessage().contains("into 2 streams"),
+                () -> "expected a duplication error, got: " + ex.getMessage());
     }
 }
