@@ -145,6 +145,20 @@ class ReadmeSnippetTest {
                 .compareTo((java.math.BigDecimal) result));
     }
 
+    @Test
+    void readmeTuplePatternSnippet_evaluatesTo11() throws Exception {
+        String src = """
+                function score(p:[(Int, Int)]):Int -> match p {
+                  [(0, 0)] -> 0
+                  [(0, y)] -> y
+                  [(x, y)] -> x * y
+                }
+
+                score((0, 5)) + score((2, 3))
+                """;
+        assertEquals(11L, run(src));
+    }
+
     // --- Traits: methods (the primary example) -------------------------------
 
     @Test

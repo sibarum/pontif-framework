@@ -147,6 +147,23 @@ is no separate pattern DSL. A positional pattern wears the constructor's clothes
 and must account for *every* slot (discard with `_`); a subset is lying by
 omission and is rejected.
 
+The same per-slot composition applies to **tuples** — a slot is pinned to a
+value, bound to a name, or discarded:
+
+```pontif
+function score(p:[(Int, Int)]):Int -> match p {
+  [(0, 0)] -> 0          # both slots pinned
+  [(0, y)] -> y          # pin the first, bind the second
+  [(x, y)] -> x * y      # bind both — the catch-all
+}
+
+score((0, 5)) + score((2, 3))   # → 11
+```
+
+The pattern stays bracketed (`[(…)]`) even though the value is written `(…)`:
+`[` is never postfix in Pontif (arrays index by application), so `[…]` is
+unambiguously a pattern — which an unbracketed `(…)` could not be.
+
 ## Traits — alternative interfaces
 
 A trait is a type whose members are declared by *name* with `Type{ ... }`, and a
