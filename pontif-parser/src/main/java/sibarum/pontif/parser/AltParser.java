@@ -2287,12 +2287,47 @@ public final class AltParser {
             if (!first) expect(AltToken.Kind.COMMA);
             String key = "_" + index;
             if (parsingTuplePattern) {
-                AltToken binder = expect(AltToken.Kind.IDENT);
-                members.put(key, IrSort.named("_"));  // sort resolved from scrutinee
-                if (binder.text().equals("_")) {
-                    discards.add(key);                // verdict C: explicit discard
+                AltToken t = peek();
+                boolean literalClause = t.kind() == AltToken.Kind.INTEGER
+                        || t.kind() == AltToken.Kind.DECIMAL
+                        || t.kind() == AltToken.Kind.CHAR
+                        || (t.kind() == AltToken.Kind.IDENT
+                                && (t.text().equals("true") || t.text().equals("false")));
+                if (literalClause) {
+                    // A value constraint in place ([(0.0, 0.0)], [(0, y)]) — like a
+                    // struct's positional literal field ([Point(0, y)]). The base
+                    // comes from the literal's own kind; the slot is occupied but
+                    // binds nothing (verdict C).
+                    consume();
+                    String base = switch (t.kind()) {
+                        case INTEGER -> "Int";
+                        case DECIMAL -> "Decimal";
+                        case CHAR -> "Char";
+                        default -> "Bool";
+                    };
+                    IrExpr lit = switch (t.kind()) {
+                        case INTEGER -> new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
+                        case DECIMAL -> new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+                        case CHAR -> new IrExpr.Chr(t.text().codePointAt(0), t.origin());
+                        default -> new IrExpr.Bool(t.text().equals("true"), t.origin());
+                    };
+                    members.put(key, new IrSort.Refined(base,
+                            new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
+                            t.origin()));
+                    discards.add(key);
+                } else if (t.kind() == AltToken.Kind.LBRACKET || t.kind() == AltToken.Kind.LPAREN) {
+                    // An explicit refinement-sort constraint ([Decimal:0.0],
+                    // [Int:@>0]) or a nested tuple — occupies the slot, binds nothing.
+                    members.put(key, parseSort());
+                    discards.add(key);
                 } else {
-                    renames.put(key, binder.text());
+                    AltToken binder = expect(AltToken.Kind.IDENT);
+                    members.put(key, IrSort.named("_"));  // sort resolved from scrutinee
+                    if (binder.text().equals("_")) {
+                        discards.add(key);                // verdict C: explicit discard
+                    } else {
+                        renames.put(key, binder.text());
+                    }
                 }
             } else {
                 members.put(key, parseSort());        // type position: a real sort
