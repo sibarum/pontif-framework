@@ -159,6 +159,31 @@ public final class AltParser {
             new java.util.IdentityHashMap<>();
 
     /**
+     * Identity set of {@link IrSort.Structural} patterns whose struct was NOT in
+     * {@link #declaredStructs} at parse time (cross-module / imported). Their
+     * slots are keyed positionally ({@code _0.._n}) with binder/discard roles
+     * encoded in the slot sorts via {@link #DEFERRED_BIND}/{@link #DEFERRED_SKIP};
+     * the post-link {@code DestructureResolver} maps slots to declared field
+     * names and runs the arity-total check. Used here only to skip the
+     * <em>parse-time</em> binding desugar for these patterns (the resolver does
+     * it post-link, when field names are known).
+     */
+    private final java.util.Set<IrSort> deferredStructPatterns =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    /**
+     * Slot-sort encodings for a DEFERRED positional struct pattern (see
+     * {@link #deferredStructPatterns}). A slot bound to binder {@code x} carries
+     * sort {@code Named("_$bind$x")}; a {@code _} discard carries
+     * {@code Named("_$skip$")}. {@code DestructureResolver} decodes them after
+     * the struct's declared fields are known. The constants live in
+     * {@code pontif-ir} (which the parser depends on) so both sides share one
+     * source of truth.
+     */
+    static final String DEFERRED_BIND = sibarum.pontif.ir.DestructureResolver.DEFERRED_BIND;
+    static final String DEFERRED_SKIP = sibarum.pontif.ir.DestructureResolver.DEFERRED_SKIP;
+
+    /**
      * True while parsing a destructure/match <em>pattern</em> (as opposed to a
      * type annotation). Tuples — unlike structs — have no declared type to
      * disambiguate sort-elements from binder-elements, so the tuple-sort parser
@@ -813,6 +838,10 @@ public final class AltParser {
         IrExpr out = body;
         for (int i = destrs.size() - 1; i >= 0; i--) {
             ParamDestructure d = destrs.get(i);
+            // A null fieldName marks a DEFERRED cross-module param destructure —
+            // the binding is wrapped post-link by DestructureResolver, which knows
+            // the declared field names. Skip it here (only seed scope).
+            if (d.fieldName() == null) continue;
             out = new IrExpr.LetIn(d.local(), d.fieldSort(),
                     new IrExpr.FieldAccess(
                             new IrExpr.Var(d.paramName(), body.origin()), d.fieldName(), body.origin()),
@@ -861,7 +890,22 @@ public final class AltParser {
                 if (sort instanceof IrSort.Structural sp) {
                     IrSort.Structural decl = patternShapeFor(sp.name());
                     if (decl != null && isPureBinderParamPattern(sp, decl)) {
+                        // A positional struct param IS a destructure pattern, so the
+                        // arity-total rule applies (verdict B) — same rule, same one
+                        // place as the match form. Without this, the too-FEW case
+                        // (`p:[P(a)]` over a 2-field struct) slipped through (the
+                        // match form caught too-many but the param form caught
+                        // neither too-few here).
+                        requireArityTotal(sp.name(), sp.members().size(),
+                                decl.members().size(), sp.origin());
                         sort = wirePositionalParamDestructure(name, sp, decl);
+                    } else if (decl == null && isDeferredPattern(sp)) {
+                        // Cross-module positional param destructure `v:[Vec(x, y)]`.
+                        // Field names/order unknown at parse time: seed the binders
+                        // into scope (sort `_`) so the body parses, but leave the
+                        // param sort as the deferred pattern. DestructureResolver
+                        // reduces it to `[Vec]` and wraps the body post-link.
+                        seedDeferredParamBinders(name.text(), sp);
                     }
                 }
             }
@@ -911,6 +955,28 @@ public final class AltParser {
                     binder, paramName.text(), m.getKey(), m.getValue()));
         }
         return new IrSort.Named(sp.name(), paramName.origin());
+    }
+
+    /**
+     * Seeds the binders of a DEFERRED positional param pattern {@code v:[Vec(x,
+     * y)]} into scope so the function body can be parsed. A {@code fieldName} of
+     * {@code null} marks the destructure as DEFERRED: {@link #wrapParamDestructures}
+     * skips it (the field name isn't known yet), and {@code DestructureResolver}
+     * reduces the param sort and wraps the body post-link. Nested patterns are
+     * destructured by the resolver via the param sort, so only the top-level
+     * slots are seeded here (matching how the local pure-binder form behaves).
+     */
+    private void seedDeferredParamBinders(String paramName, IrSort.Structural sp) {
+        java.util.Set<String> skip =
+                literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
+        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        for (Map.Entry<String, IrSort> m : sp.members().entrySet()) {
+            if (skip.contains(m.getKey())) continue;          // discard / literal slot
+            if (m.getValue() instanceof IrSort.Structural) continue;  // nested: resolver binds
+            String binder = renames.getOrDefault(m.getKey(), m.getKey());
+            pendingParamDestructures.add(new ParamDestructure(
+                    binder, paramName, null, IrSort.named("_")));
+        }
     }
 
     private static String paramSig(List<IrParam> params) {
@@ -1999,6 +2065,15 @@ public final class AltParser {
 
     public IrSort parseSort() throws ParseException {
         AltToken t = peek();
+        // Bare tuple sort `(S0, S1, …)` — the bracket-free spelling of `[(…)]`.
+        // A param type written `t:(Inner, Int)` (or a tuple PATTERN `(i, k)` in a
+        // braceless match arm) starts at `(`; `parseBracketSort` only reaches the
+        // tuple body after a `[`, so accept the bare form here for parity. The
+        // body grammar (type elements vs positional binders) is governed by
+        // parsingTuplePattern, exactly as in the bracketed path.
+        if (t.kind() == AltToken.Kind.LPAREN) {
+            return parseTupleSortBody(t);
+        }
         if (t.kind() == AltToken.Kind.LBRACKET) {
             // In-type pipeline (S8): `[let x:S = E -> … -> Base:@==witness]` — a
             // staged synthesis directive. The leading `let` is unambiguous (no
@@ -2395,6 +2470,11 @@ public final class AltParser {
             if (!renames.isEmpty()) {
                 destructureRenames.put(structural, renames);
             }
+            // Imported struct: shape unknown at parse time — mark deferred so the
+            // binding desugar is left to the post-link DestructureResolver.
+            if (patternShapeFor(baseTok.text()) == null) {
+                deferredStructPatterns.add(structural);
+            }
             return structural;
         }
 
@@ -2516,6 +2596,9 @@ public final class AltParser {
                             baseTok.text(), innerMembers, baseTok.origin());
                     if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
                     if (!innerRenames.isEmpty()) destructureRenames.put(inner, innerRenames);
+                    // An imported struct inside a tuple ([(Vec(x,y), c)]) defers
+                    // like any other — its slots are positional until link time.
+                    if (patternShapeFor(baseTok.text()) == null) deferredStructPatterns.add(inner);
                     members.put(key, inner);
                 } else if (t.kind() == AltToken.Kind.LBRACKET) {
                     // An explicit refinement-sort constraint ([Decimal:0.0],
@@ -2714,6 +2797,17 @@ public final class AltParser {
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
         int clauseIndex = -1;
+        // Cluster (2) deferral: a struct imported from another module is not in
+        // declaredStructs at parse time (requires-linking runs later), so its
+        // field ORDER and SORTS are unknown here. Rather than throw (the old
+        // per-form seam), capture the positional pattern SYMBOLICALLY — slot
+        // keys `_0.._n`, the binder/discard/literal role encoded in each slot's
+        // sort — and let the post-link DestructureResolver map slots to declared
+        // field names and run the arity-total check. This mirrors how the `.{}`
+        // by-name form already defers (IrSort.named("_") placeholders), adding
+        // the slot ORDER positional forms need. The local (struct-known) path is
+        // unchanged below.
+        boolean deferred = patternShapeFor(typeName) == null;
         while (peek().kind() != AltToken.Kind.RPAREN) {
             if (!first) expect(AltToken.Kind.COMMA);
             clauseIndex++;
@@ -2723,6 +2817,12 @@ public final class AltParser {
                     || t.kind() == AltToken.Kind.CHAR
                     || (t.kind() == AltToken.Kind.IDENT
                             && (t.text().equals("true") || t.text().equals("false")));
+            if (deferred) {
+                parseDeferredStructFieldClause(
+                        typeName, clauseIndex, members, literalFieldsOut, renamesOut, literalClause);
+                first = false;
+                continue;
+            }
             if (literalClause) {
                 consume();
                 IrSort.Structural decl = patternShapeFor(typeName);
@@ -2897,17 +2997,128 @@ public final class AltParser {
         // [Ternion(a)] is lying by omission. Enforced in pattern context only;
         // a partial field-sort *type* (e.g. [Point(x:[Int:@>0])]) is honest
         // narrowing, not a pattern, so it's left alone.
+        // Verdict B arity-total check, in pattern context. For the deferred
+        // (cross-module) path the struct shape is unknown here, so the SAME rule
+        // runs post-link in DestructureResolver — one rule, two call sites, never
+        // implemented inconsistently per form. The local path checks it now.
         IrSort.Structural decl = patternShapeFor(typeName);
-        if (parsingTuplePattern && decl != null && members.size() < decl.members().size()) {
-            throw new ParseException(
-                    "Pattern [" + typeName + "(...)] lists " + members.size() + " of "
-                            + decl.members().size() + " fields — a positional pattern must account "
-                            + "for every field. Use '_' to discard the unwanted ones "
-                            + "(e.g. [" + typeName + "(a, _, _)]) or focus by name with a refinement "
-                            + "[" + typeName + ":@.field …].",
-                    typeOrigin);
+        if (parsingTuplePattern && decl != null) {
+            requireArityTotal(typeName, members.size(), decl.members().size(), typeOrigin);
         }
         return members;
+    }
+
+    /**
+     * The arity-total rule for a positional struct pattern (verdict B): a
+     * {@code [Type(...)]} pattern wears the constructor's clothes, so it must
+     * account for EVERY field — a subset like {@code [Ternion(a)]} lies by
+     * omission. The rule itself lives ONCE in
+     * {@code DestructureResolver.arityTotalError}, shared by this parse-time
+     * local path and the post-link cross-module path, so it fires identically
+     * for both too-few and too-many.
+     */
+    private static void requireArityTotal(String typeName, int provided, int declared, Origin o)
+            throws ParseException {
+        String msg = sibarum.pontif.ir.DestructureResolver.arityTotalError(typeName, provided, declared);
+        if (msg != null) throw new ParseException(msg, o);
+    }
+
+    /**
+     * Parses one clause of a DEFERRED (cross-module) positional struct pattern.
+     * The struct's declared fields are unknown at parse time, so the slot is
+     * keyed positionally ({@code _<clauseIndex>}) and its role is encoded in the
+     * member sort, to be resolved against the linked struct by
+     * {@code DestructureResolver}:
+     * <ul>
+     *   <li>literal ({@code 0}, {@code true}) → {@link IrSort.Refined} constraint,
+     *       slot recorded in {@code literalFieldsOut} (constrains, binds nothing);
+     *   <li>nested constructor ({@code Inner(x, y)}) → a nested deferred/known
+     *       {@link IrSort.Structural} (binds its own slots, recurses);
+     *   <li>nested tuple ({@code (a, b)}) → a tuple {@link IrSort.Structural};
+     *   <li>refinement constraint ({@code [Int:@>0]}) → the parsed sort, recorded
+     *       in {@code literalFieldsOut} (constrains, binds nothing);
+     *   <li>{@code _} discard → {@link DEFERRED_SKIP} placeholder, recorded in
+     *       {@code literalFieldsOut};
+     *   <li>bare binder ({@code x}) → {@link DEFERRED_BIND} placeholder; the
+     *       binder name is recorded as a rename off the positional key so the
+     *       body can be parsed with the binder in scope, AND it is encoded in the
+     *       placeholder sort so the resolver can recover it post-link.
+     * </ul>
+     * A by-name narrowing ({@code field:Sort}) is rejected: it requires knowing
+     * the declared fields, which a cross-module pattern doesn't have at parse
+     * time. (Cross-module by-name narrowing is the `.{}` form's job.)
+     */
+    private void parseDeferredStructFieldClause(
+            String typeName, int clauseIndex, Map<String, IrSort> members,
+            java.util.Set<String> literalFieldsOut, Map<String, String> renamesOut,
+            boolean literalClause) throws ParseException {
+        String slot = "_" + clauseIndex;
+        AltToken t = peek();
+        if (literalClause) {
+            consume();
+            String base = switch (t.kind()) {
+                case INTEGER -> "Int";
+                case DECIMAL -> "Decimal";
+                case CHAR -> "Char";
+                default -> "Bool";
+            };
+            IrExpr lit = switch (t.kind()) {
+                case INTEGER -> new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
+                case DECIMAL -> new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+                case CHAR -> new IrExpr.Chr(t.text().codePointAt(0), t.origin());
+                default -> new IrExpr.Bool(t.text().equals("true"), t.origin());
+            };
+            members.put(slot, new IrSort.Refined(base,
+                    new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
+                    t.origin()));
+            literalFieldsOut.add(slot);
+            return;
+        }
+        if (t.kind() == AltToken.Kind.IDENT && peek(1).kind() == AltToken.Kind.LPAREN) {
+            // Nested constructor pattern as a slot ([Outer(Inner(x, y), c)]).
+            AltToken baseTok = consume();
+            expect(AltToken.Kind.LPAREN);
+            java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
+            Map<String, String> innerRenames = new LinkedHashMap<>();
+            Map<String, IrSort> innerMembers = parseStructFields(
+                    baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
+            expect(AltToken.Kind.RPAREN);
+            IrSort.Structural inner = new IrSort.Structural(
+                    baseTok.text(), innerMembers, baseTok.origin());
+            if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
+            if (!innerRenames.isEmpty()) destructureRenames.put(inner, innerRenames);
+            if (patternShapeFor(baseTok.text()) == null) deferredStructPatterns.add(inner);
+            members.put(slot, inner);
+            return;
+        }
+        if (t.kind() == AltToken.Kind.LPAREN) {
+            // Nested tuple pattern as a slot ([Pair((a, b), c)]).
+            members.put(slot, parseTupleSortBody(t));
+            return;
+        }
+        if (t.kind() == AltToken.Kind.LBRACKET) {
+            // Positional refinement constraint as a slot ([P([Int:@>0], y)]).
+            members.put(slot, parseSort());
+            literalFieldsOut.add(slot);
+            return;
+        }
+        AltToken binder = expect(AltToken.Kind.IDENT);
+        if (peek().kind() == AltToken.Kind.COLON) {
+            throw new ParseException(
+                    "Pattern [" + typeName + "(...)] narrows field '" + binder.text()
+                            + "' by name, but '" + typeName + "' is imported and its fields "
+                            + "are not known at this point. Use a positional binder "
+                            + "([" + typeName + "(" + binder.text() + ", …)]) or the by-name "
+                            + "form [" + typeName + ".{" + binder.text() + "}].",
+                    binder.origin());
+        }
+        if (binder.text().equals("_")) {
+            members.put(slot, IrSort.named(DEFERRED_SKIP));
+            literalFieldsOut.add(slot);
+        } else {
+            members.put(slot, IrSort.named(DEFERRED_BIND + binder.text()));
+            renamesOut.put(slot, binder.text());
+        }
     }
 
     /**
@@ -3463,7 +3674,11 @@ public final class AltParser {
             } else if (constrainedOnly.contains(e.getKey())) {
                 // constrains the match, binds nothing
             } else {
-                out.add(Map.entry(renames.getOrDefault(e.getKey(), e.getKey()), e.getValue()));
+                // A deferred slot's sort is the placeholder encoding (_$bind$x) —
+                // the binder's real sort isn't known until link time, so seed it
+                // as the unknown sort `_` for body parsing.
+                IrSort sort = isDeferredEncodedSort(e.getValue()) ? IrSort.named("_") : e.getValue();
+                out.add(Map.entry(renames.getOrDefault(e.getKey(), e.getKey()), sort));
             }
         }
     }
@@ -3899,6 +4114,21 @@ public final class AltParser {
      * {@code let field = scrutinee.field in ...} for each field, so the
      * pattern's field names are bound in the branch's result.
      */
+    /**
+     * Whether {@code sp} is a deferred (cross-module) positional struct pattern —
+     * its struct was not in {@link #declaredStructs} at parse time, so its slots
+     * are positional and {@code DestructureResolver} owns the post-link desugar.
+     */
+    private boolean isDeferredPattern(IrSort.Structural sp) {
+        return deferredStructPatterns.contains(sp);
+    }
+
+    /** True if {@code s} is a deferred-slot placeholder ({@code _$bind$x}/{@code _$skip$}). */
+    private static boolean isDeferredEncodedSort(IrSort s) {
+        return s instanceof IrSort.Named n
+                && (n.name().startsWith(DEFERRED_BIND) || n.name().startsWith(DEFERRED_SKIP));
+    }
+
     private IrExpr desugarStructuralDestructure(
             IrExpr scrutinee,
             List<IrExpr.MatchBranch> branches,
@@ -3920,8 +4150,13 @@ public final class AltParser {
         List<IrExpr.MatchBranch> wrapped = new ArrayList<>(branches.size());
         for (IrExpr.MatchBranch b : branches) {
             IrExpr result = b.result();
-            if (b.pattern() instanceof IrSort.Structural sp) {
-                result = wrapDestructureBindings(sp, scrutineeRef, result);
+            // A DEFERRED (cross-module) struct pattern is left unwrapped here: its
+            // slots are positional and the struct's field names are unknown until
+            // link time, so DestructureResolver does the let-binding wrap post-link
+            // (reading match.scrutinee(), which is always a Var after this method).
+            if (b.pattern() instanceof IrSort.Structural sp && !isDeferredPattern(sp)) {
+                result = wrapDestructureBindings(
+                        sp, scrutineeRef, inferMaximalSort(scrutinee), result);
             }
             IrSort pattern = b.pattern();
             // A native-anatomy pattern ([Decimal(u, s)]) matches the CARRIER,
@@ -3966,29 +4201,49 @@ public final class AltParser {
      * member that is itself a Structural pattern recurses regardless.
      */
     private IrExpr wrapDestructureBindings(
-            IrSort.Structural sp, IrExpr accessPath, IrExpr result) {
+            IrSort.Structural sp, IrExpr accessPath, IrSort accessSort, IrExpr result) {
         java.util.Set<String> constrainedOnly =
                 literalConstrainedFields.getOrDefault(sp, java.util.Set.of());
         Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        // A tuple pattern's member sorts are the placeholder `_` (resolved from
+        // the scrutinee); recover the real element sort from the scrutinee's
+        // inferred sort so a tuple binder used as a method receiver (`i.bump()`
+        // in [(i, k)] over (Inner, Int)) is typed, not stuck at `_`.
+        Map<String, IrSort> accessMembers = accessSort instanceof IrSort.Structural as
+                ? as.members() : Map.of();
         List<Map.Entry<String, IrSort>> entries = new ArrayList<>(sp.members().entrySet());
         for (int i = entries.size() - 1; i >= 0; i--) {
             Map.Entry<String, IrSort> e = entries.get(i);
             IrExpr fieldAccess = new IrExpr.FieldAccess(accessPath, e.getKey(), Origin.NONE);
+            IrSort elemSort = accessMembers.get(e.getKey());
             if (e.getValue() instanceof IrSort.Structural nested) {
-                result = wrapDestructureBindings(nested, fieldAccess, result);
+                // A DEFERRED nested struct (cross-module, e.g. the Vec of
+                // [(Vec(x,y), c)]) has positional slots whose field names aren't
+                // known yet — leave its bindings to DestructureResolver, which
+                // descends from this same access path post-link.
+                if (!isDeferredPattern(nested)) {
+                    result = wrapDestructureBindings(nested, fieldAccess, elemSort, result);
+                }
             } else if (constrainedOnly.contains(e.getKey())) {
                 // literal / `_` constraint: matches, binds nothing.
                 continue;
             } else {
+                IrSort binderSort = isUnknownSort(e.getValue()) && elemSort != null
+                        ? elemSort : e.getValue();
                 result = new IrExpr.LetIn(
                         renames.getOrDefault(e.getKey(), e.getKey()),
-                        e.getValue(),
+                        binderSort,
                         fieldAccess,
                         result,
                         Origin.NONE);
             }
         }
         return result;
+    }
+
+    /** True if {@code s} is the unknown placeholder sort {@code _}. */
+    private static boolean isUnknownSort(IrSort s) {
+        return s instanceof IrSort.Named n && n.name().equals("_");
     }
 
     /**

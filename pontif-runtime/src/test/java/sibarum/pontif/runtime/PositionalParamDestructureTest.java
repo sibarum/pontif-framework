@@ -107,6 +107,20 @@ class PositionalParamDestructureTest {
     }
 
     @Test
+    void positionalParam_tooFewFields_isRejected() {
+        // [P(a)] over a 2-field struct is lying by omission (verdict B). The
+        // arity-total rule must fire for the param form's too-FEW case too, not
+        // just the match form's too-many — one rule, one place.
+        String err = reject("""
+                struct P(a:Int, b:Int)
+                function f(p:[P(a)]):Int -> a
+                f(P(3, 4))
+                """);
+        assertTrue(err.contains("1 of 2 fields") || err.contains("account for every field"),
+                () -> err);
+    }
+
+    @Test
     void unboundVariable_isLocatedCompileError() {
         String err = reject("""
                 function f(x:Int):Int -> x + y
