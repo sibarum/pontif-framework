@@ -71,10 +71,30 @@ churn (full suite green). Flipped: **inference__18** ✓, **methods__18** ✓.
   `v + v` can't route → BinOp survives → runtime ClassCast. Fix: re-infer a top-level
   let's sort from its (post-link, FQN-typed) body so the merged pass can route
   operators on it. Cluster 4.
-- **dispatch__26 (method-form operator):** `method MV.+` has member `MV.+`, not `+`,
-  so it isn't collected as an operator overload → infix `MV + MV` never routes →
-  ClassCast. Legacy method-form operator (on its way out); decide whether to collect
-  it as an operator witness or formally retire the form.
+- **dispatch__26 (method-form operator):** subsumed by the Cluster 4 ruling below —
+  the method-form operator is being DROPPED, so dispatch__26 becomes an expected
+  rejection (not a bug).
+
+### Cluster 4 — operators route once + drop method-form operators — RULED (James 2026-06-17), IN PROGRESS
+Operators are **symmetric mechanism-1 multi-dispatch** (matched on all operands,
+not first-arg). Already the behavior empirically (`1/Frac`→4, `3*Vec`→15); Cluster 4
+makes it intentional: (1) delete the parse-time left-operand routing guess so
+`a op b` always parses to BinOp and the post-link `MethodOperatorResolver` routes by
+both operands; (2) reject the receiver-rooted `method T.<op>` form (regular
+`method T.name()` stays). dispatch__26 → expected rejection; dispatch__14 stays OK.
+Watch generics__11/12/13 + operator-bound checks (generic `a+b` over `E` now stays a
+BinOp — `SortChecker.checkOperatorBounds` must handle the BinOp form). "Legacy" is
+not a valid frame — project isn't born yet.
+
+### Cross-module dispatch — import-by-association + orphan rule (docs/cross-module-dispatch.md DRAFT)
+The visibility model, sequenced after Cluster 4. Operator/free-fn overloads are
+currently ACCIDENTALLY global (linker fuses all modules); tighten to module-scoped:
+generalize the existing trait-impl orphan rule (CoherenceCheck) to all mechanism-1
+overloads — declarable only in a module owning ≥1 parameter type — and surface them
+by **import-by-association** (importing a type brings the overloads that mention it,
+mirroring methods-come-with-the-type). One rule covers fns/operators/methods AND the
+orphan-method fork (inference__20 → orphan method forbidden). Phased build + §5 open
+questions in the doc; awaits James's review.
 
 ---
 
