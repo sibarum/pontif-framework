@@ -1,5 +1,7 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.QualifiedName;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -210,18 +212,13 @@ public final class OperatorResolver {
     }
 
     /**
-     * The local name after the module qualifier. The separator is the FIRST '/'
-     * (a module FQN is dotted — `cott.traction.cd` — never contains '/'), so the
-     * `/` operator (linked name `cott.traction.cd//`) correctly yields "/", not ""
-     * (which a lastIndexOf would give, dropping the division overload).
+     * The local (member) name after the module qualifier — e.g. the operator
+     * symbol of a linked overload. Delegates to {@link QualifiedName}, which
+     * encodes the one correct split rule (the `/` operator's linked name
+     * {@code cott.traction.cd//} yields member "/", and a bare "/" stays "/").
      */
     private static String simpleName(String fqn) {
-        // The module separator is the FIRST '/', but only when a non-empty module
-        // prefix precedes it (`cott.traction.cd//` → "/"). A leading '/' (slash at
-        // index 0) is the bare division operator itself, not a separator — return
-        // the whole name ("/").
-        int slash = fqn.indexOf('/');
-        return slash > 0 ? fqn.substring(slash + 1) : fqn;
+        return QualifiedName.memberOf(fqn);
     }
 
     private static String baseName(IrSort sort) {

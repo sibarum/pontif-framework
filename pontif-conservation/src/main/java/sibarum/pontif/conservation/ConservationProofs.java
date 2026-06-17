@@ -155,8 +155,7 @@ public final class ConservationProofs {
             default -> null;
         };
         if (name == null) return null;
-        int slash = name.lastIndexOf('/');
-        return slash >= 0 ? name.substring(slash + 1) : name;
+        return sibarum.pontif.core.QualifiedName.memberOf(name);
     }
 
     private static List<IrExpr> argumentsOf(IrExpr tree) {

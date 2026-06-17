@@ -1526,6 +1526,30 @@ public final class AltParser {
                 if (decimalArith) {
                     yield IrSort.named("Decimal");
                 }
+                // Don't fabricate an `[Int:@==expr]` value-pin for a non-linear /
+                // user operator: it would mis-type the base AND embed an operator
+                // the linear refinement kernel can't compile (the dispatch__22
+                // root cause — a synthesized pin that always fails compilation).
+                // Leave the binding loose ("_"); its real sort is the operator's
+                // return, resolved by OperatorResolver post-link.
+                //   - DIV/MOD/POW: there is no built-in Int `/`,`%`,`^`, so a
+                //     surviving BinOp of these is ALWAYS an unrouted user operator
+                //     (cross-module — parse routing only sees local overloads). Such
+                //     a pin can never compile, so it is never correct to synthesize.
+                //   - ADD/SUB/MUL: a struct operand (a record literal) is likewise a
+                //     user operator, not integer arithmetic.
+                // NOTE: a cross-module struct operand written as a constructor CALL
+                // (e.g. `Vec(1,2) + ...`) infers to "_" here, so an ADD/SUB/MUL over
+                // it still gets a (harmless, non-crashing) Int pin — a residual seam
+                // of parse-time routing blindness, see docs/TODO.md (cluster 4).
+                boolean nonLinearOp = switch (op.op()) {
+                    case DIV, MOD, POW -> true;
+                    case ADD, SUB, MUL -> isUserStructOperand(op.left()) || isUserStructOperand(op.right());
+                    default -> false;
+                };
+                if (nonLinearOp) {
+                    yield IrSort.named("_");
+                }
                 String baseName = switch (op.op()) {
                     case ADD, SUB, MUL, DIV, MOD, POW -> "Int";
                     case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> "Bool";
@@ -4086,6 +4110,26 @@ public final class AltParser {
     /** True when {@code expr}'s maximal-inferred sort has base name {@code Decimal}. */
     private boolean isDecimalOperand(IrExpr expr) {
         return "Decimal".equals(baseSortName(inferMaximalSort(expr)));
+    }
+
+    /**
+     * Whether {@code expr}'s inferred base is a user (non-primitive) type — a
+     * struct/Record, the signal that an arithmetic operator over it is a
+     * <em>user operator overload</em>, not integer/decimal arithmetic. Used by
+     * {@link #inferMaximalSort}'s BinOp case so it does not fabricate an
+     * {@code [Int:@==expr]} value-pin for a struct operator chain (e.g. a Frac
+     * {@code /}): that pin lies about the base AND embeds a non-linear operator
+     * the refinement kernel can't compile. Unknown ({@code "_"}) operands are NOT
+     * user structs — they keep the integer-arithmetic assumption, preserving the
+     * common {@code a + 1} narrowing. (Single-module struct ops never reach here:
+     * parse-time routing has already turned them into Calls.)
+     */
+    private boolean isUserStructOperand(IrExpr expr) {
+        String base = baseSortName(inferMaximalSort(expr));
+        return base != null
+                && !base.equals("_")
+                && !base.equals("Int") && !base.equals("Bool")
+                && !base.equals("Decimal") && !base.equals("Char") && !base.equals("String");
     }
 
     /**

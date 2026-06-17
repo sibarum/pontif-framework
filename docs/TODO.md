@@ -6,6 +6,48 @@ items get removed (history is in git); this file is forward-looking.
 
 ---
 
+## 🔧 Language-inventory refactor sweep (in progress)
+
+Fixing the 5 root-cause clusters in `docs/language-inventory.md`. Regression
+meter: `mvn install -Dmaven.test.skip=true -q` then
+`mvn -o -pl pontif-runtime test -Dtest=ProbeHarnessTest` (the 150-probe matrix).
+
+### Cluster 1 — FQN typed identity (`QualifiedName`) — LANDED
+New `sibarum.pontif.core.QualifiedName(module, member)` value type encodes the
+one correct `module/member` split (first `/` only when a non-empty module prefix
+precedes it; the division overload `module//` keeps member `/`). All hand-rolled
+`indexOf`/`lastIndexOf('/')` sites route through it: `OperatorResolver.simpleName`,
+`DispatchTable.declarationKind`+`resolveTraitFallback`, `NameResolver`'s two
+guards, `ModuleSymbolTable.fqn`, and the three proof `headLocalName`/`localName`
+sites (which had a latent `lastIndexOf` division bug). The actual bug-fix:
+`SortChecker.collectOverloadsByName` now keys overloads by **member** (not the
+full FQN), so an operator trait contract finds its witness across the module
+boundary. Flipped: **generics__23** ✓, **dispatch__22** ✓.
+
+**Re-attribution found while fixing (NOT FQN):**
+- **dispatch__22** real root cause was `AltParser.inferMaximalSort` fabricating an
+  `[Int:@==expr]` value-pin for a top-level let over a user-operator chain
+  (`Frac/Frac/Frac`). A `DIV`/`MOD`/`POW` BinOp can never compile in a refinement
+  predicate (no built-in Int `/`,`%`,`^`), so such a pin is always a latent crash;
+  `inferMaximalSort` now yields `_` for those (and for `+`,`-`,`*` over a struct
+  *record-literal* operand). Fixed here, but the mechanism is parse-time operator-
+  routing blindness → **cluster 4**.
+- **Residual seam (cluster 4):** a cross-module struct operand written as a
+  constructor CALL (`Vec(1,2) + …`) infers to `_` at parse, so `+`/`-`/`*` over it
+  still gets a (harmless, non-crashing) mis-typed `[Int:@==…]` pin. Goes away when
+  operator routing moves post-link.
+
+**Still red after cluster 1 (their contract-check FQN bug IS fixed; they advanced
+to a deeper blocker):**
+- **traits__20** → now the cross-module operator **execution** ClassCast
+  (`RecordValue` → `Long`), the *same* bug as **dispatch__26** → **cluster 4**.
+- **generics__22** → now `checkOperatorBounds` can't recognize the imported trait
+  bound (`E:Numeric` where `Numeric` is imported): "type parameter 'E' is unbounded
+  (or its bound is not a trait)". Cross-module trait-bound recognition — fold into
+  cluster 3/Other (operator-bound propagation must consult imported trait contracts).
+
+---
+
 ## ⭐ Next — explicit coercion / the `(Type:value)` cast (slice 1 LANDED)
 
 **Design RULED 2026-06-16 (see docs/dispatch-unification.md → "Coercion").** A cast

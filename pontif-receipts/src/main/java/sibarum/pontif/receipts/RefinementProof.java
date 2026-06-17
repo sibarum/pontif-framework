@@ -138,8 +138,7 @@ public final class RefinementProof {
     /** The local part of a possibly-FQN'd type name ({@code std.proof/Split} → {@code Split}). */
     private static String localName(String typeName) {
         if (typeName == null) return null;
-        int slash = typeName.lastIndexOf('/');
-        return slash >= 0 ? typeName.substring(slash + 1) : typeName;
+        return sibarum.pontif.core.QualifiedName.memberOf(typeName);
     }
 
     private static long intLiteral(IrExpr.Record rec, String field) throws CompileException {

@@ -50,9 +50,9 @@ public final class ModuleSymbolTable {
         this.exports = exports;
     }
 
-    /** FQN key for a local key in a module. */
+    /** FQN key for a local key in a module — the canonical {@code module/localKey} form. */
     public static String fqn(String module, String localKey) {
-        return module + "/" + localKey;
+        return sibarum.pontif.core.QualifiedName.of(module, localKey).fqn();
     }
 
     /**

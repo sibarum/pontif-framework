@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.QualifiedName;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.predicates.ComplementResult;
@@ -1720,19 +1721,27 @@ public final class SortChecker {
     }
 
     /**
-     * Free-function / operator overloads grouped by declared name — operators
-     * register under their symbol (`+`), so this is the lookup an operator trait
-     * contract is verified against. TraitImpl methods are included for parity with
-     * the dispatch table, though operators are declared as free functions.
+     * Free-function / operator overloads grouped by their <b>member</b> name —
+     * operators register under their symbol (`+`), so this is the lookup an
+     * operator trait contract is verified against. TraitImpl methods are included
+     * for parity with the dispatch table, though operators are declared as free
+     * functions.
+     *
+     * <p>Keying is by {@link QualifiedName#memberOf} (the local key), NOT the raw
+     * declared name. Post-link a free overload's name is FQN'd ({@code num.vector/+}),
+     * but the contract check queries by the bare symbol ({@code +}); keying by the
+     * member makes the witness findable across the module boundary (and the
+     * division overload {@code num.frac//} keys correctly under {@code "/"}, where a
+     * {@code lastIndexOf('/')} split would have lost it).
      */
     private static Map<String, List<IrStmt.FunctionDecl>> collectOverloadsByName(IrModule module) {
         Map<String, List<IrStmt.FunctionDecl>> byName = new LinkedHashMap<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
-                byName.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
+                byName.computeIfAbsent(QualifiedName.memberOf(fd.name()), k -> new ArrayList<>()).add(fd);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 for (IrStmt.FunctionDecl m : ti.methods()) {
-                    byName.computeIfAbsent(m.name(), k -> new ArrayList<>()).add(m);
+                    byName.computeIfAbsent(QualifiedName.memberOf(m.name()), k -> new ArrayList<>()).add(m);
                 }
             }
         }

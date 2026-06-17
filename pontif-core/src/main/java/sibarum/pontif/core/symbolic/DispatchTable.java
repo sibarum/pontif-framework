@@ -1,5 +1,6 @@
 package sibarum.pontif.core.symbolic;
 
+import sibarum.pontif.core.QualifiedName;
 import sibarum.pontif.core.types.Sort;
 
 import java.util.ArrayList;
@@ -51,8 +52,11 @@ public final class DispatchTable {
      * ({@code mod/Type.name}) are stripped before the check.
      */
     private static String declarationKind(String name) {
-        String simple = name.substring(name.lastIndexOf('/') + 1);
-        return simple.indexOf('.') >= 0 ? "method" : "function";
+        // The member (post-module) key: "Type.method" → method, a bare name or an
+        // operator symbol → function. QualifiedName handles the division overload
+        // (`module//` → member "/") that a lastIndexOf('/') split would mangle to "".
+        String member = QualifiedName.memberOf(name);
+        return member.indexOf('.') >= 0 ? "method" : "function";
     }
 
     private DispatchResult resolveDirect(String name, List<SymExpr> arguments, Simplifier simplifier) {
@@ -193,10 +197,11 @@ public final class DispatchTable {
             String name, List<SymExpr> arguments, Simplifier simplifier) {
         // A key may be module-qualified (module/Trait.method); the module part
         // can itself contain dots (a.b), so split off the module at the '/'
-        // boundary FIRST, then do the Trait.method split on the local part.
-        int slash = name.indexOf('/');
-        String modulePrefix = slash >= 0 ? name.substring(0, slash + 1) : "";  // "module/" or ""
-        String local = slash >= 0 ? name.substring(slash + 1) : name;
+        // boundary FIRST (via QualifiedName), then do the Trait.method split on
+        // the member part.
+        QualifiedName qn = QualifiedName.parse(name);
+        String modulePrefix = qn.isQualified() ? qn.module() + "/" : "";  // "module/" or ""
+        String local = qn.member();
         int dot = local.indexOf('.');
         if (dot <= 0 || dot >= local.length() - 1) return null;
         String traitName = modulePrefix + local.substring(0, dot);  // module/Trait (or bare Trait)

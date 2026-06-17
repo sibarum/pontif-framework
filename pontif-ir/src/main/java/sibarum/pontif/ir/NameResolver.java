@@ -1,6 +1,7 @@
 package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.QualifiedName;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -119,7 +120,7 @@ public final class NameResolver {
      */
     static String resolveTypeName(String t, String m, ModuleSymbolTable table, Origin origin)
             throws CompileException {
-        if (t.indexOf('/') >= 0 || PRIMITIVES.contains(t)) return t;
+        if (QualifiedName.parse(t).isQualified() || PRIMITIVES.contains(t)) return t;
         if (table.typeOwners(t).contains(m)) return ModuleSymbolTable.fqn(m, t);
         ModuleSymbolTable.ImportedName imported = table.importedName(m, t);
         // FQN via the DECLARING ORIGIN — a renamed type import
@@ -226,8 +227,9 @@ public final class NameResolver {
     static String resolveCallName(String n, String m, ModuleSymbolTable table) {
         // Already an FQN iff a non-empty module prefix precedes the '/'. A name
         // that *starts* with '/' is the bare division operator (slash at index 0),
-        // not an FQN — it still needs resolving to `module//`.
-        if (n.indexOf('/') > 0) return n;
+        // not an FQN — it still needs resolving to `module//`. QualifiedName
+        // encodes exactly this rule.
+        if (QualifiedName.parse(n).isQualified()) return n;
         if (table.moduleDeclaresFunction(m, n)) return ModuleSymbolTable.fqn(m, n);
         ModuleSymbolTable.ImportedName imported = table.importedName(m, n);
         // The FQN uses the DECLARING ORIGIN — the symbol as the module that
