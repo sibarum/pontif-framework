@@ -3,6 +3,7 @@ package sibarum.pontif.runtime.module;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.CoherenceCheck;
 import sibarum.pontif.ir.CompileException;
+import sibarum.pontif.ir.DestructureResolver;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
@@ -93,7 +94,15 @@ public final class ModuleLinker {
         // Constructor-shaped calls to *imported* structs parsed as Calls (the
         // parser only sees local structs); now that every struct definition is
         // FQN'd and visible in the combined module, rewrite them to Records.
-        return StructLiteralRewriter.rewrite(new IrModule(entryModule, statements, main));
+        IrModule withStructs = StructLiteralRewriter.rewrite(
+                new IrModule(entryModule, statements, main));
+        // Positional/match/nested/param destructure patterns over IMPORTED structs
+        // were left deferred by the parser (field order/sorts unknown pre-link).
+        // Now the combined struct registry is available — resolve every deferred
+        // pattern's slots to declared field names, enforce the arity-total rule,
+        // and generate the field bindings (cluster 2). Runs after StructLiteralRewriter
+        // so its struct-literal Records are in place first.
+        return DestructureResolver.rewrite(withStructs);
     }
 
     /**
