@@ -220,14 +220,18 @@ public final class PontifCompiler {
      * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
      */
     private CompileResult compileModule(IrModule rawModule, String sourceName) {
-        // Resolve instance-method calls up front so every consumer below — the
-        // IR compiler, the return-refinement gate, and the conservation gate —
-        // sees ordinary dispatch Calls rather than the parser's transient
-        // MethodCall placeholder. (IrCompiler runs MethodResolver too; on an
-        // already-resolved module that pass is a no-op.)
+        // Resolve instance-method calls AND route operators up front so every
+        // consumer below — the IR compiler, the return-refinement gate, and the
+        // conservation gate — sees ordinary dispatch Calls rather than the
+        // parser's transient MethodCall placeholder or an unrouted cross-module
+        // operator. Methods and operators are co-resolved in one bottom-up walk
+        // (MethodOperatorResolver), so a method on an operator result —
+        // `(a + b).sum()` over an imported `+` — types correctly here, not only
+        // inside IrCompiler. (IrCompiler runs the same pass; on an
+        // already-resolved module it is a no-op.)
         IrModule module;
         try {
-            module = sibarum.pontif.ir.MethodResolver.resolve(rawModule);
+            module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));

@@ -30,22 +30,15 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
-        // Resolve instance-method calls (recv.m(args)) to dispatch calls
-        // (Call("Type.m", [recv, ...args])) using the receiver's inferred type,
-        // now that every declaration is in hand. Runs after AliasResolver (so
-        // receiver sorts are alias-free) and BEFORE SortChecker (which would
-        // otherwise reject the placeholder's FieldAccess). This is what makes
-        // method resolution order-independent — forward references, self- and
-        // mutual recursion all work.
-        resolved = MethodResolver.resolve(resolved);
-
-        // Route binary operators to their dispatch overload by operand sort, now
-        // that the module is linked (a per-file parser can't see cross-module
-        // operators). Resolves to the overload's exact post-link name, or leaves
-        // the BinOp when no overload matches (primitives, tuples). After
-        // AliasResolver (so refinement aliases resolve to their base) and
-        // MethodResolver (so receiver-method results are Calls). See OperatorResolver.
-        resolved = OperatorResolver.resolve(resolved);
+        // Resolve instance-method calls (recv.m(args) → Call("Type.m", [recv,…]))
+        // AND route binary operators to their dispatch overload by operand sort,
+        // in ONE bottom-up walk. Method resolution and operator routing are
+        // mutually dependent — (a+b).m() needs the operator routed first, m(a)+m(b)
+        // needs the methods resolved first — so a single bottom-up pass that types
+        // each node from its already-resolved children satisfies both directions
+        // where a fixed two-pass order could not. Runs after AliasResolver (sorts
+        // alias-free) and before SortChecker. See MethodOperatorResolver.
+        resolved = MethodOperatorResolver.resolve(resolved);
 
         // Stamp anonymous aggregate literals with the struct name the context
         // asserts (let annotations, struct-typed params, return positions) —

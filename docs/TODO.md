@@ -40,11 +40,41 @@ boundary. Flipped: **generics__23** ✓, **dispatch__22** ✓.
 **Still red after cluster 1 (their contract-check FQN bug IS fixed; they advanced
 to a deeper blocker):**
 - **traits__20** → now the cross-module operator **execution** ClassCast
-  (`RecordValue` → `Long`), the *same* bug as **dispatch__26** → **cluster 4**.
+  (`RecordValue` → `Long`) — root cause is the top-level-let-sort gap below → **cluster 4**.
 - **generics__22** → now `checkOperatorBounds` can't recognize the imported trait
   bound (`E:Numeric` where `Numeric` is imported): "type parameter 'E' is unbounded
   (or its bound is not a trait)". Cross-module trait-bound recognition — fold into
   cluster 3/Other (operator-bound propagation must consult imported trait contracts).
+
+### Cluster 3 — unify method + operator resolution into one bottom-up pass — LANDED
+New `MethodOperatorResolver` co-resolves instance-method calls AND operator routing
+in a single bottom-up walk, so each node is typed from its already-resolved
+children. `(a+b).m()` (method on operator result) and `m(a)+m(b)` (operator on
+method results) both resolve, where the old fixed `MethodResolver`-then-
+`OperatorResolver` order satisfied only one direction. `MethodResolver` is now a
+thin methods-only facade (the conservation/receipt report paths still call it; their
+ledgers deliberately keep the parse-routed operator shape). `OperatorResolver`
+deleted. `PontifCompiler.compileModule`'s gate pre-resolve now co-resolves too (so
+`(a+b).m()` types before the return/conservation gates run) — verified no snapshot
+churn (full suite green). Flipped: **inference__18** ✓, **methods__18** ✓.
+
+**Remaining (cluster 4 / orphan-method):**
+- **inference__20** advanced from "cannot determine receiver" to an ORPHAN-METHOD
+  miss: `method Vec.mag2()` defined in the entry on an imported `Vec` is keyed
+  `app.main/Vec.mag2` (NameResolver prefixes the DEFINING module), but dispatch on a
+  `geom.vec/Vec` receiver looks up `geom.vec/Vec.mag2`. A method's dispatch key
+  should follow the TYPE's owner, not the defining module (or MethodResolver must
+  fall back to a member-keyed lookup). Distinct from resolution ordering; needs an
+  orphan-rule decision (is defining a method on an imported type even allowed?).
+- **top-level-let-sort gap (blocks traits__20):** `let v = Vector(1,2)` over an
+  IMPORTED constructor infers `_` at parse (parser can't see the import), so post-link
+  `v + v` can't route → BinOp survives → runtime ClassCast. Fix: re-infer a top-level
+  let's sort from its (post-link, FQN-typed) body so the merged pass can route
+  operators on it. Cluster 4.
+- **dispatch__26 (method-form operator):** `method MV.+` has member `MV.+`, not `+`,
+  so it isn't collected as an operator overload → infix `MV + MV` never routes →
+  ClassCast. Legacy method-form operator (on its way out); decide whether to collect
+  it as an operator witness or formally retire the form.
 
 ---
 

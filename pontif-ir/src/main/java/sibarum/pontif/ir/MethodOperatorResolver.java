@@ -1,0 +1,306 @@
+package sibarum.pontif.ir;
+
+import sibarum.pontif.core.QualifiedName;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * The unified post-link resolution pass: in ONE bottom-up tree walk it both
+ * resolves instance-method calls ({@code recv.m(args)} →
+ * {@code Call("Type.m", [recv, ...args])}) and routes binary operators to their
+ * dispatch overload ({@code a + b} → {@code Call("module/+", [a, b])}).
+ *
+ * <p><b>Why one pass.</b> Method resolution and operator routing are mutually
+ * dependent: typing the receiver of {@code (a + b).sum()} needs the {@code +}
+ * already routed to a {@code Call} (so its result sort is known), while routing
+ * the {@code +} in {@code m(a) + m(b)} needs the method calls already resolved
+ * (so the operand sorts are known). A fixed order — the old
+ * {@code MethodResolver}-then-{@code OperatorResolver} sequence — could satisfy
+ * only one direction. Resolving each node from its <em>already-resolved
+ * children</em> (true bottom-up) satisfies both, because neither kind of node
+ * globally precedes the other: an inner operator becomes a {@code Call} before
+ * its enclosing method receiver is typed, and an inner method becomes a
+ * {@code Call} before its enclosing operator's operands are typed.
+ *
+ * <p><b>Two presets.</b> The pass is parameterized by {@code resolveMethods} and
+ * {@code routeOperators}:
+ * <ul>
+ *   <li>The run path ({@link IrCompiler}) uses BOTH — full resolution.</li>
+ *   <li>The conservation / receipt <em>report</em> paths use methods-only
+ *       (operators left as parse-routed): their ledgers deliberately show the
+ *       parse-time operator shape (see {@link MethodResolver}, the methods-only
+ *       facade those paths call).</li>
+ * </ul>
+ *
+ * <p>Runs after {@link AliasResolver} (so receiver/operand sorts are alias-free)
+ * and before {@link SortChecker}.
+ */
+public final class MethodOperatorResolver {
+
+    private final boolean resolveMethods;
+    private final boolean routeOperators;
+    /** operator member symbol → declared overloads of it (keyed by post-link name). */
+    private final Map<String, List<IrStmt.FunctionDecl>> operatorOverloads = new LinkedHashMap<>();
+    /** every name a {@code MethodCall} may resolve to (Type.method / Trait.method keys). */
+    private final Set<String> methodKeys;
+    private final Map<String, IrSort.Structural> structs;
+
+    private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators) {
+        this.resolveMethods = resolveMethods;
+        this.routeOperators = routeOperators;
+        this.methodKeys = collectMethodKeys(module);
+        this.structs = InferenceContext.fromModule(module).structDefs();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.FunctionDecl fd && fd.params().size() == 2) {
+                String sym = QualifiedName.memberOf(fd.name());
+                if (isOperatorSymbol(sym)) {
+                    operatorOverloads.computeIfAbsent(sym, k -> new ArrayList<>()).add(fd);
+                }
+            }
+        }
+    }
+
+    /** Full resolution: methods AND operators (the run path). */
+    public static IrModule resolve(IrModule module) throws CompileException {
+        return resolve(module, true, true);
+    }
+
+    public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators)
+            throws CompileException {
+        MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators);
+        InferenceContext ctx = InferenceContext.fromModule(module);
+        List<IrStmt> out = new ArrayList<>(module.statements().size());
+        for (IrStmt stmt : module.statements()) out.add(r.rewriteStmt(stmt, ctx));
+        IrExpr main = module.main() == null ? null : r.rewriteExpr(module.main(), ctx);
+        return new IrModule(module.name(), out, main);
+    }
+
+    private IrStmt rewriteStmt(IrStmt stmt, InferenceContext ctx) throws CompileException {
+        return switch (stmt) {
+            case IrStmt.FunctionDecl fd -> rewriteFunction(fd, ctx);
+            case IrStmt.TraitImpl ti -> {
+                List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
+                for (IrStmt.FunctionDecl m : ti.methods()) methods.add(rewriteFunction(m, ctx));
+                List<IrStmt.FunctionDecl> producers = new ArrayList<>(ti.attributeProducers().size());
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) producers.add(rewriteFunction(a, ctx));
+                yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, producers,
+                        ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
+            }
+            default -> stmt;
+        };
+    }
+
+    private IrStmt.FunctionDecl rewriteFunction(IrStmt.FunctionDecl fd, InferenceContext ctx)
+            throws CompileException {
+        InferenceContext bodyCtx = ctx;
+        for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
+        IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);
+        return new IrStmt.FunctionDecl(fd.name(), fd.params(), fd.returnSort(),
+                body, fd.origin(), fd.topLevelLet(), fd.typeParams());
+    }
+
+    private IrExpr rewriteExpr(IrExpr e, InferenceContext ctx) throws CompileException {
+        return switch (e) {
+            case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
+            case IrExpr.Chr c -> c;
+            case IrExpr.Str s -> s;
+            case IrExpr.Bool b -> b;
+            case IrExpr.Var v -> v;
+            case IrExpr.SelfRef s -> s;
+            case IrExpr.DispatchRef d -> d;
+            case IrExpr.BinOp op -> {
+                IrExpr left = rewriteExpr(op.left(), ctx);
+                IrExpr right = rewriteExpr(op.right(), ctx);
+                if (routeOperators) {
+                    String sym = dispatchSymbol(op.op());
+                    String resolved = sym == null ? null
+                            : resolveOverload(sym, NarrowingInference.infer(left, ctx),
+                                    NarrowingInference.infer(right, ctx));
+                    if (resolved != null) {
+                        yield new IrExpr.Call(resolved, List.of(left, right), op.origin());
+                    }
+                }
+                yield new IrExpr.BinOp(op.op(), left, right, op.origin());
+            }
+            case IrExpr.LetIn let -> {
+                IrExpr value = rewriteExpr(let.value(), ctx);
+                IrSort bound = NarrowingInference.infer(value, ctx);
+                if (bound == null) bound = let.declaredSort();
+                InferenceContext bodyCtx = bound != null ? ctx.withVar(let.name(), bound) : ctx;
+                yield new IrExpr.LetIn(let.name(), let.declaredSort(), value,
+                        rewriteExpr(let.body(), bodyCtx), let.origin(), let.claim());
+            }
+            case IrExpr.Call c -> {
+                List<IrExpr> args = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) args.add(rewriteExpr(a, ctx));
+                // Correct a parse-time-routed operator call: parse routing picks
+                // the LOCAL overload by name, which is wrong across modules.
+                // Re-resolve by operand sort; unmatched operands (e.g. a type
+                // parameter) find no overload and are left for runtime dispatch.
+                if (routeOperators) {
+                    String sym = QualifiedName.memberOf(c.functionName());
+                    if (isOperatorSymbol(sym) && args.size() == 2) {
+                        String resolved = resolveOverload(sym,
+                                NarrowingInference.infer(args.get(0), ctx),
+                                NarrowingInference.infer(args.get(1), ctx));
+                        if (resolved != null) yield new IrExpr.Call(resolved, args, c.origin());
+                    }
+                }
+                yield new IrExpr.Call(c.functionName(), args, c.origin());
+            }
+            case IrExpr.Lambda lam -> {
+                InferenceContext bodyCtx = ctx;
+                for (IrParam p : lam.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
+                yield new IrExpr.Lambda(lam.params(), lam.returnSort(), rewriteExpr(lam.body(), bodyCtx), lam.origin());
+            }
+            case IrExpr.Apply app -> {
+                List<IrExpr> args = new ArrayList<>(app.args().size());
+                for (IrExpr a : app.args()) args.add(rewriteExpr(a, ctx));
+                yield new IrExpr.Apply(rewriteExpr(app.fn(), ctx), args, app.origin());
+            }
+            case IrExpr.Match m -> {
+                List<IrExpr.MatchBranch> bs = new ArrayList<>(m.branches().size());
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    InferenceContext armCtx = m.scrutinee() instanceof IrExpr.Var sv
+                            ? ctx.withVar(sv.name(), b.pattern()) : ctx;
+                    bs.add(new IrExpr.MatchBranch(b.pattern(), rewriteExpr(b.result(), armCtx)));
+                }
+                yield new IrExpr.Match(rewriteExpr(m.scrutinee(), ctx), bs, m.origin());
+            }
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> mem = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> en : r.members().entrySet()) mem.put(en.getKey(), rewriteExpr(en.getValue(), ctx));
+                yield new IrExpr.Record(r.typeName(), mem, r.runtimeChecks(), r.origin());
+            }
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(rewriteExpr(fa.base(), ctx), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> resolveMethodCall(mc, ctx);
+            case IrExpr.Iterate it -> {
+                List<IrExpr.OutputSpec> outs = new ArrayList<>(it.outputs().size());
+                for (IrExpr.OutputSpec os : it.outputs())
+                    outs.add(new IrExpr.OutputSpec(os.name(), os.kind(), os.init() == null ? null : rewriteExpr(os.init(), ctx)));
+                List<IrExpr.Arm> arms = new ArrayList<>(it.arms().size());
+                for (IrExpr.Arm arm : it.arms()) {
+                    List<IrExpr.Write> ws = new ArrayList<>(arm.writes().size());
+                    for (IrExpr.Write w : arm.writes())
+                        ws.add(new IrExpr.Write(w.output(), w.key() == null ? null : rewriteExpr(w.key(), ctx), rewriteExpr(w.value(), ctx)));
+                    arms.add(new IrExpr.Arm(arm.pattern(), ws));
+                }
+                yield new IrExpr.Iterate(rewriteExpr(it.source(), ctx), it.element(), outs, arms, it.origin());
+            }
+            case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(), rewriteExpr(cast.value(), ctx), cast.origin());
+        };
+    }
+
+    private IrExpr resolveMethodCall(IrExpr.MethodCall mc, InferenceContext ctx) throws CompileException {
+        // Receiver and args first — bottom-up, so an operator-result receiver
+        // (a + b).m() has already become a Call (typed) by now.
+        IrExpr receiver = rewriteExpr(mc.receiver(), ctx);
+        List<IrExpr> args = new ArrayList<>(mc.args().size());
+        for (IrExpr a : mc.args()) args.add(rewriteExpr(a, ctx));
+        if (!resolveMethods) {
+            // Methods-only is the only meaningful disable; this branch is for the
+            // (unused) operators-only preset — keep the call symbolic.
+            throw MethodResolver.unresolved(mc, "MethodOperatorResolver(routeOperators-only)");
+        }
+        String typeName = baseName(NarrowingInference.infer(receiver, ctx));
+        if (typeName != null) {
+            String key = typeName + "." + mc.methodName();
+            if (methodKeys.contains(key)) {
+                List<IrExpr> withReceiver = new ArrayList<>(args.size() + 1);
+                withReceiver.add(receiver);
+                withReceiver.addAll(args);
+                return new IrExpr.Call(key, withReceiver, mc.origin());
+            }
+            // Not a method — a field holding a callable, applied.
+            IrSort.Structural def = structs.get(typeName);
+            if (def != null && def.members().containsKey(mc.methodName())) {
+                return new IrExpr.Apply(
+                        new IrExpr.FieldAccess(receiver, mc.methodName(), mc.origin()), args, mc.origin());
+            }
+            throw new CompileException(
+                    "No method '" + mc.methodName() + "' on type '" + typeName + "'", mc.origin());
+        }
+        throw new CompileException(
+                "Cannot determine the type of the receiver of method '" + mc.methodName() + "'", mc.origin());
+    }
+
+    /**
+     * Resolves operator {@code sym} against its declared overloads by operand base
+     * sort, returning the matching overload's full (post-link) name, or null when
+     * no overload matches (so the BinOp stays — primitives, tuples, abstract
+     * type-parameter operands). A base-name match is enough to (a) decide
+     * BinOp-vs-Call and (b) name the dispatch key; most-specific selection among
+     * same-keyed overloads is runtime dispatch's job.
+     */
+    private String resolveOverload(String sym, IrSort leftSort, IrSort rightSort) {
+        String lb = baseName(leftSort);
+        String rb = baseName(rightSort);
+        if (lb == null || rb == null) return null;
+        for (IrStmt.FunctionDecl fd : operatorOverloads.getOrDefault(sym, List.of())) {
+            String p0 = baseName(fd.params().get(0).sort());
+            String p1 = baseName(fd.params().get(1).sort());
+            if (lb.equals(p0) && rb.equals(p1)) return fd.name();
+        }
+        return null;
+    }
+
+    /**
+     * Every name a {@code MethodCall} may legitimately resolve to: declared
+     * function/method decls, trait-impl methods + attribute producers, and trait
+     * contract methods (keyed {@code Trait.method}; dispatch's trait fallback
+     * redirects those to the concrete type at the call).
+     */
+    private static Set<String> collectMethodKeys(IrModule module) {
+        Set<String> keys = new LinkedHashSet<>();
+        for (IrStmt stmt : module.statements()) {
+            switch (stmt) {
+                case IrStmt.FunctionDecl fd -> keys.add(fd.name());
+                case IrStmt.TraitImpl ti -> {
+                    for (IrStmt.FunctionDecl m : ti.methods()) keys.add(m.name());
+                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) keys.add(a.name());
+                }
+                case IrStmt.TypeAlias ta -> {
+                    if (ta.sort() instanceof IrSort.Trait t) {
+                        for (String methodName : t.methods().keySet()) keys.add(t.name() + "." + methodName);
+                    }
+                }
+                default -> { }
+            }
+        }
+        return keys;
+    }
+
+    private static String dispatchSymbol(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
+            case MOD -> "%"; case POW -> "^";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ, NE, APPROX, AND, OR -> null;
+        };
+    }
+
+    private static boolean isOperatorSymbol(String s) {
+        return switch (s) {
+            case "+", "-", "*", "/", "%", "^", "<", "<=", ">", ">=", "==", "!=" -> true;
+            default -> false;
+        };
+    }
+
+    /** The nominal base type name of a sort, or null if it has none. */
+    private static String baseName(IrSort sort) {
+        if (sort == null) return null;
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            case IrSort.Trait t -> t.name();
+            default -> null;
+        };
+    }
+}
