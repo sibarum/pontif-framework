@@ -190,6 +190,8 @@ public final class MethodResolver {
             // REVISIT (docs/iteration.md §10): method calls inside the source /
             // arm writes are not resolved yet (slice 1 avoids them).
             case IrExpr.Iterate it -> it;
+            case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
+                    rewriteExpr(cast.value(), ctx, methodKeys, structs), cast.origin());
         };
     }
 

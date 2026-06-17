@@ -1,0 +1,3 @@
+struct Pos(v:[Int:@>0])
+function idd[type E](x:E):E -> x
+Pos(idd(0))

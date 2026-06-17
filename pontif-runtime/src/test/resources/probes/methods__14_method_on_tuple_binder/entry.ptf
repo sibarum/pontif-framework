@@ -1,0 +1,6 @@
+struct Inner(v:Int)
+method Inner.bump():Int -> this.v + 1
+function pick(t:(Inner, Int)):Int ->
+  match t
+    [(i, k)] -> i.bump() + k
+pick((Inner(41), 0))

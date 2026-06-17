@@ -1,0 +1,3 @@
+struct Point(x:Int, y:Int)
+method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
+Point(3, 4).magnitudeSq()

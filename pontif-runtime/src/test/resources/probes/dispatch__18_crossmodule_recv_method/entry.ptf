@@ -1,0 +1,8 @@
+module app.method
+
+requires geo.pt.{Point}
+
+# recv.method() on an IMPORTED type. The known Phase-2 gap: method resolution
+# needs the receiver's sort at parse time (Type.-keyed lookup), which the parser
+# can't see across the module boundary. Expected to break until Phase 2 lands.
+Point(3, 4).sum()

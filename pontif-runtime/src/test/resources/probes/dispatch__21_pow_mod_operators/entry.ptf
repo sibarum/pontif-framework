@@ -1,0 +1,5 @@
+# `^` and `%` are in the overloadable set but exotic for struct overloads.
+struct Box(v:Int)
+function ^(a:Box, b:Box):Box -> Box(a.v + b.v)
+function %(a:Box, b:Box):Box -> Box(a.v - b.v)
+((Box(2) ^ Box(3)) % Box(1)).v

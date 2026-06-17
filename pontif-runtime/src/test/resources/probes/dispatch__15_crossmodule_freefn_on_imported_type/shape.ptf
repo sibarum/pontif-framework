@@ -1,0 +1,5 @@
+module geo.shape
+
+exports @.{Point}
+
+struct Point(x:Int, y:Int)

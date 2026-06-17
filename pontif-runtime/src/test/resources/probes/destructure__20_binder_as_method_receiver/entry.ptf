@@ -1,0 +1,5 @@
+struct Inner(x:Int, y:Int)
+struct Outer(inner:Inner, c:Int)
+method Inner.sum():Int -> this.x + this.y
+function f(o:[Outer(inner, c)]):Int -> inner.sum() + c
+f(Outer(Inner(3, 4), 5))

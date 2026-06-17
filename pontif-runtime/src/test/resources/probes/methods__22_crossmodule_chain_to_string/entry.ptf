@@ -1,0 +1,5 @@
+module geom.app
+
+requires geom.vec.{Vec}
+
+Vec.of(2).scale(3).show()

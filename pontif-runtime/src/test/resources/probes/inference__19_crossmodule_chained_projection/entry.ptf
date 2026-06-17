@@ -1,0 +1,4 @@
+module app.main
+requires geom.shapes.{Box, Mid, Inner}
+function deep(b:Box):Int -> b.mid.inner.v
+deep(Box(Mid(Inner(11))))

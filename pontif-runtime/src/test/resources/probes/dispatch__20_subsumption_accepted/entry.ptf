@@ -1,0 +1,6 @@
+# Comparable overlap: a catch-all and a strict specialization of it.
+# Per the subsumption escape hatch, this is ACCEPTED (most-specific resolves it),
+# NOT an OverloadOverlap error. Call hits the specialization.
+function handle(n:Int):Int -> 0
+function handle(n:[Int:@>0]):Int -> 1
+handle(7)

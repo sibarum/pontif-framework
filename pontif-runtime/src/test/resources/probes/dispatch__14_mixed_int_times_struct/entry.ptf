@@ -1,0 +1,6 @@
+# Mixed-type operator with the PRIMITIVE on the LEFT: Int * Vec.
+# Per the parser doc, a primitive left stays BinOp regardless of any *(Int,Vec)
+# overload, so this should fail at runtime (BinOp can't multiply Int by a record).
+struct Vec(x:Int, y:Int)
+function *(k:Int, a:Vec):Vec -> Vec(k * a.x, k * a.y)
+(3 * Vec(2, 5)).y

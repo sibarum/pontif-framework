@@ -1,0 +1,3 @@
+function sgn(n:[Int:@>0]):Int -> 1
+function sgn(n:[Int:@<=0]):Int -> 0
+sgn(0)

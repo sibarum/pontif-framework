@@ -1,0 +1,8 @@
+struct Inner(v:Int)
+method Inner.bump():Int -> this.v + 1
+struct Outer(inner:Inner, c:Int)
+method Outer.go():Int ->
+  match this
+    [Outer(i, c)] -> i.bump() + c
+    [_] -> 0
+Outer(Inner(41), 0).go()

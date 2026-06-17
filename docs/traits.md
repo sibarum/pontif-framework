@@ -1,10 +1,12 @@
 # Pontif traits
 
-Traits in Pontif are *named method contracts that nominal types opt into*.
-The runtime mechanism is the existing dispatch table — there is no
-parallel "trait dispatch" system. The compile-time mechanism is the
-existing narrowing operator (`:`) — checking "type X satisfies trait Y"
-is the same machinery that checks "value v narrows to sort S."
+Traits in Pontif are *named contracts that nominal types opt into* — a
+contract of **method** members (mechanism-2, receiver-rooted) and/or
+**operator** members (mechanism-1 bounds; see *Operator contract
+members* below). The runtime mechanism is the existing dispatch table —
+there is no parallel "trait dispatch" system. The compile-time mechanism
+is the existing narrowing operator (`:`) — checking "type X satisfies
+trait Y" is the same machinery that checks "value v narrows to sort S."
 
 The design is the worked example of the load-bearing principle
 **narrowing handles polymorphism**: when a feature looks like it wants
@@ -36,6 +38,72 @@ The `this` parameter is *implicit* in each method's signature. A
 contract method `quack:[Method():Audio]` says the implementation
 should be a function from receiver-only to Audio; `this` is prepended
 at impl-check time.
+
+## Operator contract members
+
+A trait may also name an **operator** as a `Dispatch` contract member —
+the compile-time answer to "this type must support `+`". This is what
+makes operator use *decidable at definition time* instead of failing at
+a runtime dispatch miss.
+
+```
+let Numeric:Type{
+  +:[Dispatch(this.type, this.type):this.type],
+  *:[Dispatch(this.type, this.type):this.type]
+}
+```
+
+(`Numeric` is illustrative, not a blessed stdlib name.) The distinction
+from a method member is load-bearing:
+
+- A **`Method` member** is mechanism-2 — receiver-rooted, owned by the
+  type, resolved as `Type.method`. The trait *hosts* it.
+- A **`Dispatch` member** is a mechanism-1 **bound**. The trait does
+  **not** host the operator and does not make it resolve via the trait;
+  `a + b` still resolves only by global multi-dispatch over the operand
+  sorts. The member merely *requires* that a coherent mechanism-1
+  overload exist for the satisfying type. (Why a trait at all, when
+  operators live in mechanism 1? Because the trait is the place to turn
+  "an overload exists" into a checked, propagatable obligation — see
+  dispatch-unification B1.)
+
+**`this.type` is the self-type** — it stands for whichever concrete type
+is assigned the trait. So `+:[Dispatch(this.type, this.type):this.type]`
+reads "the satisfying type `T` must have an overload `+(T, T):T`."
+
+**Satisfaction is verified, not declared.** Unlike a method member, an
+operator member is *not* implemented inside the `assign trait` block (an
+operator is a free overload, not a receiver method). Instead, at
+`assign trait T:Numeric` the compiler looks up the required overload in
+the dispatch table and checks it exists and is coherent:
+
+```
+struct Vector(x:Int, y:Int)
+function +(a:Vector, b:Vector):Vector -> Vector(a.x + b.x, a.y + b.y)
+function *(a:Vector, b:Vector):Vector -> Vector(a.x * b.x, a.y * b.y)
+
+assign trait Vector:Numeric { }   # empty: the operators are witnessed, not declared
+```
+
+If either overload is missing, the `assign trait` is a compile error.
+
+**Carrying the proof into generic code.** A type parameter bounded by the
+trait (`[type E:Numeric]`) inherits the guarantee, so operator use over
+an abstract type is checked where the generic is *defined*:
+
+```
+function scaleSum[type E:Numeric](a:E, b:E):E -> (a + b) * (a + b)
+```
+
+`a + b` and `(…) * (…)` are statically known to resolve for any `E`
+satisfying `Numeric` — no runtime "no matching overload" surprise.
+
+**Scope (v1):** operator contract members are **homogeneous** —
+`(this.type, this.type):this.type` only. Mixed-operand / promotion
+contracts (e.g. `(this.type, Int):this.type`) are deferred and must
+fail with a clear error until that slice lands. Heterogeneous operator
+overloads themselves stay ordinary mechanism-1 overloads, just not
+trait-bounded.
 
 ## Assigning a trait to a type
 
@@ -204,12 +272,12 @@ Bottom-up, each slice testable end-to-end via the layer below.
   self-reference resolution. Defer to a later slice.
 - **Multi-trait constraints** in param positions (`x:Duck & Audible`).
   Defer to the in-progress union/intersection sort work.
-- **Primitives as trait implementors** (built-in type satisfies a
-  *named-method* trait, e.g. `Int : Showable`). Operators are never trait
-  contracts (dispatch-unification B1, resolved) — `Int : Addable`/`+` is not a
-  thing, so the numeric-trait motivation is gone. What's left is purely whether a
-  built-in may be registered in a trait's satisfier set (mechanism 2),
-  independent of the operator work. Low demand now. Today traits work for user
-  types only.
+- **Primitives as trait implementors** (built-in type satisfies a trait, e.g.
+  `Int : Showable`, or a numeric `Int : Numeric` witnessing `+(Int, Int):Int`).
+  With operator contract members now in (dispatch-unification B1, **reopened →
+  yes**), the `Addable`/`Numeric`-style motivation is back: a built-in needs to be
+  registrable in a trait's satisfier set so a `[type E:Numeric]` bound can include
+  primitives. Today traits work for user types only — extending the satisfier set
+  to built-ins is the remaining gap.
 - **Trait inheritance** (Trait B *extends* Trait A — B implies A).
   Pure sugar over multi-trait constraints; defer.

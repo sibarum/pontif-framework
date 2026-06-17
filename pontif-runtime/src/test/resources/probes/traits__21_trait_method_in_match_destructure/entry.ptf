@@ -1,0 +1,14 @@
+let Sized:Type{
+  size:[Method():Int]
+}
+
+struct Box(w:Int, h:Int)
+
+assign trait Box:Sized {
+  size():Int -> match this {
+    [Box(w, h)] -> w * h
+  }
+}
+
+let s:Sized = Box(4, 5)
+s.size()

@@ -1,0 +1,3 @@
+struct Point(x:Int, y:Int)
+function f(point:[Point.{x, z}]):Int -> x + z
+f(Point(3, 4))

@@ -1,0 +1,5 @@
+module app.main
+requires geom.vec.{Vec}
+struct Holder(v:Vec)
+function run(h:Holder):Int -> h.v.sum()
+run(Holder(Vec(3, 4)))

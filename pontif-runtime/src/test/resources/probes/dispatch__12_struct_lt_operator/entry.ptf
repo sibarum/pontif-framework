@@ -1,0 +1,4 @@
+# `<` overloaded on a struct, compared by magnitude.
+struct Vec(x:Int, y:Int)
+function <(a:Vec, b:Vec):Bool -> a.x + a.y < b.x + b.y
+Vec(1, 1) < Vec(3, 4)

@@ -1,0 +1,4 @@
+struct Point(x:Int, y:Int)
+method Point.doubled():Point -> Point(this.x * 2, this.y * 2)
+method Point.quadSum():Int -> this.doubled().x + this.doubled().y
+Point(3, 4).quadSum()

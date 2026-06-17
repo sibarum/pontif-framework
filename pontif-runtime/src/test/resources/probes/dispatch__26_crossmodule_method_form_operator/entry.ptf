@@ -1,0 +1,7 @@
+module app.methodop
+
+requires geo.mv.{MV}
+
+# Operator declared in the dep as the legacy method form `MV.+`, then used as
+# infix on imported values. Routing keys on the left operand's MV sort.
+(MV(2, 3) + MV(4, 5)).x

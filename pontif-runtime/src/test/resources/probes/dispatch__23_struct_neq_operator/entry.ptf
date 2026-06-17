@@ -1,0 +1,3 @@
+struct Point(x:Int, y:Int)
+method Point.!=(p:Point):Bool -> this.x != p.x | this.y != p.y
+Point(1, 2) != Point(1, 9)

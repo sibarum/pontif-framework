@@ -1,0 +1,7 @@
+module geo.pt
+
+exports @.{Point}
+
+struct Point(x:Int, y:Int)
+
+method Point.sum():Int -> this.x + this.y

@@ -67,6 +67,7 @@ public final class IrFreeVars {
                     collect(v, bound, free);
                 }
             }
+            case IrExpr.Cast cast -> collect(cast.value(), bound, free);
             case IrExpr.FieldAccess fa -> collect(fa.base(), bound, free);
             case IrExpr.MethodCall mc -> {
                 collect(mc.receiver(), bound, free);

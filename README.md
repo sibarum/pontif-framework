@@ -296,6 +296,27 @@ The cast law is the no-lie law made geometric: **lose freely, fabricate never.**
   [Proofs and synthesis](#proofs-and-synthesis)). Extension promotes you to a
   strictly richer type while every existing behavior of the base still applies.
 
+### Explicit casts — `(Type:value)`
+
+The same law governs coercion *across* domains. `let n:String = 12` is a type
+mismatch, not a silent stringification — the fix is the explicit cast `(Type:value)`,
+the value-space sibling of a refinement (`[Base:pred]` is a type, `(Type:value)` is
+a value; same colon, opposite side of the type/value line):
+
+```pontif
+let n:String = (String:12)        # render is named — no silent stringification
+"n=" + n                          # → "n=12"
+```
+
+This is Pontif's answer to Julia-style promotion. Implicit coercion is kept *only*
+for the closed primitive tower (`Int → Decimal`, a lossless embedding you can't
+extend or shadow); everything open is explicit. Because the target is named, nothing
+is searched (so nothing is incomplete) and nothing is ambiguous — and a coercion that
+can't be performed fails closed rather than fabricating. A cast is a dispatch feature:
+it resolves `(source sort → target sort)` on the one shared engine. Today the built-in
+renders to `String` ship; user-defined `Type → Type` coercions register and resolve
+the same way.
+
 ## Three models, one need
 
 Polymorphism in Pontif is three sharply-separated tools, and between them they

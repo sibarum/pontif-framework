@@ -1,0 +1,7 @@
+module geo.vec
+
+exports @.{Vec}
+
+struct Vec(x:Int, y:Int)
+
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)

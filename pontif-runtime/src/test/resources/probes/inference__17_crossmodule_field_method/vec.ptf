@@ -1,0 +1,4 @@
+module geom.vec
+exports @.{Vec}
+struct Vec(x:Int, y:Int)
+method Vec.sum():Int -> this.x + this.y

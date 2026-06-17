@@ -1,0 +1,6 @@
+struct C(v:Int)
+method C.dbl():Int -> this.v + this.v
+struct B(c:C)
+struct A(b:B)
+method A.run():Int -> this.b.c.dbl()
+A(B(C(4))).run()

@@ -1,0 +1,4 @@
+module app.main
+requires geom.shapes.{Vec}
+function f(v:[Vec.{x, y}]):Int -> x * y
+f(Vec(3, 4))

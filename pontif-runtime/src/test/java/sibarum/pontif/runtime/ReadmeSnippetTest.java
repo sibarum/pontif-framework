@@ -3,6 +3,7 @@ package sibarum.pontif.runtime;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
+import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
@@ -231,6 +232,16 @@ class ReadmeSnippetTest {
                 let back:[Point3D:@.z==0] = flat;
                 flat.x + flat.y + back.z
                 """));
+    }
+
+    @Test
+    void readmeExplicitCastSnippet_rendersIntToString() throws Exception {
+        Object result = run("""
+                let n:String = (String:12)
+                "n=" + n
+                """);
+        assertInstanceOf(StringValue.class, result);
+        assertEquals("n=12", ((StringValue) result).content());
     }
 
     // --- Type parameters — generics without erasure --------------------------

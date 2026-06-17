@@ -1,0 +1,6 @@
+struct Cell(v:Int)
+method Cell.tag():Int -> this.v
+function pick(c:Cell):Int -> match c
+  [Cell(v:[Int:@>0])] -> c.tag()
+  [_] -> 0
+pick(Cell(9))

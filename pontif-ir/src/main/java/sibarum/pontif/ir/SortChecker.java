@@ -72,6 +72,10 @@ public final class SortChecker {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
         Map<String, IrSort.Structural> structDefs = TypeRegistry.collect(module);
+        // Free-function / operator overloads by name (e.g. all `+` declarations) —
+        // the mechanism-1 dispatch entries an operator trait contract is checked
+        // against (does a coherent `+(T, T):T` exist for the satisfying type T?).
+        Map<String, List<IrStmt.FunctionDecl>> overloads = collectOverloadsByName(module);
         // The declared trait-satisfaction relation (type satisfies trait), from
         // every `assign trait` block — used to check associated-type bounds.
         Set<String> satisfies = new HashSet<>();
@@ -106,8 +110,15 @@ public final class SortChecker {
                 }
                 validateSortNames(fd.returnSort(), structDefs, fnTypeVars);
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
+                // Operator bound propagation (dispatch-unification B1): an operator
+                // applied to a value of a trait-bounded type parameter is checked
+                // against the bound's operator contract members — `a + b` over
+                // `E:Numeric` is licensed only if `Numeric` declares `+`. Makes
+                // operator use over an abstract type decidable at definition time,
+                // not at the call site's monomorphization.
+                checkOperatorBounds(fd, typeEnv, traitContracts, functionReturns);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
                 // Validate a trait DECLARATION end-to-end: its member sorts must
                 // reference only known sorts — primitives, declared types, or the
@@ -148,7 +159,8 @@ public final class SortChecker {
             Map<String, IrSort.Trait> traitContracts,
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs,
-            Set<String> satisfies) throws CompileException {
+            Set<String> satisfies,
+            Map<String, List<IrStmt.FunctionDecl>> overloads) throws CompileException {
         IrSort.Trait contract = traitContracts.get(ti.traitName());
         if (contract == null) {
             throw new CompileException(
@@ -341,6 +353,36 @@ public final class SortChecker {
                                 + "' defines method '" + implName + "', which trait '"
                                 + ti.traitName() + "' does not declare — over-assignment "
                                 + "(a member the view can't reach is dead structure)",
+                        ti.origin());
+            }
+        }
+
+        // Operator contract members (dispatch-unification B1): each
+        // `op:[Dispatch(this.type, this.type):this.type]` requires a coherent
+        // mechanism-1 overload `op(T, T):T` for the satisfying type T — NOT a
+        // method in this block (an operator is a free overload). Verified by
+        // lookup in the overload table; the bound this proves is exactly what a
+        // `[type E:Trait]` parameter then carries into generic code, making
+        // operator use decidable at definition time instead of at a runtime miss.
+        // (Built-in primitives have no FunctionDecl overload for their operators —
+        // their `+` rides the BinOp fast-path — so this targets user types; that is
+        // consistent with traits being user-types-only today. Cross-module witness
+        // overloads are the linker's coherence concern, not checked here.)
+        String implType = ti.typeName();
+        for (Map.Entry<String, IrSort.Dispatch> op : contract.operators().entrySet()) {
+            String opSym = op.getKey();
+            List<IrStmt.FunctionDecl> candidates = overloads.getOrDefault(opSym, List.of());
+            boolean witnessed = candidates.stream()
+                    .anyMatch(o -> isHomogeneousOverload(o, implType));
+            if (!witnessed) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                                + "' requires operator '" + opSym + "' — trait '" + ti.traitName()
+                                + "' declares the contract member '" + opSym
+                                + ":[Dispatch(this.type, this.type):this.type]', but no overload '"
+                                + opSym + "(" + implType + ", " + implType + "):" + implType
+                                + "' is declared. Define `function " + opSym + "(a:" + implType
+                                + ", b:" + implType + "):" + implType + " -> …`.",
                         ti.origin());
             }
         }
@@ -1038,6 +1080,7 @@ public final class SortChecker {
             }
             // An iteration construct never appears inside a refinement predicate.
             case IrExpr.Iterate ignored -> {}
+            case IrExpr.Cast cast -> validateSelfFieldAccesses(cast.value(), baseStruct, refOrigin);
         }
     }
 
@@ -1052,7 +1095,20 @@ public final class SortChecker {
             case IrExpr.Str s -> {}
             case IrExpr.Bool b -> {}
             case IrExpr.SelfRef s -> {}
-            case IrExpr.Var v -> {}
+            case IrExpr.Var v -> {
+                // A bare variable must resolve to something in scope — a param,
+                // a let-binding, a lambda/iteration binder, or a pattern binder
+                // (match destructures desugar to lets before this runs). Top-level
+                // lets and 0-arg functions are rewritten to Calls by the parser, so
+                // a Var that reaches here and isn't bound is genuinely unbound —
+                // a compile error with a location, not a runtime NoSuchElement.
+                if (!typeEnv.containsKey(v.name())) {
+                    throw new CompileException(
+                            "Unbound variable '" + v.name() + "' — no parameter, let-binding, "
+                                    + "or pattern binder of that name is in scope.",
+                            v.origin());
+                }
+            }
             // A metareference must name a declared function — zero candidates
             // is a compile error, not a runtime surprise. Key sorts validate
             // like any other sort reference.
@@ -1176,26 +1232,40 @@ public final class SortChecker {
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "SortChecker");
             case IrExpr.Iterate it -> {
-                // The source, output inits, arm patterns, and write expressions
-                // reference only known sorts. (checkExpr's Var case is lenient, so
-                // element/accumulator names need no binding here.)
+                // The source and accumulator inits are evaluated outside the loop;
+                // the element binder and the accumulator names are in scope inside
+                // each arm's writes — bind them so the unbound-variable check (the
+                // Var case) doesn't flag them.
                 checkExpr(it.source(), typeEnv, functionReturns, structDefs);
+                Map<String, IrSort> iterEnv = new HashMap<>(typeEnv);
+                iterEnv.put(it.element(), IrSort.named("_"));
                 for (IrExpr.OutputSpec os : it.outputs()) {
                     if (os.init() != null) {
                         checkExpr(os.init(), typeEnv, functionReturns, structDefs);
+                    }
+                    if (os.kind() == IrExpr.OutputKind.ACCUMULATOR) {
+                        iterEnv.put(os.name(), IrSort.named("_"));
                     }
                 }
                 for (IrExpr.Arm arm : it.arms()) {
                     validateSortNames(arm.pattern(), structDefs);
                     for (IrExpr.Write w : arm.writes()) {
-                        if (w.key() != null) checkExpr(w.key(), typeEnv, functionReturns, structDefs);
-                        checkExpr(w.value(), typeEnv, functionReturns, structDefs);
+                        if (w.key() != null) checkExpr(w.key(), iterEnv, functionReturns, structDefs);
+                        checkExpr(w.value(), iterEnv, functionReturns, structDefs);
                     }
                 }
                 // The always-on conservation discipline (§4): output-kind/write
                 // agreement and no-silent-erase. (home-vs-observe ownership and
                 // fold-carry content accounting stay deferred — docs/iteration.md §10.)
                 checkIterationConservation(it);
+            }
+            case IrExpr.Cast cast -> {
+                // The target names a sort (validate it like any reference); the
+                // value is an ordinary sub-expression. Whether the source→target
+                // coercion is actually supported is enforced at eval (slice 1 =
+                // built-in renders to String) — fail-closed there, not here.
+                validateSortNames(cast.targetSort(), structDefs);
+                checkExpr(cast.value(), typeEnv, functionReturns, structDefs);
             }
         }
     }
@@ -1474,6 +1544,199 @@ public final class SortChecker {
             case IrSort.Structural s -> s.name();
             default -> null;
         };
+    }
+
+    /**
+     * Whether an overload is a homogeneous binary operator over {@code type}:
+     * exactly two params, both of base sort {@code type}, returning base sort
+     * {@code type}. This is the shape an operator trait contract
+     * {@code (this.type, this.type):this.type} requires of its satisfier (v1;
+     * wider/narrowed witnesses — e.g. a {@code +(Number, Number)} covering a
+     * subtype — are a later slice, see the doc's open questions).
+     */
+    private static boolean isHomogeneousOverload(IrStmt.FunctionDecl o, String type) {
+        if (o.params().size() != 2) {
+            return false;
+        }
+        return type.equals(matchBaseName(o.params().get(0).sort()))
+                && type.equals(matchBaseName(o.params().get(1).sort()))
+                && type.equals(matchBaseName(o.returnSort()));
+    }
+
+    /** The overloadable operator symbols (mirrors the parser's OVERLOADABLE_OPS). */
+    private static final Set<String> OPERATOR_SYMBOLS = Set.of(
+            "+", "-", "*", "/", "%", "^", "<", "<=", ">", ">=", "==", "!=");
+
+    private static String operatorSymbol(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
+            case MOD -> "%"; case POW -> "^";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ -> "=="; case NE -> "!=";
+            // APPROX/AND/OR aren't overloadable operator contract members.
+            case APPROX, AND, OR -> null;
+        };
+    }
+
+    /**
+     * Operator bound propagation (dispatch-unification B1): within a generic
+     * function body, an operator applied to a value whose sort is a trait-bounded
+     * type parameter {@code E} is licensed only if {@code E}'s bound declares that
+     * operator as a contract member ({@code +:[Dispatch(this.type,this.type):this.type]}).
+     * This is what carries the {@code assign trait} proof into generic code, so
+     * {@code a + b} over {@code E:Numeric} is decidable at definition time. Only
+     * functions with type parameters can carry such obligations — others are
+     * skipped. The walk returns each sub-expression's sort when it is (provably) the
+     * type parameter, so a {@code let c = a + b} propagates {@code c:E} into the
+     * body (the homogeneous contract result is the self type).
+     */
+    private static void checkOperatorBounds(
+            IrStmt.FunctionDecl fd, Map<String, IrSort> paramEnv,
+            Map<String, IrSort.Trait> traitContracts,
+            Map<String, IrSort> functionReturns) throws CompileException {
+        if (fd.typeParams().isEmpty()) {
+            return;
+        }
+        // type-param name → its bound trait (null when unbounded or a non-trait bound).
+        Map<String, IrSort.Trait> boundOf = new HashMap<>();
+        for (Map.Entry<String, IrSort> tp : fd.typeParams().entrySet()) {
+            IrSort bound = tp.getValue();
+            String boundName = bound == null ? null : matchBaseName(bound);
+            boundOf.put(tp.getKey(), boundName == null ? null : traitContracts.get(boundName));
+        }
+        walkOperatorBounds(fd.body(), new HashMap<>(paramEnv), fd, boundOf, functionReturns);
+    }
+
+    /**
+     * Recursive walk for {@link #checkOperatorBounds}: returns the expression's
+     * sort when it provably is one of {@code fd}'s type parameters (so let-bound
+     * results flow), {@code null} otherwise. Throws on an operator over a
+     * type-parameter operand the bound does not license.
+     */
+    private static IrSort walkOperatorBounds(
+            IrExpr expr, Map<String, IrSort> env, IrStmt.FunctionDecl fd,
+            Map<String, IrSort.Trait> boundOf, Map<String, IrSort> functionReturns)
+            throws CompileException {
+        switch (expr) {
+            case IrExpr.Var v -> {
+                return env.get(v.name());
+            }
+            case IrExpr.LetIn l -> {
+                IrSort valueSort = walkOperatorBounds(l.value(), env, fd, boundOf, functionReturns);
+                Map<String, IrSort> extended = new HashMap<>(env);
+                if (valueSort != null) {
+                    extended.put(l.name(), valueSort);
+                } else {
+                    extended.remove(l.name());
+                }
+                return walkOperatorBounds(l.body(), extended, fd, boundOf, functionReturns);
+            }
+            case IrExpr.Call c -> {
+                List<IrSort> argSorts = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) {
+                    argSorts.add(walkOperatorBounds(a, env, fd, boundOf, functionReturns));
+                }
+                if (OPERATOR_SYMBOLS.contains(c.functionName()) && c.args().size() == 2) {
+                    return checkOperatorOverTypeParam(
+                            c.functionName(), argSorts, fd, boundOf, c.origin());
+                }
+                return functionReturns.get(c.functionName());
+            }
+            case IrExpr.BinOp op -> {
+                IrSort ls = walkOperatorBounds(op.left(), env, fd, boundOf, functionReturns);
+                IrSort rs = walkOperatorBounds(op.right(), env, fd, boundOf, functionReturns);
+                String sym = operatorSymbol(op.op());
+                if (sym != null) {
+                    return checkOperatorOverTypeParam(
+                            sym, List.of(ls == null ? IrSort.named("_") : ls,
+                                    rs == null ? IrSort.named("_") : rs),
+                            fd, boundOf, op.origin());
+                }
+                return null;
+            }
+            case IrExpr.FieldAccess fa -> {
+                walkOperatorBounds(fa.base(), env, fd, boundOf, functionReturns);
+                return null;
+            }
+            case IrExpr.Match m -> {
+                walkOperatorBounds(m.scrutinee(), env, fd, boundOf, functionReturns);
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    walkOperatorBounds(b.result(), env, fd, boundOf, functionReturns);
+                }
+                return null;
+            }
+            case IrExpr.Cast cast -> {
+                walkOperatorBounds(cast.value(), env, fd, boundOf, functionReturns);
+                return null;
+            }
+            default -> {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * The core check: given an operator applied to two operand sorts, if an
+     * operand provably is a type parameter {@code E} of {@code fd}, the homogeneous
+     * contract {@code (E, E):E} must be licensed by {@code E}'s bound. Returns
+     * {@code E} (the contract result) when licensed; throws otherwise. Returns
+     * {@code null} when no operand is a type parameter (not this check's concern).
+     */
+    private static IrSort checkOperatorOverTypeParam(
+            String opSym, List<IrSort> argSorts, IrStmt.FunctionDecl fd,
+            Map<String, IrSort.Trait> boundOf, sibarum.pontif.core.Origin origin)
+            throws CompileException {
+        String typeParam = null;
+        for (IrSort s : argSorts) {
+            String base = s == null ? null : matchBaseName(s);
+            if (base != null && fd.typeParams().containsKey(base)) {
+                typeParam = base;
+                break;
+            }
+        }
+        if (typeParam == null) {
+            return null;  // no abstract operand — ordinary dispatch governs it
+        }
+        IrSort.Trait bound = boundOf.get(typeParam);
+        // Licensed iff: BOTH operands are exactly this type parameter (the v1
+        // homogeneous shape) AND its bound declares the operator.
+        boolean homogeneous = argSorts.size() == 2
+                && typeParam.equals(matchBaseName(argSorts.get(0)))
+                && typeParam.equals(matchBaseName(argSorts.get(1)));
+        if (homogeneous && bound != null && bound.operators().containsKey(opSym)) {
+            return IrSort.named(typeParam);  // contract result is the self type
+        }
+        String why = bound == null
+                ? "type parameter '" + typeParam + "' is unbounded (or its bound is not a trait)"
+                : "its bound trait '" + bound.name() + "' does not declare operator '" + opSym
+                        + "' (it declares: " + bound.operators().keySet() + ")";
+        throw new CompileException(
+                "In '" + fd.name() + "', operator '" + opSym + "' is applied to a value of type "
+                        + "parameter '" + typeParam + "', but " + why
+                        + ". Generic operator use is licensed only by the parameter's trait bound — "
+                        + "bound '" + typeParam + "' by a trait with the contract member '" + opSym
+                        + ":[Dispatch(this.type, this.type):this.type]'.",
+                origin);
+    }
+
+    /**
+     * Free-function / operator overloads grouped by declared name — operators
+     * register under their symbol (`+`), so this is the lookup an operator trait
+     * contract is verified against. TraitImpl methods are included for parity with
+     * the dispatch table, though operators are declared as free functions.
+     */
+    private static Map<String, List<IrStmt.FunctionDecl>> collectOverloadsByName(IrModule module) {
+        Map<String, List<IrStmt.FunctionDecl>> byName = new LinkedHashMap<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.FunctionDecl fd) {
+                byName.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
+            } else if (stmt instanceof IrStmt.TraitImpl ti) {
+                for (IrStmt.FunctionDecl m : ti.methods()) {
+                    byName.computeIfAbsent(m.name(), k -> new ArrayList<>()).add(m);
+                }
+            }
+        }
+        return byName;
     }
 
     /** Whether {@code sort} references any of the given (associated-type) names. */
@@ -1767,6 +2030,13 @@ public final class SortChecker {
             // Strings: bare String in the value slice — no narrows, no
             // discrete route (unlike Char). Matches over it need a default arm.
             case IrExpr.Str s -> IrSort.named("String");
+            // A cast `(Type:value)` produces its named target sort — that IS the
+            // inferred result, by definition of the coercion (the value's own
+            // sort is irrelevant to the outcome). Whether the source→target
+            // coercion is actually supported is enforced when evaluated (slice 1
+            // = built-in renders to String); here we only report the result sort
+            // so a claim like `let n:String = (String:12)` discharges.
+            case IrExpr.Cast cast -> cast.targetSort();
             // Arithmetic results: Int op Int is Int; any Decimal operand makes
             // it Decimal (promotion). Comparisons/logical yield Bool. Lets a
             // computed scrutinee like `match n + 1` have a provable domain.

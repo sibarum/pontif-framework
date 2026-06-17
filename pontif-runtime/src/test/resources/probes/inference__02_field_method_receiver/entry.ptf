@@ -1,0 +1,5 @@
+struct Inner(v:Int)
+method Inner.bump():Int -> this.v + 1
+struct Outer(inner:Inner)
+method Outer.go():Int -> this.inner.bump()
+Outer(Inner(41)).go()

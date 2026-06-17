@@ -278,8 +278,10 @@ public final class AliasResolver {
                     resolvedAssoc.put(e.getKey(),
                             e.getValue() == null ? null : resolveSort(e.getValue(), aliases, path));
                 }
+                // Operator contract members are self-typed Dispatch sorts
+                // (this.type only) — no aliases to resolve — so pass through verbatim.
                 yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
-                        t.typeParams(), t.origin());
+                        t.typeParams(), t.operators(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -402,6 +404,10 @@ public final class AliasResolver {
                 yield new IrExpr.Iterate(
                         rewriteExpr(it.source(), resolved), it.element(), outs, arms, it.origin());
             }
+            // A cast's target sort is a sort reference — resolve aliases in it too.
+            case IrExpr.Cast cast -> new IrExpr.Cast(
+                    substituteResolved(cast.targetSort(), resolved),
+                    rewriteExpr(cast.value(), resolved), cast.origin());
         };
     }
 
@@ -461,7 +467,7 @@ public final class AliasResolver {
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
-                        t.typeParams(), t.origin());
+                        t.typeParams(), t.operators(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());
@@ -526,6 +532,8 @@ public final class AliasResolver {
             assoc.put(e.getKey(),
                     e.getValue() == null ? null : SortChecker.substituteTypeVars(e.getValue(), binds));
         }
-        return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.origin());
+        // Operator contract members are self-typed (this.type), not over the
+        // trait's [type T] params, so type-var substitution leaves them unchanged.
+        return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.operators(), tr.origin());
     }
 }

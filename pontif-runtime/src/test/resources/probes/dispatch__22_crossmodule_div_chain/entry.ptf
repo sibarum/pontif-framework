@@ -1,0 +1,9 @@
+module app.fracchain
+
+requires num.frac.{Frac}
+
+# A chain of / on an imported type with a / operator defined in the dep module.
+# (Frac(1,2) / Frac(3,4)) / Frac(5,6)  — left-associated; each / routes to the
+# imported operator on the left operand's Frac sort.
+let r = Frac(1, 2) / Frac(3, 4) / Frac(5, 6)
+r.n

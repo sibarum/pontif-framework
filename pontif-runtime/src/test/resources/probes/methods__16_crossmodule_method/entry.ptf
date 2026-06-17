@@ -1,0 +1,5 @@
+module geom.app
+
+requires geom.vec.{Vec}
+
+Vec(3, 4).magnitudeSq()

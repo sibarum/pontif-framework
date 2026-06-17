@@ -1,0 +1,3 @@
+function classify(n:[Int:@>0]):Int -> 1
+function classify(n:Int):Int -> 0
+classify(5)

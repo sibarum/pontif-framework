@@ -1,0 +1,60 @@
+module cott.traction
+
+exports @.{Traction}
+
+# n is the Real part. zexp is the exponent of 0.
+struct Traction(n:Decimal, zexp:Decimal)
+
+function Traction.of(real:Decimal):Traction ->
+  Traction(real, 0.0).normalize()
+
+let Traction.zero = Traction(1.0, 1.0)
+let Traction.one = Traction(1.0, 0.0)
+let Traction.omega = Traction(1.0, -1.0)
+let Traction.negativeOne = Traction(-1.0, 0.0)
+
+method Traction.toReal():Decimal ->
+  match this
+    [Traction(n, 0.0)] -> n
+    [_] -> 0.0
+
+method Traction.inv():Traction ->
+  match this.normalize()
+    [Traction(0.0, zexp)] -> Traction(1.0, -zexp-1)
+    [Traction(n, zexp)] -> Traction(1.0/n,-zexp)
+
+method Traction.neg():Traction ->
+  match this.normalize()
+    [Traction(n, 0.0)] -> Traction(-n, 0.0)
+    [Traction(n, zexp)] -> Traction(-n, 1.0/zexp)
+
+method Traction.normalize():Traction ->
+  match this
+    [Traction(0.0,0.0)] -> Traction(1.0,1.0)
+    [Traction(0.0, z )] -> Traction(1.0,z+1)
+    [_] -> this
+
+method Traction.toString():String ->
+  match this
+    [Traction(n, z)] ->
+      "("+n+", "+z+")"
+
+function +(t1:Traction, t2:Traction):Traction ->
+  match (t1.normalize(),t2.normalize())
+    [(Traction(n1,z1), Traction(n2,z2))] -> Traction(n1+n2, z1+z2)
+
+
+function -(t1:Traction, t2:Traction):Traction ->
+  t1+t2.neg()
+
+
+function *(t1:Traction, t2:Traction):Traction ->
+  match (t1.normalize(),t2.normalize())
+    [(Traction(n1,z1), Traction(n2,z2))] -> Traction(n1*n2, z1+z2)
+    
+
+function /(t1:Traction, t2:Traction):Traction ->
+  t1*t2.inv()
+
+
+Traction(10,2) - Traction(5,2)

@@ -159,6 +159,11 @@ public final class TruffleLowering {
             // iteration construct yet; the IrInterpreter path is slice 1.
             case IrExpr.Iterate it -> throw new UnsupportedOperationException(
                     "Iterate: Truffle lowering not yet implemented (docs/iteration.md §10)");
+            // The Truffle backend fences the `(Type:value)` cast for now, the
+            // same way it fences String `+` — the interpreter path is slice 1.
+            case IrExpr.Cast cast -> throw new UnsupportedOperationException(
+                    "Cast (Type:value): Truffle lowering not yet implemented — "
+                            + "the interpreter path is slice 1");
         };
         node.withOrigin(expr.origin());
         return node;

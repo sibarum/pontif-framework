@@ -13,7 +13,7 @@ public sealed interface IrExpr
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess, IrExpr.MethodCall,
-                IrExpr.Iterate {
+                IrExpr.Iterate, IrExpr.Cast {
 
     Origin origin();
 
@@ -41,7 +41,35 @@ public sealed interface IrExpr
     static Record record(String typeName, Map<String, IrExpr> members) { return new Record(typeName, members, Origin.NONE); }
     static FieldAccess fieldAccess(IrExpr base, String fieldName) { return new FieldAccess(base, fieldName, Origin.NONE); }
 
+    static Cast cast(IrSort targetSort, IrExpr value) { return new Cast(targetSort, value, Origin.NONE); }
+
     record Lit(long value, Origin origin) implements IrExpr {}
+
+    /**
+     * Explicit coercion — the value-space cast {@code (Type:value)} (general →
+     * specific, type on the left; docs/dispatch-unification.md → "Coercion").
+     * Pontif's answer to Julia-style implicit promotion: the target is
+     * <em>named</em>, so nothing is searched and nothing is ambiguous. A cast
+     * resolves a coercion {@code (source sort → target sort)} — conceptually a
+     * dispatched call on the one shared engine — and so is NOT desugared onto
+     * {@code +}/concat: the conservation ledger must record a coercion, not an
+     * empty-string concatenation.
+     *
+     * <p>Slice 1 supports only the built-in renders to {@code String}
+     * (Int/Decimal/Char/Bool/String → String); every other target fails closed.
+     * User-defined {@code Type → Type} coercions and refinement-target casts
+     * are later slices.
+     */
+    record Cast(IrSort targetSort, IrExpr value, Origin origin) implements IrExpr {
+        public Cast {
+            if (targetSort == null) {
+                throw new IllegalArgumentException("Cast targetSort must be non-null");
+            }
+            if (value == null) {
+                throw new IllegalArgumentException("Cast value must be non-null");
+            }
+        }
+    }
 
     /** Decimal literal — arbitrary-precision exact decimal (BigDecimal-backed). */
     record Dec(BigDecimal value, Origin origin) implements IrExpr {

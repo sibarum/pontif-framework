@@ -1,0 +1,3 @@
+struct P(a:Int, b:Int)
+function f(p:[P(a:[Int:@>0])]):Int -> p.a
+f(P(5, 9))

@@ -1,0 +1,8 @@
+module gen.adder
+
+requires gen.vecmod.{Vec}
+
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+assign trait Vec:Numeric { }
+function sum[type E:Numeric](a:E, b:E):E -> a + b
+sum(Vec(1, 2), Vec(3, 4)).x

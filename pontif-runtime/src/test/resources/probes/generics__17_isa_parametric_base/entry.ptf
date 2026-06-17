@@ -1,0 +1,3 @@
+struct Literal[type T](value:T)
+struct IntLit:[Literal[Int]](value:Int)
+IntLit(5).value

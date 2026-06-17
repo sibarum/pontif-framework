@@ -1,0 +1,5 @@
+module gen.boxmod
+
+exports @.{Box}
+
+struct Box[type T](value:T)

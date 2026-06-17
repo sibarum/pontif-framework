@@ -1,0 +1,5 @@
+module geom.app
+
+requires geom.vec.{Vec, originVec}
+
+originVec().sum()

@@ -1,0 +1,3 @@
+struct Box[type T](value:T)
+function unbox(b:Box[T]):T -> b.value
+unbox(Box(9))

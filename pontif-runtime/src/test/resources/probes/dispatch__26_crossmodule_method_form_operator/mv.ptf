@@ -1,0 +1,7 @@
+module geo.mv
+
+exports @.{MV}
+
+struct MV(x:Int, y:Int)
+
+method MV.+(p:MV):MV -> MV(this.x + p.x, this.y + p.y)

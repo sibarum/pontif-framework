@@ -1,0 +1,5 @@
+# Three nested refinements: @>=1 ⊂ @>=0 ⊂ Int. Call with 5 matches all; tightest wins.
+function rank(n:[Int:@>=1]):Int -> 2
+function rank(n:[Int:@>=0]):Int -> 1
+function rank(n:Int):Int -> 0
+rank(5)

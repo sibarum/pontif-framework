@@ -184,7 +184,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      */
     record Trait(String name, Map<String, IrSort.Method> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                 Map<String, IrSort> typeParams, Origin origin) implements IrSort {
+                 Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                 Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -201,6 +202,9 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (typeParams == null) {
                 throw new IllegalArgumentException("Trait typeParams must be non-null");
             }
+            if (operators == null) {
+                throw new IllegalArgumentException("Trait operators must be non-null");
+            }
             methods = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(methods));
             attributes = java.util.Collections.unmodifiableMap(
@@ -216,24 +220,39 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // associated types are fixed by the implementor. Null = unbounded.
             typeParams = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(typeParams));
+            // Operator contract members — `+:[Dispatch(this.type, this.type):this.type]`
+            // (dispatch-unification B1, docs/traits.md "Operator contract members").
+            // Each is a mechanism-1 BOUND: the satisfier must have a coherent
+            // operator overload of this shape; the trait does not host it. Keyed by
+            // the operator symbol ("+", "*", …). Verified at `assign trait`, not
+            // implemented in the block — a later slice; the parser only collects them.
+            operators = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(operators));
+        }
+
+        /** Back-compat: a trait with no operator contract members. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Map<String, IrSort> typeParams, Origin origin) {
+            this(name, methods, attributes, associatedTypes, typeParams, Map.of(), origin);
         }
 
         /** Back-compat: a trait with no type parameters. */
         public Trait(String name, Map<String, IrSort.Method> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                      Origin origin) {
-            this(name, methods, attributes, associatedTypes, Map.of(), origin);
+            this(name, methods, attributes, associatedTypes, Map.of(), Map.of(), origin);
         }
 
         /** Back-compat: a trait with no associated types or type parameters. */
         public Trait(String name, Map<String, IrSort.Method> methods,
                      Map<String, IrSort> attributes, Origin origin) {
-            this(name, methods, attributes, Map.of(), Map.of(), origin);
+            this(name, methods, attributes, Map.of(), Map.of(), Map.of(), origin);
         }
 
         /** Back-compat: a methods-only trait (no data attributes). */
         public Trait(String name, Map<String, IrSort.Method> methods, Origin origin) {
-            this(name, methods, Map.of(), Map.of(), Map.of(), origin);
+            this(name, methods, Map.of(), Map.of(), Map.of(), Map.of(), origin);
         }
     }
 

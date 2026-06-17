@@ -1,0 +1,4 @@
+struct Inner(v:Int)
+struct Outer(inner:Inner, c:Int)
+method Outer.firstV():Int -> this.inner.v + this.c
+Outer(Inner(40), 2).firstV()

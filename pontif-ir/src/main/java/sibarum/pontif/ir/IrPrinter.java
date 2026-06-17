@@ -128,6 +128,10 @@ public final class IrPrinter {
                 line(sb, d, "FieldAccess ." + fa.fieldName() + at(fa.origin()));
                 printExpr(sb, fa.base(), d + 1);
             }
+            case IrExpr.Cast cast -> {
+                line(sb, d, "Cast (" + sort(cast.targetSort()) + ":…)" + at(cast.origin()));
+                printExpr(sb, cast.value(), d + 1);
+            }
             case IrExpr.MethodCall mc -> {
                 line(sb, d, "MethodCall ." + mc.methodName() + " (unresolved)" + at(mc.origin()));
                 printExpr(sb, mc.receiver(), d + 1);

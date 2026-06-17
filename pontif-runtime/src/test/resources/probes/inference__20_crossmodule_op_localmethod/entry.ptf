@@ -1,0 +1,5 @@
+module app.main
+requires geom.vec.{Vec}
+method Vec.mag2():Int -> this.x * this.x + this.y * this.y
+function go(a:Vec, b:Vec):Int -> (a + b).mag2()
+go(Vec(1, 2), Vec(3, 4))

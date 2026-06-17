@@ -1,0 +1,4 @@
+struct Point(x:Int, y:Int)
+method Point.shifted(dx:Int, dy:Int):Point -> Point(this.x + dx, this.y + dy)
+method Point.magnitudeSq():Int -> this.x * this.x + this.y * this.y
+Point(0, 0).shifted(1, 1).shifted(2, 2).magnitudeSq()

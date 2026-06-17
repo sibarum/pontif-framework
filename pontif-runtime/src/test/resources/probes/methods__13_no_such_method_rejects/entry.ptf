@@ -1,0 +1,3 @@
+struct Point(x:Int, y:Int)
+function f(p:Point):Int -> p.nope()
+f(Point(1, 2))

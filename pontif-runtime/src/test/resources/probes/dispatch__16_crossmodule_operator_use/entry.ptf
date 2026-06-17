@@ -1,0 +1,8 @@
+module app.use
+
+requires geo.vec.{Vec}
+
+# Use an operator (+) that was defined in the dep module on the imported type.
+# Parser routes on the left operand's sort (Vec). The +(Vec,Vec) overload lives
+# in geo.vec — cross-module operator resolution.
+(Vec(1, 2) + Vec(3, 4)).x

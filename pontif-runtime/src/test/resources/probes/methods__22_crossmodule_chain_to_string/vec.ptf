@@ -1,0 +1,8 @@
+module geom.vec
+
+exports @.{Vec}
+
+struct Vec(x:Int, y:Int)
+function Vec.of(d:Int):Vec -> Vec(d, d)
+method Vec.scale(k:Int):Vec -> Vec(this.x * k, this.y * k)
+method Vec.show():String -> "<" + this.x + ", " + this.y + ">"

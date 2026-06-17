@@ -1,0 +1,8 @@
+let Sized:Type{ size:[Method():Int] }
+struct Vec(x:Int, y:Int)
+struct Bare(z:Int)
+assign trait Vec:Sized {
+  size():Int -> this.x + this.y
+}
+function total[type E:Sized](a:E):Int -> a.size()
+total(Bare(9))

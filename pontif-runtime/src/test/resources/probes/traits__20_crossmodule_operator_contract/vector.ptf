@@ -1,0 +1,11 @@
+module num.vector
+
+exports @.{Vector}
+
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+
+struct Vector(x:Int, y:Int)
+
+function +(a:Vector, b:Vector):Vector -> Vector(a.x + b.x, a.y + b.y)
+
+assign trait Vector:Numeric { }

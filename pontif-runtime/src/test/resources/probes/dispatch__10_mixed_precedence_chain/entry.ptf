@@ -1,0 +1,7 @@
+# a*b + c*d  — the tractioncd body shape, single module.
+# Each * yields a Vec (a Call); the + must route on the LEFT *'s inferred sort.
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+function *(a:Vec, b:Vec):Vec -> Vec(a.x * b.x, a.y * b.y)
+let p = Vec(2, 0) * Vec(3, 0) + Vec(4, 0) * Vec(5, 0)
+p.x

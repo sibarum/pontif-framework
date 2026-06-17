@@ -1,0 +1,5 @@
+module gen.traitmod
+
+exports @.{Numeric}
+
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }

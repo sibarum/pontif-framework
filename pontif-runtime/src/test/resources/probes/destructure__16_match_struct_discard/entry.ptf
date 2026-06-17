@@ -1,0 +1,5 @@
+struct P(a:Int, b:Int)
+function f(p:P):Int -> match p {
+  [P(a, _)] -> a
+}
+f(P(8, 4))

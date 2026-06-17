@@ -1,0 +1,2 @@
+struct Box[type T](value:T)
+Box(5).value

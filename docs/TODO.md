@@ -6,6 +6,90 @@ items get removed (history is in git); this file is forward-looking.
 
 ---
 
+## ⭐ Next — explicit coercion / the `(Type:value)` cast (slice 1 LANDED)
+
+**Design RULED 2026-06-16 (see docs/dispatch-unification.md → "Coercion").** A cast
+is a value-space form `(Type:value)` (general→specific, type on the left;
+`([Int:@>0]:value)` when the target is a refinement — the `([])` crossing). It's a
+**dispatch feature**: resolves a coercion `(source sort → target sort)` on the one
+shared engine + coherence rule. This is Pontif's answer to Julia-style implicit
+promotion — implicit stays for the **closed primitive** tower only (`Int → Decimal`);
+everything open is explicit.
+
+- **Slice 1 — built-in renders to `String`, wired through the cast. LANDED.** New
+  `IrExpr.Cast(targetSort, value)` (NOT desugared onto `+`/concat — the conservation
+  ledger must record a coercion, modeled as a content `Computation`, not an
+  empty-string join). Parser detects `(<Sort>:<value>)` in expr position via guarded
+  backtracking (a complete sort + `:` is the only thing that reads as a cast; the
+  capitalization law fences it from groupings/tuples/constructor calls). Eval renders
+  `Int`/`Decimal`/`Char`/`Bool`/`String` → String (shares the `+`-concat render);
+  every other target/source fails closed (fabricate-never). SortChecker types a cast
+  to its target sort, so `let n:String = (String:12)` discharges the claim. Truffle
+  backend fences it (like String `+`). Tests: `CastAltTest`.
+- **Slice 2 (NEXT) — user-defined `Type → Type` coercion functions** (the actual
+  promotion replacement), registered/resolved like any dispatched call.
+- **Open before slice 2** (from the doc): (1) does the cast law *fabricate-never*
+  govern user coercions or are they trusted fns?; (2) resolution precedence when
+  subtype-demotion / custom-coercion / trait-coercion all fit one `(T:…)`; (3) the
+  generic-code tradeoff (deliberate, acceptable given narrowing). Also: the precise
+  per-coercion **conservation classification** (slice-1 renders are conservatively
+  `DEGRADED` though in fact lossless — revisit on the ledger-taxonomy read).
+- Parser note: `(name:Type)` (binder, decl position) vs `(Type:value)` (cast, expr
+  position) never collide — disjoint positions + capitalization; no `(…)->` lambda.
+
+---
+
+## ✅ Landed — operator contract members on traits (compile-time operator bounds)
+
+**Design RULED 2026-06-16 (dispatch-unification B1 reopened → yes; docs/traits.md
+→ "Operator contract members"). Parsing + `assign trait` verification + bound
+propagation all LANDED — the rung is complete for the single-module case.** A trait may name an operator as a
+`Dispatch` contract member — `+:[Dispatch(this.type, this.type):this.type]` — so
+operator compatibility becomes **decidable at definition time** instead of failing
+at a runtime dispatch miss. Closes the gap surfaced while discussing
+generics-with-operations: named-method operations were already boundable via traits;
+operators were not.
+
+**Key invariant:** the `Dispatch` member is a **mechanism-1 bound**, not a
+relocation — `a + b` still resolves only by global multi-dispatch; the trait merely
+*witnesses* (and the compiler verifies) that a coherent overload exists for the
+satisfying type. Opt-in: unbounded operator use still resolves Julia-style.
+
+- **Parser — LANDED.** `Type{…}` accepts an operator-token-keyed `Dispatch` member
+  (`+:[Dispatch(this.type, this.type):this.type]`), stored on `IrSort.Trait.operators()`
+  (new map, threaded through every Trait reconstruction). Validates: overloadable
+  op, `Dispatch` (not `Method`) sort, and **homogeneous self-typed** v1 scope — a
+  mixed-operand contract (`(this.type, Int)`) fails with a clear error. Tests:
+  `AltParserOperatorTraitTest`.
+- **`assign trait T:Trait` verification — LANDED.** `SortChecker.validateTraitImpl`
+  now checks each operator contract member: a homogeneous overload `op(T, T):T` must
+  be declared (witnessed, not implemented in the block); missing/wrong-shaped ⇒
+  compile error with a "define `function op(a:T, b:T):T`" hint
+  (`collectOverloadsByName` + `isHomogeneousOverload`). Tests:
+  `OperatorTraitContractTest`.
+- **Bound propagation — LANDED.** `SortChecker.checkOperatorBounds` walks each
+  generic function body: an operator applied to a value whose sort is a trait-bounded
+  type parameter `E` is licensed only if `E`'s bound declares that operator (else
+  compile error). The homogeneous contract result is the self type, so `let c = a+b`
+  propagates `c:E` and operator chains compose (reach via narrowing). Closes the
+  undecidable-until-call-site hole: `diff[type E:Numeric](a,b):E -> a-b` is now
+  rejected at *definition* even though `-(Vec,Vec)` exists, because `Numeric` only
+  promises `+`. Routing/execution is unchanged — v1 targets single-module where the
+  witness overload is present, so `a+b` is already a `Call` that dispatch resolves.
+  Tests: `OperatorBoundPropagationTest`. (Strict stance: a mixed-operand `a + 1` or
+  an unbounded type-param operand is also rejected — not provable from the bound.)
+- **Open / deferred:** (1) does a *narrowed* overload (`+([Int:@>0], …)`) satisfy a
+  bare-`this.type` contract, or must the witness cover the full sort? (current check
+  is exact base-name match). (2) `primitives as trait implementors` — built-in `+`
+  rides the BinOp fast-path (no `FunctionDecl`), so `Int:Numeric` won't witness until
+  primitives can join satisfier sets (traits are user-types-only today; see
+  traits.md). (3) cross-module witness — coherence/orphan is the linker's job, not
+  checked in single-module `SortChecker`. (4) the legacy `method Type.+` form isn't
+  accepted as a witness (only the doc-canonical bare `+(T,T)`); fine while that form
+  is on its way out.
+
+---
+
 ## 🎯 Current focus (2026-06-01) — resume the receipt-graph artifact
 
 **Goal-stack** (root → where we drifted): reviewable proof-tree **artifact** ←
@@ -26,6 +110,71 @@ its actual blocker (dispatch inference) already landed. Phase 0 docs committed
 (`cd9b74e`); plan + decisions intact in `docs/dispatch-unification.md`. Resume
 only if artifact work hits real dispatch friction — Phase 2 (methods on the
 receiver sort) is the valuable rung; Phase 1 (operators) is thin post-B1.*
+
+### ✅ Phase 1 (operators) — cross-module operator dispatch LANDED (2026-06-17)
+
+**Problem:** a `+` body using an *imported* type's operators (`tractioncd.ptf`'s
+`TractionCD.+` calls `Traction`'s `*`/`+`) `ClassCast`ed at runtime. Dispatch IS global
+(cross-module *function* calls like `Traction.of` resolve fine); the gap was the
+**parse-time BinOp-vs-Call routing** (`AltParser.tryOperatorOverloadRoute`), which is
+per-file and only sees same-file operator declarations.
+
+**Design (after two false starts — see below):** **parse-time routing stays, and
+`OperatorResolver` CORRECTS it.** Parse routing (`tryOperatorOverloadRoute`) still makes
+the BinOp-vs-Call decision from the left operand's *local* sort — that's load-bearing
+because by the time `MethodResolver` runs, a method call on an operator *result*
+(`(a+b).m()`) and a generic operator body (`a+b` over `[type E]`) both need the operator
+to already be a `Call`. But parse routing is **name-based**: it picks the *local* module's
+overload regardless of operand types. `OperatorResolver` (post-link IR pass in
+`IrCompiler.compile`, after `AliasResolver`+`MethodResolver`) fixes that — for each
+operator `Call` (and any un-routed `BinOp`), it re-resolves the overload **by operand base
+sort** and retargets to the matching one; operands it can't match concretely (a type
+parameter `E`) are left as-is for runtime dispatch.
+
+Why this shape (the two dead ends, both reverted):
+- **"any non-primitive → convert to bare Call"** broke tuples/records/streams (no
+  overload) and emitted bare names the linker never FQN-resolved.
+- **"retire parse routing; OperatorResolver does all routing by overload-match"** broke
+  *generic* operator bodies (`a+b` over `E` has no concrete overload to match → stayed
+  `BinOp` → ClassCast) and *method-on-operator-result* (`(a+b).m()` — `MethodResolver`
+  runs first and can't type a `BinOp` receiver). Hence: keep parse routing, correct after.
+
+**`/`-operator FQN bugs (the slash family).** The division operator's linked name is
+`module//` (module separator `/` + operator `/`), which broke two leading/last-slash
+checks — both now use "first `/` only when a non-empty module prefix precedes it":
+- `OperatorResolver.simpleName` extracted the symbol with `lastIndexOf('/')` → `""` for
+  `module//` (so the `/` overload was never registered) and `indexOf` alone gave `""` for
+  a bare `/`. Fixed: split on first `/`, but only when index > 0.
+- `NameResolver.resolveCallName` (the linker's call-name FQN resolver) treated any name
+  with `indexOf('/') >= 0` as "already an FQN" — so a bare `/` *call* (index 0) was left
+  unresolved as `/` instead of `module//`, and `MethodResolver` then couldn't type a
+  method receiver that was a `/` result (`(a / b).toString()`). Fixed to `> 0`.
+
+**Known limitation (NOT fixed — documented):** a method on the result of an operator that
+is **imported-only** (declared in another module, not the current one) — e.g. module B does
+`(a / b).m()` where `/` lives in module A — fails with "cannot determine the receiver type".
+Parse-time routing only fires for *locally-declared* operators, so the imported operator
+stays a `BinOp`, and `MethodResolver` (before `OperatorResolver`) can't type a `BinOp`
+receiver. `tractioncd` doesn't hit this (its operators are declared locally). The real fix
+is the method/operator ordering (a combined or fixpoint resolve, or routing that consults
+imported operators) — same root as the parked dead-end #2 above.
+
+Tests: `CrossModuleOperatorTest` (two `@TempDir` modules, chained `a*b + b*a`);
+`tractioncd.ptf` (cross-module `Traction` `+`/`-`/`*`/`/`) runs end-to-end. **Caveats:**
+wired only in the **run path** (`IrCompiler.compile`); conservation/receipt **report
+paths** and the `compileModule` pre-resolve don't run it (their ledgers show the
+parse-routed/raw operators — deferred, would churn snapshots). Correction is **exact
+base-name** match (no subtype/promotion widening); most-specific among same-keyed
+overloads stays runtime dispatch's job.
+
+### ✅ By-name struct pattern validates field existence (fixed 2026-06-17)
+
+`[Type(field:Sort)]` (by-name narrowing) now rejects a `field` the declared struct
+doesn't have, with a located error that points to the positional-binder form
+(`parseStructFields`, the COLON branch). This was the *actual* mistake in `tractioncd.ptf`
+(`[TractionCD(n1:Traction, d1:Traction)]` — `n1`/`d1` aren't fields; the author meant the
+positional `[TractionCD(n1, d1)]`); it used to silently build a bogus pattern and surface
+only as an unbound-variable error at the *use*. Tests in `PositionalParamDestructureTest`.
 
 Put every dispatched call on the one shared resolution engine
 (`StaticDispatch` + `Refinements.imply` + most-specific) and delete the ad-hoc
@@ -53,8 +202,10 @@ dispatch landed (FQN keys + `CoherenceCheck`).
   sort-inference hacks).
 
 Open decisions tracked in the doc. **D2 (one namespace?) resolved: no** — two
-mechanisms. **B1 (operator-valued trait contracts) resolved: none** — operators
-are mechanism-1 only. **D5 (fast-path coverage) resolved** by the execution
+mechanisms. **B1 (operator-valued trait contracts) REOPENED → yes** (2026-06-16) —
+a trait may name an operator as a `Dispatch` contract member (a mechanism-1
+*bound*, not a relocation); see the dedicated item below. **D5 (fast-path
+coverage) resolved** by the execution
 model: runtime dispatch is the semantics; static-lower to `BinOp` only when the
 operand's static sort is concrete (built-ins always are). Live seams: **B2**
 (static methods), **B3** (promotions), **D1** (BinOp as lowered form).

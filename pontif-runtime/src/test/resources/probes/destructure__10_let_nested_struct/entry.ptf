@@ -1,0 +1,4 @@
+struct Inner(a:Int, b:Int)
+struct Outer(inner:Inner, c:Int)
+let [Outer(Inner(x, y), c)] = Outer(Inner(1, 2), 3)
+x + y + c

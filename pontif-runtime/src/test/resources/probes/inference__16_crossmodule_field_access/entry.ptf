@@ -1,0 +1,4 @@
+module app.main
+requires geom.vec.{Vec}
+function getx(v:Vec):Int -> v.x
+getx(Vec(7, 9))

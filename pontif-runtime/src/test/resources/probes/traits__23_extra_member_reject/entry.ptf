@@ -1,0 +1,10 @@
+let Heavyish:Type{ weight:[Int:@>0] }
+
+struct Ipsum(name:Int)
+
+assign trait Ipsum:Heavyish {
+  weight:Int -> 1
+  bogus:Int -> 2
+}
+
+42

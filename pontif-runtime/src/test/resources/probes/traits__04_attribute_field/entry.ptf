@@ -1,0 +1,10 @@
+let Heavyish:Type{ ping:[Method():Int], weight:[Int:@>0] }
+
+struct Lorem(weight:[Int:@>0], name:Int)
+
+assign trait Lorem:Heavyish {
+  ping():Int -> 7
+}
+
+let l = Lorem(9, 3)
+l.weight

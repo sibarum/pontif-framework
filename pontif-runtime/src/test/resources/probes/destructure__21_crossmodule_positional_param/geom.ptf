@@ -1,0 +1,3 @@
+module geom.shapes
+exports @.{Vec}
+struct Vec(x:Int, y:Int)

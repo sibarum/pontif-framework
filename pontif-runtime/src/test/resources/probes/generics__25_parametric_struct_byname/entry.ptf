@@ -1,0 +1,2 @@
+struct Box[type T](value:T)
+Box{value=8}.value

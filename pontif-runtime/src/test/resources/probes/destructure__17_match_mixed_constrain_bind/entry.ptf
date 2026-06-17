@@ -1,0 +1,6 @@
+struct P(a:Int, b:Int)
+function f(p:P):Int -> match p {
+  [P([Int:@>0], y)] -> y
+  [_] -> -1
+}
+f(P(5, 3))

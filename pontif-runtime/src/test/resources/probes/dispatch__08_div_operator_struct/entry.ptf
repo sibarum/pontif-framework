@@ -1,0 +1,4 @@
+# `/` overloaded on a struct (Frac-like). The / op is overloadable.
+struct Frac(n:Int, d:Int)
+function /(a:Frac, b:Frac):Frac -> Frac(a.n * b.d, a.d * b.n)
+(Frac(1, 2) / Frac(3, 4)).n

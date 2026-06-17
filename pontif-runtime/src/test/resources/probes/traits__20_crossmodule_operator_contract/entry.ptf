@@ -1,0 +1,6 @@
+module app.main
+
+requires num.vector.{Vector}
+
+let v = Vector(1, 2)
+(v + v).x

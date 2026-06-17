@@ -1,0 +1,9 @@
+let Heavyish:Type{ weight:[Int:@>0] }
+
+struct Lorem(weight:[Int:@>0])
+
+assign trait Lorem:Heavyish {
+  weight:Int -> 9
+}
+
+42

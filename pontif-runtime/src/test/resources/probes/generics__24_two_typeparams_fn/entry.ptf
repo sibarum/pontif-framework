@@ -1,0 +1,3 @@
+struct Pair[type A, type B](fst:A, snd:B)
+function first[type A, type B](p:Pair[A, B]):A -> p.fst
+first(Pair(7, true))

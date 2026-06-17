@@ -1,0 +1,14 @@
+struct N(v:Int)
+method N.ping():Int ->
+  let this.{v}
+  match v {
+    [@<=0] -> 1
+    [@>0]  -> N(v - 1).pong()
+  }
+method N.pong():Int ->
+  let this.{v}
+  match v {
+    [@<=0] -> 0
+    [@>0]  -> N(v - 1).ping()
+  }
+N(4).ping()

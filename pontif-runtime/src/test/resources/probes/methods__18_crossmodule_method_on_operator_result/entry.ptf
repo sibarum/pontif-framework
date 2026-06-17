@@ -1,0 +1,6 @@
+module geom.app
+
+requires geom.vec.{Vec}
+
+function blend(a:Vec, b:Vec):Int -> (a + b).sum()
+blend(Vec(1, 2), Vec(3, 4))

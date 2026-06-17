@@ -1,0 +1,13 @@
+let Expr:Type{
+  simplify:[Method():Expr]
+}
+
+struct Lit(value:Int)
+
+assign trait Lit:Expr {
+  simplify():Expr -> this
+}
+
+let e:Expr = Lit(5)
+let back:Lit = e.simplify()
+back.value

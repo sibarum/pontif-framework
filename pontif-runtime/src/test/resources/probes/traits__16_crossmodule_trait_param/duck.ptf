@@ -1,0 +1,7 @@
+module contracts.duck
+
+exports @.{Duck}
+
+let Duck:Type{
+  quack:[Method():Int]
+}

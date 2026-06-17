@@ -104,6 +104,8 @@ public final class NarrowingInference {
             // Unresolved until MethodResolver; can't narrow its result here.
             case IrExpr.MethodCall ignored -> null;
             case IrExpr.Iterate it -> inferIterate(it, ctx);
+            // A cast's narrowing is its declared target sort — the coercion's result.
+            case IrExpr.Cast cast -> cast.targetSort();
         };
     }
 
@@ -429,20 +431,39 @@ public final class NarrowingInference {
      */
     private static IrSort inferFieldAccess(IrExpr.FieldAccess fa, InferenceContext ctx) {
         IrSort baseNarrowing = infer(fa.base(), ctx);
-        if (!(baseNarrowing instanceof IrSort.Refined refinedBase)) return null;
+        if (baseNarrowing == null) return null;
 
-        IrSort.Structural struct = ctx.structDefs().get(refinedBase.name());
+        // Refined base: project the field-specific refinement conjuncts, so a
+        // narrowing on the whole struct (`[Point:@.x>0]`) flows to the field.
+        if (baseNarrowing instanceof IrSort.Refined refinedBase) {
+            IrSort.Structural struct = ctx.structDefs().get(refinedBase.name());
+            if (struct == null) return null;
+            IrSort fieldDeclared = struct.members().get(fa.fieldName());
+            if (fieldDeclared == null) return null;
+            String fieldBase = baseName(fieldDeclared);
+            if (fieldBase == null) return null;
+
+            List<IrExpr> matched = new ArrayList<>();
+            collectFieldConjuncts(refinedBase.predicate(), fa.fieldName(), matched);
+            // Only cross-field conjuncts (e.g. `@.x + @.y > 0`) — can't decompose
+            // to a field-specific narrowing, so skip conservatively.
+            if (matched.isEmpty()) return null;
+
+            return new IrSort.Refined(fieldBase, conjunctAnd(matched), Origin.NONE);
+        }
+
+        // Plain struct base (a bare Named sort — e.g. a method's `this`, or any
+        // struct-typed value): the field's narrowing is its declared sort. This is
+        // what makes `this.field` fully typed (so `this.field.method()` resolves),
+        // matching SortChecker.inferSort's FieldAccess projection. Projection goes
+        // through the registered struct table by name (the authoritative field
+        // sorts), per the Phase-C contract — an inline Structural without a
+        // structDefs entry still yields null.
+        String baseName = baseName(baseNarrowing);
+        if (baseName == null) return null;
+        IrSort.Structural struct = ctx.structDefs().get(baseName);
         if (struct == null) return null;
-        IrSort fieldDeclared = struct.members().get(fa.fieldName());
-        if (fieldDeclared == null) return null;
-        String fieldBase = baseName(fieldDeclared);
-        if (fieldBase == null) return null;
-
-        List<IrExpr> matched = new ArrayList<>();
-        collectFieldConjuncts(refinedBase.predicate(), fa.fieldName(), matched);
-        if (matched.isEmpty()) return null;
-
-        return new IrSort.Refined(fieldBase, conjunctAnd(matched), Origin.NONE);
+        return struct.members().get(fa.fieldName());
     }
 
     /**
@@ -511,6 +532,9 @@ public final class NarrowingInference {
             // (IrCompiler.compileSymExpr rejects one inside a refinement), so
             // this @-walk never reaches it; disqualify conservatively.
             case IrExpr.Iterate ignored -> false;
+            // Unreachable inside a predicate (casts are forbidden there), but
+            // the cast value can only qualify if it does — recurse.
+            case IrExpr.Cast cast -> selfAccessesAreOnlyField(cast.value(), targetField);
         };
     }
 
@@ -600,6 +624,8 @@ public final class NarrowingInference {
             // refinement predicate (IrCompiler.compileSymExpr forbids it), and
             // these helpers only ever walk predicates — nothing to substitute.
             case IrExpr.Iterate it -> it;
+            case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
+                    substituteFieldAccessWithSelf(cast.value(), targetField), cast.origin());
         };
     }
 
@@ -686,6 +712,8 @@ public final class NarrowingInference {
             // refinement predicate (IrCompiler.compileSymExpr forbids it), and
             // these helpers only ever walk predicates — nothing to substitute.
             case IrExpr.Iterate it -> it;
+            case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
+                    substituteSelfWithFieldAccess(cast.value(), fieldName), cast.origin());
         };
     }
 

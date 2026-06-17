@@ -1,0 +1,3 @@
+struct Temp(c:Int)
+function Temp.of(celsius:Int):Temp -> Temp(celsius)
+Temp.of(25).c

@@ -1,0 +1,5 @@
+# Two overloads whose param refinements OVERLAP and neither implies the other.
+# At registration the coherence/overlap check should reject this (OverloadOverlap).
+function f(n:[Int:@>0]):Int -> 1
+function f(n:[Int:@<10]):Int -> 2
+f(5)

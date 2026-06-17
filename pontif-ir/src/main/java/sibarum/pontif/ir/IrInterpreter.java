@@ -164,6 +164,7 @@ public final class IrInterpreter {
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrInterpreter");
             case IrExpr.Iterate it -> evalIterate(it, env, module);
+            case IrExpr.Cast cast -> evalCast(cast, env, module);
         };
     }
 
@@ -440,11 +441,27 @@ public final class IrInterpreter {
     }
 
     /**
-     * Renders an operand of a String {@code +} to its canonical string form:
-     * a String verbatim, an Int/Decimal/Char/Bool to its display. Decimal uses
-     * plain (non-scientific) notation, matching its literal form.
+     * Renders an operand of a String {@code +} to its canonical string form,
+     * failing closed (as a concat error) when the value has no canonical render.
      */
     private static String renderForConcat(Object v, IrExpr.BinOp op) {
+        String s = renderToStringOrNull(v);
+        if (s == null) {
+            throw new RuntimeCheckException(
+                    "Cannot concatenate " + (v == null ? "null" : v.getClass().getSimpleName())
+                            + " with a String", op.origin());
+        }
+        return s;
+    }
+
+    /**
+     * Canonical string rendering shared by String {@code +} concatenation and
+     * the {@code (String:value)} cast: a String verbatim, an Int/Decimal/Char/
+     * Bool to its display. Decimal uses plain (non-scientific) notation,
+     * matching its literal form. Returns {@code null} for a value with no
+     * canonical render, so each caller can fail closed with its own message.
+     */
+    private static String renderToStringOrNull(Object v) {
         if (v instanceof sibarum.pontif.core.types.StringValue s) return s.content();
         if (v instanceof Long n) return Long.toString(n);
         if (v instanceof java.math.BigDecimal d) return d.toPlainString();
@@ -452,9 +469,41 @@ public final class IrInterpreter {
             return new String(Character.toChars(c.codePoint()));
         }
         if (v instanceof Boolean b) return b.toString();
+        return null;
+    }
+
+    /**
+     * Evaluates a cast {@code (Type:value)} — explicit coercion. Slice 1
+     * supports only the built-in renders to {@code String}
+     * (Int/Decimal/Char/Bool/String → String); every other target fails closed,
+     * honoring the cast law's <em>fabricate-never</em> promise (we never invent
+     * a value for a coercion we cannot perform). User-defined {@code Type → Type}
+     * coercions and refinement-target casts are later slices.
+     */
+    private Object evalCast(IrExpr.Cast cast, Environment env, CompiledModule module) {
+        Object value = eval(cast.value(), env, module);
+        String targetBase = castTargetBaseName(cast.targetSort());
+        if ("String".equals(targetBase)) {
+            String rendered = renderToStringOrNull(value);
+            if (rendered == null) {
+                throw new RuntimeCheckException(
+                        "Cannot cast "
+                                + (value == null ? "null" : value.getClass().getSimpleName())
+                                + " to String — only Int, Decimal, Char, Bool and String render",
+                        cast.origin());
+            }
+            return new sibarum.pontif.core.types.StringValue(rendered);
+        }
         throw new RuntimeCheckException(
-                "Cannot concatenate " + (v == null ? "null" : v.getClass().getSimpleName())
-                        + " with a String", op.origin());
+                "Cast to '" + (targetBase == null ? cast.targetSort() : targetBase)
+                        + "' is not supported yet — this slice provides the built-in "
+                        + "renders to String (e.g. (String:12)); user-defined coercions "
+                        + "are a later slice", cast.origin());
+    }
+
+    /** Base (head) name of a cast's target sort, or null for a refinement/structural target. */
+    private static String castTargetBaseName(IrSort sort) {
+        return sort instanceof IrSort.Named n ? n.name() : null;
     }
 
     /** Lexicographic by Unicode code point (not UTF-16 char) — see Cmp. */

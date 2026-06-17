@@ -1,0 +1,6 @@
+# An operator body that calls another operator on the same type (the - via +/neg shape).
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+method Vec.neg():Vec -> Vec(0 - this.x, 0 - this.y)
+function -(a:Vec, b:Vec):Vec -> a + b.neg()
+(Vec(5, 7) - Vec(2, 3)).x

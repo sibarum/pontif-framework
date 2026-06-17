@@ -1,0 +1,5 @@
+struct A(b:B)
+struct B(c:C)
+struct C(v:Int)
+method A.deep():Int -> this.b.c.v
+A(B(C(99))).deep()

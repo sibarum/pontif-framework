@@ -1,0 +1,4 @@
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+method Vec.sum():Int -> this.x + this.y
+(Vec(1, 2) + Vec(3, 4)).sum()

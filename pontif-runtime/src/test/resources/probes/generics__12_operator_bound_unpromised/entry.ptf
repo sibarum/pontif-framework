@@ -1,0 +1,7 @@
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+function -(a:Vec, b:Vec):Vec -> Vec(a.x - b.x, a.y - b.y)
+assign trait Vec:Numeric { }
+function diff[type E:Numeric](a:E, b:E):E -> a - b
+diff(Vec(5, 6), Vec(3, 4)).x

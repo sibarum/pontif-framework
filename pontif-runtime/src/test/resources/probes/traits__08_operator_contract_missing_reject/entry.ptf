@@ -1,0 +1,7 @@
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+
+struct Vector(x:Int, y:Int)
+
+assign trait Vector:Numeric { }
+
+0

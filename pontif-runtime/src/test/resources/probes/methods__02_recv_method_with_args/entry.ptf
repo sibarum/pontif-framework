@@ -1,0 +1,3 @@
+struct Point(x:Int, y:Int)
+method Point.shifted(dx:Int, dy:Int):Point -> Point(this.x + dx, this.y + dy)
+Point(1, 2).shifted(10, 20).x

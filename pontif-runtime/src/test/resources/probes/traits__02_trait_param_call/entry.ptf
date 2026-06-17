@@ -1,0 +1,13 @@
+let Duck:Type{
+  quack:[Method():Int]
+}
+
+struct Point(x:Int, y:Int)
+
+assign trait Point:Duck {
+  quack():Int -> this.x + this.y
+}
+
+function describe(d:Duck):Int -> d.quack()
+
+describe(Point(3, 4))

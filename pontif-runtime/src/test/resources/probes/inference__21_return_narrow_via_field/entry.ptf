@@ -1,0 +1,3 @@
+struct Holder(n:[Int:@>0])
+function get(h:Holder):[Int:@>0] -> h.n
+get(Holder(5))

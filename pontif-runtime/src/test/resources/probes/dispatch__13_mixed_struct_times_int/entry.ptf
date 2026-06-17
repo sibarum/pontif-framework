@@ -1,0 +1,5 @@
+# Mixed-type operator: struct on the LEFT, Int on the right.
+# Parser routes on left's sort (Vec), so this can resolve to a *(Vec, Int) overload.
+struct Vec(x:Int, y:Int)
+function *(a:Vec, k:Int):Vec -> Vec(a.x * k, a.y * k)
+(Vec(2, 3) * 4).y

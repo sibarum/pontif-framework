@@ -851,11 +851,66 @@ public final class AltParser {
                 }
             } else {
                 sort = parseSort();
+                // Positional param destructure: `tcd:[TractionCD(n, d)]` binds the
+                // fields by position in the body (parity with the `.{}` form and
+                // with match patterns). Only a PURE-BINDER pattern over a declared
+                // struct is wired — a tuple/record type (`[(Int, Int)]`), a
+                // field-sort narrowing (`[Point(x:[Int:@>0])]`), or a nested
+                // pattern is left as an ordinary sort (destructure those with
+                // `match` in the body).
+                if (sort instanceof IrSort.Structural sp) {
+                    IrSort.Structural decl = patternShapeFor(sp.name());
+                    if (decl != null && isPureBinderParamPattern(sp, decl)) {
+                        sort = wirePositionalParamDestructure(name, sp, decl);
+                    }
+                }
             }
             params.add(new IrParam(name.text(), sort));
             first = false;
         }
         return params;
+    }
+
+    /**
+     * True iff {@code sp} (a Structural param sort over the declared struct
+     * {@code decl}) is a <em>pure-binder</em> positional destructure — every
+     * clause is a bare binder (positional or field-named), no field constraint
+     * and no nesting. Detected by reference-identity: the parser reuses the
+     * DECLARED field-sort object for a bare binder, but builds a fresh sort for a
+     * by-name narrowing (`x:[Int:@>0]`) — so a member that <em>is</em> the
+     * declared sort is a binder, and anything else is a narrowing/type. Tuples,
+     * records, narrowing types, and nested patterns are therefore NOT pure-binder
+     * (destructure those with {@code match} in the body).
+     */
+    private boolean isPureBinderParamPattern(IrSort.Structural sp, IrSort.Structural decl) {
+        if (!literalConstrainedFields.getOrDefault(sp, java.util.Set.of()).isEmpty()) {
+            return false;
+        }
+        for (Map.Entry<String, IrSort> m : sp.members().entrySet()) {
+            IrSort declared = decl.members().get(m.getKey());
+            if (declared == null || m.getValue() != declared) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Wires a pure-binder positional param destructure {@code p:[Type(a, b)]}:
+     * emits a {@link ParamDestructure} per field so the body sees
+     * {@code let a = p.field} (reusing the {@code .{}} machinery), and returns the
+     * param's reduced type {@code [Type]}. Caller guarantees pure-binder via
+     * {@link #isPureBinderParamPattern}.
+     */
+    private IrSort wirePositionalParamDestructure(
+            AltToken paramName, IrSort.Structural sp, IrSort.Structural decl) {
+        Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
+        for (Map.Entry<String, IrSort> m : sp.members().entrySet()) {
+            String binder = renames.getOrDefault(m.getKey(), m.getKey());
+            pendingParamDestructures.add(new ParamDestructure(
+                    binder, paramName.text(), m.getKey(), m.getValue()));
+        }
+        return new IrSort.Named(sp.name(), paramName.origin());
     }
 
     private static String paramSig(List<IrParam> params) {
@@ -1036,6 +1091,7 @@ public final class AltParser {
                     || it.outputs().stream().anyMatch(o -> o.init() != null && containsSelfRef(o.init()))
                     || it.arms().stream().anyMatch(a -> a.writes().stream().anyMatch(
                             w -> containsSelfRef(w.value()) || (w.key() != null && containsSelfRef(w.key()))));
+            case IrExpr.Cast cast -> containsSelfRef(cast.value());
         };
     }
 
@@ -1132,7 +1188,7 @@ public final class AltParser {
             declaredTraits.add(name);
             IrSort.Trait named = new IrSort.Trait(
                     name, t.methods(), t.attributes(), t.associatedTypes(),
-                    traitTypeParams, t.origin());
+                    traitTypeParams, t.operators(), t.origin());
             for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
                 declaredFunctionReturns.put(
                         name + "." + e.getKey(), e.getValue().returnSort());
@@ -1499,6 +1555,9 @@ public final class AltParser {
             case IrExpr.Match m -> IrSort.named("_");
             case IrExpr.LetIn l -> inferMaximalSort(l.body());
             case IrExpr.SelfRef s -> IrSort.named("_");
+            // A cast's maximal shape is its declared target sort — the coercion
+            // names exactly what it produces.
+            case IrExpr.Cast cast -> cast.targetSort();
         };
     }
 
@@ -1882,6 +1941,38 @@ public final class AltParser {
     // `[Int:0|1]` ≡ `[Int:@==0 | @==1]`, but `[Int:@>0]` and
     // `[Int:@>0 & @<10]` stay untouched.
 
+    /**
+     * Speculatively reads a cast target — a sort immediately followed by `:` —
+     * from inside an opening `(` (the cursor sits just past the LPAREN). On a
+     * match it consumes the sort and the `:` and returns the sort; otherwise it
+     * restores the cursor and returns {@code null} so the caller parses the
+     * parens as an ordinary grouping/tuple. Gated by the capitalization law: a
+     * cast target is a `[…]` refinement or a Capitalized type name, never a
+     * lowercase binder name — this keeps `(x : …)` from ever reading as a cast.
+     */
+    private IrSort tryParseCastTarget() {
+        AltToken t = peek();
+        boolean plausible = t.kind() == AltToken.Kind.LBRACKET
+                || (t.kind() == AltToken.Kind.IDENT
+                        && !t.text().isEmpty()
+                        && Character.isUpperCase(t.text().charAt(0)));
+        if (!plausible) {
+            return null;
+        }
+        int save = pos;
+        try {
+            IrSort sort = parseSort();
+            if (peek().kind() == AltToken.Kind.COLON) {
+                consume();   // the cast colon
+                return sort;
+            }
+        } catch (ParseException e) {
+            // Not a sort after all — fall through to grouping.
+        }
+        pos = save;
+        return null;
+    }
+
     public IrSort parseSort() throws ParseException {
         AltToken t = peek();
         if (t.kind() == AltToken.Kind.LBRACKET) {
@@ -2050,9 +2141,45 @@ public final class AltParser {
         // Associated types — member name → bound (null = unbounded `type X`; a
         // sort = the bound `type X:R`). LinkedHashMap permits the null value.
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
+        // Operator contract members — `+:[Dispatch(this.type, this.type):this.type]`
+        // (dispatch-unification B1). Keyed by the operator symbol.
+        Map<String, IrSort.Dispatch> operators = new LinkedHashMap<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
+            // An OPERATOR member key — `+:[Dispatch(this.type, this.type):this.type]`.
+            // The key is an operator symbol (not an identifier); the sort must be a
+            // homogeneous self-typed Dispatch (the v1 bound). This is a mechanism-1
+            // bound the compiler verifies at `assign trait`, not a hosted method.
+            if (peek().kind() == AltToken.Kind.OP) {
+                AltToken opTok = consume();
+                if (!OVERLOADABLE_OPS.contains(opTok.text())) {
+                    throw new ParseException(
+                            "'" + opTok.text() + "' is not an overloadable operator, so it "
+                                    + "cannot be a trait contract member", opTok.origin());
+                }
+                expect(AltToken.Kind.COLON);
+                IrSort opSort = parseSort();
+                if (!(opSort instanceof IrSort.Dispatch dispatch)) {
+                    throw new ParseException(
+                            "Operator contract member '" + opTok.text() + "' must be a "
+                                    + "[Dispatch(...)] sort (e.g. "
+                                    + "[Dispatch(this.type, this.type):this.type]); operators "
+                                    + "are mechanism-1 bounds, never methods", opTok.origin());
+                }
+                requireHomogeneousSelfOperatorContract(opTok, dispatch);
+                if (methods.containsKey(opTok.text())
+                        || attributes.containsKey(opTok.text())
+                        || associatedTypes.containsKey(opTok.text())
+                        || operators.containsKey(opTok.text())) {
+                    throw new ParseException(
+                            "Duplicate member '" + opTok.text() + "' in trait body",
+                            opTok.origin());
+                }
+                operators.put(opTok.text(), dispatch);
+                first = false;
+                continue;
+            }
             // `type X` / `type X:Bound` — an associated type declared with the
             // `type` declarator (a type-level member, not a value member).
             if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("type")) {
@@ -2060,7 +2187,8 @@ public final class AltParser {
                 AltToken varName = expect(AltToken.Kind.IDENT);
                 if (methods.containsKey(varName.text())
                         || attributes.containsKey(varName.text())
-                        || associatedTypes.containsKey(varName.text())) {
+                        || associatedTypes.containsKey(varName.text())
+                        || operators.containsKey(varName.text())) {
                     throw new ParseException(
                             "Duplicate member '" + varName.text() + "' in trait body",
                             varName.origin());
@@ -2079,7 +2207,8 @@ public final class AltParser {
             IrSort memberSort = parseSort();
             if (methods.containsKey(memberName.text())
                     || attributes.containsKey(memberName.text())
-                    || associatedTypes.containsKey(memberName.text())) {
+                    || associatedTypes.containsKey(memberName.text())
+                    || operators.containsKey(memberName.text())) {
                 throw new ParseException(
                         "Duplicate member '" + memberName.text() + "' in trait body",
                         memberName.origin());
@@ -2097,7 +2226,34 @@ public final class AltParser {
         AltToken close = expect(AltToken.Kind.RBRACE);
         // Placeholder name; parseLet patches it with the binding's name.
         return new IrSort.Trait(
-                "_pending", methods, attributes, associatedTypes, typeTok.spanTo(close));
+                "_pending", methods, attributes, associatedTypes, Map.of(), operators,
+                typeTok.spanTo(close));
+    }
+
+    /**
+     * Enforces the v1 scope for an operator contract member: a <b>homogeneous,
+     * self-typed</b> binary dispatch — {@code (this.type, this.type):this.type}.
+     * Mixed-operand / promotion contracts (e.g. {@code (this.type, Int)}) are a
+     * later slice; until then they fail here with a clear error rather than being
+     * silently stored and ignored (no verifier consumes them yet).
+     */
+    private void requireHomogeneousSelfOperatorContract(AltToken opTok, IrSort.Dispatch d)
+            throws ParseException {
+        boolean homogeneous = d.keySorts().size() == 2
+                && isSelfType(d.keySorts().get(0))
+                && isSelfType(d.keySorts().get(1))
+                && isSelfType(d.returnSort());
+        if (!homogeneous) {
+            throw new ParseException(
+                    "Operator contract member '" + opTok.text() + "' must be homogeneous over "
+                            + "the self type — [Dispatch(this.type, this.type):this.type]. "
+                            + "Mixed-operand or promotion contracts are not supported yet.",
+                    opTok.origin());
+        }
+    }
+
+    private static boolean isSelfType(IrSort sort) {
+        return sort instanceof IrSort.Named n && n.name().equals(IrSort.SELF_TYPE);
     }
 
     private IrSort parseBracketSort() throws ParseException {
@@ -2661,6 +2817,20 @@ public final class AltParser {
             if (peek().kind() == AltToken.Kind.COLON) {
                 consume();  // COLON
                 fieldSort = parseSort();
+                // By-name narrowing `field:Sort` must name a REAL field of the
+                // declared struct — otherwise it's silently a bogus member that
+                // binds nothing (and the body's references go unbound). A positional
+                // binder is the bare-ident form `[Type(name)]` (no `:Sort`).
+                IrSort.Structural decl = patternShapeFor(typeName);
+                if (decl != null && !decl.members().containsKey(fieldName.text())) {
+                    throw new ParseException(
+                            "Pattern [" + typeName + "(...)] narrows field '" + fieldName.text()
+                                    + "' by name, but '" + typeName + "' has no such field "
+                                    + "(declared: " + decl.members().keySet() + "). For a "
+                                    + "positional binder, drop the sort: [" + typeName + "("
+                                    + fieldName.text() + ", …)].",
+                            fieldName.origin());
+                }
             } else {
                 // Bare ident — look up declared field sort.
                 IrSort.Structural decl = patternShapeFor(typeName);
@@ -2763,16 +2933,15 @@ public final class AltParser {
             if (prec < minPrec) break;
             consume();
             IrExpr right = parseExpr(prec + 1);  // left-associative
-            // Operator-overload routing: if the left operand's inferred sort
-            // has a Type.{op} method declared, emit a Call to it instead of a
-            // primitive BinOp. The primitive path stays unchanged for Int/Bool
-            // operands; refinement predicates are unaffected because SelfRef
-            // and field-accesses-through-SelfRef yield the "_" placeholder
-            // sort which the routing skips.
+            // Parse-time routing decides BinOp-vs-Call from the left operand's
+            // local sort (so method-on-operator-result and generic-operand cases,
+            // which need a Call by the time MethodResolver runs, keep working).
+            // It is name-based and can pick the wrong overload across modules
+            // (`n1*d2` over an imported type → the local operator); OperatorResolver
+            // CORRECTS that post-link, re-resolving operator calls by operand sort.
             String overload = tryOperatorOverloadRoute(left, t.text());
             if (overload != null) {
-                left = new IrExpr.Call(
-                        overload, List.of(left, right), t.origin());
+                left = new IrExpr.Call(overload, List.of(left, right), t.origin());
             } else {
                 left = new IrExpr.BinOp(opKind(t.text()), left, right, t.origin());
             }
@@ -3239,6 +3408,26 @@ public final class AltParser {
      * Structural member recurses; a literal-/{@code _}-constrained field binds
      * nothing; everything else is a leaf binder.
      */
+    /**
+     * Seeds a structural pattern's leaf binders into {@link #currentScope} for
+     * the duration of an arm-body parse — so they're recognized as value
+     * receivers (the only effect that matters at parse time). The binder's sort
+     * is best-effort ({@code "_"} when the pattern leaves it as the placeholder);
+     * the real field sort flows post-parse through the destructure desugar's
+     * {@code let binder = scrutinee.field} and {@code MethodResolver}. A non-
+     * structural pattern (a refinement, {@code [_]}) binds nothing.
+     */
+    private void seedPatternBinders(IrSort pattern) {
+        if (!(pattern instanceof IrSort.Structural sp)) {
+            return;
+        }
+        List<Map.Entry<String, IrSort>> binders = new ArrayList<>();
+        collectPatternBinders(sp, binders);
+        for (Map.Entry<String, IrSort> b : binders) {
+            currentScope.put(b.getKey(), b.getValue() == null ? IrSort.named("_") : b.getValue());
+        }
+    }
+
     private void collectPatternBinders(
             IrSort.Structural sp, List<Map.Entry<String, IrSort>> out) {
         java.util.Set<String> constrainedOnly =
@@ -3375,7 +3564,20 @@ public final class AltParser {
                 } else {
                     IrSort pattern = parsePattern();
                     expect(AltToken.Kind.ARROW);
-                    IrExpr result = parseExpr();
+                    // The pattern's leaf binders are in scope for the arm body —
+                    // seed them so a binder used as a method receiver reads as a
+                    // value (`n.toString()` is a call on `n`, not the qualified
+                    // name `n.toString`; see isValueReceiver). Saved/restored per
+                    // arm so binders don't leak across arms or past the match.
+                    Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+                    seedPatternBinders(pattern);
+                    IrExpr result;
+                    try {
+                        result = parseExpr();
+                    } finally {
+                        currentScope.clear();
+                        currentScope.putAll(savedScope);
+                    }
                     // `[_]` parses as the universal Named("_") — the bracketed
                     // spelling of the default arm. Treat it exactly like bare `_`
                     // so its region becomes the computed complement of the other
@@ -3981,6 +4183,22 @@ public final class AltParser {
             }
             case LPAREN -> {
                 AltToken lp = consume();
+                // Value-space cast `(Type:value)` — explicit coercion, the
+                // sibling of the type-space refinement `[Base:pred]`
+                // (docs/dispatch-unification.md → "Coercion"). A complete sort
+                // immediately followed by `:` is unambiguously a cast: in
+                // expression position there is no binder `(name:Type)` (that
+                // lives in declaration slots) and `:` is not an expression
+                // operator, so nothing else can produce a top-level colon here.
+                // The capitalization law fixes the reading before scope matters
+                // — the target is a Type (`[…]` refinement or a Capitalized
+                // name), never a lowercase binder name.
+                IrSort castTarget = tryParseCastTarget();
+                if (castTarget != null) {
+                    IrExpr value = parseExpr();
+                    AltToken close = expect(AltToken.Kind.RPAREN);
+                    yield new IrExpr.Cast(castTarget, value, lp.spanTo(close));
+                }
                 IrExpr inner = parseExpr();
                 if (peek().kind() == AltToken.Kind.COMMA) {
                     // Tuple literal: (e0, e1, ...) — an anonymous positional

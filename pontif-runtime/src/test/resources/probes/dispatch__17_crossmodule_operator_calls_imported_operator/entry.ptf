@@ -1,0 +1,19 @@
+module app.cd
+
+requires num.inner.{Inner}
+
+# The tractioncd shape: a struct over an imported type, whose operator body
+# uses operators (* and +) defined on the IMPORTED Inner type.
+struct CD(n:Inner, d:Inner)
+
+function +(
+    cd1:[CD(n1, d1)],
+    cd2:[CD(n2, d2)]
+  ):CD ->
+    CD(
+      n1 * d2 + n2 * d1,
+      d1 * d2
+    )
+
+let r = CD(Inner(1), Inner(2)) + CD(Inner(3), Inner(4))
+r.n.v

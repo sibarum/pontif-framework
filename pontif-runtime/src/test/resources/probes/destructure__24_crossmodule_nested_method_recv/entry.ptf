@@ -1,0 +1,6 @@
+module app.main
+requires geom.shapes.{Inner, Outer}
+function f(o:Outer):Int -> match o {
+  [Outer(Inner(x, y), c)] -> x + y + c
+}
+f(Outer(Inner(2, 3), 4))

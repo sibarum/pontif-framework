@@ -1,0 +1,8 @@
+struct Countdown(n:Int)
+method Countdown.toZero():Int ->
+  let this.{n}
+  match n {
+    [@<=0] -> n
+    [@>0]  -> Countdown(n - 1).toZero()
+  }
+Countdown(7).toZero()

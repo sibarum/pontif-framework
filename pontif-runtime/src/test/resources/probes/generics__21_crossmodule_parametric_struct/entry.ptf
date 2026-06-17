@@ -1,0 +1,6 @@
+module gen.user
+
+requires gen.boxmod.{Box}
+
+function unbox[type E](b:Box[E]):E -> b.value
+unbox(Box(7))

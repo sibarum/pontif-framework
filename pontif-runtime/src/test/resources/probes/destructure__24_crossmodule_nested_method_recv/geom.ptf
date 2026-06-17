@@ -1,0 +1,5 @@
+module geom.shapes
+exports @.{Inner, Outer}
+struct Inner(x:Int, y:Int)
+struct Outer(inner:Inner, c:Int)
+method Inner.sum():Int -> this.x + this.y

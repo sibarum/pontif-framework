@@ -1,0 +1,6 @@
+# Two incomparable two-arg overloads; neither dominates. g(5,5) matches both
+# with neither strictly more specific -> ambiguous (runtime) or rejected at
+# registration (compile). A correct language must NOT silently pick one.
+function g(a:[Int:@>0], b:Int):Int -> 1
+function g(a:Int, b:[Int:@>0]):Int -> 2
+g(5, 5)

@@ -1,0 +1,2 @@
+struct Pair[type T](a:T, b:T)
+Pair(1, true)

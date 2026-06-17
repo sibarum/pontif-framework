@@ -39,6 +39,14 @@ public final class IrCompiler {
         // mutual recursion all work.
         resolved = MethodResolver.resolve(resolved);
 
+        // Route binary operators to their dispatch overload by operand sort, now
+        // that the module is linked (a per-file parser can't see cross-module
+        // operators). Resolves to the overload's exact post-link name, or leaves
+        // the BinOp when no overload matches (primitives, tuples). After
+        // AliasResolver (so refinement aliases resolve to their base) and
+        // MethodResolver (so receiver-method results are Calls). See OperatorResolver.
+        resolved = OperatorResolver.resolve(resolved);
+
         // Stamp anonymous aggregate literals with the struct name the context
         // asserts (let annotations, struct-typed params, return positions) —
         // checked construction with the redundant name elided. Runs BEFORE
@@ -274,6 +282,10 @@ public final class IrCompiler {
                     }
                 }
             }
+            case IrExpr.Cast cast -> {
+                registerSort(cast.targetSort(), map);
+                registerSortsInExpr(cast.value(), map);
+            }
         }
     }
 
@@ -381,6 +393,10 @@ public final class IrCompiler {
             // only, never the well-formed fold (docs/iteration.md §5).
             case IrExpr.Iterate it -> throw new CompileException(
                     "Iteration inside refinement predicates is not supported", it.origin());
+            // A cast is a runtime coercion value, not a predicate term — the
+            // linear refinement kernel has no encoding for it.
+            case IrExpr.Cast cast -> throw new CompileException(
+                    "Casts inside refinement predicates are not supported", cast.origin());
         };
     }
 

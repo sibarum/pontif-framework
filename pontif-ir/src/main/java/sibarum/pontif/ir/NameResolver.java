@@ -203,9 +203,11 @@ public final class NameResolver {
                     assoc.put(e.getKey(),
                             e.getValue() == null ? null : rewriteSort(e.getValue(), m, table));
                 }
+                // Operator contract members are self-typed Dispatch sorts — no
+                // type names to FQN-resolve — so carry them through verbatim.
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
-                        t.typeParams(), t.origin());
+                        t.typeParams(), t.operators(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());
@@ -222,7 +224,10 @@ public final class NameResolver {
 
     /** Resolve a call name to its FQN per the rules in the class doc. */
     static String resolveCallName(String n, String m, ModuleSymbolTable table) {
-        if (n.indexOf('/') >= 0) return n;  // already an FQN
+        // Already an FQN iff a non-empty module prefix precedes the '/'. A name
+        // that *starts* with '/' is the bare division operator (slash at index 0),
+        // not an FQN — it still needs resolving to `module//`.
+        if (n.indexOf('/') > 0) return n;
         if (table.moduleDeclaresFunction(m, n)) return ModuleSymbolTable.fqn(m, n);
         ModuleSymbolTable.ImportedName imported = table.importedName(m, n);
         // The FQN uses the DECLARING ORIGIN — the symbol as the module that
@@ -336,6 +341,10 @@ public final class NameResolver {
                 yield new IrExpr.Iterate(
                         rewrite(it.source(), m, table), it.element(), outs, arms, it.origin());
             }
+            // The cast's target sort names a type — FQN-resolve it like any sort.
+            case IrExpr.Cast cast -> new IrExpr.Cast(
+                    rewriteSort(cast.targetSort(), m, table),
+                    rewrite(cast.value(), m, table), cast.origin());
         };
     }
 }

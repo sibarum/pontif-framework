@@ -1,0 +1,5 @@
+module geom.shapes
+exports @.{Box, Mid, Inner}
+struct Inner(v:Int)
+struct Mid(inner:Inner)
+struct Box(mid:Mid)

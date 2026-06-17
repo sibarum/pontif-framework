@@ -1,0 +1,13 @@
+module geo.shapes
+
+exports @.{Point, Duck}
+
+let Duck:Type{
+  quack:[Method():Int]
+}
+
+struct Point(x:Int, y:Int)
+
+assign trait Point:Duck {
+  quack():Int -> this.x + this.y
+}

@@ -63,13 +63,19 @@ governance**:
   (`+(Vector,Vector)`, `<(Int,Int)`, …).
 - **Promotion-capable.** This is the home of any numeric-tower / coercion
   behavior (scope TBD — see B3).
-- **Operators live here, not as methods — and never as trait contracts.**
+- **Operators live here, not as methods — but a trait may *require* one.**
   Built-in `Int`/`Bool` arithmetic registers as built-in overloads of the
   operator names; a user type's `+` is a mechanism-1 overload `+(Vector, Vector)`,
-  **not** a `Vector.+` method and **not** a member of any trait. `a + b` resolves
-  by dispatch over the operand sorts — built-ins and user definitions uniformly.
-  Operator behavior is *only* ever extended by adding a mechanism-1 overload;
-  there is no operator-valued trait contract (no `Addable` with a `+` member).
+  **not** a `Vector.+` method. `a + b` resolves by dispatch over the operand sorts
+  — built-ins and user definitions uniformly — and operator *behavior* is extended
+  only by adding a mechanism-1 overload. What a trait may now do is **name an
+  operator as a `Dispatch` contract member**
+  (`+:[Dispatch(this.type, this.type):this.type]`). That is a compile-time
+  **bound** — it witnesses that the mechanism-1 overload exists (and is coherent)
+  for the satisfying type — **not** a relocation of the operator into mechanism 2
+  and **not** a `Vector.+` method. The operator still lives and resolves in
+  mechanism 1; the trait only proves it is there, so a `[type E:Trait]` parameter
+  can carry that proof into generic code (see B1, reopened).
 
 ### Mechanism 2 — methods / static methods / traits / inheritance (localized + rigid)
 
@@ -179,6 +185,77 @@ Each phase ships independently with the full suite green.
   method branch of `extractDottedName`). The parser emits uniform nodes; there is
   one resolution pass, post-parse, that routes each node into its mechanism.
 
+## Coercion: explicit casts as Pontif's answer to promotion
+
+*Surface + direction RULED (James, 2026-06-16). The custom-coercion mechanism
+itself follows when a consumer needs it — we do not build ahead of need.*
+
+Pontif's response to Julia-style numeric promotion is **explicit coercion**, not
+implicit promotion. Julia's `promote_rule`/`convert` is *implicit*, which forces
+it to be both **complete** (a missing pair surfaces as an error deep in generic
+code, so you reactively fill an N² matrix) and **unambiguous** (two
+equally-specific paths are a hard error). Explicit coercion deletes both
+obligations at once: nothing is searched, so nothing is incomplete; the target is
+named, so nothing is ambiguous. You define only the coercions you use, where you
+use them.
+
+**The split (principled, not a compromise):** implicit coercion is kept ONLY for
+the *closed* primitive set — e.g. `Int → Decimal`, a lossless in-domain embedding
+the user can neither extend nor shadow. The combinatorial blow-up exists only in
+the *open* (user-extensible) world; confining implicitness to the closed set draws
+the line exactly where it stays tractable. Everything else is explicit.
+
+**Surface — a cast is a value, written in value-space (RULED):**
+
+```
+(Type:value)        # the value-space cast — produce a Type from value
+(Stream[Int]:xs)    # a parametric target needs no extra brackets
+([Int:@>0]:n)       # a refinement target wears its own [..] — the ([]) crossing
+```
+
+The direction is **general → specific**, type-on-the-left — identical to the
+type-space refinement `[Base:pred]` and the in-type pipeline
+`[… -> Base:@==witness]`. The cast is the value-space **sibling** of a refinement,
+not a refinement itself: `[Base:pred]` is a *type* (square, type-space);
+`(Type:value)` is a *value* (paren, value-space) — the same colon ("specialize the
+general kind to this specific value") on the two sides of the type/value line.
+This is exactly the `([…])` crossing the bracket/paren law reserved (`[]` = types,
+`()` = values).
+
+**Why it lives here — it is dispatch.** A cast resolves a coercion by
+`(source sort → target sort)`; that is the one shared resolution engine, governed
+by the same coherence/orphan rule (no two coercions for the same pair) as every
+other dispatched call. Custom `Type → Type` coercion functions — the user-defined
+conversions that replace Julia's `convert`, and the actual response to the
+promotion use-case — register and resolve the same way. They are the planned
+consumer, deferred until needed.
+
+**Unambiguous against the binder form (RULED):** `(name:Type)` (binder position —
+a fresh name annotated by a type, specific→general) and `(Type:value)` (expression
+position — a value, general→specific) never share a position, so the reading is
+fixed before scope matters; reinforced by the capitalization law
+(`Capitalized:lowercase` for a cast vs `lowercase:Capitalized` for a binder).
+There is no `(…) ->` lambda to collide with — lambdas are retired; the matcher is
+`[…] -> …`.
+
+**Open:**
+
+- **Does the cast law govern user coercions, or are they trusted functions?**
+  `(Type:value)` promises *fabricate-never*; a built-in render honors it, but an
+  arbitrary user `S → T` coercion can fabricate. Either it is checked (hard for
+  arbitrary code) or trusted like any function (Julia's stance). Rule it when the
+  custom-coercion mechanism lands.
+- **Resolution precedence when several laws apply** through the same `(T:…)` skin
+  (subtype demotion vs. a custom coercion vs. trait coercion) — must be total.
+- **Generic-code tradeoff:** implicit promotion buys mixed-type generic code for
+  free; explicit pushes that to the call site or to type constraints. Acceptable
+  for Pontif (narrowing covers much of it), but a deliberate choice.
+
+This **reframes B3**: operator promotion stays implicit *but primitive-only*
+(mechanism 1, the closed tower); boundary coercion at assignment/argument/return
+is explicit via `(Type:value)`. The two axes are distinct — which is exactly what
+lets both coexist without contradiction.
+
 ## Open design decisions (resolved as we reach each phase)
 
 - **D1 (Phase 1) — keep `BinOp` as the lowered form of a resolved built-in
@@ -194,20 +271,32 @@ Each phase ships independently with the full suite green.
   same-name method/free-function collisions that the current `Type.`-prefixed
   keys avoid (`OverloadOverlap.collectOverloads` already pools `TraitImpl` methods
   with same-name free functions; only the prefix keeps them apart today).
-- **B1 — operator-valued trait contracts. RESOLVED: there are none.** Operators
-  never resolve via traits; they resolve via mechanism-1 global dispatch, full
-  stop (James, 2026-06-01). So `Int : Addable` with a `+` contract is not a thing
-  — operator behavior is extended only by adding a mechanism-1 overload. This
-  removes the only operator-flavored motivation for **primitives as trait
-  implementors**: that item is now purely about whether a built-in type may
-  satisfy a *named-method* trait (mechanism 2), independent of the operator work
-  — and with `Addable`-style numeric traits off the table, its main use case is
-  gone (see TODO note).
+- **B1 — operator-valued trait contracts. REOPENED → YES (James, 2026-06-16,
+  superseding the 2026-06-01 "none").** A trait *may* carry a `Dispatch` contract
+  member naming an operator (`+:[Dispatch(this.type, this.type):this.type]`).
+  Operators still **resolve** only via mechanism-1 global dispatch — this does not
+  move them into mechanism 2. The trait member is a **bound**: at
+  `assign trait T:Trait` the compiler verifies the required mechanism-1 overload
+  exists (and is coherent) for `T`, and a `[type E:Trait]` parameter then carries
+  that proof into generic code — so operator use over an abstract type is
+  **decidable at definition time** instead of failing at a runtime dispatch miss.
+  *Rationale for the reversal:* leaving operator satisfiability undecidable until
+  runtime contradicts the provably-correct stance the rest of the system pays for;
+  a trait is the right place to make it a compile-time obligation. **Opt-in** —
+  unbounded operator use still resolves Julia-style at the call, preserving
+  mechanism-1 openness; the trait is the *optional* compile-time proof. **v1
+  scope:** homogeneous `(this.type, this.type):this.type` only; arbitrary operand
+  sorts (mixed / promotion contracts) deferred, and must fail with a clear error
+  when written. This **restores** the `Addable`-style numeric-trait motivation for
+  *primitives as trait implementors* (e.g. `Int` witnessing `+(Int, Int):Int`).
 - **B2 (Phase 2) — static methods within mechanism 2.** No receiver *value* →
   namespaced under the type and resolved rigidly. Confirm the keying when we get
   there.
-- **B3 (Phase 1) — promotion semantics in mechanism 1.** Scope of the numeric
-  tower / coercion behavior for operators (defer vs. minimal). Interacts with D5.
+- **B3 (Phase 1) — promotion semantics in mechanism 1. REFRAMED** (see *Coercion*
+  above): operator promotion stays implicit but **primitive-only** (the closed
+  numeric tower, e.g. `Int → Decimal`); all open/user coercion is **explicit** via
+  the `(Type:value)` cast, resolved through this engine. Remaining Phase-1 scope is
+  just which primitive operator promotions to wire. Interacts with D5.
 - **D5 (Phase 1) — static-resolution coverage for the fast path. RESOLVED by the
   execution model above.** Lower to `BinOp` only when the static operand sort is
   concrete; otherwise leave the `Call` for runtime dispatch (the semantics). For

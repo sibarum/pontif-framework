@@ -1,0 +1,6 @@
+module app.main
+requires geom.shapes.{Vec}
+function f(v:Vec):Int -> match v {
+  [Vec(x, y)] -> x + y
+}
+f(Vec(10, 5))

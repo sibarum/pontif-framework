@@ -1,0 +1,9 @@
+module gen.client
+
+requires gen.traitmod.{Numeric}
+
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+assign trait Vec:Numeric { }
+function sum[type E:Numeric](a:E, b:E):E -> a + b
+sum(Vec(1, 2), Vec(3, 4)).x

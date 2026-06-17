@@ -1,0 +1,7 @@
+let Heavyish:Type{ weight:[Int:@>0] }
+
+struct Sit(name:Int)
+
+assign trait Sit:Heavyish { }
+
+42

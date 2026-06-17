@@ -1,0 +1,5 @@
+struct Inner(v:Int)
+method Inner.bump():Int -> this.v + 1
+struct Pair(a:Inner, b:Inner)
+function +(p:Pair, q:Pair):Pair -> Pair(Inner(p.a.v + q.a.v), Inner(p.b.v + q.b.v))
+(Pair(Inner(1), Inner(2)) + Pair(Inner(3), Inner(4))).a.bump()

@@ -1,0 +1,9 @@
+module app.main
+
+requires geo.shape.{Point}
+
+# A free-function overload, declared in the importing module, over an IMPORTED type.
+# Orphan rule: the overload's argument type is the imported one — allowed because
+# the function name `area` is owned here.
+function area(p:Point):Int -> p.x * p.y
+area(Point(3, 4))

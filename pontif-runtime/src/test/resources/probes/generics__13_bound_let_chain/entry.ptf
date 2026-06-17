@@ -1,0 +1,8 @@
+let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+struct Vec(x:Int, y:Int)
+function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
+assign trait Vec:Numeric { }
+function poly[type E:Numeric](a:E, b:E):E ->
+  let c = a + b
+  c + a
+poly(Vec(1, 2), Vec(3, 4)).x

@@ -1,0 +1,2 @@
+function f(x:Int):Int -> x + y
+f(1)

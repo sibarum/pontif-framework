@@ -1,0 +1,3 @@
+struct Box[type T](value:T)
+struct Wrap[type T]:[Box[T]](value:T)
+Wrap(11).value

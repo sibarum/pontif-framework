@@ -1,0 +1,4 @@
+struct Box[type T](value:T)
+struct Wrap[type T](inner:T)
+function deep(w:Wrap[Box[T]]):Box[T] -> w.inner
+deep(Wrap(Box(3))).value

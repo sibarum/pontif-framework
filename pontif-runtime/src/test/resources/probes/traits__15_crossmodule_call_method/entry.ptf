@@ -1,0 +1,7 @@
+module app.main
+
+requires geo.shapes.{Point, Duck}
+
+function describe(d:Duck):Int -> d.quack()
+
+describe(Point(3, 4))

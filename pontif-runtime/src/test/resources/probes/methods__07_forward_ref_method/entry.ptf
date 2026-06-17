@@ -1,0 +1,4 @@
+struct Box(n:Int)
+function f(b:Box):Int -> b.half().n
+method Box.half():Box -> Box(this.n / 2)
+f(Box(42))

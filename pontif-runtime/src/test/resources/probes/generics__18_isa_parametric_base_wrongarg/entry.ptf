@@ -1,0 +1,3 @@
+struct Literal[type T](value:T)
+struct BadLit:[Literal[Bool]](value:Int)
+0

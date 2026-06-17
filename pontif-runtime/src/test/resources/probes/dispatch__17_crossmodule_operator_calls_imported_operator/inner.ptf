@@ -1,0 +1,8 @@
+module num.inner
+
+exports @.{Inner}
+
+struct Inner(v:Int)
+
+function +(a:Inner, b:Inner):Inner -> Inner(a.v + b.v)
+function *(a:Inner, b:Inner):Inner -> Inner(a.v * b.v)

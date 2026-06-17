@@ -1,0 +1,5 @@
+struct Box(n:Int)
+method Box.half():Int ->
+  let this.{n}
+  n / 2
+Box(42).half()

@@ -1,0 +1,6 @@
+module geom.vec
+
+exports @.{Vec}
+
+struct Vec(x:Int, y:Int)
+method Vec.magnitudeSq():Int -> this.x * this.x + this.y * this.y

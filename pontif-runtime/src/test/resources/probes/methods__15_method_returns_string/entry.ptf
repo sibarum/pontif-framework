@@ -1,0 +1,3 @@
+struct Pair(a:Int, b:Int)
+method Pair.show():String -> "(" + this.a + ", " + this.b + ")"
+Pair(2, 3).show()

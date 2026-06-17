@@ -1,0 +1,7 @@
+module geom.app
+
+requires geom.vec.{Vec}
+
+struct Wrapper(v:Vec)
+method Wrapper.total():Int -> this.v.sum()
+Wrapper(Vec(8, 9)).total()

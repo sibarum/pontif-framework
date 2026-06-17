@@ -223,6 +223,7 @@ public final class ConservationDrafter {
                     }
                 }
             }
+            case IrExpr.Cast cast -> collectCallNames(cast.value(), out);
         };
     }
 
@@ -356,6 +357,7 @@ public final class ConservationDrafter {
             case IrExpr.FieldAccess ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.MethodCall ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Iterate ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Cast ignored -> wrapReturn(draftValue(expr, ctx), ctx);
         };
     }
 
@@ -622,6 +624,19 @@ public final class ConservationDrafter {
                     new Flow.Residual("application (ruled residual)", freeTouches(app, ctx));
             case IrExpr.SelfRef s ->
                     new Flow.Residual("self (typing-level)", List.of());
+            // A cast `(Type:value)` re-encodes the value's content into the
+            // target representation (slice 1: the built-in renders to String).
+            // Content Computation over the value flow; recoverability is the
+            // conservative DEGRADED verdict — the slice-1 renders are in fact
+            // lossless, but the precise per-coercion classification waits on the
+            // ledger-taxonomy read (docs/dispatch-unification.md → "Coercion").
+            case IrExpr.Cast cast -> {
+                Flow value = draftValue(cast.value(), ctx);
+                String id = ctx.freshId("c");
+                ctx.add(new FlowNode.Computation(id, "(" + renderSort(cast.targetSort()) + ":)",
+                        OpClass.ARITHMETIC, Recoverability.DEGRADED, List.of(value)));
+                yield new Flow.FromNode(id);
+            }
         };
     }
 
