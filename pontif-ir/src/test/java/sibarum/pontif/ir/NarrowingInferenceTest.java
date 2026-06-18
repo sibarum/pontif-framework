@@ -131,6 +131,25 @@ class NarrowingInferenceTest {
      * inferrable arms cover the result.
      */
     @Test
+    void match_unconstrainedArm_collapsesToBareBase() {
+        // One arm narrows ([Int:@==1]); the other returns an unconstrained Int (m).
+        // The union must be the bare base Int — NOT `[Int:@==1 | true]` (which a
+        // `true`-substituted bare arm used to produce). `X | true ≡ true`.
+        IrExpr body = IrExpr.match(
+                IrExpr.var("n"),
+                List.of(
+                        IrExpr.matchBranch(
+                                IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(1))),
+                                IrExpr.lit(1)),
+                        IrExpr.matchBranch(
+                                IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(1))),
+                                IrExpr.var("m"))));
+        IrSort result = NarrowingInference.infer(
+                body, InferenceContext.of(Map.of("n", IrSort.named("Int"), "m", IrSort.named("Int"))));
+        assertEquals(IrSort.named("Int"), result);
+    }
+
+    @Test
     void match_armWithUnknownNarrowing_propagatesNull() {
         IrExpr body = IrExpr.match(
                 IrExpr.var("n"),

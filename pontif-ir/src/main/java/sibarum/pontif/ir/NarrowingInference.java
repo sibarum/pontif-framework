@@ -1094,11 +1094,17 @@ public final class NarrowingInference {
             else if (!base.equals(n)) return null;
         }
 
+        // An unconstrained branch (a bare base — predicate ≡ true) makes the whole
+        // union unconstrained: `X | true ≡ true`, i.e. just the bare base. Claiming
+        // `X | Y` instead would falsely exclude the unconstrained arm's values (a
+        // lie). So if any arm carries no refinement, the union is the bare base.
+        for (IrSort s : sorts) {
+            if (!(s instanceof IrSort.Refined)) return IrSort.named(base);
+        }
+
         IrExpr combined = null;
         for (IrSort s : sorts) {
-            IrExpr pred = (s instanceof IrSort.Refined r)
-                    ? r.predicate()
-                    : new IrExpr.Bool(true, Origin.NONE);
+            IrExpr pred = ((IrSort.Refined) s).predicate();
             combined = combined == null
                     ? pred
                     : new IrExpr.BinOp(IrExpr.Op.OR, combined, pred, Origin.NONE);
