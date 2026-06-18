@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
 
     Origin origin();
 
@@ -99,6 +99,45 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
                 String name, List<IrParam> params, IrSort returnSort,
                 IrExpr body, Origin origin) {
             this(name, params, returnSort, body, origin, false, java.util.Map.of());
+        }
+    }
+
+    /**
+     * A user-defined coercion: {@code cast Target:(name:Source) -> body} — the
+     * value-space sibling of a refinement, the definition the cast invocation
+     * {@code (Target:value)} resolves to (docs/dispatch-unification.md →
+     * "Coercion"; docs/cross-module-dispatch.md). Pontif's answer to Julia-style
+     * implicit promotion: a named, explicit {@code Source → Target} transform, not
+     * a searched promotion hierarchy.
+     *
+     * <p>Lowered by {@link IrCompiler} to a 1-param dispatch entry under a reserved
+     * synthetic key ({@link Coercions#coerceKey} on the target's base name), so the
+     * one shared resolution engine (most-specific + refinement matching) selects the
+     * coercion by the value's runtime source sort; consulted by
+     * {@code IrInterpreter.evalCast}. Validated by {@code CoercionCheck}: no
+     * primitive↔primitive (the closed {@code Int→Decimal} tower stays built-in), the
+     * orphan rule (the declaring module owns the source or target base), and at most
+     * one coercion per {@code (sourceBase, targetBase)} pair.
+     */
+    record Coercion(
+            IrSort sourceSort,
+            IrSort targetSort,
+            String paramName,
+            IrExpr body,
+            Origin origin) implements IrStmt {
+        public Coercion {
+            if (sourceSort == null) {
+                throw new IllegalArgumentException("Coercion sourceSort must be non-null");
+            }
+            if (targetSort == null) {
+                throw new IllegalArgumentException("Coercion targetSort must be non-null");
+            }
+            if (paramName == null || paramName.isEmpty()) {
+                throw new IllegalArgumentException("Coercion paramName must be non-empty");
+            }
+            if (body == null) {
+                throw new IllegalArgumentException("Coercion body must be non-null");
+            }
         }
     }
 

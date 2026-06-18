@@ -10,24 +10,24 @@ allowed to lie.
 
 ## Contents
 
-- [Read it top to bottom](#read-it-top-to-bottom)
-- [Functions, overloads, and proven returns](#functions-overloads-and-proven-returns)
+- [A quick example](#a-quick-example)
+- [Function dispatching with refined types](#function-dispatching-with-refined-types)
 - [Structs and methods](#structs-and-methods)
 - [Traits — alternative interfaces](#traits--alternative-interfaces)
 - [Type extension — a richer type](#type-extension--a-richer-type)
-- [Three models, one need](#three-models-one-need)
-- [Type parameters — generics without erasure](#type-parameters--generics-without-erasure)
-- [The operator algebra](#the-operator-algebra)
+- [Multiple polymorphism models](#multiple-polymorphism-models)
+- [Generics (Type Parameters)](#generics-type-parameters)
+- [Braces, Brackets, Parenthesis](#braces-brackets-parenthesis)
 - [Operator overloading](#operator-overloading)
 - [Proofs and synthesis](#proofs-and-synthesis)
 - [Conservation receipts — the second ledger](#conservation-receipts--the-second-ledger)
 - [The compiler](#the-compiler)
-- [Modules](#modules)
+- [Source code explained](#source-code-explained)
 - [Status](#status)
 - [Build and test](#build-and-test)
 - [License](#license)
 
-## Read it top to bottom
+## A quick example
 
 ```pontif
 module ledger
@@ -69,7 +69,7 @@ Most of the language is already on this page:
 
 Everything below is an elaboration of these moves.
 
-## Functions, overloads, and proven returns
+## Function dispatching with refined types
 
 Sorts narrow by predicate, dispatch selects on the narrowing, and declared
 returns are proof obligations:
@@ -317,7 +317,7 @@ it resolves `(source sort → target sort)` on the one shared engine. Today the 
 renders to `String` ship; user-defined `Type → Type` coercions register and resolve
 the same way.
 
-## Three models, one need
+## Multiple polymorphism models
 
 Polymorphism in Pontif is three sharply-separated tools, and between them they
 cover the major use cases:
@@ -332,7 +332,7 @@ cover the major use cases:
 None subsumes another; the type system's job is to keep them honest, not to merge
 them.
 
-## Type parameters — generics without erasure
+## Generics (Type Parameters)
 
 A `[type T]` slot after a name makes a function, struct, or trait *parametric*.
 Pontif never erases types — every value carries its concrete type — so a generic
@@ -374,7 +374,7 @@ struct IntLit:[Literal[Int]:@.value==value](value:Int)
 IntLit(9).value                          # → 9
 ```
 
-## The operator algebra
+## Braces, Brackets, Parenthesis
 
 The brackets are not ad-hoc punctuation. The subject `@` combines with three
 brackets across two arenas (a value vs. a type), and every cell is a distinct,
@@ -596,7 +596,7 @@ reference, `docs/glossary.md` for terms, and `docs/backward-language-design.md`
 for the method that produced all of this (the theory is layer zero; the whole
 language is one big syntactic sugar for it).
 
-## Modules
+## Source code explained
 
 | Module | What it provides |
 | --- | --- |

@@ -81,6 +81,10 @@ public final class ModuleLinker {
         // (bare names match the table).
         CoherenceCheck.check(all, table);
         ModuleImportCheck.check(all, table);
+        // Coercion orphan rule: a `cast` must be declared in a module owning its
+        // source or target type (bare names here match the table). prim↔prim +
+        // coherence are checked per-module by CoercionCheck.validate (SortChecker phase).
+        sibarum.pontif.ir.CoercionCheck.validateOrphans(all, table);
 
         List<IrStmt> statements = new ArrayList<>();
         IrExpr main = IrExpr.lit(0);

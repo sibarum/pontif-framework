@@ -67,7 +67,7 @@ public final class AltParser {
      */
     public static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
-            "function", "method", "struct", "let",
+            "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type",
             "match", "proof",
             "true", "false");
@@ -337,7 +337,7 @@ public final class AltParser {
         AltToken t = peek();
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let", "assign", "proof").contains(t.text());
+                "function", "method", "struct", "let", "cast", "assign", "proof").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -397,6 +397,7 @@ public final class AltParser {
             case "function" -> parseFunction();
             case "struct"   -> parseStruct();
             case "method"   -> parseMethod();
+            case "cast"     -> parseCoercion();
             case "let"      -> parseLet();
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
@@ -719,6 +720,46 @@ public final class AltParser {
                 "function '" + name + "' needs a body ('-> expr') or a synthesis "
                         + "directive (';')",
                 peek().origin());
+    }
+
+    /**
+     * Parses a user-defined coercion: {@code cast Target:(name:Source) -> body}.
+     * Target-first (mirroring the cast invocation {@code (Target:value)}), then a
+     * single paren'd source binder, then {@code -> body}. The body parses with the
+     * binder in scope (so it can read the source value's fields / match on it,
+     * exactly as a function body sees its params). Only structural malformations are
+     * rejected here; the semantic rules (no primitive↔primitive, orphan, one-per-pair)
+     * are {@code CoercionCheck}'s job. The target may be a refinement sort
+     * ({@code cast [Int:@>0]:(n:Int) -> …}).
+     */
+    private IrStmt parseCoercion() throws ParseException {
+        AltToken start = expectKeyword("cast");
+        IrSort targetSort = parseSort();
+        expect(AltToken.Kind.COLON);
+        expect(AltToken.Kind.LPAREN);
+        AltToken paramName = expect(AltToken.Kind.IDENT);
+        expect(AltToken.Kind.COLON);
+        IrSort sourceSort = parseSort();
+        if (peek().kind() == AltToken.Kind.COMMA) {
+            throw new ParseException(
+                    "a coercion takes exactly one source binder — `cast Target:(name:Source) -> …`",
+                    peek().origin());
+        }
+        expect(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.ARROW);
+        // Push the binder into scope so the body resolves it (and match-arm
+        // contextual base works), like a function body sees its params.
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        currentScope.put(paramName.text(), sourceSort);
+        try {
+            IrExpr body = parseExpr();
+            return new IrStmt.Coercion(
+                    sourceSort, targetSort, paramName.text(), body, start.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
     }
 
     /**

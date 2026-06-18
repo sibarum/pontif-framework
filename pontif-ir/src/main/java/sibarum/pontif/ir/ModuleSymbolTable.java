@@ -103,6 +103,10 @@ public final class ModuleSymbolTable {
                     }
                     case IrStmt.Proof p -> { }
                     case IrStmt.ReturnProof rp -> { }
+                    // A coercion declares no importable NAME (it resolves by the cast,
+                    // keyed on its target sort); its orphan/coherence rules are
+                    // CoercionCheck's job, not the symbol table's.
+                    case IrStmt.Coercion c -> { }
                     case IrStmt.NoOp n -> { }
                 }
             }

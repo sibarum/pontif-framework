@@ -48,6 +48,11 @@ public final class IrPrinter {
                 for (IrStmt.FunctionDecl m : ti.methods()) printStmt(sb, m, d + 1);
                 for (IrStmt.FunctionDecl p : ti.attributeProducers()) printStmt(sb, p, d + 1);
             }
+            case IrStmt.Coercion c -> {
+                line(sb, d, "cast " + sort(c.targetSort()) + ":(" + c.paramName() + " : "
+                        + sort(c.sourceSort()) + ")" + at(c.origin()));
+                printExpr(sb, c.body(), d + 1);
+            }
             case IrStmt.Proof p -> line(sb, d, "proof " + p.functionName() + at(p.origin()));
             case IrStmt.ReturnProof rp ->
                     line(sb, d, "return-proof " + rp.functionName() + "(" + params(rp.params())

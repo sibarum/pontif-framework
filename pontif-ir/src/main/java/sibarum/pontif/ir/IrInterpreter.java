@@ -559,11 +559,27 @@ public final class IrInterpreter {
             }
             return new sibarum.pontif.core.types.StringValue(rendered);
         }
+        // User-defined coercion: resolve (source → target) by dispatching the
+        // already-evaluated value under the reserved coercion key on the target's
+        // base (Coercions.coerceKey — handles a refined target like [Int:@>0] via its
+        // base). The shared engine selects the matching source overload (most-specific
+        // + source-refinement check); the body runs and its result is returned (the
+        // trusted stance — an explicit user transform is the author's responsibility,
+        // not the language fabricating). Re-uses the already-evaluated `value`.
+        String coercionBase = Coercions.baseName(cast.targetSort());
+        if (coercionBase != null) {
+            String key = Coercions.coerceKey(coercionBase);
+            if (!module.dispatch().declarationsFor(key).isEmpty()) {
+                IrExpr.Call synthetic = new IrExpr.Call(
+                        key, java.util.List.of(cast.value()), cast.origin());
+                return dispatchValues(key, java.util.List.of(value), synthetic, env, module);
+            }
+        }
         throw new RuntimeCheckException(
-                "Cast to '" + (targetBase == null ? cast.targetSort() : targetBase)
-                        + "' is not supported yet — this slice provides the built-in "
-                        + "renders to String (e.g. (String:12)); user-defined coercions "
-                        + "are a later slice", cast.origin());
+                "No coercion to '" + (coercionBase == null ? cast.targetSort() : coercionBase)
+                        + "' from " + (value == null ? "null" : value.getClass().getSimpleName())
+                        + " — define `cast " + (coercionBase == null ? cast.targetSort() : coercionBase)
+                        + ":(x:Source) -> …`, or use a built-in render to String", cast.origin());
     }
 
     /** Base (head) name of a cast's target sort, or null for a refinement/structural target. */

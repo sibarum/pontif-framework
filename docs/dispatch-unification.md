@@ -227,8 +227,18 @@ This is exactly the `([…])` crossing the bracket/paren law reserved (`[]` = ty
 by the same coherence/orphan rule (no two coercions for the same pair) as every
 other dispatched call. Custom `Type → Type` coercion functions — the user-defined
 conversions that replace Julia's `convert`, and the actual response to the
-promotion use-case — register and resolve the same way. They are the planned
-consumer, deferred until needed.
+promotion use-case — register and resolve the same way.
+
+**Definition syntax — LANDED (2026-06-17):** `cast Target:(name:Source) -> body`
+(target-first, mirroring the invocation `(Target:value)`; a new `cast` keyword
+carries the "this is what the cast resolves" semantics). Lowered to a 1-param
+dispatch function under a reserved key on the target's base (so the engine selects
+by the value's runtime source sort — multiple sources to one target and refined
+sources come free). Rules enforced by `CoercionCheck`: **no primitive↔primitive**
+(the closed `Int → Decimal` tower stays built-in), the **orphan rule** (declaring
+module owns the source or target — the same rule generalized in
+docs/cross-module-dispatch.md), and **one coercion per `(source, target)` pair**.
+The target may be a refinement (`cast [Int:@>0]:(p:Pos) -> p.v`).
 
 **Unambiguous against the binder form (RULED):** `(name:Type)` (binder position —
 a fresh name annotated by a type, specific→general) and `(Type:value)` (expression
@@ -241,10 +251,12 @@ There is no `(…) ->` lambda to collide with — lambdas are retired; the match
 **Open:**
 
 - **Does the cast law govern user coercions, or are they trusted functions?**
-  `(Type:value)` promises *fabricate-never*; a built-in render honors it, but an
-  arbitrary user `S → T` coercion can fabricate. Either it is checked (hard for
-  arbitrary code) or trusted like any function (Julia's stance). Rule it when the
-  custom-coercion mechanism lands.
+  *RESOLVED (2026-06-17): trusted.* A built-in render honors *fabricate-never*, but an
+  explicit, named, opt-in user `cast S:(…) -> body` is the author taking responsibility
+  for the transform — the no-lie law governs the language's *implicit/automatic*
+  behavior, not a transform the programmer wrote on purpose. (An optional hook to verify
+  the body's result against a refined target is noted in `IrInterpreter.evalCast`, if a
+  stricter stance is later wanted.)
 - **Resolution precedence when several laws apply** through the same `(T:…)` skin
   (subtype demotion vs. a custom coercion vs. trait coercion) — must be total.
 - **Generic-code tradeoff:** implicit promotion buys mixed-type generic code for

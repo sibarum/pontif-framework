@@ -97,6 +97,13 @@ public final class NameResolver {
                 case IrStmt.Proof p -> new IrStmt.Proof(
                         resolveCallName(p.functionName(), m, table),
                         rewrite(p.proofTree(), m, table), p.origin());
+                // A coercion's source/target sorts and body are FQN-rewritten like a
+                // function's, so its dispatch key (Coercions.coerceKey on the target
+                // base) and the cast invocation's key agree across the module boundary.
+                case IrStmt.Coercion c -> new IrStmt.Coercion(
+                        rewriteSort(c.sourceSort(), m, table),
+                        rewriteSort(c.targetSort(), m, table),
+                        c.paramName(), rewrite(c.body(), m, table), c.origin());
                 default -> stmt;  // Requires / Exports / NoOp unchanged
             });
         }

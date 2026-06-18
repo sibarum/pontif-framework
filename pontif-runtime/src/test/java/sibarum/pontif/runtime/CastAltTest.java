@@ -124,9 +124,12 @@ class CastAltTest {
     }
 
     @Test
-    void castToUnsupportedTarget_failsClosed() {
+    void castToTargetWithNoCoercion_failsClosed() {
+        // No `cast Int:(…)` is defined, so a non-String target fails closed
+        // (fabricate-never) — now reported as a missing coercion.
         RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
                 () -> run("(Int:\"abc\")"));
-        assertTrue(e.getMessage().contains("not supported yet"), () -> e.getMessage());
+        assertTrue(e.getMessage().contains("No coercion") || e.getMessage().contains("cast Int"),
+                () -> e.getMessage());
     }
 }

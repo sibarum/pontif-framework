@@ -239,6 +239,15 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + e.getMessage()));
         }
+        // Coercion checks the symbol table can't see: no primitive↔primitive and
+        // (source, target) coherence. Runs before IrCompiler lowers coercions to
+        // dispatch functions. (The orphan rule is the linker's job — needs ownership.)
+        try {
+            sibarum.pontif.ir.CoercionCheck.validate(module);
+        } catch (CompileException ce) {
+            return new CompileResult.Failed(
+                    RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));
+        }
         Simplifier simplifier = new Simplifier(simplifierRules);
         IrCompiler compiler = new IrCompiler(simplifier);
         CompiledModule compiled;

@@ -98,7 +98,7 @@ questions in the doc; awaits James's review.
 
 ---
 
-## ⭐ Next — explicit coercion / the `(Type:value)` cast (slice 1 LANDED)
+## ✅ Landed — explicit coercion / the `(Type:value)` cast (slices 1 + 2)
 
 **Design RULED 2026-06-16 (see docs/dispatch-unification.md → "Coercion").** A cast
 is a value-space form `(Type:value)` (general→specific, type on the left;
@@ -118,14 +118,30 @@ everything open is explicit.
   every other target/source fails closed (fabricate-never). SortChecker types a cast
   to its target sort, so `let n:String = (String:12)` discharges the claim. Truffle
   backend fences it (like String `+`). Tests: `CastAltTest`.
-- **Slice 2 (NEXT) — user-defined `Type → Type` coercion functions** (the actual
-  promotion replacement), registered/resolved like any dispatched call.
-- **Open before slice 2** (from the doc): (1) does the cast law *fabricate-never*
-  govern user coercions or are they trusted fns?; (2) resolution precedence when
-  subtype-demotion / custom-coercion / trait-coercion all fit one `(T:…)`; (3) the
+- **Slice 2 — user-defined `Type → Type` coercion functions. LANDED (2026-06-17).**
+  Syntax RULED (James): `cast Target:(name:Source) -> body` — target-first (mirrors the
+  invocation `(Target:value)`), new `cast` keyword (carries the "this is what the cast
+  resolves" semantics; not hung on `function`). New `IrStmt.Coercion`, lowered by
+  `IrCompiler` to a 1-param dispatch function under the reserved key
+  `Coercions.coerceKey` (`#coerce:<TargetBase>`, collision-proof — `#` is unlexable), so
+  the one shared engine selects by the value's runtime source sort (multiple sources to
+  one target + refined sources come free); `IrInterpreter.evalCast` consults it before
+  failing closed. `CoercionCheck` enforces the rules: no primitive↔primitive (closed
+  tower stays built-in), the orphan rule (declaring module owns source or target —
+  linker phase), one coercion per `(source, target)` pair. NameResolver/StructLiteralRewriter
+  rewrite the body; the target may be a refinement (`cast [Int:@>0]:(p:Pos) -> p.v`).
+  Tests: `CoercionTest` (single + cross-module, orphan/prim-prim/duplicate rejections,
+  refined source/target). Resolves open Q1 below: user coercions are **trusted** (run the
+  body) — the no-lie law governs implicit behavior, not an explicit user transform.
+- **Still open / deferred:** (2) resolution precedence when subtype-demotion /
+  custom-coercion / trait-coercion all fit one `(T:…)` — only the custom-coercion arm
+  exists today, so no contention yet; rule it when a second arm lands. (3) the
   generic-code tradeoff (deliberate, acceptable given narrowing). Also: the precise
   per-coercion **conservation classification** (slice-1 renders are conservatively
-  `DEGRADED` though in fact lossless — revisit on the ledger-taxonomy read).
+  `DEGRADED` though in fact lossless; a user coercion currently isn't laddered in the
+  conservation/receipt reports at all — the drafters skip `Coercion` — revisit on the
+  ledger-taxonomy read). The optional fabricate-never *result* check (verify the body's
+  output against a refined target) is the hook noted in `evalCast`.
 - Parser note: `(name:Type)` (binder, decl position) vs `(Type:value)` (cast, expr
   position) never collide — disjoint positions + capitalization; no `(…)->` lambda.
 

@@ -10,6 +10,8 @@ function TractionCD.of(n:Decimal, d:Decimal):TractionCD ->
 method TractionCD.toString():String ->
   "TCD<"+this.n.toString()+"/"+this.d.toString()+">"
 
+#method TractionCD.normalize():TractionCD ->
+#  match this
 
 function +(
     tcd1:[TractionCD(n1,d1)],

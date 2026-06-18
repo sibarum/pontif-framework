@@ -24,6 +24,14 @@ public final class IrCompiler {
     }
 
     public CompiledModule compile(IrModule module) throws CompileException {
+        // Lower user coercions (`cast Target:(p:Source) -> body`) to 1-param
+        // dispatch functions under the reserved coercion key (Coercions.coerceKey
+        // on the target's base), BEFORE the transform passes — so AliasResolver,
+        // MethodOperatorResolver, the promotions, the gate and registration all see
+        // an ordinary function and resolve its body uniformly. The cast invocation
+        // `(Target:value)` resolves to it via the same key (IrInterpreter.evalCast).
+        module = lowerCoercions(module);
+
         // Resolve type aliases first — strips IrStmt.TypeAlias declarations and
         // substitutes every Named reference to an alias with the aliased sort.
         // After this pass, the rest of the pipeline sees a module with only
@@ -137,6 +145,8 @@ public final class IrCompiler {
                 case IrStmt.Requires r -> { /* import decl; consumed by the module loader/linker + name resolver, not the per-module compile */ }
                 case IrStmt.Exports e -> { /* export decl; consumed by the linker's visibility check */ }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
+                case IrStmt.Coercion c -> throw new IllegalStateException(
+                        "Coercion must be lowered to a FunctionDecl before the compile loop");
             }
         }
 
@@ -145,6 +155,31 @@ public final class IrCompiler {
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
                 structRegistry, topLevelLets);
+    }
+
+    /**
+     * Lowers each {@link IrStmt.Coercion} to a 1-param {@link IrStmt.FunctionDecl}
+     * named by {@link Coercions#coerceKey} on the target's base, with the source as
+     * its sole param and the target as its return sort. The shared dispatch engine
+     * then selects the coercion by the runtime value's source sort (most-specific +
+     * refinement matching come free); {@code IrInterpreter.evalCast} looks it up under
+     * the same key. The synthetic name's {@code '#'} prefix can never collide with a
+     * user dispatch key (it is not a lexable identifier/operator). Idempotent on a
+     * module with no coercions.
+     */
+    private static IrModule lowerCoercions(IrModule module) {
+        List<IrStmt> out = new ArrayList<>(module.statements().size());
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.Coercion c) {
+                out.add(new IrStmt.FunctionDecl(
+                        Coercions.coerceKey(Coercions.baseName(c.targetSort())),
+                        List.of(new IrParam(c.paramName(), c.sourceSort())),
+                        c.targetSort(), c.body(), c.origin()));
+            } else {
+                out.add(s);
+            }
+        }
+        return new IrModule(module.name(), out, module.main());
     }
 
     private void compileFunctionDecl(

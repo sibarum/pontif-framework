@@ -68,6 +68,11 @@ public final class StructLiteralRewriter {
                 }
                 case IrStmt.Proof p -> new IrStmt.Proof(
                         p.functionName(), rewriteExpr(p.proofTree(), structs), p.origin());
+                // A coercion body may construct an imported struct (`cast T:(x) -> S(x)`),
+                // so rewrite it like a function body.
+                case IrStmt.Coercion c -> new IrStmt.Coercion(
+                        c.sourceSort(), c.targetSort(), c.paramName(),
+                        rewriteExpr(c.body(), structs), c.origin());
                 default -> stmt;  // TypeAlias / Requires / Exports / NoOp carry no struct-literal expr
             });
         }
