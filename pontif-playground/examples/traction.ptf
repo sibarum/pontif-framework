@@ -14,9 +14,18 @@ let Traction.omega = Traction(1.0, -1.0)
 let Traction.negativeOne = Traction(-1.0, 0.0)
 
 method Traction.toReal():Decimal ->
-  match this.normalize
+  match this.normalize()
     [Traction(n, 0.0)] -> n
     [_] -> 0.0
+
+method Traction.isZero():Bool ->
+  this.normalize().zexp > 0.0
+
+method Traction.isOmega():Bool ->
+  this.normalize().zexp < 0.0
+
+method Traction.isReal():Bool ->
+  this.normalize().zexp == 0.0
 
 method Traction.inv():Traction ->
   match this.normalize()
@@ -55,4 +64,4 @@ function /(t1:Traction, t2:Traction):Traction ->
   t1*t2.inv()
 
 
-Traction(10,2) * Traction(5,-2)
+Traction(10,2).isZero()

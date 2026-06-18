@@ -2,6 +2,8 @@ module cott.traction.cd
 
 requires cott.traction.{Traction}
 
+exports @.{TractionCD}
+
 struct TractionCD(n:Traction, d:Traction)
 
 function TractionCD.of(n:Decimal, d:Decimal):TractionCD ->
@@ -10,8 +12,9 @@ function TractionCD.of(n:Decimal, d:Decimal):TractionCD ->
 method TractionCD.toString():String ->
   "TCD<"+this.n.toString()+"/"+this.d.toString()+">"
 
-#method TractionCD.normalize():TractionCD ->
-#  match this
+method TractionCD.normalize():TractionCD ->
+  match (this.n, this.d)
+    [(t1, t2)] -> TractionCD(t1/t2, Traction(1,0))
 
 function +(
     tcd1:[TractionCD(n1,d1)],
@@ -51,4 +54,3 @@ function /(
 
 
 
-(TractionCD.of(20,0) / TractionCD.of(5,0) / TractionCD.of(2,0) * TractionCD.of(12,0)).toString()
