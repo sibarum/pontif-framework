@@ -30,6 +30,19 @@ public final class ModuleSymbolTable {
      */
     public record ImportedName(String sourceModule, String remoteName) {}
 
+    /**
+     * A declaration associated with a type (import-by-association,
+     * docs/cross-module-dispatch.md): {@code module} declares the member keyed
+     * {@code localKey}, which mentions/namespaces a type. Importing that type
+     * surfaces this declaration. {@code localKey} is the pre-FQN local key
+     * (an operator symbol like {@code +}, or a {@code Type.member} name).
+     */
+    public record Association(String module, String localKey) {}
+
+    /** The overloadable operator symbols — a mechanism-1 overload of one of these is associated by operand. */
+    private static final Set<String> OPERATORS = Set.of(
+            "+", "-", "*", "/", "%", "^", "<", "<=", ">", ">=", "==", "!=");
+
     /** function/method/operator local key → modules declaring it. */
     private final Map<String, Set<String>> functionOwners;
     /** type name (struct / trait / alias) → modules declaring it. */
@@ -38,16 +51,20 @@ public final class ModuleSymbolTable {
     private final Map<String, Map<String, ImportedName>> imports;
     /** module → exported local names, from {@code exports @.{…}}. */
     private final Map<String, Set<String>> exports;
+    /** type name → declarations associated with it (operators by operand, {@code Type.member} by prefix). */
+    private final Map<String, Set<Association>> typeAssociations;
 
     private ModuleSymbolTable(
             Map<String, Set<String>> functionOwners,
             Map<String, Set<String>> typeOwners,
             Map<String, Map<String, ImportedName>> imports,
-            Map<String, Set<String>> exports) {
+            Map<String, Set<String>> exports,
+            Map<String, Set<Association>> typeAssociations) {
         this.functionOwners = functionOwners;
         this.typeOwners = typeOwners;
         this.imports = imports;
         this.exports = exports;
+        this.typeAssociations = typeAssociations;
     }
 
     /** FQN key for a local key in a module — the canonical {@code module/localKey} form. */
@@ -111,7 +128,60 @@ public final class ModuleSymbolTable {
                 }
             }
         }
-        return new ModuleSymbolTable(fns, types, imp, exp);
+
+        // Second pass — the association index (needs `types` complete, so the
+        // Type.member prefix check and the operand-type gate can consult it). Pure
+        // data; nothing consumes it until Phase 3 (import-by-association visibility).
+        Map<String, Set<Association>> assoc = new LinkedHashMap<>();
+        for (Map.Entry<String, IrModule> e : modules.entrySet()) {
+            String module = e.getKey();
+            for (IrStmt stmt : e.getValue().statements()) {
+                if (stmt instanceof IrStmt.FunctionDecl fd) {
+                    indexAssociations(fd, module, types, assoc);
+                }
+            }
+        }
+        return new ModuleSymbolTable(fns, types, imp, exp, assoc);
+    }
+
+    /**
+     * Records the types a function declaration is associated with: a
+     * {@code Type.member} name (method or static attribute, e.g. {@code Traction.one})
+     * associates with its prefix type; an operator associates with each operand type.
+     * Only DECLARED types are indexed — a primitive operand ({@code Int}) is in no
+     * module's ownership, so it never anchors an association (you don't import {@code Int}).
+     */
+    private static void indexAssociations(
+            IrStmt.FunctionDecl fd, String module,
+            Map<String, Set<String>> types, Map<String, Set<Association>> assoc) {
+        String name = fd.name();
+        int dot = name.indexOf('.');
+        if (dot > 0) {
+            String prefix = name.substring(0, dot);
+            if (types.containsKey(prefix)) {
+                assoc.computeIfAbsent(prefix, k -> new LinkedHashSet<>())
+                        .add(new Association(module, name));
+            }
+        }
+        if (OPERATORS.contains(name)) {
+            for (IrParam p : fd.params()) {
+                String base = baseTypeName(p.sort());
+                if (base != null && types.containsKey(base)) {
+                    assoc.computeIfAbsent(base, k -> new LinkedHashSet<>())
+                            .add(new Association(module, name));
+                }
+            }
+        }
+    }
+
+    /** The nominal base type name of a sort (struct/trait/alias name), or null for none. */
+    private static String baseTypeName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            default -> null;
+        };
     }
 
     /** Modules declaring a function/method/operator local key (may be empty). */
@@ -122,6 +192,16 @@ public final class ModuleSymbolTable {
     /** Modules declaring a type name (may be empty). */
     public Set<String> typeOwners(String typeName) {
         return typeOwners.getOrDefault(typeName, Set.of());
+    }
+
+    /**
+     * Declarations associated with {@code typeName} (may be empty): operator
+     * overloads with it as an operand, and {@code Type.member} methods / static
+     * attributes namespaced under it. Importing {@code typeName} surfaces these
+     * (import-by-association; consumed by the Phase-3 visibility gate).
+     */
+    public Set<Association> associatedDecls(String typeName) {
+        return typeAssociations.getOrDefault(typeName, Set.of());
     }
 
     /** The single module owning {@code typeName}, or {@code null} if none/ambiguous. */
