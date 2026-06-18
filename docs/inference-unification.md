@@ -103,3 +103,35 @@ Branch off master (`master` stays green at slice 3, commit `557fa83`). Then:
 
 Leave `// WAR:` breadcrumbs at any site left broken mid-campaign, and commit green
 logical checkpoints on the branch so a context reset can resume from here + the diff.
+
+## Campaign status (2026-06-18)
+
+**Steps 1–3 LANDED on branch `war/scope-aware-narrowing`** (commit after 489f84b):
+`inferBinOp` produces the open value-pin; `closeOver` projects at the two boundaries
+(`inferFunctionReturn`, `inferIterate`); `checkMatchTotality` widens an open-pin
+scrutinee to its base. **Full suite + 150-probe matrix green.** The core is now the
+capability superset for narrowing *shapes* — the exact pin the parser had is now the
+core's behavior.
+
+**Step 4 (route the parser through the core; delete `inferMaximalSort`) — NOT a clean
+swap. THREE real impedance points the core must absorb first** (the parser types at
+parse time, pre-link, for desugar purposes — a genuinely different stage):
+1. **MethodCall result typing.** `inferMaximalSort` types `recv.method()` via a
+   `Type.method` lookup in `declaredFunctionReturns`; the core's `infer` returns `null`
+   for `MethodCall` (deliberate: "unresolved until MethodResolver"). Routing needs a
+   best-effort `MethodCall` case — put it in the **floor** (`inferFloor`), matching the
+   parser's best-effort stance, not in `infer`.
+2. **Unrouted-operator return.** For a parse-time DIV/MOD/POW or struct-operand BinOp
+   (an un-routed user operator), `inferMaximalSort` looks up the operator *symbol*'s
+   declared return (`declaredFunctionReturns.get("+")`). The core has no operator-symbol
+   case (post-link these are `Call`s). Needs a floor-level fallback.
+3. **Record shape mismatch.** `inferMaximalSort` → `IrSort.Structural(name, memberSorts)`
+   (a bare structural with member sorts, for parse-time field typing of inline/anonymous
+   records); the core's `inferRecord` → an `IrSort.Refined` (field-predicate conjuncts)
+   or `null`. Consumers of the parser's record result (FieldAccess base typing,
+   demotion/coercion detection) expect the structural shape. Reconcile before routing.
+
+Plus: map the core's `null` → the parser's `"_"` floor at the delegation boundary, and
+preserve the cluster-4 operator-routing-blindness behavior (the `null`/`_` for unrouted
+cross-module operands). These are parse-stage concerns; the clean home for 1–2 is the
+floor layer (best-effort), and 3 is a real shape-unification decision (James).
