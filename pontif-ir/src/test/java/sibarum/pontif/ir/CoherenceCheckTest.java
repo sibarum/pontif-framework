@@ -120,4 +120,46 @@ class CoherenceCheckTest {
         Map<String, IrModule> mods = project(frac, geoWithPoint());
         assertDoesNotThrow(() -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
     }
+
+    // --- Orphan methods / static members (Type.member) -----------------------
+
+    private static IrStmt.FunctionDecl member(String typeMember, IrSort recvOrSort) {
+        return IrStmt.functionDecl(typeMember, List.of(new IrParam("this", recvOrSort)),
+                IrSort.named("Int"), IrExpr.lit(0));
+    }
+
+    @Test
+    void methodOnUnownedType_isRejected() {
+        // `method Point.flip()` declared in a module that doesn't own Point — orphan.
+        IrModule pirate = new IrModule("pirate",
+                List.of(member("Point.flip", IrSort.named("Point"))), IrExpr.lit(0));
+        Map<String, IrModule> mods = project(geoWithPoint(), pirate);
+        CompileException e = assertThrows(CompileException.class,
+                () -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+        assertTrue(e.getMessage().contains("orphan rule") && e.getMessage().contains("Point.flip"),
+                () -> e.getMessage());
+    }
+
+    @Test
+    void methodOnOwnedType_isAllowed() {
+        // geo owns Point → may declare a method on it.
+        IrModule geoWithMethod = new IrModule("geo", List.of(
+                IrStmt.typeAlias("Point", IrSort.structural("Point", Map.of("x", IrSort.named("Int")))),
+                member("Point.flip", IrSort.named("Point"))), IrExpr.lit(0));
+        Map<String, IrModule> mods = project(geoWithMethod, showWithTrait());
+        assertDoesNotThrow(() -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+    }
+
+    @Test
+    void staticMemberOnUnownedType_isRejected() {
+        // `let Point.origin = …` in a non-owning module is an orphan static member.
+        IrModule pirate = new IrModule("pirate", List.of(
+                IrStmt.functionDecl("Point.origin", List.of(), IrSort.named("Point"), IrExpr.lit(0))),
+                IrExpr.lit(0));
+        Map<String, IrModule> mods = project(geoWithPoint(), pirate);
+        CompileException e = assertThrows(CompileException.class,
+                () -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+        assertTrue(e.getMessage().contains("orphan rule") && e.getMessage().contains("Point.origin"),
+                () -> e.getMessage());
+    }
 }

@@ -54,6 +54,7 @@ public final class CoherenceCheck {
                     checkTraitImpl(ti, module, table);
                 } else if (stmt instanceof IrStmt.FunctionDecl fd) {
                     checkOperatorOverload(fd, module, table);
+                    checkTypeMemberOwnership(fd, module, table);
                 }
             }
         }
@@ -104,6 +105,38 @@ public final class CoherenceCheck {
                             + " module that owns one of the operands.",
                     fd.origin());
         }
+    }
+
+    /**
+     * Orphan rule for a {@code Type.member} declaration — a free-standing method
+     * ({@code method Vec.mag2}, desugared to a top-level {@code Vec.mag2} function) or a
+     * static attribute ({@code let Traction.one}). It may be declared only in the module
+     * owning the prefix type; declaring it on a type you don't own is an orphan method /
+     * member (resolves {@code inference__20}). Importing the type then brings it by
+     * association (Phase 3).
+     *
+     * <p>Scope guard: this fires only on TOP-LEVEL {@code FunctionDecl}s. Trait-impl
+     * methods are nested in {@link IrStmt.TraitImpl} (checked by {@link #checkTraitImpl},
+     * which legitimately allows an impl in the <em>trait</em>'s module even when it
+     * doesn't own the type) — so they never reach here, and a trait impl in the trait
+     * owner is not mis-flagged.
+     */
+    private static void checkTypeMemberOwnership(
+            IrStmt.FunctionDecl fd, String module, ModuleSymbolTable table)
+            throws CompileException {
+        String name = fd.name();
+        int dot = name.indexOf('.');
+        if (dot <= 0) return;  // not a Type.member name
+        String type = name.substring(0, dot);
+        // Only a DECLARED type anchors the rule (a stray dotted name isn't a member).
+        if (table.typeOwners(type).isEmpty() || table.typeOwners(type).contains(module)) return;
+        throw new CompileException(
+                "Coherence violation: '" + name + "' declared in module '" + module
+                        + "' which does not own type '" + type + "' — a method or static member"
+                        + " may be declared only in the module owning the type it is namespaced"
+                        + " under (the orphan rule). Define it in " + type + "'s module; importing"
+                        + " " + type + " then brings it by association.",
+                fd.origin());
     }
 
     /** The nominal base type name of a sort (struct/trait/alias name), or null for none. */
