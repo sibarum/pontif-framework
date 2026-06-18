@@ -1399,7 +1399,8 @@ public final class SortChecker {
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs) throws CompileException {
-        IrSort scrutineeIr = inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs);
+        IrSort scrutineeIr = widenOpenPinToBase(
+                inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs));
 
         // A catch-all arm makes the match total by construction, regardless of
         // what the other arms look like (ordered match: it catches the rest).
@@ -1483,6 +1484,35 @@ public final class SortChecker {
             throw cannotProveTotality(m, scrutineeIr,
                     "coverage over this domain is undecidable");
         }
+    }
+
+    /**
+     * Totality reasons about coverage of the scrutinee's <em>domain</em>. Now that
+     * {@code infer} produces exact value-pins (docs/inference-unification.md), a
+     * scrutinee like {@code n + 1} narrows to {@code [Int:@==n+1]} — an <em>open</em>
+     * pin whose free variable {@code n} is universally quantified for totality. Such
+     * a pin must widen to its base ({@code Int}): the arms partition the base, not the
+     * single value. A <em>closed</em> refinement (a literal singleton {@code [@==5]},
+     * a bound {@code [@>=2]}, a self-field struct refinement {@code [@.x>0]}) has no
+     * free variable and stays as the domain.
+     */
+    private static IrSort widenOpenPinToBase(IrSort sort) {
+        if (sort instanceof IrSort.Refined r && predicateHasFreeVar(r.predicate())) {
+            return IrSort.named(r.name());
+        }
+        return sort;
+    }
+
+    /** Whether a refinement predicate references a free variable (not {@code @}/self). */
+    private static boolean predicateHasFreeVar(IrExpr e) {
+        return switch (e) {
+            case IrExpr.Var ignored -> true;
+            case IrExpr.BinOp op -> predicateHasFreeVar(op.left()) || predicateHasFreeVar(op.right());
+            case IrExpr.FieldAccess fa -> predicateHasFreeVar(fa.base());
+            case IrExpr.Call c -> c.args().stream().anyMatch(SortChecker::predicateHasFreeVar);
+            case IrExpr.Cast c -> predicateHasFreeVar(c.value());
+            default -> false;  // SelfRef, Lit, Bool, Dec, Chr, Str, etc.
+        };
     }
 
     /** The conservation rule's rejection: undeterminable totality, no default. */

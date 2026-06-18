@@ -7,6 +7,7 @@ import sibarum.pontif.predicates.BoundAnalysis;
 import sibarum.pontif.predicates.Interval;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -115,10 +116,15 @@ public final class NarrowingInference {
      */
     public static IrSort inferFunctionReturn(IrStmt.FunctionDecl fd, InferenceContext ctx) {
         InferenceContext seeded = ctx;
+        Set<String> paramNames = new HashSet<>();
         for (IrParam p : fd.params()) {
             seeded = seeded.withVar(p.name(), p.sort());
+            paramNames.add(p.name());
         }
-        return infer(fd.body(), seeded);
+        // A return narrowing escapes to the caller, where the params don't exist —
+        // close the body's (possibly param-referencing) value-pin over them, which
+        // yields the variable-free bound the caller's graph can use as a hypothesis.
+        return closeOver(infer(fd.body(), seeded), paramNames, seeded);
     }
 
     /**
@@ -430,7 +436,12 @@ public final class NarrowingInference {
             for (IrExpr.Write w : arm.writes()) {
                 List<IrSort> bucket = writtenByOutput.get(w.output());
                 // A write to an undeclared output is SortChecker's beat, not ours.
-                if (bucket != null) bucket.add(infer(w.value(), armCtx));
+                // The element var leaves scope at stream quantification (∀ element ⟹
+                // …), so close the written value's pin over it → the element-quantified
+                // bound (e+1 with e:[@>=0] → [Int:@>=1]).
+                if (bucket != null) {
+                    bucket.add(closeOver(infer(w.value(), armCtx), Set.of(it.element()), armCtx));
+                }
             }
         }
         Map<String, IrSort> streamSorts = new LinkedHashMap<>();
@@ -813,19 +824,90 @@ public final class NarrowingInference {
      */
     private static IrSort inferBinOp(IrExpr.BinOp op, InferenceContext ctx) {
         if (!isArithmetic(op.op())) return null;
-        SymExpr expr;
-        List<SymExpr> hypotheses;
+        // Decimal arithmetic carries no value-level narrowing (the kernel is
+        // integer-only) — bare Decimal, matching the parser's maximal shape.
+        if (isDecimalOperand(op.left(), ctx) || isDecimalOperand(op.right(), ctx)) {
+            return IrSort.named("Decimal");
+        }
+        // The exact value-pin `[Int:@==expr]` is the narrowest kernel-compilable
+        // predicate, valid wherever expr's free variables are in scope (the
+        // CONSUMING scope — closing over variables that leave scope is a boundary
+        // concern, see #closeOver, not done here). Emit it only when the predicate
+        // compiles — the one core invariant (never mint a non-compilable
+        // refinement; isArithmetic already excludes DIV/MOD/POW, and a struct /
+        // non-kernel operand makes compileSymExpr throw). See
+        // docs/inference-unification.md.
         try {
-            expr = IrCompiler.compileSymExpr(op);
-            hypotheses = hypothesesFromEnv(ctx);
+            IrCompiler.compileSymExpr(op);
         } catch (CompileException unused) {
             return null;
         }
-        return intervalToIntSort(BoundAnalysis.bound(expr, hypotheses));
+        return intRefined(new IrExpr.BinOp(
+                IrExpr.Op.EQ, new IrExpr.SelfRef(op.origin()), op, op.origin()));
     }
 
     private static boolean isArithmetic(IrExpr.Op op) {
         return op == IrExpr.Op.ADD || op == IrExpr.Op.SUB || op == IrExpr.Op.MUL;
+    }
+
+    /** Whether an operand's value is Decimal-sorted (any Decimal operand keeps the result Decimal). */
+    private static boolean isDecimalOperand(IrExpr e, InferenceContext ctx) {
+        return switch (e) {
+            case IrExpr.Dec ignored -> true;
+            case IrExpr.Var v -> "Decimal".equals(nullableBaseName(ctx.typeEnv().get(v.name())));
+            case IrExpr.BinOp op -> isDecimalOperand(op.left(), ctx) || isDecimalOperand(op.right(), ctx);
+            case IrExpr.Cast c -> "Decimal".equals(nullableBaseName(c.targetSort()));
+            default -> false;
+        };
+    }
+
+    private static String nullableBaseName(IrSort s) {
+        return s == null ? null : baseName(s);
+    }
+
+    /**
+     * Closes a narrowing over variables that are leaving the consuming scope: any
+     * value-pin / predicate referencing an {@code escaping} variable is re-projected
+     * to a variable-free numeric bound via {@link BoundAnalysis} (a bound IS a pin
+     * with its free variables eliminated). A narrowing free of the escaping vars is
+     * returned unchanged. Called at scope boundaries — function return, stream-element
+     * quantification (see docs/inference-unification.md). Returns {@code null} when the
+     * projection is unbounded (nothing tighter than the declared sort survives the
+     * boundary).
+     */
+    static IrSort closeOver(IrSort narrowing, Set<String> escaping, InferenceContext ctx) {
+        if (!(narrowing instanceof IrSort.Refined refined)) return narrowing;
+        if (!"Int".equals(refined.name())) return narrowing;
+        if (!predicateMentionsAny(refined.predicate(), escaping)) return narrowing;
+        // The narrowing references a departing variable. A value-pin `@==expr`
+        // closes by bounding `expr` under the env's hypotheses (the bound IS the
+        // pin with its free variables eliminated — exactly the projection the
+        // boundary always did). A non-pin predicate mentioning an escaping var
+        // can't be projected here → drop to the declared sort.
+        if (refined.predicate() instanceof IrExpr.BinOp eq
+                && eq.op() == IrExpr.Op.EQ
+                && eq.left() instanceof IrExpr.SelfRef) {
+            try {
+                SymExpr expr = IrCompiler.compileSymExpr(eq.right());
+                return intervalToIntSort(BoundAnalysis.bound(expr, hypothesesFromEnv(ctx)));
+            } catch (CompileException unused) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** Whether a refinement predicate references any of the given variable names. */
+    private static boolean predicateMentionsAny(IrExpr predicate, Set<String> names) {
+        return switch (predicate) {
+            case IrExpr.Var v -> names.contains(v.name());
+            case IrExpr.BinOp op ->
+                    predicateMentionsAny(op.left(), names) || predicateMentionsAny(op.right(), names);
+            case IrExpr.FieldAccess fa -> predicateMentionsAny(fa.base(), names);
+            case IrExpr.Call c -> c.args().stream().anyMatch(a -> predicateMentionsAny(a, names));
+            case IrExpr.Cast c -> predicateMentionsAny(c.value(), names);
+            default -> false;
+        };
     }
 
     /**
