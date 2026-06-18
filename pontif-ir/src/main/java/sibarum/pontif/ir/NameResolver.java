@@ -268,6 +268,29 @@ public final class NameResolver {
         return n;  // primitive / local lambda / unknown — leave bare
     }
 
+    /**
+     * If {@code fa} is {@code T.member} where the current module IMPORTS the type
+     * {@code T} and {@code T.member} is a 0-arg static attribute (import-by-association,
+     * docs/cross-module-dispatch.md), resolves it to a 0-arg dispatch call to that
+     * member's FQN. Returns null otherwise (an ordinary field access on a value, or a
+     * type the module doesn't import). Only nullary members are surfaced this way — a
+     * bare {@code T.member} is a value reference; methods/operators are not.
+     */
+    private static IrExpr tryStaticMemberRef(
+            IrExpr.FieldAccess fa, String m, ModuleSymbolTable table) {
+        if (!(fa.base() instanceof IrExpr.Var v)) return null;
+        ModuleSymbolTable.ImportedName imported = table.importedName(m, v.name());
+        if (imported == null) return null;  // not an imported name → ordinary field access
+        String memberKey = imported.remoteName() + "." + fa.fieldName();
+        for (ModuleSymbolTable.Association a : table.associatedDecls(imported.remoteName())) {
+            if (a.nullary() && a.localKey().equals(memberKey)) {
+                return new IrExpr.Call(
+                        ModuleSymbolTable.fqn(a.module(), memberKey), List.of(), fa.origin());
+            }
+        }
+        return null;
+    }
+
     private static IrExpr rewrite(IrExpr e, String m, ModuleSymbolTable table) throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
@@ -320,8 +343,17 @@ public final class NameResolver {
                 String typeName = r.typeName() == null ? null : resolveTypeName(r.typeName(), m, table, r.origin());
                 yield new IrExpr.Record(typeName, mem, r.origin());
             }
-            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
-                    rewrite(fa.base(), m, table), fa.fieldName(), fa.origin());
+            case IrExpr.FieldAccess fa -> {
+                // Import-by-association: `T.member` where T is an IMPORTED type and
+                // T.member is a 0-arg static attribute resolves to that member, as a
+                // 0-arg dispatch call — importing the type surfaces its statics, the
+                // same way methods come with the type. (A LOCAL static is already
+                // rewritten to a Call by the parser via declaredTopLevelLets, so it
+                // never reaches here as a Var-rooted field access.)
+                IrExpr staticRef = tryStaticMemberRef(fa, m, table);
+                yield staticRef != null ? staticRef
+                        : new IrExpr.FieldAccess(rewrite(fa.base(), m, table), fa.fieldName(), fa.origin());
+            }
             case IrExpr.MethodCall mc -> {
                 List<IrExpr> args = new ArrayList<>(mc.args().size());
                 for (IrExpr a : mc.args()) args.add(rewrite(a, m, table));

@@ -36,8 +36,10 @@ public final class ModuleSymbolTable {
      * {@code localKey}, which mentions/namespaces a type. Importing that type
      * surfaces this declaration. {@code localKey} is the pre-FQN local key
      * (an operator symbol like {@code +}, or a {@code Type.member} name).
+     * {@code nullary} marks a 0-parameter member — a static attribute referenced
+     * bare as a value ({@code Type.one}); operators and methods are non-nullary.
      */
-    public record Association(String module, String localKey) {}
+    public record Association(String module, String localKey, boolean nullary) {}
 
     /** The overloadable operator symbols — a mechanism-1 overload of one of these is associated by operand. */
     private static final Set<String> OPERATORS = Set.of(
@@ -155,12 +157,13 @@ public final class ModuleSymbolTable {
             IrStmt.FunctionDecl fd, String module,
             Map<String, Set<String>> types, Map<String, Set<Association>> assoc) {
         String name = fd.name();
+        boolean nullary = fd.params().isEmpty();
         int dot = name.indexOf('.');
         if (dot > 0) {
             String prefix = name.substring(0, dot);
             if (types.containsKey(prefix)) {
                 assoc.computeIfAbsent(prefix, k -> new LinkedHashSet<>())
-                        .add(new Association(module, name));
+                        .add(new Association(module, name, nullary));
             }
         }
         if (OPERATORS.contains(name)) {
@@ -168,7 +171,7 @@ public final class ModuleSymbolTable {
                 String base = baseTypeName(p.sort());
                 if (base != null && types.containsKey(base)) {
                     assoc.computeIfAbsent(base, k -> new LinkedHashSet<>())
-                            .add(new Association(module, name));
+                            .add(new Association(module, name, nullary));
                 }
             }
         }

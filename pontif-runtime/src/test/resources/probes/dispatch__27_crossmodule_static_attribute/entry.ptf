@@ -1,0 +1,7 @@
+module app.main
+
+requires phys.{Traction}
+
+# Import-by-association: requiring the type Traction should bring its static
+# attribute Traction.one along, no separate import needed.
+Traction.one.z

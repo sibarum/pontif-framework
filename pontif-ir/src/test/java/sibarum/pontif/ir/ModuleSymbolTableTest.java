@@ -41,7 +41,7 @@ class ModuleSymbolTableTest {
     void operator_indexedByEachDeclaredOperandType() {
         ModuleSymbolTable t = tableOf(module("num.vec", typeDecl("Vec"), op("+", "Vec", "Vec")));
         assertTrue(t.associatedDecls("Vec").contains(
-                new ModuleSymbolTable.Association("num.vec", "+")), t.associatedDecls("Vec").toString());
+                new ModuleSymbolTable.Association("num.vec", "+", false)), t.associatedDecls("Vec").toString());
     }
 
     @Test
@@ -50,7 +50,7 @@ class ModuleSymbolTableTest {
         // owned by no module — you never import Int).
         ModuleSymbolTable t = tableOf(module("frac", typeDecl("Frac"), op("/", "Int", "Frac")));
         assertTrue(t.associatedDecls("Frac").contains(
-                new ModuleSymbolTable.Association("frac", "/")), t.associatedDecls("Frac").toString());
+                new ModuleSymbolTable.Association("frac", "/", false)), t.associatedDecls("Frac").toString());
         assertEquals(0, t.associatedDecls("Int").size());
     }
 
@@ -62,7 +62,7 @@ class ModuleSymbolTableTest {
                 IrStmt.functionDecl("Traction.one", List.of(), IrSort.named("Traction"), IrExpr.lit(1)));
         ModuleSymbolTable t = tableOf(m);
         assertTrue(t.associatedDecls("Traction").contains(
-                new ModuleSymbolTable.Association("phys", "Traction.one")),
+                new ModuleSymbolTable.Association("phys", "Traction.one", true)),
                 t.associatedDecls("Traction").toString());
     }
 
@@ -74,7 +74,7 @@ class ModuleSymbolTableTest {
                 module("geom", typeDecl("Vec")),
                 module("algebra", op("+", "Vec", "Vec")));
         assertTrue(t.associatedDecls("Vec").contains(
-                new ModuleSymbolTable.Association("algebra", "+")), t.associatedDecls("Vec").toString());
+                new ModuleSymbolTable.Association("algebra", "+", false)), t.associatedDecls("Vec").toString());
     }
 
     @Test

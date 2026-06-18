@@ -1,0 +1,7 @@
+module phys
+
+exports @.{Traction}
+
+struct Traction(z:Int, n:Int)
+
+let Traction.one = Traction(7, 1)
