@@ -55,6 +55,21 @@ class ReturnGateTest {
     }
 
     @Test
+    void acceptsReturnNarrowedViaStructFieldRefinement() {
+        // get(h:Holder):[Int:@>0] -> h.n  where Holder.n:[Int:@>0]. The param
+        // h is a BARE struct (no param-level refinement), so the proof comes
+        // from the FIELD's declared refinement: the field-fact `h_0.n > 0`
+        // discharges the `r_0 > 0` obligation (r_0 = h_0.n). (Probe inference__21.)
+        CompileResult r = compiler.compileAlt("""
+                module m
+                struct Holder(n:[Int:@>0])
+                function get(h:Holder):[Int:@>0] -> h.n
+                get(Holder(5))""", "holder.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "field-refinement return should compile; got " + r);
+    }
+
+    @Test
     void acceptsBareReturnUnaffected() {
         // No refined return → nothing to prove → unaffected by the gate.
         CompileResult r = compiler.compileAlt(

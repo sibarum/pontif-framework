@@ -227,10 +227,11 @@ public final class Drafter {
             InferenceContext ctx, int[] callCounter, StepSink sink)
             throws CompileException {
         List<CallRef> calls = new ArrayList<>();
-        SymExpr rhs = transcribeBody(body, renameBindings, ctx, callCounter, calls, sink);
-        InitialReceipt bodyReceipt = new InitialReceipt(
-                SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
-        return new Branch(Optional.empty(), List.of(bodyReceipt), calls);
+        List<InitialReceipt> receipts = new ArrayList<>();
+        SymExpr rhs = transcribeBody(body, renameBindings, ctx, callCounter, calls, sink, receipts);
+        receipts.add(new InitialReceipt(
+                SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs)));
+        return new Branch(Optional.empty(), receipts, calls);
     }
 
     /**
@@ -261,10 +262,11 @@ public final class Drafter {
                 guard = Optional.of(Substitute.applySelf(predicate, scrutinee));
             }
             List<CallRef> calls = new ArrayList<>();
-            SymExpr rhs = transcribeBody(arm.result(), renameBindings, ctx, callCounter, calls, sink);
-            InitialReceipt bodyReceipt = new InitialReceipt(
-                    SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs));
-            branches.add(new Branch(guard, List.of(bodyReceipt), calls));
+            List<InitialReceipt> receipts = new ArrayList<>();
+            SymExpr rhs = transcribeBody(arm.result(), renameBindings, ctx, callCounter, calls, sink, receipts);
+            receipts.add(new InitialReceipt(
+                    SymExpr.cmp(SymExpr.var(resultVar.name()), SymExpr.CmpOp.EQ, rhs)));
+            branches.add(new Branch(guard, receipts, calls));
         }
         return branches;
     }
@@ -279,8 +281,83 @@ public final class Drafter {
             IrExpr body, Map<String, SymExpr> renameBindings,
             InferenceContext ctx, int[] callCounter, List<CallRef> calls, StepSink sink)
             throws CompileException {
+        return transcribeBody(body, renameBindings, ctx, callCounter, calls, sink, null);
+    }
+
+    /**
+     * As {@link #transcribeBody(IrExpr, Map, InferenceContext, int[], List, StepSink)},
+     * but when {@code fieldFacts} is non-null also gathers each reachable field
+     * access's declared refinement into it (see {@link #gatherFieldFacts}). Walks
+     * the <em>hoisted</em> body, so the field-access terms match the equation's
+     * variables and any call result is already a fresh {@code r_k} var.
+     */
+    private static SymExpr transcribeBody(
+            IrExpr body, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, int[] callCounter, List<CallRef> calls, StepSink sink,
+            List<InitialReceipt> fieldFacts)
+            throws CompileException {
         IrExpr hoisted = hoistCalls(body, renameBindings, ctx, callCounter, calls, sink);
+        if (fieldFacts != null) {
+            gatherFieldFacts(hoisted, renameBindings, ctx, fieldFacts);
+        }
         return Substitute.apply(IrCompiler.compileSymExpr(hoisted), renameBindings);
+    }
+
+    /**
+     * Emits a field-declaration refinement fact for every field access reachable
+     * in {@code expr}. A value of a struct type carries each field's declared
+     * refinement (the construction gate enforced it at construction), so a field
+     * access {@code h.n} where {@code Holder.n:[Int:@>0]} contributes the
+     * assumable fact {@code h_0.n > 0} — exactly the hypothesis a return like
+     * {@code get(h):[Int:@>0] -> h.n} needs, which the param's (bare) sort can't
+     * supply. Each fact is added as an {@link InitialReceipt}, picked up as a
+     * branch hypothesis by {@link PathFacts}.
+     *
+     * <p>The field's narrowing is projected by {@link NarrowingInference#infer}
+     * (the same projection the floor layer uses); a field access whose own sort
+     * isn't a refinement (or whose term/predicate doesn't lift to the linear
+     * kernel) contributes nothing — conservative, never aborting the draft.
+     */
+    private static void gatherFieldFacts(
+            IrExpr expr, Map<String, SymExpr> renameBindings,
+            InferenceContext ctx, List<InitialReceipt> out) {
+        switch (expr) {
+            case IrExpr.FieldAccess fa -> {
+                if (NarrowingInference.infer(fa, ctx) instanceof IrSort.Refined refined) {
+                    try {
+                        SymExpr term = Substitute.apply(
+                                IrCompiler.compileSymExpr(fa), renameBindings);
+                        SymExpr pred = IrCompiler.compileSymExpr(refined.predicate());
+                        out.add(new InitialReceipt(Substitute.applySelf(pred, term)));
+                    } catch (CompileException ignored) {
+                        // Field term or predicate not liftable to the linear
+                        // kernel — skip the fact (conservative).
+                    }
+                }
+                gatherFieldFacts(fa.base(), renameBindings, ctx, out);
+            }
+            case IrExpr.BinOp op -> {
+                gatherFieldFacts(op.left(), renameBindings, ctx, out);
+                gatherFieldFacts(op.right(), renameBindings, ctx, out);
+            }
+            case IrExpr.LetIn l -> {
+                gatherFieldFacts(l.value(), renameBindings, ctx, out);
+                gatherFieldFacts(l.body(), renameBindings, ctx, out);
+            }
+            case IrExpr.Record r -> {
+                for (IrExpr v : r.members().values()) {
+                    gatherFieldFacts(v, renameBindings, ctx, out);
+                }
+            }
+            case IrExpr.Call c -> {
+                for (IrExpr a : c.args()) {
+                    gatherFieldFacts(a, renameBindings, ctx, out);
+                }
+            }
+            // Leaves (and forms whose field reads don't survive into the linear
+            // body equation): nothing to gather.
+            default -> { }
+        }
     }
 
     /**
