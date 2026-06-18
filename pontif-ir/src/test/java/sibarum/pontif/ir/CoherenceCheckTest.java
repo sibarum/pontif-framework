@@ -81,4 +81,43 @@ class CoherenceCheckTest {
         Map<String, IrModule> mods = project(solo);
         assertDoesNotThrow(() -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
     }
+
+    // --- Operator orphan rule (mechanism-1 overloads) ------------------------
+
+    private static IrStmt.FunctionDecl op(String sym, String lt, String rt) {
+        return IrStmt.functionDecl(sym,
+                List.of(new IrParam("a", IrSort.named(lt)), new IrParam("b", IrSort.named(rt))),
+                IrSort.named(rt), IrExpr.lit(0));
+    }
+
+    @Test
+    void operatorOnUnownedPrimitives_isRejected() {
+        // A module that owns neither operand redefining `+(Int, Int)` is type piracy.
+        IrModule pirate = new IrModule("pirate", List.of(op("+", "Int", "Int")), IrExpr.lit(0));
+        Map<String, IrModule> mods = project(geoWithPoint(), pirate);
+        CompileException e = assertThrows(CompileException.class,
+                () -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+        assertTrue(e.getMessage().contains("operator '+'") && e.getMessage().contains("pirate"),
+                () -> e.getMessage());
+    }
+
+    @Test
+    void operatorOnOwnedType_isAllowed() {
+        // num.vec owns Vec → may define `+(Vec, Vec)`.
+        IrModule vec = new IrModule("num.vec", List.of(
+                IrStmt.typeAlias("Vec", IrSort.structural("Vec", Map.of("x", IrSort.named("Int")))),
+                op("+", "Vec", "Vec")), IrExpr.lit(0));
+        Map<String, IrModule> mods = project(vec, geoWithPoint());
+        assertDoesNotThrow(() -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+    }
+
+    @Test
+    void operatorWithOneOwnedOperand_isAllowed() {
+        // frac owns Frac → may define `/(Int, Frac)` even though it doesn't own Int.
+        IrModule frac = new IrModule("frac", List.of(
+                IrStmt.typeAlias("Frac", IrSort.structural("Frac", Map.of("n", IrSort.named("Int")))),
+                op("/", "Int", "Frac")), IrExpr.lit(0));
+        Map<String, IrModule> mods = project(frac, geoWithPoint());
+        assertDoesNotThrow(() -> CoherenceCheck.check(mods, ModuleSymbolTable.build(mods)));
+    }
 }
