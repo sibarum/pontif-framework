@@ -152,6 +152,88 @@ public final class NarrowingInference {
         return inferred instanceof IrSort.Refined refined ? refined : null;
     }
 
+    /**
+     * The <em>floor</em> layer: {@link #infer}'s narrowed sort when it has
+     * one, else the coarse <em>base</em> sort (bare {@code Int}/{@code Bool}/
+     * {@code Decimal}/{@code String}/struct). Where {@link #infer} returns
+     * {@code null} (= "nothing tighter than declared"), validation and
+     * match-totality consumers still need <em>a</em> sort — the base — so they
+     * can decide field-existence and exhaustiveness. This wrapper supplies it
+     * without touching {@code infer}'s null contract (load-bearing for the
+     * narrowing consumers — {@code MethodOperatorResolver}/{@code ConstructionGate}/
+     * the receipt {@code Drafter}).
+     *
+     * <p>The one divergence from {@link #infer}: an inline {@link IrSort.Structural}
+     * field-access base (a struct not registered in {@code ctx.structDefs()}) is
+     * resolved here by reading the base's own members — whereas {@code infer}
+     * deliberately yields {@code null} for it (pinned by
+     * {@code NarrowingInferenceTest.fieldAccess_returnsNullWithoutStructDef}).
+     */
+    public static IrSort inferFloor(IrExpr expr, InferenceContext ctx) {
+        IrSort narrowed = infer(expr, ctx);
+        if (narrowed != null) return narrowed;
+        return floorOf(expr, ctx);
+    }
+
+    /**
+     * The coarse base-sort fallback, mirroring the bare cases of the (now
+     * deleted) {@code SortChecker.inferSort}. Only reached when {@link #infer}
+     * yields {@code null}; recurses through {@link #inferFloor} so nested bases
+     * (a field-access base, an arithmetic operand) also fall to their floor.
+     */
+    private static IrSort floorOf(IrExpr expr, InferenceContext ctx) {
+        return switch (expr) {
+            case IrExpr.Var v -> ctx.typeEnv().get(v.name());
+            // A cast produces its named target sort regardless of source.
+            case IrExpr.Cast cast -> cast.targetSort();
+            case IrExpr.BinOp op -> switch (op.op()) {
+                case ADD, SUB, MUL, DIV, MOD, POW -> {
+                    IrSort ls = inferFloor(op.left(), ctx);
+                    IrSort rs = inferFloor(op.right(), ctx);
+                    String lb = ls == null ? null : baseName(ls);
+                    String rb = rs == null ? null : baseName(rs);
+                    // `+` with a String operand is concatenation → String.
+                    if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
+                        yield IrSort.named("String");
+                    }
+                    if ("Decimal".equals(lb) || "Decimal".equals(rb)) yield IrSort.named("Decimal");
+                    if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
+                    yield null;
+                }
+                case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> IrSort.named("Bool");
+            };
+            case IrExpr.FieldAccess fa -> {
+                // Single-name struct resolution (no body recursion), so a
+                // recursive type still terminates. Unlike infer's FieldAccess,
+                // an inline Structural base resolves via its own members.
+                IrSort.Structural sp = resolveNominal(inferFloor(fa.base(), ctx), ctx.structDefs());
+                yield sp != null ? sp.members().get(fa.fieldName()) : null;
+            }
+            case IrExpr.Call c -> ctx.functionReturns().get(c.functionName());
+            // Match / LetIn / Apply / Lambda / SelfRef / MethodCall / Iterate /
+            // Record / DispatchRef: no coarser floor than infer already gives.
+            default -> null;
+        };
+    }
+
+    /**
+     * Resolves a sort to its struct definition: an inline {@link IrSort.Structural}
+     * directly, a nominal {@link IrSort.Named}/{@link IrSort.Refined} by name via
+     * {@code structDefs}. {@code null} when it isn't a struct. A single name
+     * lookup (never recursing into the body) keeps consumers terminating on a
+     * recursive type.
+     */
+    private static IrSort.Structural resolveNominal(
+            IrSort sort, Map<String, IrSort.Structural> structDefs) {
+        if (sort == null) return null;
+        return switch (sort) {
+            case IrSort.Structural s -> s;
+            case IrSort.Named n -> structDefs.get(n.name());
+            case IrSort.Refined r -> structDefs.get(r.name());
+            default -> null;
+        };
+    }
+
     // --- Call (Phase D) ----------------------------------------------------
 
     /**

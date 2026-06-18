@@ -357,6 +357,48 @@ class NarrowingInferenceTest {
                         Map.of("x", IrSort.named("Int"), "y", IrSort.named("Int")))))));
     }
 
+    // --- Floor layer (inferFloor) --------------------------------------------
+
+    @Test
+    void inferFloor_passesThroughNarrowing() {
+        // When infer has a narrowing, the floor returns it verbatim.
+        IrSort xSort = IrSort.refined(
+                "Int", IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        InferenceContext ctx = InferenceContext.of(Map.of("x", xSort));
+        assertEquals(xSort, NarrowingInference.inferFloor(IrExpr.var("x"), ctx));
+    }
+
+    @Test
+    void inferFloor_comparison_fallsToBool() {
+        // infer abstains on a comparison (it's Bool, not a bounded Int); the
+        // floor supplies the bare Bool that match-totality needs.
+        IrExpr cmp = IrExpr.binOp(IrExpr.Op.GT, IrExpr.var("x"), IrExpr.lit(0));
+        InferenceContext ctx = InferenceContext.of(Map.of("x", IrSort.named("Int")));
+        assertNull(NarrowingInference.infer(cmp, ctx));
+        assertEquals(IrSort.named("Bool"), NarrowingInference.inferFloor(cmp, ctx));
+    }
+
+    @Test
+    void inferFloor_unboundedArith_fallsToBareInt() {
+        // Unbounded Int arithmetic doesn't narrow, but the floor is bare Int.
+        IrExpr sum = IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("x"), IrExpr.var("y"));
+        InferenceContext ctx = InferenceContext.of(Map.of(
+                "x", IrSort.named("Int"), "y", IrSort.named("Int")));
+        assertNull(NarrowingInference.infer(sum, ctx));
+        assertEquals(IrSort.named("Int"), NarrowingInference.inferFloor(sum, ctx));
+    }
+
+    @Test
+    void inferFloor_inlineStructuralFieldAccess_resolvesViaOwnMembers() {
+        // The one floor-only divergence: an inline Structural base (no structDefs
+        // entry) resolves via its own members, where infer yields null.
+        InferenceContext ctx = InferenceContext.of(Map.of("p", IrSort.structural("Point",
+                Map.of("x", IrSort.named("Int"), "y", IrSort.named("Int")))));
+        IrExpr fa = IrExpr.fieldAccess(IrExpr.var("p"), "x");
+        assertNull(NarrowingInference.infer(fa, ctx));
+        assertEquals(IrSort.named("Int"), NarrowingInference.inferFloor(fa, ctx));
+    }
+
     // --- Iteration construct (docs/iteration.md) -----------------------------
 
     /**
