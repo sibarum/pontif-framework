@@ -298,11 +298,12 @@ class NarrowingInferenceTest {
     }
 
     @Test
-    void binOp_comparisonOp_returnsNull() {
-        // x > 0 yields a Bool, not a pinned/bounded Int — still abstains.
-        assertNull(NarrowingInference.infer(
-                IrExpr.binOp(IrExpr.Op.GT, IrExpr.var("x"), IrExpr.lit(0)),
-                InferenceContext.of(Map.of("x", intGe(1)))));
+    void binOp_comparisonOp_pinsBool() {
+        // x > 0 is Bool-valued and pins to the exact [Bool:@==(x>0)] (the parser's
+        // historical narrowing, now the core's — open, closed at boundaries).
+        IrExpr cmp = IrExpr.binOp(IrExpr.Op.GT, IrExpr.var("x"), IrExpr.lit(0));
+        assertEquals(IrSort.refined("Bool", eqSelf(cmp)),
+                NarrowingInference.infer(cmp, InferenceContext.of(Map.of("x", intGe(1)))));
     }
 
     // --- Closing a pin at a scope boundary projects it to a bound ------------
@@ -387,13 +388,15 @@ class NarrowingInferenceTest {
     }
 
     @Test
-    void inferFloor_comparison_fallsToBool() {
-        // infer abstains on a comparison (it's Bool, not a bounded Int); the
-        // floor supplies the bare Bool that match-totality needs.
+    void inferFloor_comparison_returnsBoolPin() {
+        // A comparison pins to [Bool:@==(x>0)] (infer is open); the floor returns
+        // that pin. (The bare-Bool floor is still the fallback when the predicate
+        // doesn't compile — exercised via the totality-widening path.)
         IrExpr cmp = IrExpr.binOp(IrExpr.Op.GT, IrExpr.var("x"), IrExpr.lit(0));
         InferenceContext ctx = InferenceContext.of(Map.of("x", IrSort.named("Int")));
-        assertNull(NarrowingInference.infer(cmp, ctx));
-        assertEquals(IrSort.named("Bool"), NarrowingInference.inferFloor(cmp, ctx));
+        IrSort boolPin = IrSort.refined("Bool", eqSelf(cmp));
+        assertEquals(boolPin, NarrowingInference.infer(cmp, ctx));
+        assertEquals(boolPin, NarrowingInference.inferFloor(cmp, ctx));
     }
 
     @Test

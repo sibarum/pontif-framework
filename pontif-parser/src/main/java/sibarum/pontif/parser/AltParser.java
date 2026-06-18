@@ -4,12 +4,14 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.ir.CompileException;
+import sibarum.pontif.ir.InferenceContext;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.ir.NarrowingInference;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 
@@ -107,16 +109,6 @@ public final class AltParser {
         };
     }
 
-    /** The overloadable operator symbol for an {@link IrExpr.Op}, or null. */
-    private static String operatorTextFor(IrExpr.Op op) {
-        return switch (op) {
-            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
-            case MOD -> "%"; case POW -> "^";
-            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
-            case EQ -> "=="; case NE -> "!=";
-            case APPROX, AND, OR -> null;
-        };
-    }
 
     private final List<AltToken> tokens;
     private int pos;
@@ -1573,159 +1565,52 @@ public final class AltParser {
         return toBase.equals(baseSortName(from.baseSort()));
     }
 
+    // Parse-time best-effort typing — now ONE engine with the core. The parser
+    // is no longer a separate reasoner: it runs NarrowingInference.inferFloor over
+    // an InferenceContext built from its live scope maps, so every narrowing shape
+    // the core can express (the exact value-pin, field projection, method/operator
+    // return typing) is available here too. Parse-time weakness falls out only from
+    // an emptier context (no imports yet → "_"), never a divergent strategy. See
+    // docs/inference-unification.md.
     private IrSort inferMaximalSort(IrExpr expr) {
-        return switch (expr) {
-            case IrExpr.Lit lit -> new IrSort.Refined(
-                    "Int",
-                    new IrExpr.BinOp(IrExpr.Op.EQ,
-                            new IrExpr.SelfRef(lit.origin()),
-                            lit,
-                            lit.origin()),
-                    lit.origin());
-            case IrExpr.Bool b -> new IrSort.Refined(
-                    "Bool",
-                    new IrExpr.BinOp(IrExpr.Op.EQ,
-                            new IrExpr.SelfRef(b.origin()),
-                            b,
-                            b.origin()),
-                    b.origin());
-            // Decimal literals carry no value-level narrowing (the discharge
-            // engine is integer-only); the bare Decimal sort is the maximal
-            // shape we infer.
-            case IrExpr.Dec d -> new IrSort.Named("Decimal", d.origin());
-            // A metareference's maximal shape is its Dispatch sort; the
-            // return stays "_" at parse level (candidates aren't consulted).
-            case IrExpr.DispatchRef d -> new IrSort.Dispatch(
-                    d.keySorts(), new IrSort.Named("_", d.origin()), d.origin());
-            // Same stance for Char in the value slice: bare Char.
-            case IrExpr.Chr c -> new IrSort.Named("Char", c.origin());
-            // Strings: bare String — no value-level narrowing in the value slice.
-            case IrExpr.Str s -> new IrSort.Named("String", s.origin());
-            case IrExpr.Var v -> {
-                IrSort scoped = currentScope.get(v.name());
-                if (scoped != null) yield scoped;
-                IrSort topLevel = declaredTopLevelLets.get(v.name());
-                if (topLevel != null) yield topLevel;
-                yield IrSort.named("_");
+        // A record keeps its STRUCTURAL representation — the parser's canonical
+        // aggregate shape (member name → sort), interchangeable with the
+        // field-conjunct refinement the core's `infer` produces for the same value
+        // (James 2026-06-18). Members and every other form type through the one
+        // core engine, so there's no divergent reasoner — only a shape choice.
+        if (expr instanceof IrExpr.Record r) {
+            Map<String, IrSort> members = new LinkedHashMap<>();
+            for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                members.put(e.getKey(), inferMaximalSort(e.getValue()));
             }
-            case IrExpr.Record r -> {
-                Map<String, IrSort> memberSorts = new LinkedHashMap<>();
-                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
-                    memberSorts.put(e.getKey(), inferMaximalSort(e.getValue()));
-                }
-                // The record's own claim is the inferred name: a named struct
-                // stays itself, a tuple stays "_tuple", and an anonymous record
-                // stays "_record" — NEVER christened after a same-shaped struct
-                // (that was findStructByFieldSet, retired by the claim rule:
-                // names come from declared assertions via AggregatePromotion,
-                // not from shape guessing).
-                String name = r.typeName() != null ? r.typeName() : "_record";
-                yield new IrSort.Structural(name, memberSorts, r.origin());
-            }
-            case IrExpr.FieldAccess fa -> {
-                IrSort baseSort = inferMaximalSort(fa.base());
-                if (baseSort instanceof IrSort.Structural sp) {
-                    IrSort fieldSort = sp.members().get(fa.fieldName());
-                    if (fieldSort != null) yield fieldSort;
-                }
-                yield IrSort.named("_");
-            }
-            // A method call's RESULT type, best-effort: infer the receiver's
-            // base type and look up the declared return of `Type.method`. This
-            // is only TYPING (for parse-time desugars like destructuring-let);
-            // it stays order-best-effort (a method declared below yields "_"),
-            // while the call's ROUTING is order-independent in MethodResolver.
-            case IrExpr.MethodCall mc -> {
-                String recvType = baseSortName(inferMaximalSort(mc.receiver()));
-                if (recvType != null && !recvType.equals("_")) {
-                    IrSort ret = declaredFunctionReturns.get(recvType + "." + mc.methodName());
-                    if (ret != null) yield ret;
-                }
-                yield IrSort.named("_");
-            }
-            // REVISIT (docs/iteration.md §10): infer the output tuple's sort;
-            // for now the iteration construct's maximal sort is unknown ("_").
-            case IrExpr.Iterate it -> IrSort.named("_");
-            case IrExpr.BinOp op -> {
-                // Decimal arithmetic yields a bare Decimal (no value refinement —
-                // see the Dec literal case). Int arithmetic and all comparisons
-                // keep the value-pinned refinement.
-                boolean decimalArith = switch (op.op()) {
-                    case ADD, SUB, MUL, DIV, MOD, POW -> isDecimalOperand(op.left()) || isDecimalOperand(op.right());
-                    default -> false;
-                };
-                if (decimalArith) {
-                    yield IrSort.named("Decimal");
-                }
-                // Don't fabricate an `[Int:@==expr]` value-pin for a non-linear /
-                // user operator: it would mis-type the base AND embed an operator
-                // the linear refinement kernel can't compile (the dispatch__22
-                // root cause — a synthesized pin that always fails compilation).
-                // Leave the binding loose ("_"); its real sort is the operator's
-                // return, resolved by OperatorResolver post-link.
-                //   - DIV/MOD/POW: there is no built-in Int `/`,`%`,`^`, so a
-                //     surviving BinOp of these is ALWAYS an unrouted user operator
-                //     (cross-module — parse routing only sees local overloads). Such
-                //     a pin can never compile, so it is never correct to synthesize.
-                //   - ADD/SUB/MUL: a struct operand (a record literal) is likewise a
-                //     user operator, not integer arithmetic.
-                // NOTE: a cross-module struct operand written as a constructor CALL
-                // (e.g. `Vec(1,2) + ...`) infers to "_" here, so an ADD/SUB/MUL over
-                // it still gets a (harmless, non-crashing) Int pin — a residual seam
-                // of parse-time routing blindness, see docs/TODO.md (cluster 4).
-                boolean nonLinearOp = switch (op.op()) {
-                    case DIV, MOD, POW -> true;
-                    case ADD, SUB, MUL -> isUserStructOperand(op.left()) || isUserStructOperand(op.right());
-                    default -> false;
-                };
-                if (nonLinearOp) {
-                    // The operator no longer routes to a Call at parse time, so its
-                    // result sort can't be read off a Call's declared return. Look
-                    // up the declared user-operator overload's return by the bare
-                    // operator symbol so a let-bound `v = a <op> b` (and the 0-arg
-                    // function it lowers to) carries the operator's actual result
-                    // sort — what method/field resolution on the result needs.
-                    // (MethodOperatorResolver does the same routing on the IR;
-                    // here we only need the result SORT for typing.) Falls back to
-                    // "_" when no such overload is declared (cross-module operators,
-                    // resolved post-link).
-                    String opSym = operatorTextFor(op.op());
-                    IrSort opReturn = opSym == null ? null : declaredFunctionReturns.get(opSym);
-                    yield opReturn != null ? opReturn : IrSort.named("_");
-                }
-                String baseName = switch (op.op()) {
-                    case ADD, SUB, MUL, DIV, MOD, POW -> "Int";
-                    case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> "Bool";
-                };
-                yield new IrSort.Refined(
-                        baseName,
-                        new IrExpr.BinOp(IrExpr.Op.EQ,
-                                new IrExpr.SelfRef(op.origin()),
-                                op,
-                                op.origin()),
-                        op.origin());
-            }
-            case IrExpr.Call call -> {
-                IrSort declaredReturn = declaredFunctionReturns.get(call.functionName());
-                if (declaredReturn != null) yield declaredReturn;
-                // Top-level let names lower to 0-arg Calls — check there too
-                // so method-call routing can see a let-receiver's actual sort.
-                IrSort letSort = declaredTopLevelLets.get(call.functionName());
-                if (letSort != null) yield letSort;
-                yield IrSort.named("_");
-            }
-            case IrExpr.Apply ap -> IrSort.named("_");
-            case IrExpr.Lambda lam -> new IrSort.Method(
-                    lam.params().stream().map(IrParam::sort).toList(),
-                    lam.returnSort(),
-                    lam.origin());
-            case IrExpr.Match m -> IrSort.named("_");
-            case IrExpr.LetIn l -> inferMaximalSort(l.body());
-            case IrExpr.SelfRef s -> IrSort.named("_");
-            // A cast's maximal shape is its declared target sort — the coercion
-            // names exactly what it produces.
-            case IrExpr.Cast cast -> cast.targetSort();
-        };
+            return new IrSort.Structural(
+                    r.typeName() != null ? r.typeName() : "_record", members, r.origin());
+        }
+        IrSort inferred = NarrowingInference.inferFloor(expr, parseInferenceContext());
+        // The parser's floor for "no narrowing" is the unknown sort "_", not null.
+        return inferred != null ? inferred : IrSort.named("_");
+    }
+
+    /**
+     * Builds the inference context from the parser's live scope maps. Mirrors the
+     * old per-case lookup order: a Var resolves in {@code currentScope} over
+     * {@code declaredTopLevelLets}; a 0-arg Call resolves in
+     * {@code declaredFunctionReturns} over {@code declaredTopLevelLets} (a top-level
+     * let lowers to a 0-arg call). Method/operator returns live in
+     * {@code declaredFunctionReturns} keyed {@code Type.method} / the operator symbol.
+     * Null-valued entries are stripped ({@link InferenceContext}'s canonical
+     * constructor rejects nulls).
+     */
+    private InferenceContext parseInferenceContext() {
+        Map<String, IrSort> typeEnv = new LinkedHashMap<>();
+        typeEnv.putAll(declaredTopLevelLets);
+        typeEnv.putAll(currentScope);  // local scope shadows top-level
+        Map<String, IrSort> functionReturns = new LinkedHashMap<>();
+        functionReturns.putAll(declaredTopLevelLets);
+        functionReturns.putAll(declaredFunctionReturns);  // declared returns win
+        typeEnv.values().removeIf(java.util.Objects::isNull);
+        functionReturns.values().removeIf(java.util.Objects::isNull);
+        return new InferenceContext(typeEnv, functionReturns, declaredStructs, Map.of(), Map.of());
     }
 
 
@@ -4395,31 +4280,6 @@ public final class AltParser {
             case IrSort.Union u -> null;
             case IrSort.Intersection i -> null;
         };
-    }
-
-    /** True when {@code expr}'s maximal-inferred sort has base name {@code Decimal}. */
-    private boolean isDecimalOperand(IrExpr expr) {
-        return "Decimal".equals(baseSortName(inferMaximalSort(expr)));
-    }
-
-    /**
-     * Whether {@code expr}'s inferred base is a user (non-primitive) type — a
-     * struct/Record, the signal that an arithmetic operator over it is a
-     * <em>user operator overload</em>, not integer/decimal arithmetic. Used by
-     * {@link #inferMaximalSort}'s BinOp case so it does not fabricate an
-     * {@code [Int:@==expr]} value-pin for a struct operator chain (e.g. a Frac
-     * {@code /}): that pin lies about the base AND embeds a non-linear operator
-     * the refinement kernel can't compile. Unknown ({@code "_"}) operands are NOT
-     * user structs — they keep the integer-arithmetic assumption, preserving the
-     * common {@code a + 1} narrowing. (Single-module struct ops never reach here:
-     * parse-time routing has already turned them into Calls.)
-     */
-    private boolean isUserStructOperand(IrExpr expr) {
-        String base = baseSortName(inferMaximalSort(expr));
-        return base != null
-                && !base.equals("_")
-                && !base.equals("Int") && !base.equals("Bool")
-                && !base.equals("Decimal") && !base.equals("Char") && !base.equals("String");
     }
 
     /**

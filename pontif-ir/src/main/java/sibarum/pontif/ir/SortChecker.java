@@ -1211,6 +1211,14 @@ public final class SortChecker {
                 checkExpr(fa.base(), typeEnv, functionReturns, structDefs);
                 IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
                 IrSort.Structural sp = resolveNominal(baseSort, structDefs);
+                // Anonymous aggregates ('_record'/'_tuple') defer field-existence to
+                // the runtime check (RuntimeCheckException carries the access origin);
+                // only NOMINAL structs are compile-checked here. (The floor now gives
+                // an anonymous record a structural shape for the parser's base-name
+                // needs, but that must not change this check's nominal-only contract.)
+                if (sp != null && sp.name().startsWith("_")) {
+                    sp = null;
+                }
                 if (sp != null) {
                     // A trait attribute reads as a field but is stored as a
                     // computed projection: `x.weight` resolves to the satisfier's

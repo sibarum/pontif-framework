@@ -193,19 +193,7 @@ public final class NarrowingInference {
             // A cast produces its named target sort regardless of source.
             case IrExpr.Cast cast -> cast.targetSort();
             case IrExpr.BinOp op -> switch (op.op()) {
-                case ADD, SUB, MUL, DIV, MOD, POW -> {
-                    IrSort ls = inferFloor(op.left(), ctx);
-                    IrSort rs = inferFloor(op.right(), ctx);
-                    String lb = ls == null ? null : baseName(ls);
-                    String rb = rs == null ? null : baseName(rs);
-                    // `+` with a String operand is concatenation → String.
-                    if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
-                        yield IrSort.named("String");
-                    }
-                    if ("Decimal".equals(lb) || "Decimal".equals(rb)) yield IrSort.named("Decimal");
-                    if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
-                    yield null;
-                }
+                case ADD, SUB, MUL, DIV, MOD, POW -> floorArith(op, ctx);
                 case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> IrSort.named("Bool");
             };
             case IrExpr.FieldAccess fa -> {
@@ -215,10 +203,95 @@ public final class NarrowingInference {
                 IrSort.Structural sp = resolveNominal(inferFloor(fa.base(), ctx), ctx.structDefs());
                 yield sp != null ? sp.members().get(fa.fieldName()) : null;
             }
+            // A method call's result is the resolved method's declared return,
+            // keyed on the receiver's base sort (`Type.method`). Best-effort floor
+            // (infer abstains on MethodCall until MethodResolver runs) — same
+            // resolve-by-sort-then-return mechanism as the operator case below,
+            // just receiver-rooted (one operand → less dispatch ambiguity).
+            case IrExpr.MethodCall mc -> {
+                IrSort recv = inferFloor(mc.receiver(), ctx);
+                String recvBase = recv == null ? null : baseName(recv);
+                if (recvBase == null || recvBase.equals("_")) yield null;
+                yield ctx.functionReturns().get(recvBase + "." + mc.methodName());
+            }
             case IrExpr.Call c -> ctx.functionReturns().get(c.functionName());
-            // Match / LetIn / Apply / Lambda / SelfRef / MethodCall / Iterate /
-            // Record / DispatchRef: no coarser floor than infer already gives.
+            // A record's structural narrowing — the shape interchangeable with the
+            // field-conjunct refinement infer produces for a NAMED record (same
+            // semantics, different shape). Reached here only for the cases infer
+            // abstains on (an anonymous record → "_record"); members fall to their
+            // own floor ("_" when un-narrowable, never null in the map).
+            case IrExpr.Record r -> {
+                Map<String, IrSort> members = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    IrSort m = inferFloor(e.getValue(), ctx);
+                    members.put(e.getKey(), m != null ? m : IrSort.named("_"));
+                }
+                yield IrSort.structural(r.typeName() != null ? r.typeName() : "_record", members);
+            }
+            // A lambda's shape is its method sort (param sorts → return sort).
+            case IrExpr.Lambda lam -> new IrSort.Method(
+                    lam.params().stream().map(IrParam::sort).toList(),
+                    lam.returnSort(), lam.origin());
+            // Match / LetIn / Apply / SelfRef / Iterate / DispatchRef: no coarser
+            // floor than infer already gives.
             default -> null;
+        };
+    }
+
+    /**
+     * Floor for an arithmetic BinOp the {@code infer} pin couldn't type (an
+     * un-routed user operator, or a non-kernel operand). String concat → String;
+     * any Decimal operand → Decimal; a built-in {@code Int}-on-{@code Int} →
+     * {@code Int}. Otherwise it's an un-routed user operator (no built-in for
+     * DIV/MOD/POW, or a non-primitive operand): its result is the operator
+     * overload's declared return, looked up by the operator <em>symbol</em> — the
+     * SAME mechanism as a method call, keyed on the operator instead of a receiver
+     * (more operands → more dispatch ambiguity, identical resolution). Post-link the
+     * operator key is FQN'd so the bare-symbol lookup misses → null (no regression);
+     * at parse time it hits the parser's bare-keyed declared returns.
+     */
+    private static IrSort floorArith(IrExpr.BinOp op, InferenceContext ctx) {
+        IrSort ls = inferFloor(op.left(), ctx);
+        IrSort rs = inferFloor(op.right(), ctx);
+        String lb = ls == null ? null : baseName(ls);
+        String rb = rs == null ? null : baseName(rs);
+        if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
+            return IrSort.named("String");
+        }
+        if ("Decimal".equals(lb) || "Decimal".equals(rb)) return IrSort.named("Decimal");
+        boolean userOp = switch (op.op()) {
+            case DIV, MOD, POW -> true;
+            default -> isUserType(lb) || isUserType(rb);
+        };
+        if (userOp) {
+            String sym = operatorTextFor(op.op());
+            return sym == null ? null : ctx.functionReturns().get(sym);
+        }
+        if ("Int".equals(lb) && "Int".equals(rb)) return IrSort.named("Int");
+        return null;
+    }
+
+    /** Whether an operand's narrowed base is a user type (struct), not a primitive. */
+    private static boolean isUserTypeOperand(IrExpr e, InferenceContext ctx) {
+        IrSort s = inferFloor(e, ctx);
+        return isUserType(s == null ? null : baseName(s));
+    }
+
+    /** A non-primitive, known base name — a user struct/type operand. */
+    private static boolean isUserType(String base) {
+        return base != null && !base.equals("_")
+                && !base.equals("Int") && !base.equals("Bool")
+                && !base.equals("Decimal") && !base.equals("Char") && !base.equals("String");
+    }
+
+    /** The operator symbol used as an overload key (mirrors AltParser). */
+    private static String operatorTextFor(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
+            case MOD -> "%"; case POW -> "^";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ -> "=="; case NE -> "!=";
+            case APPROX, AND, OR -> null;
         };
     }
 
@@ -823,11 +896,28 @@ public final class NarrowingInference {
      * lowering to {@link SymExpr} degrades to {@code null} (declared sort).
      */
     private static IrSort inferBinOp(IrExpr.BinOp op, InferenceContext ctx) {
+        // Bool-valued ops (comparisons, logical) pin to the exact [Bool:@==expr]
+        // — the narrowest kernel-compilable narrowing, valid wherever the operand
+        // vars are in scope (closed at boundaries by closeOver, like the Int pin).
+        if (isBoolValued(op.op())) {
+            if (!kernelCompilable(op)) return null;
+            return new IrSort.Refined("Bool",
+                    new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(op.origin()), op, op.origin()),
+                    op.origin());
+        }
         if (!isArithmetic(op.op())) return null;
         // Decimal arithmetic carries no value-level narrowing (the kernel is
         // integer-only) — bare Decimal, matching the parser's maximal shape.
         if (isDecimalOperand(op.left(), ctx) || isDecimalOperand(op.right(), ctx)) {
             return IrSort.named("Decimal");
+        }
+        // A user-type operand means this is a USER operator (e.g. +(Vec,Vec):Vec),
+        // not Int arithmetic — its result is the overload's return, NOT an Int pin.
+        // (compileSymExpr treats a struct/constructor operand as an opaque atom, so
+        // it wouldn't catch this — the old parser's isUserStructOperand guard did.)
+        // Abstain so the floor's operator-return lookup (floorArith) supplies it.
+        if (isUserTypeOperand(op.left(), ctx) || isUserTypeOperand(op.right(), ctx)) {
+            return null;
         }
         // The exact value-pin `[Int:@==expr]` is the narrowest kernel-compilable
         // predicate, valid wherever expr's free variables are in scope (the
@@ -835,19 +925,39 @@ public final class NarrowingInference {
         // concern, see #closeOver, not done here). Emit it only when the predicate
         // compiles — the one core invariant (never mint a non-compilable
         // refinement; isArithmetic already excludes DIV/MOD/POW, and a struct /
-        // non-kernel operand makes compileSymExpr throw). See
-        // docs/inference-unification.md.
-        try {
-            IrCompiler.compileSymExpr(op);
-        } catch (CompileException unused) {
-            return null;
-        }
+        // non-kernel operand isn't kernel-compilable). See docs/inference-unification.md.
+        if (!kernelCompilable(op)) return null;
         return intRefined(new IrExpr.BinOp(
                 IrExpr.Op.EQ, new IrExpr.SelfRef(op.origin()), op, op.origin()));
     }
 
+    /**
+     * Whether {@code expr} lowers to the linear refinement kernel. {@code infer}
+     * runs at PARSE time too (via the parser's maximal-sort typing), where an
+     * expression can still hold an unresolved {@link IrExpr.MethodCall} or an
+     * un-routed operator — {@link IrCompiler#compileSymExpr} signals those with a
+     * {@link CompileException} (non-kernel form) OR an {@link IllegalStateException}
+     * (the unresolved-MethodCall invariant breach). Either means "not a kernel
+     * term": abstain, never throw (infer's contract).
+     */
+    private static boolean kernelCompilable(IrExpr expr) {
+        try {
+            IrCompiler.compileSymExpr(expr);
+            return true;
+        } catch (CompileException | RuntimeException unused) {
+            return false;
+        }
+    }
+
     private static boolean isArithmetic(IrExpr.Op op) {
         return op == IrExpr.Op.ADD || op == IrExpr.Op.SUB || op == IrExpr.Op.MUL;
+    }
+
+    private static boolean isBoolValued(IrExpr.Op op) {
+        return switch (op) {
+            case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> true;
+            case ADD, SUB, MUL, DIV, MOD, POW -> false;
+        };
     }
 
     /** Whether an operand's value is Decimal-sorted (any Decimal operand keeps the result Decimal). */
@@ -877,23 +987,27 @@ public final class NarrowingInference {
      */
     static IrSort closeOver(IrSort narrowing, Set<String> escaping, InferenceContext ctx) {
         if (!(narrowing instanceof IrSort.Refined refined)) return narrowing;
-        if (!"Int".equals(refined.name())) return narrowing;
+        // No escaping variable in the predicate → already closed; keep it verbatim.
         if (!predicateMentionsAny(refined.predicate(), escaping)) return narrowing;
-        // The narrowing references a departing variable. A value-pin `@==expr`
-        // closes by bounding `expr` under the env's hypotheses (the bound IS the
-        // pin with its free variables eliminated — exactly the projection the
-        // boundary always did). A non-pin predicate mentioning an escaping var
-        // can't be projected here → drop to the declared sort.
-        if (refined.predicate() instanceof IrExpr.BinOp eq
+        // The narrowing references a departing variable and must be projected out.
+        // An Int value-pin `@==expr` closes by bounding `expr` under the env's
+        // hypotheses (the bound IS the pin with its free variables eliminated).
+        if ("Int".equals(refined.name())
+                && refined.predicate() instanceof IrExpr.BinOp eq
                 && eq.op() == IrExpr.Op.EQ
                 && eq.left() instanceof IrExpr.SelfRef) {
             try {
                 SymExpr expr = IrCompiler.compileSymExpr(eq.right());
                 return intervalToIntSort(BoundAnalysis.bound(expr, hypothesesFromEnv(ctx)));
-            } catch (CompileException unused) {
+            } catch (CompileException | RuntimeException unused) {
+                // Non-kernel term (e.g. an unresolved MethodCall at parse time) →
+                // can't project; drop to the declared sort. Never throw.
                 return null;
             }
         }
+        // Anything else mentioning an escaping var can't be projected (a Bool pin
+        // `@==(x>0)`, a non-pin predicate) → drop to the declared sort. Returning it
+        // verbatim would leak a free variable into the consuming scope.
         return null;
     }
 
