@@ -302,6 +302,20 @@ forcing function).
 
 ## New language features
 
+- **User-defined constructors for structs (NEW — James reverses a prior ruling,
+  2026-06-18).** Allow a struct to define a constructor with a custom body. **Hard
+  constraint: the constructor's argument list must match the struct definition
+  *exactly*** (same arity, same field names/sorts) — so it can't fabricate a different
+  shape; it produces the same struct with possibly-transformed/validated field values.
+  `Point(3, 4)` would then invoke the constructor rather than the default field-assign.
+  Separate from the dispatch war; scope after it. Open design Qs: does it run on
+  *every* construction (incl. internal/promotion paths)? how does it compose with the
+  **construction gate** + no-lie (a body that lies about what's stored must be fenced —
+  the "args match exactly" rule is the guardrail)? relationship to the existing
+  **native constructors** (`Decimal(unscaled, scale)` — the bijection-contract registry,
+  see memory `project_native_constructors`)? is it one default + overloads, or exactly
+  one? **Why the reversal matters:** the original ruling kept construction transparent;
+  the exact-match constraint is what lets a body back in without reopening the lie hole.
 - **Per-call dispatch return narrowing for inferred let sorts** — `let q = factorial(3)` only
   gets `factorial`'s *declared* return at parse, not the matched overload's narrowing. (The
   reflector's shallow call-site specialization does this for the Narrowings view; the parser's

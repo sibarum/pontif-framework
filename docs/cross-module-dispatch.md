@@ -27,26 +27,30 @@ What's actually built, confirmed against the code (not the docs' old phase numbe
   does **not** index overloads by parameter type. Those three gaps are exactly Phases
   1–3 of §6.
 
-**The four gating probes, with their dispositions under this model:**
+**The concrete motivating gap (James, 2026-06-18):** **static/class attributes don't
+import with the struct.** `let Traction.one = …` in a module is not surfaced by
+`requires m.{Traction}` — only the type itself comes across. A static member is
+`Type.member`-keyed (a 0-arg top-level let), structurally identical to a method
+(`Type.method`); import-by-association must bring *all* of a type's associated members
+— methods, operators, and static attributes — uniformly. This is the user-visible
+payoff of the war (a single clean namespace; see memory `project_import_by_association`).
 
-| probe | today | under this model |
+**Gating-probe reality (verified on the war branch — the inference unification already
+fixed two of the four I expected):**
+
+| probe | status now | disposition |
 |---|---|---|
-| `dispatch__26` (method-form operator `method MV.+`) | rejected at parse (correct) | **already an expected rejection** — no work; it's a confirming negative probe. |
-| `inference__20` (`method Vec.mag2` declared on an *imported* `Vec`) | confusing "No method 'mag2'" miss | **expected orphan rejection** (Phase 4) — clear "define it in `Vec`'s module" error; importing `Vec` then brings it by association. |
-| `generics__22` (generic `a+b` over `E:Numeric`; `+(Vec,Vec)` imported) | fails — the witness / operator-bound check doesn't see the imported `+(Vec,Vec)` | **fixed by import-by-association** (Phase 3) — importing `Vec` surfaces `+(Vec,Vec)`, so `assign trait Vec:Numeric`'s witness check and `checkOperatorBounds` find it. A consumer of the model, not a separate fix. |
-| `traits__20` (`let v = Vector(1,2)` over an imported ctor, then `(v+v).x`) | runtime ClassCast — `v`'s sort is `_` (parser couldn't see the imported ctor), so `v+v` doesn't route | **companion bug, mostly independent:** re-infer a top-level let's sort from its *post-link* FQN-typed body so the operator routes. A narrowing/post-link-retyping fix that rides alongside, not part of the visibility model itself. |
+| `dispatch__26` (method-form operator) | COMPILE_FAIL (correct rejection) | **no-op** — confirming negative probe. |
+| `traits__20` (`let v=Vector(1,2)`; `(v+v).x` cross-module) | **OK already** | the inference unification fixed the top-level-let routing — *not* war work. |
+| `generics__22` (generic `a+b`, `+(Vec,Vec)` imported) | **OK already** | also fixed upstream — *not* war work. |
+| `inference__20` (`method Vec.mag2` on an *imported* `Vec`) | COMPILE_FAIL | **the one directly-relevant probe** → becomes a clean **orphan rejection** (Phase 4): "define it in `Vec`'s module." |
 
-**Companion bugs (ride alongside; not the visibility model proper):**
-- **traits__20 — re-type top-level lets post-link.** A `let`'s sort is computed at
-  parse (imports invisible → `_`) and never re-inferred after linking. Fix: a
-  post-link pass (or hook in the existing post-link passes) re-infers a top-level
-  let's narrowing from its FQN-resolved body via `NarrowingInference`, so an operator
-  over a let-bound imported value routes. Do this early — it's low-risk and unblocks a
-  visible cross-module case.
-- **generics__22 — witness/bound checks must consult the visible overload set.**
-  Confirm `SortChecker.validateTraitImpl` (operator-contract witness) and
-  `checkOperatorBounds` read the post-link/imported overloads, not a per-module-only
-  set. Likely falls out of Phase 3; verify with the probe.
+So the war has **no companion narrowing bugs** — it is purely the visibility model
+(orphan rule + association index + import-by-association), whose user-visible win is
+static-attribute import, and whose only probe motion is `inference__20` →
+expected-rejection. (`generics__14` / `generics__27` are *generics* feature gaps —
+method-call-on-bounded-type-param and parametric method declarations — unrelated to
+this war; tracked separately.)
 
 ---
 
@@ -209,34 +213,35 @@ into one rule that reads the same for every dispatched name.
 Each step lands green on the full suite + the 150-probe matrix (the regression meter).
 Suggested order — additive/low-risk first, the disruptive cutover last:
 
-1. **Companion: traits__20 — re-type top-level lets post-link** (independent, unblocks
-   a visible case; do it first as a clean win).
-2. **Phase 1 — orphan rule for mechanism-1 overloads** (additive `CoherenceCheck`
+1. **Phase 1 — orphan rule for mechanism-1 overloads** (additive `CoherenceCheck`
    extension). New negative probes: `op(Int,Int)`-by-a-user → rejected; `op(Int,Custom)`
    in `Custom`'s module → accepted. **Watch:** existing single-module operator/function
    suites stay green (single modules own everything they declare — trivially coherent).
-3. **Phase 2 — association index** in `ModuleSymbolTable` (pure data, no behavior
-   change). Verifiable in isolation by a unit test over the index.
-4. **Phase 4 — orphan methods** (extends Phase 1 to `T.m`): `inference__20` flips to an
+2. **Phase 2 — association index** in `ModuleSymbolTable` (pure data, no behavior
+   change): index each overload AND each static member (`Type.member`) by every
+   associated type's FQN. Verifiable in isolation by a unit test over the index.
+3. **Phase 4 — orphan methods** (extends Phase 1 to `T.m`): `inference__20` flips to an
    expected, well-worded rejection. (Sequenced before Phase 3 because it's the same
    additive orphan check, not the visibility cutover.)
-5. **Phase 3 — import-by-association visibility (THE CUTOVER, gated on §5.3 nod).**
-   Restricts overload visibility to imported-type associations. **This breaks
-   currently-passing cross-module cases that relied on accidental global visibility**
-   — they will start needing an explicit `requires m.{T}`. Guardrails:
-   - A dedicated migration-probe set (cross-module operator/function uses *with* and
-     *without* the now-required type import).
+4. **Phase 3 — import-by-association visibility (THE CUTOVER, gated on §5.3 nod).**
+   Restricts overload + static-member visibility to imported-type associations, and —
+   the user-visible payoff — **surfaces a type's static attributes (`let Type.one = …`)
+   on `requires m.{Type}`**, the same way methods already come with the type. **This
+   breaks currently-passing cross-module cases that relied on accidental global
+   visibility** — they will start needing an explicit `requires m.{T}`. Guardrails:
+   - A dedicated migration-probe set (cross-module operator/function/static-member uses
+     *with* and *without* the now-required type import), incl. a positive probe for
+     static-attribute import (the `Traction.one` case).
    - A precise migration error: *"`+` resolves to an overload in `m`; add
      `requires m.{Vector}` to use it."* — never a silent miss.
-   - `generics__22` should flip to PASS here (importing `Vec` surfaces `+(Vec,Vec)` for
-     the witness/bound checks).
    - **Watch:** every existing `dispatch__*` / `traits__*` cross-module probe — each
      either still has the needed import or needs one added (a deliberate, reviewed
      migration, not a quiet bolt-on).
 
 **Probe scorecard for the war:** `dispatch__26` already correct (no-op);
-`inference__20` → expected rejection (Phase 4); `generics__22` → PASS (Phase 3);
-`traits__20` → PASS (step 1). No probe should regress from PASS.
+`traits__20` / `generics__22` **already PASS** (fixed by the inference unification — not
+war work); `inference__20` → expected rejection (Phase 4). New static-attribute-import
+probe → PASS (Phase 3). No probe should regress from PASS.
 
 ---
 
