@@ -12,6 +12,40 @@ dispatch mechanisms** (below); this effort makes both ride the same engine and
 removes the name-mangling / BinOp-bypass / parse-time-inference hacks that
 currently make them look like three unrelated systems.*
 
+## Status (ground truth, 2026-06-18) — Phases 1–4 + Cluster 4 are LANDED
+
+The phased plan below was written when the three ad-hoc accidents were live. They
+are now gone; the section is kept for its *design rationale*, but the phase list no
+longer reflects open work. What actually shipped:
+
+- **Phase 1 (operators as mechanism-1 dispatch) — landed.** `a op b` always parses
+  to `IrExpr.BinOp` (no parse-time left-operand guess); the post-link
+  `MethodOperatorResolver` routes user operators by *both* operand base sorts and
+  leaves built-in `Int`/`Bool` ops as `BinOp` (the fast path). The parse-time
+  `tryOperatorOverloadRoute` no longer exists.
+- **Phase 2 (methods resolve on the receiver sort, post-typecheck) — landed.** The
+  parser emits a transient `IrExpr.MethodCall`; `MethodOperatorResolver.resolveMethodCall`
+  types the receiver post-link (`NarrowingInference.infer`) and keys `Type.method`.
+  The parse-time `methodNameForReceiver` no longer exists. In-module `recv.method()`
+  works; cross-module is gated only by the orphan/visibility model below.
+- **Phase 3 (trait dispatch) — functionally landed.** Methods resolve on the
+  receiver's sort within mechanism 2; the `Trait.method → Type.method` redirect
+  survives only as a *runtime fallback* (`DispatchTable.resolveTraitFallback`) for a
+  bare-trait-typed receiver value. Removing that fallback is optional polish, not a
+  blocker.
+- **Phase 4 (parser de-blinding) — landed.** The parse-time sort-inference hacks are
+  deleted; `AltParser.inferMaximalSort` now routes through the one inference engine
+  (`docs/inference-unification.md`).
+- **Cluster 4 (route once + drop method-form operators) — landed.** `method T.+` is
+  rejected at parse (`AltParser` ~line 804) with a "operators are free functions"
+  diagnostic; operators route once, post-link, by both operands.
+
+**The one remaining piece of "dispatch unification" is the cross-module *visibility*
+model** — today the linker fuses all modules into one table, so every overload is
+*accidentally globally visible* (the SPN failure mode). Tightening that to
+module-scoped **import-by-association under the orphan rule** is the live war; see
+**`docs/cross-module-dispatch.md`** (the scoped plan), which this doc defers to.
+
 ## Why
 
 Pontif is a type system built on dispatch: the strength of the type system is

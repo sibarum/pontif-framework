@@ -1,13 +1,52 @@
 # Cross-module dispatch: import by association
 
-**Status: DRAFT — for ratification.** Sequenced after Cluster 4 (operators route
-once; see `docs/dispatch-unification.md` and `docs/TODO.md`). This doc pins the
-*visibility* model for mechanism-1 dispatch — how operator/free-function overloads
-are shared across modules — before it is built. It refines, not replaces,
-`docs/dispatch-unification.md` (§"Mechanism 1"): that doc described mechanism 1 as
-"global multi-dispatch"; this tightens the cross-module half to **module-scoped,
-import-by-association**, which is what the namespace-hygiene direction requires
-(global dispatch is what sank SPN).
+**Status: SCOPED (war branch `war/cross-module-dispatch`, 2026-06-18).** The §5
+recommendations are pinned below; the one decision that needs an explicit nod before
+building is **§5.3 — the visibility tightening is a behavioral cutover**, not an
+additive feature. Cluster 4 (the prerequisite) and the rest of
+`docs/dispatch-unification.md` (Phases 1–4) have **already landed** — see that doc's
+status banner. This is now the *sole* remaining piece of dispatch unification: the
+cross-module *visibility* model — how operator/free-function overloads are shared
+across modules. It tightens `docs/dispatch-unification.md` (§"Mechanism 1") from
+"global multi-dispatch" to **module-scoped, import-by-association** (global dispatch
+is what sank SPN).
+
+## 0. Scoping (ground truth, 2026-06-18)
+
+What's actually built, confirmed against the code (not the docs' old phase numbering):
+
+- **Operators + methods already resolve post-link by sort.** `MethodOperatorResolver`
+  routes operators by both operand base sorts and methods by receiver sort; the
+  parse-time routing hacks are gone; `method T.+` is rejected at parse. So mechanism
+  1 is the sole home of operators, and this doc has a single uniform overload set to
+  govern — its prerequisite is met.
+- **The hole is visibility.** `CoherenceCheck` enforces the orphan rule for **trait
+  impls only** — *not* for free-function/operator overloads. And `ModuleLinker.combine`
+  concatenates every module's statements into one FQN-keyed table, so **every overload
+  is globally visible after link** (accidental global dispatch). `ModuleSymbolTable`
+  does **not** index overloads by parameter type. Those three gaps are exactly Phases
+  1–3 of §6.
+
+**The four gating probes, with their dispositions under this model:**
+
+| probe | today | under this model |
+|---|---|---|
+| `dispatch__26` (method-form operator `method MV.+`) | rejected at parse (correct) | **already an expected rejection** — no work; it's a confirming negative probe. |
+| `inference__20` (`method Vec.mag2` declared on an *imported* `Vec`) | confusing "No method 'mag2'" miss | **expected orphan rejection** (Phase 4) — clear "define it in `Vec`'s module" error; importing `Vec` then brings it by association. |
+| `generics__22` (generic `a+b` over `E:Numeric`; `+(Vec,Vec)` imported) | fails — the witness / operator-bound check doesn't see the imported `+(Vec,Vec)` | **fixed by import-by-association** (Phase 3) — importing `Vec` surfaces `+(Vec,Vec)`, so `assign trait Vec:Numeric`'s witness check and `checkOperatorBounds` find it. A consumer of the model, not a separate fix. |
+| `traits__20` (`let v = Vector(1,2)` over an imported ctor, then `(v+v).x`) | runtime ClassCast — `v`'s sort is `_` (parser couldn't see the imported ctor), so `v+v` doesn't route | **companion bug, mostly independent:** re-infer a top-level let's sort from its *post-link* FQN-typed body so the operator routes. A narrowing/post-link-retyping fix that rides alongside, not part of the visibility model itself. |
+
+**Companion bugs (ride alongside; not the visibility model proper):**
+- **traits__20 — re-type top-level lets post-link.** A `let`'s sort is computed at
+  parse (imports invisible → `_`) and never re-inferred after linking. Fix: a
+  post-link pass (or hook in the existing post-link passes) re-infers a top-level
+  let's narrowing from its FQN-resolved body via `NarrowingInference`, so an operator
+  over a let-bound imported value routes. Do this early — it's low-risk and unblocks a
+  visible cross-module case.
+- **generics__22 — witness/bound checks must consult the visible overload set.**
+  Confirm `SortChecker.validateTraitImpl` (operator-contract witness) and
+  `checkOperatorBounds` read the post-link/imported overloads, not a per-module-only
+  set. Likely falls out of Phase 3; verify with the probe.
 
 ---
 
@@ -164,6 +203,40 @@ into one rule that reads the same for every dispatched name.
   methods (resolves `inference__20`), and confirm importing a type brings its methods
   by the same association path (much of which already happens — methods come with the
   type today).
+
+### War sequencing + regression guardrails
+
+Each step lands green on the full suite + the 150-probe matrix (the regression meter).
+Suggested order — additive/low-risk first, the disruptive cutover last:
+
+1. **Companion: traits__20 — re-type top-level lets post-link** (independent, unblocks
+   a visible case; do it first as a clean win).
+2. **Phase 1 — orphan rule for mechanism-1 overloads** (additive `CoherenceCheck`
+   extension). New negative probes: `op(Int,Int)`-by-a-user → rejected; `op(Int,Custom)`
+   in `Custom`'s module → accepted. **Watch:** existing single-module operator/function
+   suites stay green (single modules own everything they declare — trivially coherent).
+3. **Phase 2 — association index** in `ModuleSymbolTable` (pure data, no behavior
+   change). Verifiable in isolation by a unit test over the index.
+4. **Phase 4 — orphan methods** (extends Phase 1 to `T.m`): `inference__20` flips to an
+   expected, well-worded rejection. (Sequenced before Phase 3 because it's the same
+   additive orphan check, not the visibility cutover.)
+5. **Phase 3 — import-by-association visibility (THE CUTOVER, gated on §5.3 nod).**
+   Restricts overload visibility to imported-type associations. **This breaks
+   currently-passing cross-module cases that relied on accidental global visibility**
+   — they will start needing an explicit `requires m.{T}`. Guardrails:
+   - A dedicated migration-probe set (cross-module operator/function uses *with* and
+     *without* the now-required type import).
+   - A precise migration error: *"`+` resolves to an overload in `m`; add
+     `requires m.{Vector}` to use it."* — never a silent miss.
+   - `generics__22` should flip to PASS here (importing `Vec` surfaces `+(Vec,Vec)` for
+     the witness/bound checks).
+   - **Watch:** every existing `dispatch__*` / `traits__*` cross-module probe — each
+     either still has the needed import or needs one added (a deliberate, reviewed
+     migration, not a quiet bolt-on).
+
+**Probe scorecard for the war:** `dispatch__26` already correct (no-op);
+`inference__20` → expected rejection (Phase 4); `generics__22` → PASS (Phase 3);
+`traits__20` → PASS (step 1). No probe should regress from PASS.
 
 ---
 
