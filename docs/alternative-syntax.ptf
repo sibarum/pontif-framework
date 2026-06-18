@@ -246,15 +246,17 @@ method Point.plus(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
 function combine(p:Point, q:Point):Point -> p.plus(q)
 let shifted = origin.plus(Point(1, 2))   # works on a let-bound value too
 
-# Operator overloading.  Methods whose name is an operator character (or
-# operator string) are routed from infix binary expressions: when the left
-# operand's inferred sort has a `Type.<op>` method, `a <op> b` lowers to
-# `Type.<op>(a, b)` instead of the primitive BinOp.  Primitive operands
-# (Int, Bool) always keep the fast BinOp path.  Refinement-predicate
-# arithmetic stays primitive too — overloads are strictly a runtime,
-# value-level concern.  Overloadable: + - * < <= > >= == !=
-method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
-method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
+# Operator overloading.  Operators are symmetric multi-dispatch FREE FUNCTIONS
+# — declared `function <op>(a:T, b:T):R`, dispatched by matching BOTH operand
+# types (exactly like every other function).  An infix `a <op> b` always parses
+# to a primitive BinOp; the post-link resolver routes it to the matching
+# overload by operand sort, leaving built-in Int/Bool ops as BinOp.  The
+# receiver-rooted `method Type.<op>` form is REJECTED — it forces the receiver
+# to be the first operand, the asymmetry symmetric dispatch removes.
+# Refinement-predicate arithmetic stays primitive.  Overloadable: + - * / % ^
+# < <= > >= == !=
+function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
+function ==(a:Point, b:Point):Bool -> a.x == b.x & a.y == b.y
 function shift(a:Point, b:Point):Point -> a + b
 function same(a:Point, b:Point):Bool -> a == b
 

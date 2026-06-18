@@ -142,6 +142,14 @@ public final class SortChecker {
             if (stmt instanceof IrStmt.TypeAlias ta
                     && ta.sort() instanceof IrSort.Trait t) {
                 map.put(t.name(), t);
+                // A linked trait's name is FQN'd (`mod/Numeric`) while a
+                // type-parameter bound that references it across modules keeps
+                // the short form (`Numeric`). Register the member (short) name
+                // too so operator-bound resolution finds the contract by either
+                // spelling. Full names are canonical — only fill a short key
+                // that isn't already taken by a same-named trait.
+                String member = sibarum.pontif.core.QualifiedName.memberOf(t.name());
+                if (!member.equals(t.name())) map.putIfAbsent(member, t);
             }
         }
         return map;

@@ -1,3 +1,3 @@
 struct Point(x:Int, y:Int)
-method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
+function ==(a:Point, b:Point):Bool -> a.x == b.x & a.y == b.y
 Point(1, 2) == Point(1, 2)
