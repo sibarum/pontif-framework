@@ -1,4 +1,4 @@
 # Chained overloaded ops: a + b + c associates left-to-right; each + routes.
 struct Point(x:Int, y:Int)
-method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
 (Point(1, 0) + Point(2, 0) + Point(3, 0)).x

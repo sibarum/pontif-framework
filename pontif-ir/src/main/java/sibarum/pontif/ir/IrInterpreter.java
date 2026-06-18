@@ -313,6 +313,55 @@ public final class IrInterpreter {
         }
     }
 
+    /**
+     * The dispatch symbol an operator routes to when applied to struct operands,
+     * or null for operators that are never user-overloaded at runtime. Mirrors
+     * {@link MethodOperatorResolver}'s static routing table: arithmetic and
+     * ordering route; {@code ==}/{@code !=} stay built-in structural equality,
+     * and {@code &}/{@code |} are always primitive Bool ops.
+     */
+    private static String dispatchOperatorSymbol(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
+            case MOD -> "%"; case POW -> "^";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ, NE, APPROX, AND, OR -> null;
+        };
+    }
+
+    /**
+     * The dispatch-table key to route a struct-operand operator under. The
+     * compile-time {@link MethodOperatorResolver} keys an operator overload by
+     * its declaration name, which is module-qualified in a linked module
+     * ({@code gen.vecmod/+}) and bare in a single file ({@code +}). A BinOp that
+     * survives to runtime (a generic body's {@code a + b}) has only the bare
+     * symbol, so we reconstruct the qualified key from an operand's FQN type
+     * name. Prefers a key the dispatch table actually declares; falls back to
+     * the bare symbol (single-file, or for the table to surface a clean
+     * "no function" error).
+     *
+     * <p>STOPGAP: this hand-reconstruction exists only because the dispatch table
+     * is FQN-keyed with no "resolve operator symbol over operand types" entry
+     * point. The import-by-association <b>association index</b>
+     * (docs/cross-module-dispatch.md §6 phase 2 — overloads indexed by each
+     * signature type) replaces it with a direct (symbol, operand-types) lookup,
+     * at which point this method goes away.
+     */
+    private static String operatorDispatchName(
+            String sym, Object l, Object r, CompiledModule module) {
+        if (!module.dispatch().declarationsFor(sym).isEmpty()) return sym;
+        for (Object operand : new Object[]{l, r}) {
+            if (operand instanceof RecordValue rv && rv.typeName() != null) {
+                String mod = sibarum.pontif.core.QualifiedName.parse(rv.typeName()).module();
+                if (!mod.isEmpty()) {
+                    String qualified = sibarum.pontif.core.QualifiedName.of(mod, sym).fqn();
+                    if (!module.dispatch().declarationsFor(qualified).isEmpty()) return qualified;
+                }
+            }
+        }
+        return sym;
+    }
+
     private Object evalBinOp(IrExpr.BinOp op, Environment env, CompiledModule module) {
         Object l = eval(op.left(), env, module);
         Object r = eval(op.right(), env, module);
@@ -338,6 +387,22 @@ public final class IrInterpreter {
         if (l instanceof sibarum.pontif.core.types.CharValue
                 || r instanceof sibarum.pontif.core.types.CharValue) {
             return evalCharBinOp(op, l, r);
+        }
+        // Operator over struct operands: route to the user's operator overload by
+        // dispatch on the runtime operand types. This is the runtime home of
+        // symmetric operator dispatch for the cases the static
+        // MethodOperatorResolver left as BinOp — chiefly a generic body `a + b`
+        // over a trait-bounded type parameter E, whose operands are abstract at
+        // compile time but concrete struct values here. Built-in Int/Bool/Decimal
+        // operands never reach this point.
+        if (l instanceof RecordValue || r instanceof RecordValue) {
+            String sym = dispatchOperatorSymbol(op.op());
+            if (sym != null) {
+                String name = operatorDispatchName(sym, l, r, module);
+                return dispatchValues(name, List.of(l, r),
+                        new IrExpr.Call(name, List.of(op.left(), op.right()), op.origin()),
+                        env, module);
+            }
         }
         return switch (op.op()) {
             case ADD -> (Long) l + (Long) r;
@@ -659,12 +724,25 @@ public final class IrInterpreter {
     private Object dispatchByName(
             String name, IrExpr.Call call, Environment env, CompiledModule module) {
         List<Object> argValues = new ArrayList<>();
-        List<SymExpr> argSymbolics = new ArrayList<>();
         for (IrExpr argExpr : call.args()) {
-            Object argValue = eval(argExpr, env, module);
-            argValues.add(argValue);
-            argSymbolics.add(toSymExpr(argValue));
+            argValues.add(eval(argExpr, env, module));
         }
+        return dispatchValues(name, argValues, call, env, module);
+    }
+
+    /**
+     * Registry dispatch under {@code name} over ALREADY-EVALUATED argument
+     * values — the shared core for direct calls, metareference application, and
+     * runtime operator routing (a {@code BinOp} whose operands turn out to be
+     * struct values dispatches its operator overload through here, the runtime
+     * analog of {@link MethodOperatorResolver}'s static routing for the generic
+     * case where the operand sorts were abstract type parameters).
+     */
+    private Object dispatchValues(
+            String name, List<Object> argValues, IrExpr.Call call,
+            Environment env, CompiledModule module) {
+        List<SymExpr> argSymbolics = new ArrayList<>(argValues.size());
+        for (Object argValue : argValues) argSymbolics.add(toSymExpr(argValue));
 
         DispatchResult dr = module.dispatch().resolve(name, argSymbolics, checker(module));
         switch (dr) {

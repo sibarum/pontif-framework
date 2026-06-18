@@ -107,6 +107,17 @@ public final class AltParser {
         };
     }
 
+    /** The overloadable operator symbol for an {@link IrExpr.Op}, or null. */
+    private static String operatorTextFor(IrExpr.Op op) {
+        return switch (op) {
+            case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
+            case MOD -> "%"; case POW -> "^";
+            case LT -> "<"; case LE -> "<="; case GT -> ">"; case GE -> ">=";
+            case EQ -> "=="; case NE -> "!=";
+            case APPROX, AND, OR -> null;
+        };
+    }
+
     private final List<AltToken> tokens;
     private int pos;
     /** Counter for synthesizing fresh names — used by the structural-destructure desugar. */
@@ -751,6 +762,19 @@ public final class AltParser {
                     start.origin());
         }
         String receiverTypeName = name.substring(0, dotIdx);
+        String memberName = name.substring(dotIdx + 1);
+        // Operators are symmetric multi-dispatch free functions — the
+        // receiver-rooted method form forces the receiver to be the FIRST
+        // operand (you can never write `method Int./(c:Custom)`), exactly the
+        // asymmetry the dispatch unification removes. Reject it and point the
+        // author to the free-function form. Non-operator methods are unaffected.
+        if (OVERLOADABLE_OPS.contains(memberName)) {
+            throw new ParseException(
+                    "operators are free functions, not methods: declare "
+                            + "`function " + memberName + "(a:T, b:T):R` instead of "
+                            + "`method " + receiverTypeName + "." + memberName + "`.",
+                    start.origin());
+        }
 
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
@@ -1614,7 +1638,19 @@ public final class AltParser {
                     default -> false;
                 };
                 if (nonLinearOp) {
-                    yield IrSort.named("_");
+                    // The operator no longer routes to a Call at parse time, so its
+                    // result sort can't be read off a Call's declared return. Look
+                    // up the declared user-operator overload's return by the bare
+                    // operator symbol so a let-bound `v = a <op> b` (and the 0-arg
+                    // function it lowers to) carries the operator's actual result
+                    // sort — what method/field resolution on the result needs.
+                    // (MethodOperatorResolver does the same routing on the IR;
+                    // here we only need the result SORT for typing.) Falls back to
+                    // "_" when no such overload is declared (cross-module operators,
+                    // resolved post-link).
+                    String opSym = operatorTextFor(op.op());
+                    IrSort opReturn = opSym == null ? null : declaredFunctionReturns.get(opSym);
+                    yield opReturn != null ? opReturn : IrSort.named("_");
                 }
                 String baseName = switch (op.op()) {
                     case ADD, SUB, MUL, DIV, MOD, POW -> "Int";
@@ -3168,70 +3204,28 @@ public final class AltParser {
             if (prec < minPrec) break;
             consume();
             IrExpr right = parseExpr(prec + 1);  // left-associative
-            // Parse-time routing decides BinOp-vs-Call from the left operand's
-            // local sort (so method-on-operator-result and generic-operand cases,
-            // which need a Call by the time MethodResolver runs, keep working).
-            // It is name-based and can pick the wrong overload across modules
-            // (`n1*d2` over an imported type → the local operator); OperatorResolver
-            // CORRECTS that post-link, re-resolving operator calls by operand sort.
-            String overload = tryOperatorOverloadRoute(left, t.text());
-            if (overload != null) {
-                left = new IrExpr.Call(overload, List.of(left, right), t.origin());
-            } else {
-                left = new IrExpr.BinOp(opKind(t.text()), left, right, t.origin());
-            }
+            // Operators are symmetric mechanism-1 multi-dispatch: `a <op> b`
+            // always parses to a BinOp. The post-link MethodOperatorResolver
+            // routes user-declared operators to their overload by matching BOTH
+            // operand base sorts, and leaves built-in Int/Bool ops as BinOp.
+            // No parse-time guess from the left operand's sort (which could not
+            // see cross-module types and forced the receiver-rooted asymmetry).
+            left = new IrExpr.BinOp(opKind(t.text()), left, right, t.origin());
         }
         return left;
     }
 
     /**
      * Operators that can be overloaded — via a bare generic
-     * {@code function <op>(l, r)} or the legacy {@code method Type.<op>(...)}.
-     * Arithmetic and comparison. Logical {@code &} and {@code |} are excluded
-     * — they always go through BinOp regardless of any declaration named
-     * {@code &}.
+     * {@code function <op>(l, r)}. Arithmetic and comparison. Logical {@code &}
+     * and {@code |} are excluded — they always go through BinOp regardless of
+     * any declaration named {@code &}. The receiver-rooted {@code method Type.op}
+     * form is rejected at parse (see {@link #parseMethod}); operators are free
+     * functions.
      */
     private static final Set<String> OVERLOADABLE_OPS = Set.of(
             "+", "-", "*", "/", "%", "^",
             "<", "<=", ">", ">=", "==", "!=");
-
-    /**
-     * Returns the dispatch name to route {@code left <op> right} to, or
-     * {@code null} to keep the primitive {@code BinOp} path. Resolution:
-     * <ol>
-     *   <li>the bare operator generic {@code "<op>"} (a {@code function +(l,r)}
-     *       declaration) — preferred;</li>
-     *   <li>the legacy {@code "<TypeName>.<op>"} method form — fallback.</li>
-     * </ol>
-     * Skipped (BinOp stays) when the op isn't overloadable, or {@code left}'s
-     * base sort is a primitive ({@code Int}, {@code Bool}, {@code Function})
-     * or a sentinel ({@code _}, {@code _record}), or neither name is
-     * registered. (Routing on a primitive <em>left</em> with a non-primitive
-     * right — {@code Int * Point} — is a separate, later slice.)
-     */
-    private String tryOperatorOverloadRoute(IrExpr left, String opText) {
-        if (!OVERLOADABLE_OPS.contains(opText)) return null;
-        IrSort leftSort = inferMaximalSort(left);
-        String typeName = baseSortName(leftSort);
-        if (typeName == null
-                || typeName.equals("_")
-                || typeName.equals("_record")
-                || typeName.equals(TUPLE_SENTINEL)
-                || typeName.equals("Int")
-                || typeName.equals("Bool")
-                || typeName.equals("Decimal")
-                || typeName.equals("Char")
-                || typeName.equals("Method")
-                || typeName.equals("Dispatch")) {
-            return null;
-        }
-        // Bare-name operator generic (`function +(l, r)`) wins; the legacy
-        // `Type.op` method form stays as a fallback so existing
-        // `method Type.+` declarations keep routing.
-        if (declaredFunctionReturns.containsKey(opText)) return opText;
-        String methodName = typeName + "." + opText;
-        return declaredFunctionReturns.containsKey(methodName) ? methodName : null;
-    }
 
     /**
      * A postfix {@code (} or <code>{</code> must open on the same line as the

@@ -477,7 +477,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointPlusPoint_evaluates() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
                 function sum(a:Point, b:Point):Point -> a + b
                 sum(Point(1, 2), Point(3, 4)).x
                 """;
@@ -489,7 +489,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointEquality_evaluates() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
+                function ==(a:Point, b:Point):Bool -> a.x == b.x & a.y == b.y
                 function eq(a:Point, b:Point):Bool -> a == b
                 eq(Point(1, 2), Point(1, 2))
                 """;
@@ -500,7 +500,7 @@ class AltParserIntegrationTest {
     void operatorOverload_pointEquality_negative() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.==(p:Point):Bool -> this.x == p.x & this.y == p.y
+                function ==(a:Point, b:Point):Bool -> a.x == b.x & a.y == b.y
                 function eq(a:Point, b:Point):Bool -> a == b
                 eq(Point(1, 2), Point(1, 99))
                 """;
@@ -511,7 +511,7 @@ class AltParserIntegrationTest {
     void operatorOverload_chainsLeftToRight() throws Exception {
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
                 function tri(a:Point, b:Point, c:Point):Point -> a + b + c
                 tri(Point(1, 1), Point(2, 2), Point(3, 3)).x
                 """;
@@ -524,7 +524,7 @@ class AltParserIntegrationTest {
         // With Point.+ declared, Int+Int must still route through BinOp.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
                 3 + 4
                 """;
         assertEquals(7L, run(src));
@@ -535,7 +535,7 @@ class AltParserIntegrationTest {
         // Both `pointA.shifted(...)` and `p + q` work in the same function.
         String src = """
                 struct Point(x:Int, y:Int)
-                method Point.+(p:Point):Point -> Point(this.x + p.x, this.y + p.y)
+                function +(a:Point, b:Point):Point -> Point(a.x + b.x, a.y + b.y)
                 method Point.shifted(dx:Int, dy:Int):Point ->
                   Point(this.x + dx, this.y + dy)
                 function f(p:Point, q:Point):Int -> (p + q).shifted(10, 10).x
