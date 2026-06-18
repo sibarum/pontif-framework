@@ -1,5 +1,7 @@
 # Pontif Framework
 
+![Pontif Playground editing the Traction example](traction-ptf.png)
+
 An experimental typed language built on GraalVM's Truffle, where **declared
 types are claims the compiler proves or rejects** — never annotations it
 trusts. A single symbolic-predicate engine drives refinement, multi-dispatch,
