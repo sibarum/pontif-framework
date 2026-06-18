@@ -2026,71 +2026,39 @@ public final class SortChecker {
     private static IrSort inferSort(IrExpr expr, Map<String, IrSort> typeEnv,
                                     Map<String, IrSort> functionReturns,
                                     Map<String, IrSort.Structural> structDefs) {
-        return switch (expr) {
-            case IrExpr.Var v -> typeEnv.get(v.name());
-            // Literal scrutinees have the most statically-known sorts there are
-            // — their singletons. Needed now that undeterminable match totality
-            // is a hard error: `match 5 [@>=0 & @<=10] -> …` is total over
-            // [Int:@==5] (provably — only 5 can flow), while `match 20` against
-            // the same arm is provably non-exhaustive at compile time.
-            case IrExpr.Lit l -> IrSort.refined("Int",
-                    IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), l));
-            case IrExpr.Bool b -> IrSort.refined("Bool",
-                    IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), b));
-            // No decimal kernel reasoning — bare Decimal; matches over it need
-            // a default arm, per the rule.
-            case IrExpr.Dec d -> IrSort.named("Decimal");
-            // Same stance for Char in the value slice: bare Char (the engines
-            // abstain on Chr for now). Char IS discrete, so singleton/range
-            // reasoning via the integer kernel is the narrows slice's upgrade.
-            case IrExpr.Chr c -> IrSort.named("Char");
-            // Strings: bare String in the value slice — no narrows, no
-            // discrete route (unlike Char). Matches over it need a default arm.
-            case IrExpr.Str s -> IrSort.named("String");
-            // A cast `(Type:value)` produces its named target sort — that IS the
-            // inferred result, by definition of the coercion (the value's own
-            // sort is irrelevant to the outcome). Whether the source→target
-            // coercion is actually supported is enforced when evaluated (slice 1
-            // = built-in renders to String); here we only report the result sort
-            // so a claim like `let n:String = (String:12)` discharges.
-            case IrExpr.Cast cast -> cast.targetSort();
-            // Arithmetic results: Int op Int is Int; any Decimal operand makes
-            // it Decimal (promotion). Comparisons/logical yield Bool. Lets a
-            // computed scrutinee like `match n + 1` have a provable domain.
-            case IrExpr.BinOp op -> switch (op.op()) {
-                case ADD, SUB, MUL, DIV, MOD, POW -> {
-                    IrSort ls = inferSort(op.left(), typeEnv, functionReturns, structDefs);
-                    IrSort rs = inferSort(op.right(), typeEnv, functionReturns, structDefs);
-                    String lb = ls == null ? null : matchBaseName(ls);
-                    String rb = rs == null ? null : matchBaseName(rs);
-                    // `+` with a String operand is concatenation: the other operand
-                    // (Int/Decimal/Char/String) is rendered to its string form and
-                    // the result is a String (strings.md slice 2).
-                    if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
-                        yield IrSort.named("String");
-                    }
-                    if ("Decimal".equals(lb) || "Decimal".equals(rb)) yield IrSort.named("Decimal");
-                    if ("Int".equals(lb) && "Int".equals(rb)) yield IrSort.named("Int");
-                    yield null;
-                }
-                case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR -> IrSort.named("Bool");
-            };
-            case IrExpr.FieldAccess fa -> {
-                IrSort base = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
-                // Resolve a nominal struct reference to its definition by name
-                // (single lookup — no body recursion), then project the field.
-                // A field whose own sort is a nominal struct reference yields
-                // that Named back, so a deeper access resolves one level per
-                // FieldAccess node: bounded by expression depth, never by the
-                // (possibly recursive) type graph.
-                IrSort.Structural sp = resolveNominal(base, structDefs);
-                if (sp != null) {
-                    yield sp.members().get(fa.fieldName());
-                }
-                yield null;
-            }
-            case IrExpr.Call c -> functionReturns.get(c.functionName());
-            default -> null;
-        };
+        // One engine: route through NarrowingInference.inferFloor — infer's
+        // narrowed sort where it has one (so the FieldAccess refinement
+        // projection and arithmetic bounds reach SortChecker for free), else the
+        // coarse base sort the totality/field-existence consumers need.
+        return NarrowingInference.inferFloor(
+                expr, floorContext(typeEnv, functionReturns, structDefs));
+    }
+
+    /**
+     * Builds the {@link InferenceContext} for the floor delegation. Strips
+     * null-valued entries: {@code typeEnv}/{@code functionReturns} may carry
+     * nulls (where a typer abstained), but {@link InferenceContext}'s canonical
+     * constructor does {@code Map.copyOf}, which rejects null values. Overloads
+     * stay empty so the floor's {@code Call} case falls back to
+     * {@code functionReturns} — exactly the old {@code inferSort} behavior.
+     */
+    private static InferenceContext floorContext(
+            Map<String, IrSort> typeEnv,
+            Map<String, IrSort> functionReturns,
+            Map<String, IrSort.Structural> structDefs) {
+        return new InferenceContext(
+                stripNullValues(typeEnv),
+                stripNullValues(functionReturns),
+                structDefs,
+                Map.of(),
+                Map.of());
+    }
+
+    private static <V> Map<String, V> stripNullValues(Map<String, V> m) {
+        Map<String, V> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, V> e : m.entrySet()) {
+            if (e.getValue() != null) copy.put(e.getKey(), e.getValue());
+        }
+        return copy;
     }
 }
