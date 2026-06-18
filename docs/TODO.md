@@ -6,6 +6,102 @@ items get removed (history is in git); this file is forward-looking.
 
 ---
 
+## 🧩 Inference-engine unification (Cluster 5+) — PLANNED, multi-slice
+
+**North star (James, 2026-06-17):** ONE engine for type inference + narrowing +
+destructuring + inline conditionals + pattern matching. Today there are **three**
+divergent expression typers; consolidate to one (the canonical engine is
+`NarrowingInference.infer`). Do it in verified slices; TODO further scope creep and
+keep going until it's right.
+
+### The three typers (landscape map)
+1. **`pontif-ir/NarrowingInference.infer(expr, ctx)`** — the canonical, comprehensive
+   engine (literals→singletons, Var env, LetIn threads env, Match arm-union under
+   per-arm hypotheses, Call via `StaticDispatch`+type-params+`assign proof` grants,
+   Record→struct-refined, **FieldAccess projects refined conjuncts**, BinOp arith via
+   `BoundAnalysis`). Contract: returns the *narrowest* sort or **null** = "nothing
+   tighter than declared". Consumers: MethodOperatorResolver, ConstructionGate, the
+   receipt Drafter (return gate). **No external consumer reads SortChecker.inferSort.**
+2. **`pontif-ir/SortChecker.inferSort`** (~line 2026) — a SECOND, incomplete typer,
+   3 *internal* uses only (let-value→body env; field-access base for field-existence;
+   match scrutinee for totality). Returns **bare** sorts where (1) returns null
+   (comparisons→Bool, String-concat→String, Decimal/Int arith→bare). Its FieldAccess
+   does NOT project refinements (returns the bare declared field sort).
+3. **`pontif-parser/AltParser.inferMaximalSort`** (~line 1576) — a THIRD, parse-time
+   best-effort typer (can't see imported types/operators); BinOp arith → value-pin
+   `[Int:@==expr]` (carefully tuned — see cluster-4 notes); 4 internal parse-time uses.
+
+### Why a naive collapse is UNSAFE (the design crux)
+A 1-line `inferSort → infer` delegation loses the **bare-sort floor** that
+match-totality + field-existence rely on (where `infer` returns null). The unified
+engine needs a documented **floor**: when no narrowing is derivable, return the *base*
+sort (Bool/String/Decimal/Int/struct), not null — so one engine serves BOTH the
+narrowing consumers (use the narrowed sort) and the validation/totality consumers (use
+the floor). Do NOT change `infer`'s null contract directly (it ripples to
+MethodOperatorResolver/ConstructionGate/Drafter); add a layered
+`NarrowingInference.inferFloor(expr, ctx)` = `infer` ∪ coarse-base-fallback, and route
+SortChecker through it.
+
+### `inference__21` is GATE-SIDE, not a typer-consolidation bug
+`get(h):[Int:@>0] -> h.n` with `h:[Hist:@.n>0]` fails in the **return gate**
+(`PontifCompiler.firstUnprovableReturn` → Drafter → BuiltinIssuer/Notary), which can't
+prove `r_0>0` for `r_0 = h.n`. Fix: the Drafter/`PathFacts`/issuer must project a
+param's field refinement (`h:[Hist:@.n>0]`) into the hypothesis `h.n > 0` (it already
+has `NarrowingInference.inferFieldAccess` projection — wire it into the issuer's
+hypothesis gathering). Independent of slices 1–2 below.
+
+### Slice plan (verify each with the probe matrix + full suite; commit per slice)
+1. **`NarrowingInference.inferFloor`** — the floor layer (port `SortChecker.inferSort`'s
+   bare cases as the fallback). No contract change to `infer`.
+2. **Route `SortChecker.inferSort` → `inferFloor`** and delete the divergent body. The
+   FieldAccess refinement projection now reaches SortChecker for free; bare-sort floor
+   keeps match-totality + field checks intact. (Watch `MatchTotalityTest`, `SortCheckerTest`.)
+3. **Gate-side field-refinement projection** → fixes **inference__21**.
+4. **Absorb `AltParser.inferMaximalSort`** — parse-time stays (can't see imports) but
+   shares the floor logic / a common core where possible; preserve the cluster-4
+   value-pin tuning (DIV/MOD/POW + struct operands → no Int pin).
+5. **Unify destructuring + match narrowing** — fold `DestructureResolver` shape
+   resolution and match-arm narrowing into the one engine's surface (the bigger reach
+   of James's north star; slice further as needed).
+
+### Gotchas discovered by an exploratory slice-1/2 attempt (2026-06-18, reverted)
+An `inferFloor` layer (`infer` ∪ bare-base fallback) routed via `SortChecker.inferSort`
+compiled but triggered a **cascade of subtle ripples** — proof this needs dedicated,
+fresh focus, not a tail-of-session push. Concrete traps for the next attempt:
+- **Null-tolerant env.** `SortChecker`'s `typeEnv` holds **null** sorts (where a typer
+  abstains); `InferenceContext`'s constructor does `Map.copyOf` which **rejects null
+  values** → NPE. Strip nulls before building the context, or relax the record.
+- **Inline-Structural FieldAccess is a pinned divergence.** `infer.inferFieldAccess`
+  deliberately requires the struct in `ctx.structDefs()` (returns **null** for an inline
+  `Structural` base — a let-annotated `[P(n:Int)]` never registered as a top-level
+  struct), and `NarrowingInferenceTest.fieldAccess_returnsNullWithoutStructDef` PINS that
+  contract. `SortChecker`'s old `resolveNominal` reads the inline base's own members.
+  → handle inline-Structural in the FLOOR layer (SortChecker-facing), NOT in `infer`.
+- **Match-totality depends on bare sorts.** Where `infer` returns null (comparisons →
+  would-be Bool, String concat, un-bounded Int/Decimal arith), `checkMatchTotality` needs
+  the bare base or it errors "scrutinee's sort is not statically known"
+  (`IrRecordTest.truffle_fieldAccessAsMatchScrutinee`). The floor must supply it.
+- **Stream/iterate NPE ripple.** A changed sort flowing into the iteration desugar
+  surfaced `Cannot invoke Object.hashCode() because "pk" is null`
+  (`StreamCombinatorTest.exchange_modifiesMatchesInPlace_remainderIsTotal`) — a latent
+  null-key path in the stream lowering that a more-precise/different sort newly triggers.
+  Investigate that path independently before re-attempting.
+Net: the consolidation is correct in principle but must land as small, independently-
+verified steps (each green on the FULL suite), almost certainly via a FLOOR layer that
+leaves `infer`'s null contract untouched. **No probe is gated on it** (inference__21 is
+gate-side, slice 3), so there's no urgency forcing a risky push.
+
+### Divergence table (risk points)
+| case | infer | inferSort | inferMaximalSort |
+|---|---|---|---|
+| Dec | `[Decimal:@==v]` | bare Decimal | bare Decimal |
+| BinOp arith | BoundAnalysis bounds / null | bare Int/Decimal | value-pin `[Int:@==expr]` |
+| BinOp compare | null | bare Bool | value-pin `[Bool:@==expr]` |
+| FieldAccess(refined) | **projects conjuncts** | bare field sort | structural walk |
+| LetIn / Match / Call | full | partial / declared-only | parse-time weak |
+
+---
+
 ## 🔧 Language-inventory refactor sweep (in progress)
 
 Fixing the 5 root-cause clusters in `docs/language-inventory.md`. Regression
