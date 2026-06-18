@@ -4,10 +4,14 @@ import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSourceReflector;
+import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.ir.MethodOperatorResolver;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.module.ModuleResolver;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Produces the "reflected source" debug view: the program re-emitted in
@@ -66,5 +70,33 @@ public final class ReflectionReport {
         } catch (RuntimeException e) {
             return new Result.Failed("Compile error: " + e.getMessage());
         }
+    }
+
+    /**
+     * The selectable entrypoints for {@code source}: {@code "main"} plus each
+     * top-level function / let name (best-effort, from a parse alone — operator
+     * symbols are omitted as they read poorly in a menu). Parse failures degrade
+     * to just {@code "main"}, so a selector can always offer at least the default.
+     */
+    public static List<String> entrypoints(String source, String sourceName) {
+        List<String> names = new ArrayList<>();
+        names.add("main");
+        try {
+            IrModule parsed = AltParser.parseModule(source, sourceName);
+            for (IrStmt stmt : parsed.statements()) {
+                if (stmt instanceof IrStmt.FunctionDecl fd
+                        && isReadableName(fd.name()) && !names.contains(fd.name())) {
+                    names.add(fd.name());
+                }
+            }
+        } catch (ParseException | RuntimeException ignored) {
+            // Unparseable in-progress edit — the default entrypoint is still valid.
+        }
+        return names;
+    }
+
+    /** Skips operator-symbol names (`+`, `//`, …) — they don't read as menu items. */
+    private static boolean isReadableName(String name) {
+        return !name.isEmpty() && (Character.isLetter(name.charAt(0)) || name.charAt(0) == '_');
     }
 }

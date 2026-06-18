@@ -119,6 +119,13 @@ public final class App {
     private static Component.Text reportText;
     private static Component.Text irAstText;
     private static Component.Text narrowingsText;
+    // The main tab strip's active index, hoisted so the entrypoint menu can revert
+    // it on dismiss. `committedTab` is the tab the user actually settled on (a press
+    // of the Narrowings tab is transient until an entrypoint is chosen);
+    // `narrowingsEntry` is the chosen reflection entrypoint (null = main).
+    private static Property<Integer> activeTab;
+    private static int committedTab = 0;
+    private static String narrowingsEntry = null;
     // Last-published cursor string, so the per-frame refresh only writes the
     // ribbon's docked field when the caret actually moved.
     private static String lastCursorText = null;
@@ -330,12 +337,15 @@ public final class App {
 
         Component narrowingsPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, narrowingsText, false, 1);
 
-        Property<Integer> activeTab = new Property<>(0);
+        activeTab = new Property<>(0);
         activeTab.subscribe(i -> {
             if (i == null) return;
-            if (i == IR_AST_TAB) regenerateIrAst();
-            else if (i == REPORT_TAB) regenerateReports();
-            else if (i == NARROWINGS_TAB) regenerateNarrowings();
+            // The Narrowings tab is driven by the entrypoint menu (onTabPressed), not
+            // by this change signal — so don't regenerate or commit on switch-to. Every
+            // other tab commits and regenerates as usual.
+            if (i == IR_AST_TAB) { committedTab = i; regenerateIrAst(); }
+            else if (i == REPORT_TAB) { committedTab = i; regenerateReports(); }
+            else if (i != NARROWINGS_TAB) { committedTab = i; }  // Editor
         });
 
         Component tabs = Themed.tabs(
@@ -348,7 +358,7 @@ public final class App {
                 new Component.Tabs.TabPanel("Narrowings", narrowingsPane)),
             activeTab,
             Variant.PRIMARY
-        ).withFlexGrow(1);
+        ).withOnTabPressed(App::onTabPressed).withFlexGrow(1);
 
         return new Component.Flex(
             null, null, Em.of(0.5f), FRAME_BG,
@@ -412,11 +422,57 @@ public final class App {
     private static void regenerateNarrowings() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
-        String text = switch (ReflectionReport.fromAltSource(code, sourceName, resolveDir(), null)) {
+        String text = switch (ReflectionReport.fromAltSource(code, sourceName, resolveDir(), narrowingsEntry)) {
             case ReflectionReport.Result.Generated g -> g.text();
             case ReflectionReport.Result.Failed f -> f.error();
         };
         TextStates.setContent(narrowingsText, text);
+    }
+
+    /** Every press of the Narrowings tab — even while it's already active — opens
+     *  the entrypoint menu (Dasum's onTabPressed fires on every press, unlike the
+     *  activeIndex change signal). Dismiss returns to the committed tab; selecting
+     *  an entrypoint opens Narrowings reflected from it. */
+    private static void onTabPressed(Integer idx) {
+        if (idx != null && idx == NARROWINGS_TAB) openEntrypointMenu();
+    }
+
+    /** Modal entrypoint chooser: pick the function (or main) to reflect the
+     *  computation tree from. Reuses the overlay idiom the System menu uses. */
+    private static void openEntrypointMenu() {
+        if (OverlayStack.isActive()) return;  // don't stack on another overlay
+        String code = TextStates.contentOf(codeText);
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        String current = narrowingsEntry == null ? "main" : narrowingsEntry;
+
+        java.util.List<Component> rows = new java.util.ArrayList<>();
+        rows.add(new Component.Text("Reflect from entrypoint", Em.of(1.15f), MENU_TITLE_FG));
+        rows.add(new Component.Text(
+                "The reflected code is the call tree reachable from this entrypoint, "
+                        + "narrowed by how it's called.", Em.of(0.9f), MENU_HINT_FG));
+        for (String name : ReflectionReport.entrypoints(code, sourceName)) {
+            Variant v = name.equals(current) ? Variant.PRIMARY : Variant.DEFAULT;
+            rows.add(Themed.button(name, Em.of(18f), v, 0, () -> chooseEntrypoint(name)));
+        }
+        rows.add(Themed.button("Close", Em.of(18f), Variant.DEFAULT, 0, OverlayStack::pop));
+
+        Component panel = new Component.Flex(
+                Em.of(24f), Em.AUTO, Em.of(1f), MENU_BG,
+                Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.of(0.5f),
+                rows, false, 0);
+        // Dismiss (Close, click-outside, ESC) → return to the tab we came from. On a
+        // selection chooseEntrypoint() has already committed Narrowings, so this set
+        // is a no-op then.
+        OverlayStack.push(new OverlayStack.Overlay(
+                panel, Anchor.CENTER, true, () -> activeTab.set(committedTab)));
+    }
+
+    private static void chooseEntrypoint(String name) {
+        narrowingsEntry = "main".equals(name) ? null : name;
+        committedTab = NARROWINGS_TAB;     // settle on Narrowings (onClose revert → no-op)
+        regenerateNarrowings();            // refresh behind the overlay before it closes
+        activeTab.set(NARROWINGS_TAB);     // ensure the tab is shown (no-op if already)
+        OverlayStack.pop();
     }
 
     /** Directory used to resolve sibling {@code requires} for the open file —

@@ -64,6 +64,20 @@ class ReflectionReportTest {
     }
 
     @Test
+    void entrypoints_listMainFirstThenNamedFunctionsAndLets() {
+        java.util.List<String> names = ReflectionReport.entrypoints(
+                "function a(x:Int):Int -> x\nfunction b(y:Int):Int -> y\nlet c = 5\na(1)", "t.ptf");
+        assertTrue("main".equals(names.get(0)), names.toString());
+        assertTrue(names.contains("a") && names.contains("b") && names.contains("c"), names.toString());
+    }
+
+    @Test
+    void entrypoints_unparseable_degradesToMainOnly() {
+        java.util.List<String> names = ReflectionReport.entrypoints("function (((", "t.ptf");
+        assertTrue(names.equals(java.util.List.of("main")), names.toString());
+    }
+
+    @Test
     void variableEntrypoint_rootsAtNamedFunction() {
         String out = reflect("""
                 function helper(x:[Int:@>=1]):Int -> x + 1
