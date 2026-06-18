@@ -23,6 +23,7 @@ allowed to lie.
 - [Operator overloading](#operator-overloading)
 - [Proofs and synthesis](#proofs-and-synthesis)
 - [Conservation receipts — the second ledger](#conservation-receipts--the-second-ledger)
+- [One inference engine, every stage](#one-inference-engine-every-stage)
 - [The compiler](#the-compiler)
 - [Source code explained](#source-code-explained)
 - [Status](#status)
@@ -564,6 +565,74 @@ proof swap = Reversible()          # bijective rewiring — invertibility witnes
 let [(x, y)] = swap((1, true)) y   # → 1
 ```
 
+## One inference engine, every stage
+
+Everything above — refinement, dispatch, match, the return gate — rests on one
+question: *what is this value, exactly?* A type system is only as honest as the
+thing that answers it, and Pontif has exactly **one** answerer: `NarrowingInference`.
+It runs while parsing, while sort-checking, at the return-refinement gate, and
+during dispatch. The stages differ only in **what is known** — a parser hasn't
+linked imports yet; the gate has the whole module — never in **how the reasoning
+works**. There is no second typer to drift out of agreement with the first, which
+is the failure mode where touching one corner of a type system quietly breaks
+another.
+
+What it computes is a **narrowing**: the tightest true statement about a value's
+set, written as a predicate over `@`. A literal is `[Int:@==5]`; a comparison is
+`[Bool:@==(x>0)]`; an arithmetic result is the *exact* value-pin `[Int:@==x+1]`.
+There is no separate "bound type" and "singleton type" and "pin type" — they are
+one shape, a refinement, and the engine always produces the most precise one it
+can express.
+
+A *bound* like `[Int:@>=2]` is not a rival representation — **it is a value-pin
+with its out-of-scope variables eliminated.** `x+1` is `[Int:@==x+1]` everywhere
+`x` is in scope; the moment it crosses a boundary where `x` no longer exists — a
+return value seen by its caller, a stream element being quantified — the engine
+*projects* `x` out by interval reasoning, and what survives is the bound. So the
+**same expression has different, equally-correct narrowings depending on the scope
+that consumes it** — and projecting only at the boundary, rather than eagerly
+everywhere, is what keeps the engine both precise and small.
+
+You can watch it work. The playground's **Narrowings** view re-emits your program
+in source shape with declared types replaced by what the engine inferred — walked
+from any entrypoint, each function shown specialized to how it is actually called:
+
+```
+# entrypoint: main
+inc(5)
+
+function inc(x:[Int:(@ == 5)]):[Int:(@ == 6)]    # return was: Int
+  (x + 1)
+```
+
+`inc` was *declared* to return `Int`; entered via `inc(5)`, the engine pins the
+argument to `5` and infers the return as exactly `6` — it evaluated the call at the
+type level. (The walk borrows the receipt-graph's no-duplicate-edges discipline:
+each reachable function is shown once, and a recursive call is a back-edge, never an
+infinite unfolding.) It is the same idea as the receipt and conservation ledgers — a
+plain-text window you can *read* — turned on the type system itself.
+
+### Principles that aren't specific to Pontif
+
+Four moves do most of the work, and none of them needs refinement types to be
+worth borrowing:
+
+- **One reasoner, many stages.** Don't reimplement "what is the type of this
+  expression" in the parser, the checker, and the optimizer. Write it once,
+  parameterize it by what is known. Stages that share a reasoner cannot disagree.
+- **A coarse type is a precise one, projected.** Keep the most precise fact while
+  its inputs are in scope; *widen at the boundary*, deliberately, instead of
+  discarding precision eagerly. This is the instinct behind flow-typing
+  (TypeScript, Kotlin, Flow), made into an explicit operation with a name.
+- **Abstain, never bluff.** When it can't prove the precise fact, the engine drops
+  to the honest coarse one — it never asserts a plausible-but-false widening. That
+  one rule is why a Pontif error points at a real gap instead of a phantom, and why
+  the language stays workable even where the prover is incomplete.
+- **Make the inferred view legible.** A "show me what you concluded" mode — the
+  whole inferred program, not just hover-hints — turns a type system from a black
+  box into something you read. It is cheap to build on top of a single engine and
+  pays back disproportionately in how the language *feels*.
+
 ## The compiler
 
 Pontif is a pipeline from source text to a running program, with the proof gates
@@ -604,13 +673,13 @@ language is one big syntactic sugar for it).
 | --- | --- |
 | `pontif-core` | Symbolic algebra (`SymExpr`, `Simplifier`, alpha-equivalence, substitution), the sort system (`Sort`, with refined/structural/function/union/intersection variants), refinements with BigDecimal-generalized implication, multi-dispatch (`DispatchTable`, `FunctionDecl`, `FunctionCheck`, `TraitRegistry`), `Decimals` (display + derived-tolerance `~=`), Truffle language registration. |
 | `pontif-ast` | Ready-made Truffle nodes — literals (Int, Decimal, Bool), arithmetic (`+ - * / % ^`), comparison (incl. `~=`), let-bindings, records, field access, match, function entry/call. |
-| `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). `AliasResolver` substitutes type aliases; `SortChecker` validates sorts, calls, trait impls, Decimal narrow shapes, and **match totality** (the conservation rule); `DecimalPromotion` promotes Int literals at Decimal boundaries; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
+| `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). **`NarrowingInference` is the single inference engine** — every stage (parse, sort-check, return gate, dispatch) decides a value's narrowing through it, over a stage-appropriate `InferenceContext`; `inferFloor` adds the coarse-base fallback for the totality/field-existence consumers, and `closeOver` projects a value-pin to a variable-free bound at scope boundaries. `IrSourceReflector` re-emits the IR as source-shaped text with declared sorts replaced by inferred narrowings (the playground's Narrowings view), walked from a variable entrypoint with shallow call-site specialization. `AliasResolver` substitutes type aliases; `SortChecker` validates sorts, calls, trait impls, Decimal narrow shapes, and **match totality** (the conservation rule); `DecimalPromotion` promotes Int literals at Decimal boundaries; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
 | `pontif-predicates` | Predicate-arithmetic kernel — satisfiability, complement, and bound analysis over `Int` and `Bool` domains. `PredicateArithmetic` decides single-domain coverage (used by match totality, the `_`-arm desugar, and overload-overlap); `BoundAnalysis` is the hybrid linear-bound + sign engine that powers integer discharge. |
 | `pontif-defaults` | Canonical rule-set factories for the simplifier — `DefaultRules.production()` and `DefaultRules.full()`. Owns `BoundAnalysisRules`, the in-simplifier wrapper over `BoundAnalysis.discharge`, gated to abstain on non-integer values. |
 | `pontif-parser` | Two parsers sharing the same IR: the **reference parser** (`Parser`, S-expression, stable, for tests / reference) and the **Pontif parser** (`AltParser`, the user-facing surface) — including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
-| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers. |
+| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
 | `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, match. |
 
@@ -647,6 +716,11 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   **conservation receipts** (`DataConservative`, `Reversible`, `NoDuplication`,
   `DataConservativeExcept`) — all gated at compile time, with reviewable text
   reports
+- **One inference engine, inspectable** — every stage (parse, sort-check, return
+  gate, dispatch) decides a value's narrowing through `NarrowingInference` (exact
+  value-pins, projected to bounds only at scope boundaries); the playground's
+  **Narrowings** view reflects the program with declared types replaced by what was
+  inferred, walked from any entrypoint
 - **Module system** — file-as-module, FQN-keyed dispatch, orphan-rule coherence,
   builtin modules (`std.proof`, `std.stream`, `std.conservation`), cross-module
   struct literals
