@@ -56,6 +56,7 @@ import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
+import sibarum.pontif.runtime.ReflectionReport;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -99,6 +100,7 @@ public final class App {
     /** Tab indices in the main tab strip (Editor = 0). */
     private static final int IR_AST_TAB = 1;
     private static final int REPORT_TAB = 2;
+    private static final int NARROWINGS_TAB = 3;
 
     /** ASCII divider between the two report sections — the mono atlas is ASCII-only. */
     private static final String REPORT_DIVIDER = "=".repeat(72);
@@ -116,6 +118,7 @@ public final class App {
     private static Component.Text filenameLabel;
     private static Component.Text reportText;
     private static Component.Text irAstText;
+    private static Component.Text narrowingsText;
     // Last-published cursor string, so the per-frame refresh only writes the
     // ribbon's docked field when the caret actually moved.
     private static String lastCursorText = null;
@@ -316,11 +319,23 @@ public final class App {
 
         Component irAstPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, irAstText, false, 1);
 
+        // Read-only "reflected source" view: the program re-emitted with declared
+        // sorts replaced by the inferred narrowings the one engine derives.
+        // Regenerated from the editor source on tab activation.
+        narrowingsText = new Component.Text(
+            "", MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
+            null, null, Em.of(0.5f),
+            null, false,
+            true, true, false, false, 1);
+
+        Component narrowingsPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, narrowingsText, false, 1);
+
         Property<Integer> activeTab = new Property<>(0);
         activeTab.subscribe(i -> {
             if (i == null) return;
             if (i == IR_AST_TAB) regenerateIrAst();
             else if (i == REPORT_TAB) regenerateReports();
+            else if (i == NARROWINGS_TAB) regenerateNarrowings();
         });
 
         Component tabs = Themed.tabs(
@@ -329,7 +344,8 @@ public final class App {
             List.of(
                 new Component.Tabs.TabPanel("Editor",   codePane),
                 new Component.Tabs.TabPanel("IR / AST", irAstPane),
-                new Component.Tabs.TabPanel("Receipts", reportPane)),
+                new Component.Tabs.TabPanel("Receipts", reportPane),
+                new Component.Tabs.TabPanel("Narrowings", narrowingsPane)),
             activeTab,
             Variant.PRIMARY
         ).withFlexGrow(1);
@@ -387,6 +403,20 @@ public final class App {
             case IrAstReport.Result.Failed f -> f.error();
         };
         TextStates.setContent(irAstText, text);
+    }
+
+    /** Fill the "reflected source" inspector from the current editor source —
+     *  the program re-emitted with declared sorts replaced by inferred narrowings
+     *  (entrypoint defaults to main). Bounded + fast; runs on the tab-switch
+     *  callback like {@link #regenerateIrAst}. */
+    private static void regenerateNarrowings() {
+        String code = TextStates.contentOf(codeText);
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        String text = switch (ReflectionReport.fromAltSource(code, sourceName, resolveDir(), null)) {
+            case ReflectionReport.Result.Generated g -> g.text();
+            case ReflectionReport.Result.Failed f -> f.error();
+        };
+        TextStates.setContent(narrowingsText, text);
     }
 
     /** Directory used to resolve sibling {@code requires} for the open file —
