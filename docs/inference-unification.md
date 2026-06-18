@@ -113,8 +113,22 @@ scrutinee to its base. **Full suite + 150-probe matrix green.** The core is now 
 capability superset for narrowing *shapes* — the exact pin the parser had is now the
 core's behavior.
 
-**Step 4 (route the parser through the core; delete `inferMaximalSort`) — NOT a clean
-swap. THREE real impedance points the core must absorb first** (the parser types at
+**Step 4 LANDED (commit 108e3e1).** `AltParser.inferMaximalSort` now delegates to
+`inferFloor` over an `InferenceContext` built from the parser's live scope maps; the
+parser is no longer a separate reasoner. The three impedance points below were all
+absorbed into the core floor (so it is a true superset): MethodCall + unrouted-operator
+return typing (one resolve-by-sort mechanism, two key constructions), and the
+Record→Structural / Lambda→Method shapes. Additional fixes the divide-and-conquer
+surfaced: `infer` pins Bool-valued ops too; `kernelCompilable()` guards every parse-time
+`compileSymExpr` (an unresolved MethodCall throws `IllegalStateException`, which `infer`
+must swallow — it never throws); `inferBinOp` must not pin Int over a user-type operand
+(restored the old `isUserStructOperand` guard — `Vec+Vec:Vec` is a user operator, not Int
+arithmetic); `closeOver` drops any un-projectable escaping-var refinement to the declared
+sort; `SortChecker` defers anonymous-record field-existence to runtime. **Full suite +
+150-probe matrix green** (27 known-failing, all intentional/known; `inference__21` fixed).
+The original impedance analysis, for the record:
+
+**(historical) THREE impedance points the core had to absorb** (the parser types at
 parse time, pre-link, for desugar purposes — a genuinely different stage):
 1. **MethodCall result typing.** `inferMaximalSort` types `recv.method()` via a
    `Type.method` lookup in `declaredFunctionReturns`; the core's `infer` returns `null`
