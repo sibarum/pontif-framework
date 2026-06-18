@@ -68,7 +68,7 @@ import java.util.Optional;
 import static sibarum.dasum.gui.natives.gl.Gl.GL_COLOR_BUFFER_BIT;
 
 /**
- * Pontif Playground — a minimal GUI for typing Pontif source, running it on
+ * Pontif Editor — a minimal GUI for typing Pontif source, running it on
  * a background thread, and seeing the result (or origin-tagged error) flash
  * in the status ribbon at the bottom. Click the ribbon for the full event
  * log. The two execution paths in pontif-ir (interpreter and Truffle
@@ -138,6 +138,11 @@ public final class App {
     private static Component pressTarget = null;
     private static Path currentFile = null;
 
+    /** A file named on the command line to open at startup (e.g. launched by
+     *  {@code pontif editor foo.ptf}); overrides the restored session file when
+     *  readable. Null when launched with no argument. */
+    private static Path startupFile = null;
+
     /** Background persistence: recovery autosave + session-file writer. Created
      *  in {@link #main} once the state directory is confirmed writable. */
     private static SessionManager session;
@@ -146,6 +151,12 @@ public final class App {
     private static final PontifRunner RUNNER = new PontifRunner();
 
     public static void main(String[] args) {
+        // An optional file argument (the CLI's `pontif editor <file>`): open it
+        // at startup instead of restoring the last session's file.
+        if (args.length > 0 && args[0] != null && !args[0].isBlank()) {
+            Path candidate = Path.of(args[0]);
+            if (Files.isReadable(candidate)) startupFile = candidate;
+        }
         // Per-user state directory + the previous session (if any). Read before
         // the window is created so its size can be restored at creation time.
         boolean stateEnabled = AppPaths.ensureDirs();
@@ -156,7 +167,7 @@ public final class App {
         int initH = (restored != null && restored.hasGeometry()) ? restored.windowHeight : 720;
 
         try (GlfwContext ctx = GlfwContext.init();
-             Window win = Window.create(initW, initH, "Pontif Playground");
+             Window win = Window.create(initW, initH, "Pontif Editor");
              Batcher batcher = new Batcher();
              CursorManager cursors = new CursorManager(win.handle().address())) {
             window = win;
@@ -180,7 +191,7 @@ public final class App {
                 FontGroups.register(FontGroup.of(Icon.DEFAULT_FONT_GROUP,   iconsAtlas,   iconsTexture));
 
                 Status.setDefaultMessage(
-                    "Pontif Playground — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.",
+                    "Pontif Editor — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.",
                     Variant.DEFAULT);
                 Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
@@ -645,7 +656,10 @@ public final class App {
         // The editor currently holds DEFAULT_CODE as an untitled buffer.
         if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), DEFAULT_CODE, null);
 
-        if (restored != null && restored.openFile != null) {
+        // A file named on the command line wins over the restored session file.
+        if (startupFile != null) {
+            loadFile(startupFile, true);
+        } else if (restored != null && restored.openFile != null) {
             Path path = Path.of(restored.openFile);
             if (Files.isReadable(path)) loadFile(path, false);
         }

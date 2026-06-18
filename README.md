@@ -680,7 +680,8 @@ language is one big syntactic sugar for it).
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
-| `pontif-playground` | Editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. |
+| `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
+| `pontif-cli` | The **`pontif`** command-line tool — `run`, `pack`, `console`, `new`, `editor` — over the `pontif-runtime` compile/run surface. picocli-based; runs on the JVM and as a GraalVM native image. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, match. |
 
 ## Status
@@ -726,6 +727,37 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   struct literals
 
 See `docs/TODO.md` for the active work list and parked design sketches.
+
+## The `pontif` CLI
+
+`pontif-cli` is the command-line front end — a thin layer over `PontifCompiler`
+and `PontifRunner`, so the gates a program passes in the editor it passes here too.
+
+```
+pontif new my.app                 # scaffold a project (module.ptf.toml + sample source)
+pontif run app.ptf                # run a file, a project dir, or a .ptfpkg
+pontif run my.app                 #   (directory with a module.ptf.toml)
+pontif pack                       # validate-by-compiling, then zip to <name>-<version>.ptfpkg
+pontif run app-0.1.0.ptfpkg       # execute the packaged artifact
+pontif console                    # REPL: declarations persist, expressions print
+pontif console --include lib/     #   resolve `requires` against a directory or .ptfpkg
+pontif editor app.ptf             # open the Pontif Editor GUI on a file
+```
+
+A `.ptfpkg` artifact is a compressed **source bundle** (the `module.ptf.toml`
+marker plus the `.ptf` sources) — not compiled IR, so the full compile and proof
+gates re-run on execution and an artifact can never carry unproven code.
+
+Build it:
+
+```
+mvn -pl pontif-cli -am package           # → pontif-cli/target/pontif-cli.jar
+java -jar pontif-cli/target/pontif-cli.jar run app.ptf
+mvn -Pnative -pl pontif-cli -am package  # → a native `pontif` binary (needs a GraalVM JDK)
+```
+
+`pontif editor` shells out to the JVM editor jar (`pontif-playground/target/pontif-editor.jar`);
+build it with `mvn -pl pontif-playground -am package`, or point `PONTIF_EDITOR_JAR` at it.
 
 ## Build and test
 

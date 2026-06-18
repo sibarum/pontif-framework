@@ -21,6 +21,7 @@
         <module>pontif-runtime</module>
         <module>pontif-demo</module>
         <module>pontif-playground</module>
+        <module>pontif-cli</module>
     </modules>
 
     <properties>
@@ -30,6 +31,7 @@
         <truffle.version>24.1.1</truffle.version>
         <junit.version>5.11.3</junit.version>
         <dasum.version>1.0-SNAPSHOT</dasum.version>
+        <picocli.version>4.7.6</picocli.version>
     </properties>
 
     <dependencyManagement>

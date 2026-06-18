@@ -61,6 +61,35 @@ public final class PontifRunner {
         };
     }
 
+    /**
+     * Runs a compiled program through the {@link Engine#INTERPRETER} only,
+     * touching no Truffle class. {@link #run(CompiledProgram, Engine)} statically
+     * references {@link TruffleLowering} in its {@code TRUFFLE} branch, which
+     * drags the whole Truffle subsystem into reachability; this method exists so
+     * a Truffle-free consumer (the {@code pontif} CLI, built as a native image)
+     * can interpret without that coupling. Behaviour is identical to
+     * {@code run(program, Engine.INTERPRETER)}.
+     */
+    public RunResult runInterpreted(CompiledProgram program) {
+        try {
+            Object value = new IrInterpreter(program.simplifier()).eval(program.module());
+            return RunResult.success(formatValue(value));
+        } catch (RuntimeCheckException rce) {
+            return RunResult.error("Runtime error: " + rce.getMessage(), rce.origin());
+        } catch (RuntimeException e) {
+            return RunResult.error("Runtime error (internal " + e.getClass().getSimpleName()
+                    + "): " + e.getMessage());
+        }
+    }
+
+    /** {@link #runInterpreted(CompiledProgram)} over a {@link PontifCompiler.CompileResult}. */
+    public RunResult runInterpreted(PontifCompiler.CompileResult compileResult) {
+        return switch (compileResult) {
+            case PontifCompiler.CompileResult.Compiled c -> runInterpreted(c.program());
+            case PontifCompiler.CompileResult.Failed f -> f.error();
+        };
+    }
+
     private static String formatValue(Object value) {
         if (value == null) return "null";
         if (value instanceof java.math.BigDecimal d) {

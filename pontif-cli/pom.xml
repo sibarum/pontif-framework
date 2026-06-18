@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-cli</artifactId>
+
+    <properties>
+        <main.class>sibarum.pontif.cli.Pontif</main.class>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+            <!-- The CLI interprets only (PontifRunner.runInterpreted), never lowering
+                 to Truffle, so it needs no Truffle at runtime. Dropping truffle-api
+                 keeps the GraalVM Truffle SVM feature (which auto-activates merely
+                 from truffle-api being on the classpath, and is incompatible across
+                 the 24.1.1/builder-25 version skew) out of the native image. -->
+            <exclusions>
+                <exclusion>
+                    <groupId>org.graalvm.truffle</groupId>
+                    <artifactId>truffle-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
+            <version>${picocli.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>pontif-cli</finalName>
+        <plugins>
+            <!-- picocli-codegen as an annotation processor: emits the GraalVM
+                 reflect-/resource-config for the @Command tree at compile time,
+                 so the native-image profile (see the `native` profile) needs no
+                 hand-maintained config. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>info.picocli</groupId>
+                            <artifactId>picocli-codegen</artifactId>
+                            <version>${picocli.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                    <compilerArgs>
+                        <arg>-Aproject=${project.groupId}/${project.artifactId}</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <!-- Fat jar: the always-works JVM front end (`java -jar`) and the
+                 classpath the `editor` subcommand shells out against. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>make-fat-jar</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>${main.class}</mainClass>
+                                </transformer>
+                            </transformers>
+                            <!-- Truffle/polyglot ship native-image.properties carrying a
+                                 ForceOnModulePath directive that assumes their jars sit on
+                                 the module path; once flattened into the uber-jar those module
+                                 descriptors are gone and native-image aborts. The CLI never
+                                 runs the Truffle backend (it pins INTERPRETER), so these
+                                 configs are dead weight — drop them, while keeping picocli's
+                                 and the project's own generated config. -->
+                            <filters>
+                                <filter>
+                                    <artifact>org.graalvm.*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/native-image/**</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- `mvn -Pnative -pl pontif-cli -am package` → a standalone `pontif`
+             native binary. Off by default; needs a GraalVM JDK (native-image on
+             PATH) and, on Windows, the MSVC build tools. picocli-codegen has
+             already emitted the reflection/resource config under
+             META-INF/native-image, which native-maven-plugin picks up. -->
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <!-- Disable the fat-jar shade for native builds: native-image must
+                         consume the regular (thin) classpath — separate dependency jars —
+                         so the GraalVM SDK/builder classes are recognized as the builder's
+                         own rather than illegally bundled into an uber-jar on -cp. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>make-fat-jar</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.3</version>
+                        <extensions>true</extensions>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>pontif</imageName>
+                            <mainClass>${main.class}</mainClass>
+                            <buildArgs>
+                                <buildArg>--no-fallback</buildArg>
+                                <buildArg>-H:+ReportExceptionStackTraces</buildArg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>
