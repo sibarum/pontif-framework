@@ -125,16 +125,16 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + e.getMessage()));
         }
-        ModuleLinker.LinkResult linked;
+        IrModule linked;
         try {
-            linked = ModuleResolver.resolveAndCombineWithTable(module, resolveDir);
+            linked = ModuleResolver.resolveAndCombine(module, resolveDir);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(linked.module(), sourceName);
+        return compileModule(linked, sourceName);
     }
 
     /**
@@ -203,16 +203,16 @@ public final class PontifCompiler {
      * entry. Single-file {@link #compile}/{@link #compileAlt} are unaffected.
      */
     public CompileResult compileProject(Map<String, IrModule> modules, String entryModule) {
-        ModuleLinker.LinkResult linked;
+        IrModule linked;
         try {
-            linked = ModuleLinker.combineWithTable(modules, entryModule);
+            linked = ModuleLinker.combine(modules, entryModule);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(linked.module(), entryModule);
+        return compileModule(linked, entryModule);
     }
 
     /**

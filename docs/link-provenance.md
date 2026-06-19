@@ -1,7 +1,7 @@
 # Link provenance: resolution should respect the module boundary, not reconstruct it
 
-**Status: WAR EXECUTING — Option A chosen (James, 2026-06-19); Slices 1–2 landed
-(branch `war/link-provenance`). Slice 3 (cleanup) remains.** Successor to the cross-module-dispatch war
+**Status: WAR COMPLETE — Option A delivered (James, 2026-06-19); Slices 1–3 all
+landed (branch `war/link-provenance`).** Successor to the cross-module-dispatch war
 (`docs/cross-module-dispatch.md`), whose Step B got cross-module visibility working
 but did it by *re-threading* module context into a post-link pass. This war removes
 the workaround by making module scope structural.
@@ -107,9 +107,11 @@ not making the back-end scope-aware (that is option B's mistake); we are making 
 **Known wrinkle — `IrCompiler` re-runs `resolve`.** Today `IrCompiler.compile:49`
 re-runs `MethodOperatorResolver` (a no-op on already-resolved IR). Under A, the flat
 module reaching `IrCompiler` is already resolved, so the re-run must stay a true
-no-op (it has no scope and must not re-gate). Slice 3 verifies this and, if the
-re-run is purely defensive, considers dropping it. The single-file path (no
-`requires`) resolves with an all-visible scope, exactly as today's `null` table.
+no-op (it has no scope and must not re-gate). **Slice 3 resolution: kept, not
+dropped** — the re-run is *not* purely defensive: it is the real resolution pass for
+the bare single-file path (no `requires`, never linked), and a genuine no-op
+(unrestricted scope) on already-linked input. The single-file path resolves with an
+all-visible scope, exactly as the old `null` table.
 
 ---
 
@@ -146,11 +148,21 @@ Per the rewrite rule (`feedback_vertical_slices`): each slice compiles and is gr
   have no visibility concern, so forcing them per-module would be over-reach for zero
   debt reduction. "Before concatenation" was relaxed to "during the link, grouped by
   module" because the only thing needing module scope is the resolver's gate.
-- **Slice 3 — delete the downstream table plumbing.** Remove the `table` parameter
-  from `compileModule`/`resolve`'s post-link path; confirm `IrCompiler`'s re-run is
-  a genuine no-op (and drop it if purely defensive). `SortChecker`/gates/runtime
-  unchanged. Confirm `§5.7` of the dispatch doc (no file-init-order dependence)
-  still holds with resolution moved earlier.
+- **Slice 3 — delete the downstream table plumbing. DONE (2026-06-19).**
+  Removed every `*WithTable` variant and the `LinkResult` record: `ModuleLinker`
+  exposes only `combine`/`combineSingle` (the table is built and fully consumed
+  *inside* the link — coherence/import/coercion checks + `resolvePerModule`, the
+  gate); `ModuleResolver.resolveAndCombine` and `PontifCompiler.compileFromSource`/
+  `compileProject` thread a plain `IrModule`, never a side table.
+  `MethodOperatorResolver` dropped its `table` field, the `fixedScope` flag, the
+  per-decl `scopeFor` reconstruction, and the table-carrying `resolve(..)`
+  overloads — `currentScope` is now caller-owned (unrestricted for the whole-module
+  paths, per-module inside `resolvePerModule`). `IrCompiler`'s `MethodOperatorResolver.resolve`
+  re-run stays: it is *not* purely defensive — it is the real resolution pass for
+  the bare single-file path (no `requires`, never linked), and a genuine no-op
+  (unrestricted scope, no re-gating) on already-linked input. `SortChecker`/gates/
+  runtime unchanged. Green: 765 pontif-runtime tests + the full pontif-ir suite,
+  all dispatch/traits cross-module + migration probes unchanged.
 
 Probe meter throughout: the `dispatch__*` / `traits__*` cross-module probes and the
 Step B migration probes are the regression meter — all must stay green, none
@@ -158,31 +170,32 @@ suppressed (R1 from the predecessor war still binds).
 
 ---
 
-## 5. WAR markers (cut sites)
+## 5. WAR markers (cut sites — all resolved)
 
-Marked in-code with `WAR(link-provenance)` pointing here:
+Every cut site is closed. The remaining in-code `WAR(link-provenance)` comments are
+now *descriptive* (they document where the sole visibility gate lives and why the
+table is not threaded), not open TODOs:
 
-- `MethodOperatorResolver.java` — the `currentModule` mutable field (`:56-58`) and
-  its FQN-reconstruction (`:122`, `:100`); `isVisibleHere`/`ownsOrImports`
-  (`:301-319`) become scope membership.
-- `ModuleLinker.java` — `combineWithTable` (`:89`) is where per-module resolution
-  moves in; `LinkResult.table` (`:47-54`) stops being a downstream output.
-- `PontifCompiler.java` — `compileModule(.., table)` (`:222`) loses the table once
-  Slice 3 lands.
+- `MethodOperatorResolver.java` — the `currentModule` mutable field, its
+  FQN-reconstruction, the `fixedScope` flag, `scopeFor`, and the table-carrying
+  `resolve(..)` overloads are **gone**. Visibility is `currentScope` (a
+  `ModuleScope`), caller-owned: unrestricted on the whole-module paths, set
+  per-module inside `resolvePerModule`.
+- `ModuleLinker.java` — `combine` builds the table and consumes it within the link
+  (checks + `resolvePerModule`); `LinkResult`/`*WithTable` are **deleted** — nothing
+  downstream re-threads it.
+- `PontifCompiler.java` / `ModuleResolver.java` — the post-link `table` plumbing is
+  **removed**; both thread a plain `IrModule`.
 
 ---
 
-## 6. The decision (James)
+## 6. The decision (James) — RESOLVED 2026-06-19
 
-The plan above assumes **Option A** at **bold-but-bounded** ambition. Two things to
-confirm before Slice 1:
+1. **Option A vs C → A.** James chose A: resolution moves into the link, gated
+   per-module, dissolving the round-trip rather than papering it.
+2. **Mechanical, not philosophical.** The objection was to the stateful
+   reconstruction + side-table mechanics (§1), which A removes cleanly. The
+   flatten-then-resolve shape stays (the back-end is honestly module-blind); only
+   the *front-end* became uniformly module-scoped. B (never flatten) was not needed.
 
-1. **Option A vs C.** A moves resolution before the link (dissolves the round-trip,
-   slightly larger); C stamps provenance on statements and keeps resolution post-link
-   (smaller, papers it). I recommend A.
-2. **Is the smell mechanical or philosophical?** My read (§1) is that declaration
-   provenance is *not* actually lost — it is in the FQN — so the objection is really
-   to the stateful reconstruction + side-table mechanics, which A removes cleanly. If
-   your objection is deeper (the flatten-then-resolve *philosophy* itself, even done
-   tidily), say so — that would push toward B (never flatten), and I should not
-   assume it away.
+All three slices landed on `war/link-provenance`. The war is closed.

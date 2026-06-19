@@ -50,26 +50,16 @@ public final class MethodOperatorResolver {
     /** every name a {@code MethodCall} may resolve to (Type.method / Trait.method keys). */
     private final Set<String> methodKeys;
     private final Map<String, IrSort.Structural> structs;
-    /** Cross-module ownership/import table for the visibility gate, or null for a
-     *  bare single-file compile (nothing to gate — every name is local).
-     *  WAR(link-provenance) Slice 1: now used only to build per-decl ModuleScopes;
-     *  Slice 2 moves resolution per-module and Slice 3 drops this field. */
-    private final ModuleSymbolTable table;
-    /** Visibility view of the decl currently being rewritten — its own module's
-     *  scope (own + imported-by-association). In the legacy whole-module path it is
-     *  recomputed per declaration from the FQN; in the per-module link path
-     *  ({@link #resolvePerModule}) the caller sets it per module and it is fixed. */
+    /** Visibility view used to gate operator/method routing. The whole-module
+     *  {@code resolve(...)} entry points leave it {@linkplain ModuleScope#unrestricted()
+     *  unrestricted} (single-file, or an already-gated no-op re-run); only the
+     *  per-module link path ({@link #resolvePerModule}) sets it per module — the
+     *  sole cross-module visibility gate (WAR(link-provenance)). */
     private ModuleScope currentScope = ModuleScope.unrestricted();
-    /** When true (the per-module link path, WAR(link-provenance) Slice 2),
-     *  {@link #currentScope} is owned by the caller and NOT recomputed per
-     *  declaration — resolution is gated in one fixed scope per module. */
-    private boolean fixedScope = false;
 
-    private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators,
-            ModuleSymbolTable table) {
+    private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators) {
         this.resolveMethods = resolveMethods;
         this.routeOperators = routeOperators;
-        this.table = table;
         this.methodKeys = collectMethodKeys(module);
         this.structs = InferenceContext.fromModule(module).structDefs();
         for (IrStmt stmt : module.statements()) {
@@ -82,53 +72,40 @@ public final class MethodOperatorResolver {
         }
     }
 
-    /** Full resolution: methods AND operators (the run path), no visibility gate. */
+    /** Full resolution: methods AND operators (the run path). Unrestricted — for a
+     *  bare single-file compile (nothing cross-module to gate) and for the no-op
+     *  re-run over an already-linked module. Cross-module gating is the linker's
+     *  job via {@link #resolvePerModule}. */
     public static IrModule resolve(IrModule module) throws CompileException {
-        return resolve(module, true, true, null);
-    }
-
-    /** Full resolution with the cross-module symbol table — enables the
-     *  import-by-association visibility gate (Step B); pass the table the linker
-     *  built for the combined module. A {@code null} table gates nothing. */
-    public static IrModule resolve(IrModule module, ModuleSymbolTable table) throws CompileException {
-        return resolve(module, true, true, table);
+        return resolve(module, true, true);
     }
 
     public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators)
             throws CompileException {
-        return resolve(module, resolveMethods, routeOperators, null);
-    }
-
-    public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators,
-            ModuleSymbolTable table) throws CompileException {
-        MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators, table);
+        MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators);
         InferenceContext ctx = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) out.add(r.rewriteStmt(stmt, ctx));
-        r.currentScope = r.scopeFor(module.name());   // the entry module owns `main`
         IrExpr main = module.main() == null ? null : r.rewriteExpr(module.main(), ctx);
         return new IrModule(module.name(), out, main);
     }
 
     /**
-     * The per-module link path (Option A; WAR(link-provenance) Slice 2): resolve an
-     * already shape-resolved COMBINED module so that each declaration is gated in
-     * ITS OWN module's scope. The typing / overload registry is the full combined
-     * module — the migration error must be able to see an overload that <em>exists
-     * but isn't imported</em> — while VISIBILITY is the per-module
-     * {@link ModuleScope}. The link consumes {@code table} here, so nothing
-     * downstream needs to re-thread it: this supersedes the old post-link
-     * {@code resolve(module, table)} call as the sole visibility gate.
+     * The per-module link path (Option A; WAR(link-provenance)) and the <b>sole
+     * cross-module visibility gate</b>: resolve an already shape-resolved COMBINED
+     * module so that each declaration is gated in ITS OWN module's scope. The typing
+     * / overload registry is the full combined module — the migration error must be
+     * able to see an overload that <em>exists but isn't imported</em> — while
+     * VISIBILITY is the per-module {@link ModuleScope}. The {@code table} is consumed
+     * here, during linking; nothing downstream re-threads it (the whole-module
+     * {@link #resolve(IrModule)} runs unrestricted, a no-op re-run on this output).
      *
-     * <p>Result is identical to the legacy {@code resolve(combined, table)} (each
-     * decl was already scoped by its FQN module) — the difference is structural:
-     * the scope is assigned once per module here, not reconstructed per declaration
-     * inside the walk, and it happens during linking rather than after.
+     * <p>Scope is assigned once per module (grouped by the decls' FQN module), not
+     * reconstructed per declaration inside the walk.
      */
     public static IrModule resolvePerModule(IrModule combined, ModuleSymbolTable table)
             throws CompileException {
-        MethodOperatorResolver r = new MethodOperatorResolver(combined, true, true, table);
-        r.fixedScope = true;
+        MethodOperatorResolver r = new MethodOperatorResolver(combined, true, true);
         InferenceContext ctx = InferenceContext.fromModule(combined);
         Map<String, ModuleScope> scopes = new LinkedHashMap<>();
         String entry = combined.name();
@@ -177,16 +154,10 @@ public final class MethodOperatorResolver {
         };
     }
 
-    /** The visibility scope for a decl owned by {@code module} ("" → unrestricted). */
-    private ModuleScope scopeFor(String module) {
-        return ModuleScope.forModule(module, table);
-    }
-
     private IrStmt.FunctionDecl rewriteFunction(IrStmt.FunctionDecl fd, InferenceContext ctx)
             throws CompileException {
-        // Legacy whole-module path recomputes the scope per decl from the FQN; the
-        // per-module link path (fixedScope) keeps the caller's one scope per module.
-        if (!fixedScope) this.currentScope = scopeFor(QualifiedName.parse(fd.name()).module());
+        // currentScope is owned by the caller: unrestricted for the whole-module
+        // resolve(...) paths, or the per-module scope set by resolvePerModule.
         InferenceContext bodyCtx = ctx;
         for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
         IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);

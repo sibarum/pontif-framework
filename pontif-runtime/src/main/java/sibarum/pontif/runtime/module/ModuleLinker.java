@@ -46,25 +46,6 @@ public final class ModuleLinker {
     private ModuleLinker() {}
 
     /**
-     * A linked module paired with the {@link ModuleSymbolTable} built for it. The
-     * table carries the per-module ownership + import facts the combined (flat,
-     * FQN-keyed) module no longer exposes — needed by the import-by-association
-     * visibility gate. {@code table} is {@code null} when no linking happened (a
-     * bare single-file module with no {@code requires}).
-     *
-     * <p>WAR(link-provenance): the table-as-downstream-output is the side channel
-     * Option A removes — resolution moves into {@link #combineWithTable} (per
-     * module, before concatenation), so the combined module is emitted already
-     * resolved and nothing downstream needs the table. See docs/link-provenance.md.
-     */
-    public record LinkResult(IrModule module, ModuleSymbolTable table) {}
-
-    /**
-     * @param modules     {@code moduleName → parsed IrModule}
-     * @param entryModule the module whose {@code main} runs
-     * @throws CompileException on an unknown entry module or a coherence violation
-     */
-    /**
      * Links a single parsed module <b>iff</b> it declares any {@code requires}
      * (so builtin modules are injected and names FQN-resolved); otherwise
      * returns it unchanged — the bare single-file path. This is the one shared
@@ -73,26 +54,23 @@ public final class ModuleLinker {
      * disagree about whether a file went through linking.
      */
     public static IrModule combineSingle(IrModule parsed) throws CompileException {
-        return combineSingleWithTable(parsed).module();
-    }
-
-    /** {@link #combineSingle} that also returns the symbol table (null when the
-     *  file has no {@code requires} and is left unlinked). */
-    public static LinkResult combineSingleWithTable(IrModule parsed) throws CompileException {
         boolean hasRequires = parsed.statements().stream()
                 .anyMatch(s -> s instanceof IrStmt.Requires);
-        return hasRequires
-                ? combineWithTable(Map.of(parsed.name(), parsed), parsed.name())
-                : new LinkResult(parsed, null);
+        return hasRequires ? combine(Map.of(parsed.name(), parsed), parsed.name()) : parsed;
     }
 
+    /**
+     * Links parsed modules into one combined, FQN-keyed, fully-resolved module the
+     * ordinary compiler can consume. The symbol table built here is consumed
+     * <em>within</em> the link — coherence/import/coercion checks and per-module
+     * operator/method resolution (the cross-module visibility gate) — and is not
+     * exposed: nothing downstream re-threads it (WAR(link-provenance)).
+     *
+     * @param modules     {@code moduleName → parsed IrModule}
+     * @param entryModule the module whose {@code main} runs
+     * @throws CompileException on an unknown entry module or a coherence violation
+     */
     public static IrModule combine(Map<String, IrModule> modules, String entryModule)
-            throws CompileException {
-        return combineWithTable(modules, entryModule).module();
-    }
-
-    /** {@link #combine} that also returns the {@link ModuleSymbolTable} it built. */
-    public static LinkResult combineWithTable(Map<String, IrModule> modules, String entryModule)
             throws CompileException {
         if (!modules.containsKey(entryModule)) {
             throw new CompileException(
@@ -140,8 +118,7 @@ public final class ModuleLinker {
         // combined module is emitted already resolved and nothing downstream needs
         // to re-thread the table. Runs last, after struct literals are Records and
         // destructures are resolved, so operand sorts are known for routing.
-        IrModule resolved = MethodOperatorResolver.resolvePerModule(shaped, table);
-        return new LinkResult(resolved, table);
+        return MethodOperatorResolver.resolvePerModule(shaped, table);
     }
 
     /**
