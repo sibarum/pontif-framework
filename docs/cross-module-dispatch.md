@@ -320,6 +320,46 @@ way methods already do.
 
 *Risk: this is the disruptive cutover.* R1 governs the fixes.
 
+#### 8.3.1 Implementation design (concrete, from the 2026-06-19 read)
+
+The architectural fact that shapes everything: after `ModuleLinker.combine` the program
+is **one flat FQN-keyed module** and per-module provenance is gone from the statement
+list. `MethodOperatorResolver` (where operators resolve, post-link) therefore can't see
+"which module's code am I in" or "what did that module import." Two things must be
+threaded in:
+
+- **Calling module** — the FQN prefix of the enclosing decl: `QualifiedName.module(fd.name())`
+  in `rewriteFunction` (and `module.name()` for `main`). Thread it through `rewriteExpr`
+  → `resolveOverload`.
+- **`ModuleSymbolTable`** — built in `combine` (line 79) but **not currently passed** to
+  the compile. Thread it: `combine` returns it (new `LinkResult` or overload) →
+  `PontifCompiler.compileModule`/`compileProject` and the `compileAlt`/`ModuleResolver`
+  path pass it to `MethodOperatorResolver.resolve(module, table)`. **Nullable** — a bare
+  single-file compile passes `null` and gates nothing (backward-compatible).
+
+The gate in `resolveOverload` (the chokepoint that already matches an overload by operand
+base sorts): when a match `fd` is found, it is **visible to calling module M iff M owns or
+imports ≥1 of fd's signature types**. For an operand FQN `geom/Vec`:
+- owns: `table.typeOwners("Vec").contains(M)` (table is built pre-FQN, so query by the bare
+  `QualifiedName.memberOf` name);
+- imports: `table.importedName(M, "Vec") != null` (import-by-association: a `requires
+  geom.{Vec}` records it). Reuse `CoherenceCheck.baseTypeName` for the ownership test —
+  it's the same home-set logic the orphan rule already uses.
+
+If a match exists but isn't visible → the **migration error** (rides the §8.2 compile-error
+path): *"Operator '+' resolves to an overload in 'geom'; add `requires geom.{Vec}` to use
+it."* (Static members fold in the same way via `NameResolver.tryStaticMemberRef`, which
+already gates by import — extend its sibling check for methods if needed.)
+
+**Sub-slices:** B.1 thread table + calling-module (behavior-preserving, suite stays green) →
+B.2 the visibility gate + migration error → B.3 migrate the cross-module probes per R1
+(`dispatch__16/17/22`, `traits__20`, etc. — add the now-required `requires m.{T}`; many
+already import the type and stay green) → B.4 full suite + 150-probe matrix + §5.7
+init-order check.
+
+**Status: designed, not yet built (2026-06-19).** The R2 mandate (Steps A + C) is closed;
+this cutover is the remaining Phase-3 work.
+
 ### 8.4 Step C — trait-typed operands (the ruling) — LANDED 2026-06-19
 
 An operator on a trait-abstracted value is legal **iff** it is provably total at compile
