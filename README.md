@@ -27,6 +27,7 @@ allowed to lie.
 - [The compiler](#the-compiler)
 - [Source code explained](#source-code-explained)
 - [Status](#status)
+- [The `pontif` CLI](#the-pontif-cli)
 - [Build and test](#build-and-test)
 - [License](#license)
 
@@ -722,8 +723,11 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   value-pins, projected to bounds only at scope boundaries); the playground's
   **Narrowings** view reflects the program with declared types replaced by what was
   inferred, walked from any entrypoint
-- **Module system** — file-as-module, FQN-keyed dispatch, orphan-rule coherence,
-  builtin modules (`std.proof`, `std.stream`, `std.conservation`), cross-module
+- **Module system** — file-as-module, FQN-keyed dispatch, **import-by-association**
+  (a `requires m.{Type}` carries the type's associated members with it — its methods,
+  operators, and static attributes), with the **orphan rule** governing all of them
+  uniformly (define an overload only in a module that owns one of its operand/receiver
+  types); builtin modules (`std.proof`, `std.stream`, `std.conservation`); cross-module
   struct literals
 
 See `docs/TODO.md` for the active work list and parked design sketches.
@@ -751,13 +755,17 @@ gates re-run on execution and an artifact can never carry unproven code.
 Build it:
 
 ```
-mvn -pl pontif-cli -am package           # → pontif-cli/target/pontif-cli.jar
+mvn -pl pontif-cli -am package                  # → pontif-cli/target/pontif-cli.jar
 java -jar pontif-cli/target/pontif-cli.jar run app.ptf
-mvn -Pnative -pl pontif-cli -am package  # → a native `pontif` binary (needs a GraalVM JDK)
+mvn -Pnative -pl pontif-cli -am package         # → a native `pontif` binary (needs a GraalVM JDK)
+mvn -Pnative -pl pontif-playground -am package  # → a native `pontif-editor` GUI binary
 ```
 
-`pontif editor` shells out to the JVM editor jar (`pontif-playground/target/pontif-editor.jar`);
-build it with `mvn -pl pontif-playground -am package`, or point `PONTIF_EDITOR_JAR` at it.
+Both the editor and the CLI ship as GraalVM native images (the dasum GUI provides
+the FFM/reachability metadata; the editor's was completed by tracing one render
+run). `pontif editor` launches the native `pontif-editor` binary when present
+(no JVM), otherwise falls back to the editor jar (`mvn -pl pontif-playground -am
+package`) via `java -jar`. Overrides: `PONTIF_EDITOR_EXE` / `PONTIF_EDITOR_JAR`.
 
 ## Build and test
 
@@ -768,7 +776,7 @@ mvn -pl pontif-demo test       # run the demo & integration tests
 ```
 
 JDK 25 (sealed interfaces, records, switch pattern matching). Maven 3.9+. GraalVM
-Truffle 24.1.1 pulled transitively.
+Truffle 25.0.1 pulled transitively (aligned with the GraalVM-25 native-image builder).
 
 ## License
 

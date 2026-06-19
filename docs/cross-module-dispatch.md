@@ -1,15 +1,18 @@
 # Cross-module dispatch: import by association
 
-**Status: SCOPED (war branch `war/cross-module-dispatch`, 2026-06-18).** The §5
-recommendations are pinned below; the one decision that needs an explicit nod before
-building is **§5.3 — the visibility tightening is a behavioral cutover**, not an
-additive feature. Cluster 4 (the prerequisite) and the rest of
-`docs/dispatch-unification.md` (Phases 1–4) have **already landed** — see that doc's
-status banner. This is now the *sole* remaining piece of dispatch unification: the
-cross-module *visibility* model — how operator/free-function overloads are shared
-across modules. It tightens `docs/dispatch-unification.md` (§"Mechanism 1") from
-"global multi-dispatch" to **module-scoped, import-by-association** (global dispatch
-is what sank SPN).
+**Status: RATIFIED — executing (war branch `war/cross-module-dispatch`, 2026-06-18).**
+Phases 1–4 (orphan rule for operators + methods + static members, the association
+index) and Phase 3a (static-attribute import-by-association) have **landed on master**.
+The **§5.3 nod is GIVEN** (James, 2026-06-18): build the visibility cutover. Two
+rulings now drive the rest — **(R1)** the cutover *migrates* tests, it does not
+suppress them; breakage gets fixed. **(R2, the mandate)** *no operator application may
+reach runtime undefined* — "no applicable overload" and "ambiguous overload" become
+**compile errors**, never runtime throws (north star: no runtime errors, ever). The
+operator-on-trait question is resolved (contract model, **§8**). The concrete
+execution plan is **§8**; §0–§6 are the scoping that produced it. This is the *sole*
+remaining piece of dispatch unification: the cross-module *visibility* model — it
+tightens `docs/dispatch-unification.md` (§"Mechanism 1") from "global multi-dispatch"
+to **module-scoped, import-by-association** (global dispatch is what sank SPN).
 
 ## 0. Scoping (ground truth, 2026-06-18)
 
@@ -255,3 +258,102 @@ probe → PASS (Phase 3). No probe should regress from PASS.
   import-by-association under the orphan rule."
 - **`glossary.md`** "coherence rule (orphan rule)" entry should be broadened from
   "trait impl" to "any mechanism-1 overload (incl. operators) and methods."
+
+---
+
+## 8. Ratified execution plan — Phase 3 + operator completeness (2026-06-18)
+
+This is the build order. It folds the §6 visibility cutover together with the **R2
+mandate** (no runtime undefined-operator) and the **operator-on-trait ruling**, because
+they share one resolution path: an operator application either resolves to exactly one
+overload *at compile time* or it is a compile error. Each step lands green on the full
+suite **and** the 150-probe matrix (the regression meter). Order is additive → disruptive.
+
+### 8.1 Rulings being implemented
+
+- **R1 — migrate, don't suppress.** Programs that break under the cutover get a real
+  `requires m.{T}` added (a reviewed migration); genuinely-stale tests get fixed. No
+  `@Disabled`, no weakening of an assertion to dodge the cutover.
+- **R2 — the mandate.** No operator application reaches runtime undefined. "No
+  applicable overload" and "ambiguous overload" are **compile errors**. The runtime
+  throws become unreachable defense-in-depth, not the primary guard.
+- **Operator-on-trait — option (a) via the contract member**, with *totality fixing the
+  contract's shape* (§8.4). Option (c) is deferred (§8.5).
+
+### 8.2 Step A — operator-dispatch completeness (the R2 invariant)
+
+The hole today: `MethodOperatorResolver` leaves operators that find no compile-time
+overload "for runtime dispatch" (≈ line 145); `IrInterpreter` then throws at runtime —
+ambiguous (≈786), the no-match case, and "Operator not defined for Char/String"
+(≈468/503).
+
+The change — at the sort-check / resolution stage (`SortChecker` + `MethodOperatorResolver`):
+every operator application (`BinOp` and operator `Call`) must resolve to **exactly one**
+applicable overload over its operand sorts. **No applicable overload → compile error;
+provable ambiguity at the call → compile error.** The runtime throw sites are demoted to
+`assert`-grade "unreachable" backstops.
+
+*Risk: additive.* It only rejects programs that would have crashed at runtime, so no
+working program needs migration. This establishes the invariant before the cutover leans
+on it.
+
+### 8.3 Step B — import-by-association visibility cutover (§6 Phase 3, THE CUTOVER)
+
+Gate mechanism-1 overload **and** static-member visibility (in `NameResolver` / the
+linker's dispatch-table assembly) using the Phase-2 association index: an overload is
+visible to a module **iff that module imports or owns ≥1 of the overload's signature
+types.** Static attributes (`let Type.one = …`) surface on `requires m.{Type}` the same
+way methods already do.
+
+- **Migration error (rides A's compile-error path):** *"`+` resolves to an overload in
+  `m`; add `requires m.{Vector}` to use it."* — never a silent miss.
+- **Probes:** migrate every existing `dispatch__*` / `traits__*` cross-module probe
+  (each gains the now-required `requires`, per R1); add a dedicated migration-probe set
+  (the same use *with* and *without* the import) and a **positive static-attribute-import
+  probe** (the `Traction.one` case).
+- **§5.7:** confirm no residual file-init-order dependence once visibility is import-gated.
+
+*Risk: this is the disruptive cutover.* R1 governs the fixes.
+
+### 8.4 Step C — trait-typed operands (the ruling)
+
+An operator on a trait-abstracted value is legal **iff** it is a contract member of the
+trait **and** dispatch is provably total. Totality fixes the contract shape:
+
+| Use | Total when | Status |
+|---|---|---|
+| parametric bound `[type E:T]`, `a:E + b:E` | self-typed contract `+(this.type, this.type):this.type` (operands unified to one concrete type) | **works today** |
+| bare `a:T + b:T` (operands may differ at runtime) | **trait-ranging** contract `+(this.type, T):T` — each impl handles "me + any sibling", so every runtime pairing is covered | **new** |
+
+Anything outside these is a compile error:
+
+> *"`+` on trait `T` is defined only for same-type operands; to combine heterogeneous
+> `T` values declare `+(this.type, T):T` in `T`'s contract, or use a parametric bound
+> `[type E:T]`."*
+
+Then **remove the runtime trait-fallback's ability to throw undefined-operator** — it is
+now total-by-contract or unreachable. Verify the symmetric (either-operand) trait case
+(§5.6) lands on this rule.
+
+### 8.5 Deferred — (c) dynamic confirm-before-use
+
+For the genuinely-dynamic case (using an operator on a trait that did *not* contract it),
+the narrowing-native answer: the application yields a `[!!]`-style **runtime-hazard sort**
+(existence undetermined), discharged by a `match` that confirms the operator is defined
+for the concrete value — at which point the survivor upgrades. "Not defined" is then a
+**branch you must cover, not a thrown error**, so it honors R2 the same way `match [!!]`
+does. It rides the existing `[!!]` machinery and is **explicitly not built in Phase 3** —
+the contract model (§8.4) covers the designed case; this is the opportunistic layer.
+
+### 8.6 Sequence + probe deltas
+
+1. **A** — completeness check. New negative probes: undefined-operator and
+   ambiguous-operator → compile error.
+2. **B** — visibility cutover. Migrate existing cross-module probes; add the migration
+   set + the static-attribute-import positive probe.
+3. **C** — trait-operand totality + remove the runtime trait-fallback throw. New probes:
+   contracted heterogeneous `+` (both shapes) → PASS; uncontracted bare trait-operand →
+   compile error.
+
+No probe regresses from PASS. On land, apply the §7 doc updates
+(`dispatch-unification.md` §"Mechanism 1"; the `glossary.md` orphan-rule entry).
