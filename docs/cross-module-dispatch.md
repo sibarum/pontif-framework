@@ -9,10 +9,15 @@ suppress them; breakage gets fixed. **(R2, the mandate)** *no operator applicati
 reach runtime undefined* — "no applicable overload" and "ambiguous overload" become
 **compile errors**, never runtime throws (north star: no runtime errors, ever). The
 operator-on-trait question is resolved (contract model, **§8**). The concrete
-execution plan is **§8**; §0–§6 are the scoping that produced it. This is the *sole*
-remaining piece of dispatch unification: the cross-module *visibility* model — it
-tightens `docs/dispatch-unification.md` (§"Mechanism 1") from "global multi-dispatch"
-to **module-scoped, import-by-association** (global dispatch is what sank SPN).
+execution plan is **§8**; §0–§6 are the scoping that produced it.
+
+**Progress (2026-06-19): the R2 mandate is closed.** Step A (§8.2 — built-in primitive
++ concrete-struct operator completeness) and Step C (§8.4 — trait-typed operands) have
+**landed** on the war branch: every operator over concrete *or* trait-typed operands now
+resolves at compile time or is a compile error. The remaining piece is **Step B
+(§8.3)** — the cross-module *visibility* cutover, which tightens
+`docs/dispatch-unification.md` (§"Mechanism 1") from "global multi-dispatch" to
+**module-scoped, import-by-association** (global dispatch is what sank SPN).
 
 ## 0. Scoping (ground truth, 2026-06-18)
 
@@ -315,25 +320,36 @@ way methods already do.
 
 *Risk: this is the disruptive cutover.* R1 governs the fixes.
 
-### 8.4 Step C — trait-typed operands (the ruling)
+### 8.4 Step C — trait-typed operands (the ruling) — LANDED 2026-06-19
 
-An operator on a trait-abstracted value is legal **iff** it is a contract member of the
-trait **and** dispatch is provably total. Totality fixes the contract shape:
+An operator on a trait-abstracted value is legal **iff** it is provably total at compile
+time. Totality fixes the contract shape:
 
 | Use | Total when | Status |
 |---|---|---|
-| parametric bound `[type E:T]`, `a:E + b:E` | self-typed contract `+(this.type, this.type):this.type` (operands unified to one concrete type) | **works today** |
-| bare `a:T + b:T` (operands may differ at runtime) | **trait-ranging** contract `+(this.type, T):T` — each impl handles "me + any sibling", so every runtime pairing is covered | **new** |
+| parametric bound `[type E:T]`, `a:E + b:E` | self-typed contract `+(this.type, this.type):this.type` — both operands unify to one concrete type, so the homogeneous contract covers them | **works** (checkOperatorBounds) |
+| bare `a:T + b:T` (operands may differ at runtime) | a **trait-ranging** contract `+(this.type, T):T` — each impl handles "me + any sibling" | **deferred** — operator contracts are homogeneous-only in v1 (docs/traits.md §"Operator contract members"); the shape doesn't exist yet |
 
-Anything outside these is a compile error:
+**What landed** (`MethodOperatorResolver.checkOperatorComplete`): a *bare* trait-typed
+operand is the only non-total case, so every operator on one is rejected at compile time
+— **except structural equality** (`== != ~=`), which is defined on the concrete runtime
+value and stays allowed. The message points at the total form:
 
-> *"`+` on trait `T` is defined only for same-type operands; to combine heterogeneous
-> `T` values declare `+(this.type, T):T` in `T`'s contract, or use a parametric bound
-> `[type E:T]`."*
+> *"Operator '+' is not defined for the trait-typed operand 'T' — trait 'T' declares '+'
+> only for same-type operands … use a parametric bound `[type E:T]` so both operands are
+> one concrete type."* (When `T` doesn't declare `+` at all, it says so and suggests
+> declaring the contract member.)
 
-Then **remove the runtime trait-fallback's ability to throw undefined-operator** — it is
-now total-by-contract or unreachable. Verify the symmetric (either-operand) trait case
-(§5.6) lands on this rule.
+Detection is `operandSort instanceof IrSort.Trait` (a type parameter's sort is the param
+name, not the trait, so the parametric-bound path is untouched). **No runtime change was
+needed**: operators have no trait-fallback (that path is `Trait.method`-only), so the
+bare-operand dispatch — and its `NoMatch` throw — is now unreachable. This closes the R2
+mandate: every operator over concrete *or* trait-typed operands is total-at-compile-time
+or a compile error.
+
+*Future:* the trait-ranging contract `+(this.type, T):T` would turn the bare heterogeneous
+case from a compile error into an allowed, total form — additive, when that contract shape
+is built. The symmetric either-operand trait case (§5.6) rides the same rule.
 
 ### 8.5 Deferred — (c) dynamic confirm-before-use
 

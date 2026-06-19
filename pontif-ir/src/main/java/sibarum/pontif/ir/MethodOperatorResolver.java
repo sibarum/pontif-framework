@@ -319,6 +319,39 @@ public final class MethodOperatorResolver {
             return;
         }
 
+        // Step C — a bare trait-typed operand. Structural equality works on the
+        // concrete runtime value, so it stays allowed; every other operator is
+        // rejected. Operator contracts are homogeneous (`+(this.type, this.type)`),
+        // which guarantees only same-type combination — but two values of a trait
+        // type may be different implementers at runtime, so the pairing is not
+        // provably total. The parametric bound `[type E:T]` ties both operands to
+        // one concrete type and IS total (and is checked by checkOperatorBounds).
+        IrSort.Trait leftTrait = leftSort instanceof IrSort.Trait t ? t : null;
+        IrSort.Trait rightTrait = rightSort instanceof IrSort.Trait t ? t : null;
+        if (leftTrait != null || rightTrait != null) {
+            if (op == IrExpr.Op.EQ || op == IrExpr.Op.NE || op == IrExpr.Op.APPROX) {
+                return;   // structural equality is always defined
+            }
+            String sym = BuiltinOperators.symbol(op);
+            if (op == IrExpr.Op.AND || op == IrExpr.Op.OR) {
+                throw new CompileException(
+                        "Operator '" + sym + "' is not defined for trait-typed operands — "
+                                + "logical operators need Bool operands", origin);
+            }
+            IrSort.Trait tr = leftTrait != null ? leftTrait : rightTrait;
+            String guidance = tr.operators().containsKey(sym)
+                    ? "trait '" + tr.name() + "' declares '" + sym + "' only for same-type operands "
+                      + "(the homogeneous contract '" + sym + "(this.type, this.type)'), but two '"
+                      + tr.name() + "' values may be different types at runtime — use a parametric "
+                      + "bound `[type E:" + tr.name() + "]` so both operands are one concrete type"
+                    : "trait '" + tr.name() + "' does not declare operator '" + sym + "' — declare it "
+                      + "as a contract member and use a parametric bound `[type E:" + tr.name()
+                      + "]`, or use a concrete type";
+            throw new CompileException(
+                    "Operator '" + sym + "' is not defined for the trait-typed operand '"
+                            + tr.name() + "' — " + guidance, origin);
+        }
+
         boolean lConcrete = lPrim || (lb != null && structs.containsKey(lb));
         boolean rConcrete = rPrim || (rb != null && structs.containsKey(rb));
         if (!(lConcrete && rConcrete)) {
