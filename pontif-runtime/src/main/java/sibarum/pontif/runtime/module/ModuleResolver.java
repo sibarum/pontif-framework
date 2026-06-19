@@ -60,10 +60,17 @@ public final class ModuleResolver {
      */
     public static IrModule resolveAndCombine(IrModule entry, Path resolveDir)
             throws CompileException {
+        return resolveAndCombineWithTable(entry, resolveDir).module();
+    }
+
+    /** {@link #resolveAndCombine} that also returns the {@link ModuleLinker.LinkResult}
+     *  (its table is null on the bare/unlinked fast paths) for the visibility gate. */
+    public static ModuleLinker.LinkResult resolveAndCombineWithTable(IrModule entry, Path resolveDir)
+            throws CompileException {
         boolean hasRequires = entry.statements().stream()
                 .anyMatch(s -> s instanceof IrStmt.Requires);
-        if (!hasRequires) return entry;                          // bare single-file path, untouched
-        if (resolveDir == null) return ModuleLinker.combineSingle(entry);  // builtins-only fallback
+        if (!hasRequires) return new ModuleLinker.LinkResult(entry, null);   // bare single-file path
+        if (resolveDir == null) return ModuleLinker.combineSingleWithTable(entry);  // builtins-only fallback
 
         Set<String> builtins = BuiltinModules.all().keySet();
         ModuleHeader.Index index = ModuleHeader.scan(resolveDir);
@@ -98,7 +105,7 @@ public final class ModuleResolver {
                 work.push(loaded);
             }
         }
-        return ModuleLinker.combine(collected, entry.name());
+        return ModuleLinker.combineWithTable(collected, entry.name());
     }
 
     private static IrModule parseRequired(String name, Path file, Path root, Origin requireOrigin)

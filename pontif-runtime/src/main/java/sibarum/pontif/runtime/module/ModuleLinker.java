@@ -45,6 +45,15 @@ public final class ModuleLinker {
     private ModuleLinker() {}
 
     /**
+     * A linked module paired with the {@link ModuleSymbolTable} built for it. The
+     * table carries the per-module ownership + import facts the combined (flat,
+     * FQN-keyed) module no longer exposes — needed by the import-by-association
+     * visibility gate. {@code table} is {@code null} when no linking happened (a
+     * bare single-file module with no {@code requires}).
+     */
+    public record LinkResult(IrModule module, ModuleSymbolTable table) {}
+
+    /**
      * @param modules     {@code moduleName → parsed IrModule}
      * @param entryModule the module whose {@code main} runs
      * @throws CompileException on an unknown entry module or a coherence violation
@@ -58,14 +67,26 @@ public final class ModuleLinker {
      * disagree about whether a file went through linking.
      */
     public static IrModule combineSingle(IrModule parsed) throws CompileException {
+        return combineSingleWithTable(parsed).module();
+    }
+
+    /** {@link #combineSingle} that also returns the symbol table (null when the
+     *  file has no {@code requires} and is left unlinked). */
+    public static LinkResult combineSingleWithTable(IrModule parsed) throws CompileException {
         boolean hasRequires = parsed.statements().stream()
                 .anyMatch(s -> s instanceof IrStmt.Requires);
         return hasRequires
-                ? combine(Map.of(parsed.name(), parsed), parsed.name())
-                : parsed;
+                ? combineWithTable(Map.of(parsed.name(), parsed), parsed.name())
+                : new LinkResult(parsed, null);
     }
 
     public static IrModule combine(Map<String, IrModule> modules, String entryModule)
+            throws CompileException {
+        return combineWithTable(modules, entryModule).module();
+    }
+
+    /** {@link #combine} that also returns the {@link ModuleSymbolTable} it built. */
+    public static LinkResult combineWithTable(Map<String, IrModule> modules, String entryModule)
             throws CompileException {
         if (!modules.containsKey(entryModule)) {
             throw new CompileException(
@@ -106,7 +127,7 @@ public final class ModuleLinker {
         // pattern's slots to declared field names, enforce the arity-total rule,
         // and generate the field bindings (cluster 2). Runs after StructLiteralRewriter
         // so its struct-literal Records are in place first.
-        return DestructureResolver.rewrite(withStructs);
+        return new LinkResult(DestructureResolver.rewrite(withStructs), table);
     }
 
     /**

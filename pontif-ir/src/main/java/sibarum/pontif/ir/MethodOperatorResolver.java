@@ -50,10 +50,18 @@ public final class MethodOperatorResolver {
     /** every name a {@code MethodCall} may resolve to (Type.method / Trait.method keys). */
     private final Set<String> methodKeys;
     private final Map<String, IrSort.Structural> structs;
+    /** Cross-module ownership/import table for the visibility gate, or null for a
+     *  bare single-file compile (nothing to gate — every name is local). */
+    private final ModuleSymbolTable table;
+    /** FQN module of the decl currently being rewritten — the "calling module"
+     *  for visibility decisions. Set per function/main as the walk descends. */
+    private String currentModule = "";
 
-    private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators) {
+    private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators,
+            ModuleSymbolTable table) {
         this.resolveMethods = resolveMethods;
         this.routeOperators = routeOperators;
+        this.table = table;
         this.methodKeys = collectMethodKeys(module);
         this.structs = InferenceContext.fromModule(module).structDefs();
         for (IrStmt stmt : module.statements()) {
@@ -66,17 +74,30 @@ public final class MethodOperatorResolver {
         }
     }
 
-    /** Full resolution: methods AND operators (the run path). */
+    /** Full resolution: methods AND operators (the run path), no visibility gate. */
     public static IrModule resolve(IrModule module) throws CompileException {
-        return resolve(module, true, true);
+        return resolve(module, true, true, null);
+    }
+
+    /** Full resolution with the cross-module symbol table — enables the
+     *  import-by-association visibility gate (Step B); pass the table the linker
+     *  built for the combined module. A {@code null} table gates nothing. */
+    public static IrModule resolve(IrModule module, ModuleSymbolTable table) throws CompileException {
+        return resolve(module, true, true, table);
     }
 
     public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators)
             throws CompileException {
-        MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators);
+        return resolve(module, resolveMethods, routeOperators, null);
+    }
+
+    public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators,
+            ModuleSymbolTable table) throws CompileException {
+        MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators, table);
         InferenceContext ctx = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) out.add(r.rewriteStmt(stmt, ctx));
+        r.currentModule = module.name();   // the entry module owns `main`
         IrExpr main = module.main() == null ? null : r.rewriteExpr(module.main(), ctx);
         return new IrModule(module.name(), out, main);
     }
@@ -98,6 +119,7 @@ public final class MethodOperatorResolver {
 
     private IrStmt.FunctionDecl rewriteFunction(IrStmt.FunctionDecl fd, InferenceContext ctx)
             throws CompileException {
+        this.currentModule = QualifiedName.parse(fd.name()).module();   // "" when bare/unlinked
         InferenceContext bodyCtx = ctx;
         for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
         IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);

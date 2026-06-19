@@ -88,7 +88,7 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + e.getMessage()));
         }
-        return compileModule(module, sourceName);
+        return compileModule(module, sourceName, null);
     }
 
     /**
@@ -125,16 +125,16 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + e.getMessage()));
         }
-        IrModule linked;
+        ModuleLinker.LinkResult linked;
         try {
-            linked = ModuleResolver.resolveAndCombine(module, resolveDir);
+            linked = ModuleResolver.resolveAndCombineWithTable(module, resolveDir);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(linked, sourceName);
+        return compileModule(linked.module(), sourceName, linked.table());
     }
 
     /**
@@ -203,23 +203,24 @@ public final class PontifCompiler {
      * entry. Single-file {@link #compile}/{@link #compileAlt} are unaffected.
      */
     public CompileResult compileProject(Map<String, IrModule> modules, String entryModule) {
-        IrModule combined;
+        ModuleLinker.LinkResult linked;
         try {
-            combined = ModuleLinker.combine(modules, entryModule);
+            linked = ModuleLinker.combineWithTable(modules, entryModule);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(combined, entryModule);
+        return compileModule(linked.module(), entryModule, linked.table());
     }
 
     /**
      * Runs the IR compile pipeline on an already-parsed module. Shared by
      * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
      */
-    private CompileResult compileModule(IrModule rawModule, String sourceName) {
+    private CompileResult compileModule(IrModule rawModule, String sourceName,
+            sibarum.pontif.ir.ModuleSymbolTable table) {
         // Resolve instance-method calls AND route operators up front so every
         // consumer below — the IR compiler, the return-refinement gate, and the
         // conservation gate — sees ordinary dispatch Calls rather than the
@@ -231,7 +232,7 @@ public final class PontifCompiler {
         // already-resolved module it is a no-op.)
         IrModule module;
         try {
-            module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule);
+            module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule, table);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));
