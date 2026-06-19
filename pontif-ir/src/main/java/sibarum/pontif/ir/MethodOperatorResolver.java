@@ -126,12 +126,12 @@ public final class MethodOperatorResolver {
                     if (resolved != null) {
                         yield new IrExpr.Call(resolved, List.of(left, right), op.origin());
                     }
-                    // No user overload matched. When both operands are concrete
-                    // primitives this is a built-in application — reject at compile
-                    // time the ones the runtime would refuse, so no operator reaches
-                    // runtime undefined (the mandate). Struct/abstract operands are
-                    // left for overload dispatch and the trait-bound check.
-                    checkBuiltinComplete(op.op(), leftSort, rightSort, op.origin());
+                    // No user overload matched: reject at compile time the
+                    // applications the runtime would refuse, so no operator reaches
+                    // runtime undefined (the mandate). Built-in primitives and
+                    // concrete-struct pairs are decided here; abstract operands are
+                    // deferred to the trait-bound check and the trait-operand rule.
+                    checkOperatorComplete(op.op(), leftSort, rightSort, op.origin());
                 }
                 yield new IrExpr.BinOp(op.op(), left, right, op.origin());
             }
@@ -284,28 +284,59 @@ public final class MethodOperatorResolver {
     }
 
     /**
-     * Rejects a built-in operator application the runtime would refuse — the
-     * compile-time half of "no operator reaches runtime undefined". Fires only
-     * when <em>both</em> operands are concrete primitives (Int/Bool/Decimal/Char/
-     * String); struct or abstract (type-parameter) operands have a {@code null}
-     * or non-primitive base and are governed by user-overload dispatch and the
-     * trait-bound check instead. The accept/reject decision is delegated to
-     * {@link BuiltinOperators}, the same predicate the interpreter consults, so
-     * the gate and the runtime cannot disagree.
+     * Rejects an operator application the runtime would refuse — the compile-time
+     * half of "no operator reaches runtime undefined". Reached only for a
+     * {@code BinOp} that resolved to no user overload.
+     *
+     * <ul>
+     *   <li><b>Both concrete primitives</b> (Int/Bool/Decimal/Char/String): the
+     *       built-in must define the op — delegated to {@link BuiltinOperators},
+     *       the same predicate the interpreter consults, so gate and runtime
+     *       cannot drift.</li>
+     *   <li><b>At least one struct</b>, both operands concrete (a primitive or a
+     *       declared struct): a user overload is required. Structural equality
+     *       ({@code == != ~=}) is always defined; everything else with no
+     *       declared overload is the runtime's {@code NoMatch}, rejected here.</li>
+     *   <li><b>An abstract operand</b> (a type parameter, or a trait-typed value —
+     *       a base that is neither a primitive nor a declared struct): deferred to
+     *       the trait-bound check and the trait-operand rule (Step C).</li>
+     * </ul>
      */
-    private static void checkBuiltinComplete(IrExpr.Op op, IrSort leftSort, IrSort rightSort, Origin origin)
+    private void checkOperatorComplete(IrExpr.Op op, IrSort leftSort, IrSort rightSort, Origin origin)
             throws CompileException {
         String lb = baseName(leftSort);
         String rb = baseName(rightSort);
-        if (!BuiltinOperators.isPrimitiveBase(lb) || !BuiltinOperators.isPrimitiveBase(rb)) {
+        boolean lPrim = BuiltinOperators.isPrimitiveBase(lb);
+        boolean rPrim = BuiltinOperators.isPrimitiveBase(rb);
+
+        if (lPrim && rPrim) {
+            if (!BuiltinOperators.acceptsPrimitive(op, lb, rb)) {
+                throw new CompileException(
+                        "Operator '" + BuiltinOperators.symbol(op) + "' is not defined for ("
+                                + lb + ", " + rb + ") — " + BuiltinOperators.rejectionHint(op, lb, rb),
+                        origin);
+            }
             return;
         }
-        if (!BuiltinOperators.acceptsPrimitive(op, lb, rb)) {
+
+        boolean lConcrete = lPrim || (lb != null && structs.containsKey(lb));
+        boolean rConcrete = rPrim || (rb != null && structs.containsKey(rb));
+        if (!(lConcrete && rConcrete)) {
+            return;   // abstract operand — the trait-bound check / Step C governs it
+        }
+        if (op == IrExpr.Op.EQ || op == IrExpr.Op.NE || op == IrExpr.Op.APPROX) {
+            return;   // structural equality is always defined
+        }
+        if (op == IrExpr.Op.AND || op == IrExpr.Op.OR) {
             throw new CompileException(
                     "Operator '" + BuiltinOperators.symbol(op) + "' is not defined for ("
-                            + lb + ", " + rb + ") — " + BuiltinOperators.rejectionHint(op, lb, rb),
-                    origin);
+                            + lb + ", " + rb + ") — logical operators need Bool operands", origin);
         }
+        String owners = lb.equals(rb) ? lb : lb + " or " + rb;
+        throw new CompileException(
+                "Operator '" + BuiltinOperators.symbol(op) + "' is not defined for (" + lb + ", " + rb
+                        + ") — no overload '" + BuiltinOperators.symbol(op) + "(" + lb + ", " + rb
+                        + ")' is declared; define it in a module that owns " + owners, origin);
     }
 
     private static String dispatchSymbol(IrExpr.Op op) {
