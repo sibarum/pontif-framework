@@ -44,7 +44,7 @@ method Traction.normalize():Traction ->
 method Traction.toString():String ->
   match this
     [Traction(n, z)] ->
-      "("+n+", "+z+")"
+      "("+n+"*10^"+z+")"
 
 function +(t1:Traction, t2:Traction):Traction ->
   match (t1.normalize(),t2.normalize())
@@ -64,4 +64,6 @@ function /(t1:Traction, t2:Traction):Traction ->
   t1*t2.inv()
 
 
-Traction(10,2).isZero()
+(
+  Traction(10,2)/Traction(-2,3)
+).toString()
