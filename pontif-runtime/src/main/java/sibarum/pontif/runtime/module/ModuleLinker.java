@@ -50,6 +50,11 @@ public final class ModuleLinker {
      * FQN-keyed) module no longer exposes — needed by the import-by-association
      * visibility gate. {@code table} is {@code null} when no linking happened (a
      * bare single-file module with no {@code requires}).
+     *
+     * <p>WAR(link-provenance): the table-as-downstream-output is the side channel
+     * Option A removes — resolution moves into {@link #combineWithTable} (per
+     * module, before concatenation), so the combined module is emitted already
+     * resolved and nothing downstream needs the table. See docs/link-provenance.md.
      */
     public record LinkResult(IrModule module, ModuleSymbolTable table) {}
 

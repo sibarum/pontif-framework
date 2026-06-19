@@ -54,7 +54,10 @@ public final class MethodOperatorResolver {
      *  bare single-file compile (nothing to gate — every name is local). */
     private final ModuleSymbolTable table;
     /** FQN module of the decl currently being rewritten — the "calling module"
-     *  for visibility decisions. Set per function/main as the walk descends. */
+     *  for visibility decisions. Set per function/main as the walk descends.
+     *  WAR(link-provenance): this mutable field reconstructs module context the
+     *  flatten discarded; Option A replaces it with an explicit ModuleScope built
+     *  before the link. See docs/link-provenance.md §5. */
     private String currentModule = "";
 
     private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators,
