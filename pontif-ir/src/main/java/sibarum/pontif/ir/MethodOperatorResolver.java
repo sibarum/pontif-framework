@@ -51,14 +51,15 @@ public final class MethodOperatorResolver {
     private final Set<String> methodKeys;
     private final Map<String, IrSort.Structural> structs;
     /** Cross-module ownership/import table for the visibility gate, or null for a
-     *  bare single-file compile (nothing to gate — every name is local). */
+     *  bare single-file compile (nothing to gate — every name is local).
+     *  WAR(link-provenance) Slice 1: now used only to build per-decl ModuleScopes;
+     *  Slice 2 moves resolution per-module and Slice 3 drops this field. */
     private final ModuleSymbolTable table;
-    /** FQN module of the decl currently being rewritten — the "calling module"
-     *  for visibility decisions. Set per function/main as the walk descends.
-     *  WAR(link-provenance): this mutable field reconstructs module context the
-     *  flatten discarded; Option A replaces it with an explicit ModuleScope built
-     *  before the link. See docs/link-provenance.md §5. */
-    private String currentModule = "";
+    /** Visibility view of the decl currently being rewritten — its own module's
+     *  scope (own + imported-by-association). Set per function/main as the walk
+     *  descends (Slice 1). WAR(link-provenance): Slice 2 makes this a single fixed
+     *  per-module scope once resolution runs before the link. See docs/link-provenance.md. */
+    private ModuleScope currentScope = ModuleScope.unrestricted();
 
     private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators,
             ModuleSymbolTable table) {
@@ -100,7 +101,7 @@ public final class MethodOperatorResolver {
         InferenceContext ctx = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) out.add(r.rewriteStmt(stmt, ctx));
-        r.currentModule = module.name();   // the entry module owns `main`
+        r.currentScope = r.scopeFor(module.name());   // the entry module owns `main`
         IrExpr main = module.main() == null ? null : r.rewriteExpr(module.main(), ctx);
         return new IrModule(module.name(), out, main);
     }
@@ -120,9 +121,14 @@ public final class MethodOperatorResolver {
         };
     }
 
+    /** The visibility scope for a decl owned by {@code module} ("" → unrestricted). */
+    private ModuleScope scopeFor(String module) {
+        return ModuleScope.forModule(module, table);
+    }
+
     private IrStmt.FunctionDecl rewriteFunction(IrStmt.FunctionDecl fd, InferenceContext ctx)
             throws CompileException {
-        this.currentModule = QualifiedName.parse(fd.name()).module();   // "" when bare/unlinked
+        this.currentScope = scopeFor(QualifiedName.parse(fd.name()).module());   // "" when bare/unlinked
         InferenceContext bodyCtx = ctx;
         for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
         IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);
@@ -296,29 +302,19 @@ public final class MethodOperatorResolver {
     }
 
     /**
-     * Import-by-association visibility: an overload is visible to the calling
-     * module iff that module owns or imports ≥1 of its <em>non-primitive</em>
-     * signature types. Trivially true with no symbol table (single-file/unlinked)
-     * or when the calling module is unknown.
+     * Import-by-association visibility: an overload is visible to the current
+     * scope iff that module owns or imports ≥1 of its <em>non-primitive</em>
+     * signature types. Trivially true for the unrestricted scope (single-file/
+     * unlinked, or an unknown calling module). The ownership/import test itself
+     * lives on {@link ModuleScope} (WAR(link-provenance) Slice 1).
      */
     private boolean isVisibleHere(IrStmt.FunctionDecl fd) {
-        if (table == null || currentModule.isEmpty()) return true;
+        if (!currentScope.restricts()) return true;
         for (IrParam p : fd.params()) {
             String t = baseName(p.sort());
-            if (t != null && ownsOrImports(t)) return true;
+            if (t != null && currentScope.ownsOrImports(t)) return true;
         }
         return false;
-    }
-
-    /** Whether {@code currentModule} owns or imports the given (FQN) type. A bare
-     *  primitive type (no module qualifier) never grants visibility. */
-    private boolean ownsOrImports(String typeFqn) {
-        QualifiedName qn = QualifiedName.parse(typeFqn);
-        String owner = qn.module();
-        if (owner.isEmpty()) return false;                       // primitive / bare
-        if (owner.equals(currentModule)) return true;            // the caller owns it
-        ModuleSymbolTable.ImportedName imp = table.importedName(currentModule, qn.member());
-        return imp != null && imp.sourceModule().equals(owner);  // imported by association
     }
 
     /** The migration error for a matched-but-unimported operator overload. */
@@ -336,7 +332,7 @@ public final class MethodOperatorResolver {
                 : "import a type it is associated with";
         return new CompileException(
                 "Operator '" + sym + "' resolves to an overload in module '" + declModule
-                        + "', which '" + currentModule + "' does not import — " + fix
+                        + "', which '" + currentScope.module() + "' does not import — " + fix
                         + " (operators come with their operand types, by association).", origin);
     }
 

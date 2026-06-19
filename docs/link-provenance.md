@@ -1,7 +1,7 @@
 # Link provenance: resolution should respect the module boundary, not reconstruct it
 
-**Status: WAR DECLARED — scouting done, awaiting the direction call (branch
-`war/link-provenance`, 2026-06-19).** Successor to the cross-module-dispatch war
+**Status: WAR EXECUTING — Option A chosen (James, 2026-06-19); Slice 1 landed
+(branch `war/link-provenance`).** Successor to the cross-module-dispatch war
 (`docs/cross-module-dispatch.md`), whose Step B got cross-module visibility working
 but did it by *re-threading* module context into a post-link pass. This war removes
 the workaround by making module scope structural.
@@ -117,13 +117,16 @@ re-run is purely defensive, considers dropping it. The single-file path (no
 
 Per the rewrite rule (`feedback_vertical_slices`): each slice compiles and is green.
 
-- **Slice 1 — make the dependency explicit (behavior-preserving).** Introduce a
-  `ModuleScope` value (own module name + the set of visible decl keys + import
-  facts) and have `MethodOperatorResolver` take it explicitly, replacing the
-  `currentModule` mutable field and the raw `table`. For a linked compile, build the
-  scope from the existing table (same answers as today); for single-file, an
-  all-visible scope (== today's `null`). No behavior change; the probes stay green.
-  This isolates the smell behind one seam.
+- **Slice 1 — make the dependency explicit (behavior-preserving). DONE (2026-06-19).**
+  Introduced `ModuleScope` (`ir/ModuleScope.java`): own module + the symbol table,
+  exposing `restricts()` and `ownsOrImports(typeFqn)` — the old `ownsOrImports`
+  logic relocated behind one type. `MethodOperatorResolver` now holds a
+  `currentScope` (set per-decl via `scopeFor`) instead of the `currentModule`
+  mutable field; `isVisibleHere`/`notImportedError` route through it. The unrestricted
+  scope reproduces the old `table == null || currentModule.isEmpty()` short-circuit
+  exactly. Green: 765 pontif-runtime tests + the full pontif-ir suite, all
+  cross-module dispatch/traits + migration probes unchanged. The smell is now behind
+  one seam, ready for Slice 2 to move resolution per-module.
 - **Slice 2 — resolve per module, before concatenation.** In `combineWithTable`,
   run the resolver on each module with its own `ModuleScope` *before* concatenating,
   so the combined module is emitted already-resolved. Drop the post-link
