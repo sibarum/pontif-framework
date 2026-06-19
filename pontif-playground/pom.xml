@@ -68,6 +68,7 @@
                 <version>3.6.0</version>
                 <executions>
                     <execution>
+                        <id>make-fat-jar</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
@@ -150,5 +151,61 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- `mvn -Pnative -pl pontif-playground -am package` → a standalone native
+             `pontif-editor` GUI binary. The dasum GUI ships GraalVM reachability
+             metadata (FFM down/upcalls) + run-time initialization for its native
+             loaders and bundles glfw3.dll, so native-image picks that up automatically;
+             this profile only adds the editor's own pieces. Needs a GraalVM JDK and,
+             on Windows, the MSVC build tools. -->
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <!-- Same rule as the CLI: native-image must consume the thin
+                         classpath, not the uber-jar (which would bundle the GraalVM
+                         SDK builder classes). Disable the fat-jar shade here. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-shade-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>make-fat-jar</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <version>0.10.3</version>
+                        <extensions>true</extensions>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>pontif-editor</imageName>
+                            <mainClass>${main.class}</mainClass>
+                            <buildArgs>
+                                <buildArg>--no-fallback</buildArg>
+                                <buildArg>-H:+ReportExceptionStackTraces</buildArg>
+                                <!-- The MSDF font atlases are generated into this module's
+                                     resources and loaded by classloader (Texture.fromPngResource
+                                     / AtlasData.loadFromResource); embed them in the image. -->
+                                <buildArg>-H:IncludeResources=dasum/atlas/.*</buildArg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

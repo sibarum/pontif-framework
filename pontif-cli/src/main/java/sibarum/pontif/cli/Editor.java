@@ -34,15 +34,17 @@ public final class Editor implements Callable<Integer> {
             return 2;
         }
 
-        Path jar = EditorLauncher.resolveJar();
-        if (jar == null) {
-            System.err.println("Could not locate the editor jar (" + EditorLauncher.JAR_NAME + ").");
-            System.err.println("Build it with `mvn -pl pontif-playground -am package`, "
-                    + "or set PONTIF_EDITOR_JAR to its path.");
+        EditorLauncher.Target target = EditorLauncher.resolve();
+        if (target == null) {
+            System.err.println("Could not locate the Pontif Editor (" + EditorLauncher.EXE_NAME
+                    + " or " + EditorLauncher.JAR_NAME + ").");
+            System.err.println("Build the native binary with `mvn -Pnative -pl pontif-playground -am package`, "
+                    + "or the jar with `mvn -pl pontif-playground -am package`; "
+                    + "or set PONTIF_EDITOR_EXE / PONTIF_EDITOR_JAR.");
             return 1;
         }
 
-        List<String> command = EditorLauncher.buildCommand(jar, file);
+        List<String> command = EditorLauncher.buildCommand(target, file);
         if (print) {
             System.out.println(String.join(" ", command));
             return 0;

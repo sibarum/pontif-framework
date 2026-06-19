@@ -1,0 +1,562 @@
+{
+  "reflection": [
+    {
+      "type": "java.lang.Boolean",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "getBoolean",
+          "parameterTypes": [
+            "java.lang.String"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "java.lang.String[]"
+    },
+    {
+      "type": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+      "methods": [
+        {
+          "name": "onChar",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int"
+          ]
+        },
+        {
+          "name": "onCursorEnter",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int"
+          ]
+        },
+        {
+          "name": "onCursorPos",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "double",
+            "double"
+          ]
+        },
+        {
+          "name": "onError",
+          "parameterTypes": [
+            "int",
+            "java.lang.foreign.MemorySegment"
+          ]
+        },
+        {
+          "name": "onFramebufferSize",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "onKey",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "onMouseButton",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int",
+            "int",
+            "int"
+          ]
+        },
+        {
+          "name": "onScroll",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "double",
+            "double"
+          ]
+        },
+        {
+          "name": "onWindowClose",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment"
+          ]
+        },
+        {
+          "name": "onWindowFocus",
+          "parameterTypes": [
+            "java.lang.foreign.MemorySegment",
+            "int"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sibarum.pontif.playground.App",
+      "jniAccessible": true,
+      "methods": [
+        {
+          "name": "main",
+          "parameterTypes": [
+            "java.lang.String[]"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.launcher.LauncherHelper",
+      "jniAccessible": true,
+      "fields": [
+        {
+          "name": "isStaticMain"
+        },
+        {
+          "name": "noArgMain"
+        }
+      ],
+      "methods": [
+        {
+          "name": "getApplicationClass",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.DRBG",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": [
+            "java.security.SecureRandomParameters"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.SHA",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "sun.security.provider.SHA2$SHA256",
+      "methods": [
+        {
+          "name": "<init>",
+          "parameterTypes": []
+        }
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "glob": "META-INF/services/java.time.zone.ZoneRulesProvider"
+    },
+    {
+      "glob": "dasum/atlas/icons.json"
+    },
+    {
+      "glob": "dasum/atlas/icons.png"
+    },
+    {
+      "glob": "dasum/atlas/mono.json"
+    },
+    {
+      "glob": "dasum/atlas/mono.png"
+    },
+    {
+      "glob": "dasum/atlas/primary.json"
+    },
+    {
+      "glob": "dasum/atlas/primary.png"
+    },
+    {
+      "glob": "natives/windows-x64/glfw3.dll"
+    },
+    {
+      "glob": "shaders/msdf-text.frag"
+    },
+    {
+      "glob": "shaders/msdf-text.vert"
+    },
+    {
+      "glob": "shaders/solid-fill.frag"
+    },
+    {
+      "glob": "shaders/solid-fill.vert"
+    }
+  ],
+  "foreign": {
+    "downcalls": [
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "jbyte",
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jfloat"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jbyte"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jbyte",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": []
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jlong",
+          "jlong",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jfloat",
+          "jfloat",
+          "jfloat"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "void*",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jdouble"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jlong",
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "jint",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jfloat",
+          "jfloat",
+          "jfloat",
+          "jfloat"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jfloat",
+          "jfloat",
+          "jfloat",
+          "jfloat"
+        ]
+      },
+      {
+        "returnType": "void*",
+        "parameterTypes": [
+          "jint"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": []
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "jint"
+        ]
+      }
+    ],
+    "directUpcalls": [
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onCursorEnter",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onMouseButton",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onScroll",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jdouble",
+          "jdouble"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onWindowFocus",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onChar",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onKey",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jint",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onCursorPos",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jdouble",
+          "jdouble"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onFramebufferSize",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onWindowClose",
+        "returnType": "void",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
+        "class": "sibarum.dasum.gui.natives.glfw.GlfwCallbacks",
+        "method": "onError",
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "void*"
+        ]
+      }
+    ]
+  }
+}
