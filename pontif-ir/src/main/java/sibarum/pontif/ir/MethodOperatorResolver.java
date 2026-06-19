@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.QualifiedName;
 
 import java.util.ArrayList;
@@ -118,13 +119,19 @@ public final class MethodOperatorResolver {
                 IrExpr left = rewriteExpr(op.left(), ctx);
                 IrExpr right = rewriteExpr(op.right(), ctx);
                 if (routeOperators) {
+                    IrSort leftSort = NarrowingInference.infer(left, ctx);
+                    IrSort rightSort = NarrowingInference.infer(right, ctx);
                     String sym = dispatchSymbol(op.op());
-                    String resolved = sym == null ? null
-                            : resolveOverload(sym, NarrowingInference.infer(left, ctx),
-                                    NarrowingInference.infer(right, ctx));
+                    String resolved = sym == null ? null : resolveOverload(sym, leftSort, rightSort);
                     if (resolved != null) {
                         yield new IrExpr.Call(resolved, List.of(left, right), op.origin());
                     }
+                    // No user overload matched. When both operands are concrete
+                    // primitives this is a built-in application — reject at compile
+                    // time the ones the runtime would refuse, so no operator reaches
+                    // runtime undefined (the mandate). Struct/abstract operands are
+                    // left for overload dispatch and the trait-bound check.
+                    checkBuiltinComplete(op.op(), leftSort, rightSort, op.origin());
                 }
                 yield new IrExpr.BinOp(op.op(), left, right, op.origin());
             }
@@ -274,6 +281,31 @@ public final class MethodOperatorResolver {
             }
         }
         return keys;
+    }
+
+    /**
+     * Rejects a built-in operator application the runtime would refuse — the
+     * compile-time half of "no operator reaches runtime undefined". Fires only
+     * when <em>both</em> operands are concrete primitives (Int/Bool/Decimal/Char/
+     * String); struct or abstract (type-parameter) operands have a {@code null}
+     * or non-primitive base and are governed by user-overload dispatch and the
+     * trait-bound check instead. The accept/reject decision is delegated to
+     * {@link BuiltinOperators}, the same predicate the interpreter consults, so
+     * the gate and the runtime cannot disagree.
+     */
+    private static void checkBuiltinComplete(IrExpr.Op op, IrSort leftSort, IrSort rightSort, Origin origin)
+            throws CompileException {
+        String lb = baseName(leftSort);
+        String rb = baseName(rightSort);
+        if (!BuiltinOperators.isPrimitiveBase(lb) || !BuiltinOperators.isPrimitiveBase(rb)) {
+            return;
+        }
+        if (!BuiltinOperators.acceptsPrimitive(op, lb, rb)) {
+            throw new CompileException(
+                    "Operator '" + BuiltinOperators.symbol(op) + "' is not defined for ("
+                            + lb + ", " + rb + ") — " + BuiltinOperators.rejectionHint(op, lb, rb),
+                    origin);
+        }
     }
 
     private static String dispatchSymbol(IrExpr.Op op) {

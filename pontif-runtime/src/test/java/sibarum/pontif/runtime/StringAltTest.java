@@ -85,28 +85,27 @@ class StringAltTest {
 
     @Test
     void mixedStringInt_failsClosed_noTower() {
-        RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
+        CompileException e = assertThrows(CompileException.class,
                 () -> run("\"a\" == 97"));
-        assertTrue(e.getMessage().contains("String compares only with String"),
+        assertTrue(e.getMessage().contains("not defined for (String, Int)"),
                 () -> e.getMessage());
     }
 
     @Test
     void mixedStringChar_failsClosed_noTower() {
-        RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
+        CompileException e = assertThrows(CompileException.class,
                 () -> run("\"a\" == 'a'"));
-        // Either guard may fire first; both are fail-closed "compares only with".
-        assertTrue(e.getMessage().contains("compares only with"),
+        assertTrue(e.getMessage().contains("not defined for (String, Char)"),
                 () -> e.getMessage());
     }
 
     @Test
     void arithmeticOnStrings_failsClosed() {
-        // `+` now concatenates (slice 2); the other arithmetic ops still fail
-        // closed — strings order, compare, and concatenate, nothing more.
-        RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
+        // `+` concatenates (slice 2); the other arithmetic ops are now rejected at
+        // compile time — strings order, compare, and concatenate, nothing more.
+        CompileException e = assertThrows(CompileException.class,
                 () -> run("\"a\" * \"b\""));
-        assertTrue(e.getMessage().contains("not defined for String"), () -> e.getMessage());
+        assertTrue(e.getMessage().contains("concatenates"), () -> e.getMessage());
     }
 
     @Test

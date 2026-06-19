@@ -75,16 +75,17 @@ class CharAltTest {
 
     @Test
     void mixedCharInt_failsClosed_noTower() {
-        // No Char/Int tower: 'a' is not 97 until an ord/chr pair is ruled.
-        RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
+        // No Char/Int tower: 'a' is not 97 until an ord/chr pair is ruled — and
+        // the undefined operator is now rejected at compile time, not at runtime.
+        CompileException e = assertThrows(CompileException.class,
                 () -> run("'a' == 97"));
-        assertTrue(e.getMessage().contains("Char compares only with Char"),
+        assertTrue(e.getMessage().contains("not defined for (Char, Int)"),
                 () -> e.getMessage());
     }
 
     @Test
     void arithmeticOnChars_failsClosed() {
-        RuntimeCheckException e = assertThrows(RuntimeCheckException.class,
+        CompileException e = assertThrows(CompileException.class,
                 () -> run("'a' + 'b'"));
         assertTrue(e.getMessage().contains("don't compute"), () -> e.getMessage());
     }
