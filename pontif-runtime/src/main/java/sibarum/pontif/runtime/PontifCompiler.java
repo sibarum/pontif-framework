@@ -88,7 +88,7 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + e.getMessage()));
         }
-        return compileModule(module, sourceName, null);
+        return compileModule(module, sourceName);
     }
 
     /**
@@ -134,7 +134,7 @@ public final class PontifCompiler {
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(linked.module(), sourceName, linked.table());
+        return compileModule(linked.module(), sourceName);
     }
 
     /**
@@ -212,27 +212,26 @@ public final class PontifCompiler {
         } catch (RuntimeException e) {
             return new CompileResult.Failed(RunResult.error("Link error: " + e.getMessage()));
         }
-        return compileModule(linked.module(), entryModule, linked.table());
+        return compileModule(linked.module(), entryModule);
     }
 
     /**
      * Runs the IR compile pipeline on an already-parsed module. Shared by
      * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
      */
-    private CompileResult compileModule(IrModule rawModule, String sourceName,
-            sibarum.pontif.ir.ModuleSymbolTable table) {
+    private CompileResult compileModule(IrModule rawModule, String sourceName) {
         // Resolve instance-method calls AND route operators up front so every
         // consumer below — the IR compiler, the return-refinement gate, and the
         // conservation gate — sees ordinary dispatch Calls rather than the
-        // parser's transient MethodCall placeholder or an unrouted cross-module
-        // operator. Methods and operators are co-resolved in one bottom-up walk
-        // (MethodOperatorResolver), so a method on an operator result —
-        // `(a + b).sum()` over an imported `+` — types correctly here, not only
-        // inside IrCompiler. (IrCompiler runs the same pass; on an
-        // already-resolved module it is a no-op.)
+        // parser's transient MethodCall placeholder or an unrouted operator.
+        // WAR(link-provenance) Slice 2: cross-module VISIBILITY is now gated during
+        // linking (ModuleLinker.resolvePerModule, the sole gate, with the symbol
+        // table), so a LINKED module arrives already resolved and this call is an
+        // unrestricted no-op re-run. A bare single-file module (no requires, never
+        // linked) is resolved here — it has nothing cross-module to gate.
         IrModule module;
         try {
-            module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule, table);
+            module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));

@@ -1,7 +1,7 @@
 # Link provenance: resolution should respect the module boundary, not reconstruct it
 
-**Status: WAR EXECUTING — Option A chosen (James, 2026-06-19); Slice 1 landed
-(branch `war/link-provenance`).** Successor to the cross-module-dispatch war
+**Status: WAR EXECUTING — Option A chosen (James, 2026-06-19); Slices 1–2 landed
+(branch `war/link-provenance`). Slice 3 (cleanup) remains.** Successor to the cross-module-dispatch war
 (`docs/cross-module-dispatch.md`), whose Step B got cross-module visibility working
 but did it by *re-threading* module context into a post-link pass. This war removes
 the workaround by making module scope structural.
@@ -127,11 +127,25 @@ Per the rewrite rule (`feedback_vertical_slices`): each slice compiles and is gr
   exactly. Green: 765 pontif-runtime tests + the full pontif-ir suite, all
   cross-module dispatch/traits + migration probes unchanged. The smell is now behind
   one seam, ready for Slice 2 to move resolution per-module.
-- **Slice 2 — resolve per module, before concatenation.** In `combineWithTable`,
-  run the resolver on each module with its own `ModuleScope` *before* concatenating,
-  so the combined module is emitted already-resolved. Drop the post-link
-  `resolve(module, table)` call's reliance on the table. Visibility now holds by
-  construction; the migration error moves to scope construction.
+- **Slice 2 — resolution moves into the link, gated per-module. DONE (2026-06-19).**
+  `MethodOperatorResolver.resolvePerModule` resolves the combined module with a
+  *fixed* `ModuleScope` per owning module (grouped by FQN, set once — no per-decl
+  reconstruction), against the *full combined registry* (the migration error must
+  see overloads that exist but aren't imported — proven by the `(mk()+mk()).x` on an
+  unimported `Vec` case). `ModuleLinker.combineWithTable` calls it last (after struct
+  literals are Records and destructures resolved), making the linker the **sole
+  visibility gate**; `compileModule` dropped the `table` parameter and now resolves
+  unrestricted (a no-op re-run on linked input; the real pass for bare single-file).
+  Result is identical to the old post-link gated pass — the change is structural:
+  the table is consumed *during* the link, not threaded downstream. Green: 255
+  pontif-ir + 765 pontif-runtime tests, `CrossModuleVisibilityTest` both cases,
+  all dispatch/traits probes unchanged.
+
+  *Deliberate scope note (honest-scope):* `StructLiteralRewriter` and
+  `DestructureResolver` keep running on the combined module — they are FQN-keyed and
+  have no visibility concern, so forcing them per-module would be over-reach for zero
+  debt reduction. "Before concatenation" was relaxed to "during the link, grouped by
+  module" because the only thing needing module scope is the resolver's gate.
 - **Slice 3 — delete the downstream table plumbing.** Remove the `table` parameter
   from `compileModule`/`resolve`'s post-link path; confirm `IrCompiler`'s re-run is
   a genuine no-op (and drop it if purely defensive). `SortChecker`/gates/runtime

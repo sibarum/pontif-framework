@@ -7,6 +7,7 @@ import sibarum.pontif.ir.DestructureResolver;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.ir.MethodOperatorResolver;
 import sibarum.pontif.ir.ModuleImportCheck;
 import sibarum.pontif.ir.ModuleSymbolTable;
 import sibarum.pontif.ir.NameResolver;
@@ -132,7 +133,15 @@ public final class ModuleLinker {
         // pattern's slots to declared field names, enforce the arity-total rule,
         // and generate the field bindings (cluster 2). Runs after StructLiteralRewriter
         // so its struct-literal Records are in place first.
-        return new LinkResult(DestructureResolver.rewrite(withStructs), table);
+        IrModule shaped = DestructureResolver.rewrite(withStructs);
+        // Per-module operator/method resolution (WAR(link-provenance) Slice 2,
+        // Option A): the link is where the symbol table is consumed. Each decl is
+        // gated in its OWN module's scope here — the sole visibility gate — so the
+        // combined module is emitted already resolved and nothing downstream needs
+        // to re-thread the table. Runs last, after struct literals are Records and
+        // destructures are resolved, so operand sorts are known for routing.
+        IrModule resolved = MethodOperatorResolver.resolvePerModule(shaped, table);
+        return new LinkResult(resolved, table);
     }
 
     /**

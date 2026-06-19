@@ -56,10 +56,14 @@ public final class MethodOperatorResolver {
      *  Slice 2 moves resolution per-module and Slice 3 drops this field. */
     private final ModuleSymbolTable table;
     /** Visibility view of the decl currently being rewritten — its own module's
-     *  scope (own + imported-by-association). Set per function/main as the walk
-     *  descends (Slice 1). WAR(link-provenance): Slice 2 makes this a single fixed
-     *  per-module scope once resolution runs before the link. See docs/link-provenance.md. */
+     *  scope (own + imported-by-association). In the legacy whole-module path it is
+     *  recomputed per declaration from the FQN; in the per-module link path
+     *  ({@link #resolvePerModule}) the caller sets it per module and it is fixed. */
     private ModuleScope currentScope = ModuleScope.unrestricted();
+    /** When true (the per-module link path, WAR(link-provenance) Slice 2),
+     *  {@link #currentScope} is owned by the caller and NOT recomputed per
+     *  declaration — resolution is gated in one fixed scope per module. */
+    private boolean fixedScope = false;
 
     private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators,
             ModuleSymbolTable table) {
@@ -106,6 +110,58 @@ public final class MethodOperatorResolver {
         return new IrModule(module.name(), out, main);
     }
 
+    /**
+     * The per-module link path (Option A; WAR(link-provenance) Slice 2): resolve an
+     * already shape-resolved COMBINED module so that each declaration is gated in
+     * ITS OWN module's scope. The typing / overload registry is the full combined
+     * module — the migration error must be able to see an overload that <em>exists
+     * but isn't imported</em> — while VISIBILITY is the per-module
+     * {@link ModuleScope}. The link consumes {@code table} here, so nothing
+     * downstream needs to re-thread it: this supersedes the old post-link
+     * {@code resolve(module, table)} call as the sole visibility gate.
+     *
+     * <p>Result is identical to the legacy {@code resolve(combined, table)} (each
+     * decl was already scoped by its FQN module) — the difference is structural:
+     * the scope is assigned once per module here, not reconstructed per declaration
+     * inside the walk, and it happens during linking rather than after.
+     */
+    public static IrModule resolvePerModule(IrModule combined, ModuleSymbolTable table)
+            throws CompileException {
+        MethodOperatorResolver r = new MethodOperatorResolver(combined, true, true, table);
+        r.fixedScope = true;
+        InferenceContext ctx = InferenceContext.fromModule(combined);
+        Map<String, ModuleScope> scopes = new LinkedHashMap<>();
+        String entry = combined.name();
+        List<IrStmt> out = new ArrayList<>(combined.statements().size());
+        for (IrStmt stmt : combined.statements()) {
+            r.currentScope = scopes.computeIfAbsent(
+                    moduleOf(stmt, entry), m -> ModuleScope.forModule(m, table));
+            out.add(r.rewriteStmt(stmt, ctx));
+        }
+        r.currentScope = scopes.computeIfAbsent(entry, m -> ModuleScope.forModule(m, table));
+        IrExpr main = combined.main() == null ? null : r.rewriteExpr(combined.main(), ctx);
+        return new IrModule(entry, out, main);
+    }
+
+    /** The owning (FQN) module of a statement, read from its declared name; the
+     *  {@code fallback} (the entry module) for statements with no resolvable body. */
+    private static String moduleOf(IrStmt stmt, String fallback) {
+        String fqn = switch (stmt) {
+            case IrStmt.FunctionDecl fd -> fd.name();
+            case IrStmt.TraitImpl ti -> traitImplAnchor(ti);
+            default -> null;
+        };
+        return fqn == null ? fallback : QualifiedName.parse(fqn).module();
+    }
+
+    /** A trait impl's methods all live in the impl's module; anchor the scope on a
+     *  method (or attribute producer) FQN, falling back to the type name. */
+    private static String traitImplAnchor(IrStmt.TraitImpl ti) {
+        if (!ti.methods().isEmpty()) return ti.methods().get(0).name();
+        if (!ti.attributeProducers().isEmpty()) return ti.attributeProducers().get(0).name();
+        return ti.typeName();
+    }
+
     private IrStmt rewriteStmt(IrStmt stmt, InferenceContext ctx) throws CompileException {
         return switch (stmt) {
             case IrStmt.FunctionDecl fd -> rewriteFunction(fd, ctx);
@@ -128,7 +184,9 @@ public final class MethodOperatorResolver {
 
     private IrStmt.FunctionDecl rewriteFunction(IrStmt.FunctionDecl fd, InferenceContext ctx)
             throws CompileException {
-        this.currentScope = scopeFor(QualifiedName.parse(fd.name()).module());   // "" when bare/unlinked
+        // Legacy whole-module path recomputes the scope per decl from the FQN; the
+        // per-module link path (fixedScope) keeps the caller's one scope per module.
+        if (!fixedScope) this.currentScope = scopeFor(QualifiedName.parse(fd.name()).module());
         InferenceContext bodyCtx = ctx;
         for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
         IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);
