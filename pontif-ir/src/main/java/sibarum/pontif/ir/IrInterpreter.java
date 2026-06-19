@@ -381,9 +381,11 @@ public final class IrInterpreter {
         if (l instanceof BigDecimal || r instanceof BigDecimal) {
             return evalDecimalBinOp(op.op(), asDecimal(l, op), asDecimal(r, op), op.origin());
         }
-        // Char compares only with Char, by code point. No arithmetic, no
-        // promotion (there is no Char/Int tower) — anything else fails closed
-        // with an origin-carrying error.
+        // Char compares only with Char, by code point — no arithmetic, no
+        // Char/Int tower. The undefined cases are now rejected at compile time
+        // by MethodOperatorResolver's checkOperatorComplete, so evalCharBinOp's
+        // throws are unreachable-through-a-checked-compile backstops (see its
+        // javadoc) rather than the primary guard.
         if (l instanceof sibarum.pontif.core.types.CharValue
                 || r instanceof sibarum.pontif.core.types.CharValue) {
             return evalCharBinOp(op, l, r);
@@ -443,9 +445,14 @@ public final class IrInterpreter {
 
     /**
      * Char operations: ordering and equality by code point, both operands
-     * Char. Arithmetic and logical ops on chars are errors, as are mixed
-     * Char/non-Char comparisons — fail closed until a conversion pair
-     * (ord/chr) is ruled.
+     * Char. Arithmetic/logical ops on chars and mixed Char/non-Char operands
+     * are undefined — but they are now rejected at compile time by
+     * {@link MethodOperatorResolver}'s {@code checkOperatorComplete} (which
+     * consults the same {@link BuiltinOperators#acceptsPrimitive} predicate, so
+     * gate and runtime cannot drift). The throws below are therefore
+     * unreachable through a checked compile; they stay as defense-in-depth for
+     * hand-built IR (the operator analog of the match no-match safety net kept
+     * honest by {@code IrMatchTest}). An ord/chr conversion pair is still unruled.
      */
     private static Object evalCharBinOp(IrExpr.BinOp op, Object l, Object r) {
         if (!(l instanceof sibarum.pontif.core.types.CharValue lc)
@@ -475,7 +482,12 @@ public final class IrInterpreter {
      * String and the other (Int/Decimal/Char/Bool/String) is rendered to its
      * canonical string (strings.md slice 2). Ordering/equality compare
      * lexicographically by code point and require BOTH operands String (no
-     * String/Int tower). Other arithmetic/logical ops are errors — fail closed.
+     * String/Int tower). Other arithmetic/logical ops and mixed non-String
+     * comparisons are undefined — now rejected at compile time by
+     * {@link MethodOperatorResolver}'s {@code checkOperatorComplete} (mirrored
+     * by {@link BuiltinOperators#acceptsPrimitive}), so the throws below are
+     * unreachable-through-a-checked-compile backstops, kept as defense-in-depth
+     * for hand-built IR.
      */
     private static Object evalStringBinOp(IrExpr.BinOp op, Object l, Object r) {
         if (op.op() == IrExpr.Op.ADD) {

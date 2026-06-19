@@ -18,9 +18,23 @@ branch. The R2 mandate is closed (every operator over concrete or trait-typed op
 resolves at compile time or is a compile error) and mechanism-1 dispatch is now
 **module-scoped, import-by-association** — `docs/dispatch-unification.md` (§"Mechanism 1")
 should be updated from "global multi-dispatch" accordingly. Deferred (not blocking):
-the interpreter-refactor hygiene, the trait-ranging operator contract, and method
-*visibility* gating (methods are mechanism-2; the orphan-declaration rule + "methods come
-with the type" already hold).
+the trait-ranging operator contract, and method *visibility* gating (methods are
+mechanism-2; the orphan-declaration rule + "methods come with the type" already hold).
+
+**Interpreter-refactor hygiene — DONE (2026-06-19).** Scoped against the code: with
+`checkOperatorComplete` now run on *every* path into the interpreter (`IrCompiler.compile`
+invokes `MethodOperatorResolver.resolve`), exactly four `IrInterpreter` throw sites are
+unreachable through a checked compile — `evalCharBinOp`'s arithmetic/logic arm and its
+mixed-operand throw, and `evalStringBinOp`'s two analogs. The `dispatchValues`
+no-match/ambiguous throws are **not** dead (shared with ordinary function-call and
+metareference dispatch, which carry no operator-completeness mandate), and the
+struct-operator route is the live home of generic `a + b` over a trait-bounded `E`.
+Following the codebase's own match-totality precedent (`IrMatchTest`), the four sites
+were re-framed as defense-in-depth backstops (kept as `RuntimeCheckException`, not
+demoted to `IllegalStateException`) and a `compileUnchecked`-style honesty test
+(`IrOperatorBackstopTest`) keeps them live. The deeper architectural smell — the
+flat-fused-module losing per-module provenance, which forced Step B to re-thread the
+symbol table (§8.3.1) — is a separate, war-grade refactor, **not** part of this slice.
 
 ## 0. Scoping (ground truth, 2026-06-18)
 

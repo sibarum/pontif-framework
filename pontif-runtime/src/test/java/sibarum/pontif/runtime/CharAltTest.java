@@ -135,8 +135,10 @@ class CharAltTest {
 
     @Test
     void truffleBackend_agreesOnComparisonAndGuard() {
-        // The Truffle path shares the semantics: Cmp accepts chars, the
-        // arithmetic nodes fail closed via the BinaryOp guard.
+        // The Truffle path shares the semantics: Cmp accepts chars; char
+        // arithmetic is now rejected at compile time by checkOperatorComplete
+        // (the BinaryOp runtime guard survives only as a defense-in-depth
+        // backstop), so the bad program fails closed before it ever runs.
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
         PontifRunner.RunResult eq = runner.run(
