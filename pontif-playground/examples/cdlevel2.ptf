@@ -1,0 +1,33 @@
+module cott.traction.cd.lvl2
+
+requires cott.traction.{Traction}
+requires cott.traction.cd.{TractionCD}
+
+struct TractionL2CD(n:TractionCD, d:TractionCD)
+
+function TractionL2CD.of(n:Decimal, d:Decimal):TractionL2CD ->
+  TractionL2CD(TractionCD(Traction(n,0), Traction(1,0)), TractionCD(Traction(d,0), Traction(1,0)))
+
+method TractionL2CD.toString():String ->
+  "L2cd["+this.n.toString()+"/"+this.d.toString()+"]"
+
+function +(
+      t1:[TractionL2CD(n1,d1)],
+      t2:[TractionL2CD(n2,d2)]
+):TractionL2CD ->
+  TractionL2CD(
+    n1*d2+n2*d1,
+    d1*d2
+)
+
+function -(
+      t1:[TractionL2CD(n1,d1)],
+      t2:[TractionL2CD(n2,d2)]
+):TractionL2CD ->
+  TractionL2CD(
+    n1*d2-n2*d1,
+    d1*d2
+)
+
+
+(TractionL2CD.of(5,12) + TractionL2CD.of(-2,5)).toString()
