@@ -11,13 +11,16 @@ reach runtime undefined* — "no applicable overload" and "ambiguous overload" b
 operator-on-trait question is resolved (contract model, **§8**). The concrete
 execution plan is **§8**; §0–§6 are the scoping that produced it.
 
-**Progress (2026-06-19): the R2 mandate is closed.** Step A (§8.2 — built-in primitive
-+ concrete-struct operator completeness) and Step C (§8.4 — trait-typed operands) have
-**landed** on the war branch: every operator over concrete *or* trait-typed operands now
-resolves at compile time or is a compile error. The remaining piece is **Step B
-(§8.3)** — the cross-module *visibility* cutover, which tightens
-`docs/dispatch-unification.md` (§"Mechanism 1") from "global multi-dispatch" to
-**module-scoped, import-by-association** (global dispatch is what sank SPN).
+**Progress (2026-06-19): Phase 3 COMPLETE.** Step A (§8.2 — built-in primitive +
+concrete-struct operator completeness), Step C (§8.4 — trait-typed operands), and Step B
+(§8.3 — the import-by-association visibility cutover) have all **landed** on the war
+branch. The R2 mandate is closed (every operator over concrete or trait-typed operands
+resolves at compile time or is a compile error) and mechanism-1 dispatch is now
+**module-scoped, import-by-association** — `docs/dispatch-unification.md` (§"Mechanism 1")
+should be updated from "global multi-dispatch" accordingly. Deferred (not blocking):
+the interpreter-refactor hygiene, the trait-ranging operator contract, and method
+*visibility* gating (methods are mechanism-2; the orphan-declaration rule + "methods come
+with the type" already hold).
 
 ## 0. Scoping (ground truth, 2026-06-18)
 
@@ -302,7 +305,7 @@ provable ambiguity at the call → compile error.** The runtime throw sites are 
 working program needs migration. This establishes the invariant before the cutover leans
 on it.
 
-### 8.3 Step B — import-by-association visibility cutover (§6 Phase 3, THE CUTOVER)
+### 8.3 Step B — import-by-association visibility cutover (§6 Phase 3, THE CUTOVER) — LANDED 2026-06-19
 
 Gate mechanism-1 overload **and** static-member visibility (in `NameResolver` / the
 linker's dispatch-table assembly) using the Phase-2 association index: an overload is
@@ -357,8 +360,18 @@ B.2 the visibility gate + migration error → B.3 migrate the cross-module probe
 already import the type and stay green) → B.4 full suite + 150-probe matrix + §5.7
 init-order check.
 
-**Status: designed, not yet built (2026-06-19).** The R2 mandate (Steps A + C) is closed;
-this cutover is the remaining Phase-3 work.
+**Status: LANDED 2026-06-19.** Built exactly as designed: the gate lives in
+`MethodOperatorResolver.resolveOverload` (visible iff the calling module — the enclosing
+decl's FQN prefix — owns or imports a non-primitive signature type), with the migration
+error on a matched-but-unimported overload. **No probe migration was needed** — the
+existing cross-module operator probes (`dispatch__16/17/22`, `traits__20`) already
+`requires` their operand type, so import-by-association keeps them visible; the agent's
+predicted breakage didn't materialize because well-written code already imports the type.
+`CrossModuleVisibilityTest` is the regression lock (negative: operator on an unimported
+type — a `Vec` obtained from an imported factory — rejected with the migration error;
+positive: importing the type resolves the operator by association). §5.7 holds: the gate
+resolves from the import graph + the symbol table, with no file-init-order dependence.
+Single-file/unlinked compiles pass a null table and gate nothing.
 
 ### 8.4 Step C — trait-typed operands (the ruling) — LANDED 2026-06-19
 

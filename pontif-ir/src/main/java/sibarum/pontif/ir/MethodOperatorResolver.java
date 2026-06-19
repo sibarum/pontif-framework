@@ -144,7 +144,8 @@ public final class MethodOperatorResolver {
                     IrSort leftSort = NarrowingInference.infer(left, ctx);
                     IrSort rightSort = NarrowingInference.infer(right, ctx);
                     String sym = dispatchSymbol(op.op());
-                    String resolved = sym == null ? null : resolveOverload(sym, leftSort, rightSort);
+                    String resolved = sym == null ? null
+                            : resolveOverload(sym, leftSort, rightSort, op.origin());
                     if (resolved != null) {
                         yield new IrExpr.Call(resolved, List.of(left, right), op.origin());
                     }
@@ -177,7 +178,7 @@ public final class MethodOperatorResolver {
                     if (isOperatorSymbol(sym) && args.size() == 2) {
                         String resolved = resolveOverload(sym,
                                 NarrowingInference.infer(args.get(0), ctx),
-                                NarrowingInference.infer(args.get(1), ctx));
+                                NarrowingInference.infer(args.get(1), ctx), c.origin());
                         if (resolved != null) yield new IrExpr.Call(resolved, args, c.origin());
                     }
                 }
@@ -266,17 +267,74 @@ public final class MethodOperatorResolver {
      * type-parameter operands). A base-name match is enough to (a) decide
      * BinOp-vs-Call and (b) name the dispatch key; most-specific selection among
      * same-keyed overloads is runtime dispatch's job.
+     *
+     * <p><b>Import-by-association visibility (Step B):</b> a matched overload is
+     * only returned if it is visible to the calling module — i.e. that module owns
+     * or imports ≥1 of the overload's signature types. A match that exists but
+     * isn't imported is a compile error (the migration error), never a silent
+     * miss. With no symbol table (single-file / unlinked) nothing is gated.
      */
-    private String resolveOverload(String sym, IrSort leftSort, IrSort rightSort) {
+    private String resolveOverload(String sym, IrSort leftSort, IrSort rightSort, Origin origin)
+            throws CompileException {
         String lb = baseName(leftSort);
         String rb = baseName(rightSort);
         if (lb == null || rb == null) return null;
+        IrStmt.FunctionDecl invisible = null;
         for (IrStmt.FunctionDecl fd : operatorOverloads.getOrDefault(sym, List.of())) {
             String p0 = baseName(fd.params().get(0).sort());
             String p1 = baseName(fd.params().get(1).sort());
-            if (lb.equals(p0) && rb.equals(p1)) return fd.name();
+            if (lb.equals(p0) && rb.equals(p1)) {
+                if (isVisibleHere(fd)) return fd.name();
+                if (invisible == null) invisible = fd;   // matched by sort, but not imported
+            }
         }
+        if (invisible != null) throw notImportedError(sym, invisible, origin);
         return null;
+    }
+
+    /**
+     * Import-by-association visibility: an overload is visible to the calling
+     * module iff that module owns or imports ≥1 of its <em>non-primitive</em>
+     * signature types. Trivially true with no symbol table (single-file/unlinked)
+     * or when the calling module is unknown.
+     */
+    private boolean isVisibleHere(IrStmt.FunctionDecl fd) {
+        if (table == null || currentModule.isEmpty()) return true;
+        for (IrParam p : fd.params()) {
+            String t = baseName(p.sort());
+            if (t != null && ownsOrImports(t)) return true;
+        }
+        return false;
+    }
+
+    /** Whether {@code currentModule} owns or imports the given (FQN) type. A bare
+     *  primitive type (no module qualifier) never grants visibility. */
+    private boolean ownsOrImports(String typeFqn) {
+        QualifiedName qn = QualifiedName.parse(typeFqn);
+        String owner = qn.module();
+        if (owner.isEmpty()) return false;                       // primitive / bare
+        if (owner.equals(currentModule)) return true;            // the caller owns it
+        ModuleSymbolTable.ImportedName imp = table.importedName(currentModule, qn.member());
+        return imp != null && imp.sourceModule().equals(owner);  // imported by association
+    }
+
+    /** The migration error for a matched-but-unimported operator overload. */
+    private CompileException notImportedError(String sym, IrStmt.FunctionDecl fd, Origin origin) {
+        String declModule = QualifiedName.parse(fd.name()).module();
+        String suggestType = null;
+        for (IrParam p : fd.params()) {
+            String t = baseName(p.sort());
+            if (t == null) continue;
+            QualifiedName qn = QualifiedName.parse(t);
+            if (qn.module().equals(declModule)) { suggestType = qn.member(); break; }
+        }
+        String fix = suggestType != null
+                ? "add `requires " + declModule + ".{" + suggestType + "}` to use it"
+                : "import a type it is associated with";
+        return new CompileException(
+                "Operator '" + sym + "' resolves to an overload in module '" + declModule
+                        + "', which '" + currentModule + "' does not import — " + fix
+                        + " (operators come with their operand types, by association).", origin);
     }
 
     /**
