@@ -43,7 +43,7 @@ class TypeParameterTraitSortTest {
         // `Stream[Int]` as a function-param sort: the trait body inlines with
         // E↦Int substituted. Compiles (E is supplied, no leftover variable).
         compiles("""
-                let Stream[type E]:Type{ head:[Method():E] }
+                trait Stream[type E]{ head:[Method():E] }
                 function f(s:Stream[Int]):Int -> 1
                 0
                 """);
@@ -53,7 +53,7 @@ class TypeParameterTraitSortTest {
     void parametricTraitSort_wrongArity_isRejected() {
         // One declared `[type E]`, two args supplied at the application site.
         PontifCompiler.CompileResult.Failed f = rejects("""
-                let Stream[type E]:Type{ head:[Method():E] }
+                trait Stream[type E]{ head:[Method():E] }
                 function f(s:Stream[Int, Bool]):Int -> 1
                 0
                 """);
@@ -70,7 +70,7 @@ class TypeParameterTraitSortTest {
         // (E↦T) matches the impl's `make():T`.
         compiles("""
                 struct Box[type T](value:T)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait Box[type T]:Producer[T] {
                     make():T -> this.value
                 }
@@ -84,7 +84,7 @@ class TypeParameterTraitSortTest {
         // binder needed (E↦Int).
         compiles("""
                 struct IntBox(value:Int)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait IntBox:Producer[Int] {
                     make():Int -> this.value
                 }
@@ -99,7 +99,7 @@ class TypeParameterTraitSortTest {
         // that the supplied arg drives the contract.
         PontifCompiler.CompileResult.Failed f = rejects("""
                 struct IntBox(value:Int)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait IntBox:Producer[Bool] {
                     make():Int -> this.value
                 }
@@ -112,7 +112,7 @@ class TypeParameterTraitSortTest {
     void impl_wrongTraitArgArity_isRejected() {
         PontifCompiler.CompileResult.Failed f = rejects("""
                 struct IntBox(value:Int)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait IntBox:Producer[Int, Bool] {
                     make():Int -> this.value
                 }
@@ -129,7 +129,7 @@ class TypeParameterTraitSortTest {
         // arity.
         PontifCompiler.CompileResult.Failed f = rejects("""
                 struct Box[type T](value:T)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait Box[type A, type B]:Producer[A] {
                     make():A -> this.value
                 }
@@ -145,7 +145,7 @@ class TypeParameterTraitSortTest {
         // The trait's data attribute `value:T` substitutes E↦Int, so the field
         // `value:Int` on IntLit satisfies it — an empty impl body.
         compiles("""
-                let Literal[type T]:Type{
+                trait Literal[type T]{
                   value:T
                 }
                 struct IntLit(value:Int)
@@ -160,7 +160,7 @@ class TypeParameterTraitSortTest {
         // No `value` field; a producer computes it. The trait's `value:T`
         // substitutes E↦Int, so the producer's `value:Int` return satisfies it.
         compiles("""
-                let Literal[type T]:Type{
+                trait Literal[type T]{
                   value:T
                 }
                 struct IntLit(raw:Int)
@@ -176,7 +176,7 @@ class TypeParameterTraitSortTest {
         // The producer forwards the impl's variable T; the trait's `value:T`
         // (E↦T) matches the producer's `value:T` return.
         compiles("""
-                let Holder[type E]:Type{
+                trait Holder[type E]{
                   value:E
                 }
                 struct Wrap[type T](inner:T)
@@ -194,7 +194,7 @@ class TypeParameterTraitSortTest {
         // acting as the literal-vs-variable toggle (docs/type-parameters.md §2.1).
         PontifCompiler.CompileResult.Failed f = rejects("""
                 struct Box[type T](value:T)
-                let Producer[type E]:Type{ make:[Method():E] }
+                trait Producer[type E]{ make:[Method():E] }
                 assign trait Box:Producer[T] {
                     make():T -> this.value
                 }

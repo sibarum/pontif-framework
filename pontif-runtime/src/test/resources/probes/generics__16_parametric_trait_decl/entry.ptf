@@ -1,2 +1,2 @@
-let Producer[type T]:Type{ make:[Method():T] }
+trait Producer[type T]{ make:[Method():T] }
 0

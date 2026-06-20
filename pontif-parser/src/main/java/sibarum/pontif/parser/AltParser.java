@@ -233,7 +233,7 @@ public final class AltParser {
     private final Set<String> declaredSortAliases = new java.util.HashSet<>();
 
     /**
-     * Names declared as traits via {@code let NAME:Type{...}}. Tracked so the
+     * Names declared as traits via {@code trait NAME{...}}. Tracked so the
      * base-sort-mismatch check accepts a struct→trait upcast (`let h:Trait = s`):
      * a trait coerces implicitly in both directions because its attributes are
      * computed projections (information-conserving). Satisfaction is enforced by
@@ -329,7 +329,7 @@ public final class AltParser {
         AltToken t = peek();
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let", "cast", "assign", "proof").contains(t.text());
+                "function", "method", "struct", "let", "trait", "cast", "assign", "proof").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -391,6 +391,7 @@ public final class AltParser {
             case "method"   -> parseMethod();
             case "cast"     -> parseCoercion();
             case "let"      -> parseLet();
+            case "trait"    -> parseTrait();
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
             default -> throw new ParseException(
@@ -1246,13 +1247,11 @@ public final class AltParser {
             return parseDestructuringLetTop(start);
         }
         String name = parseDottedName();
-        // Optional `[type T, …]` slot for a parametric trait declaration
-        // (`let Expr[type T]:Type{…}`, docs/type-parameters.md §2.1). After the
-        // name, before the `:`. Consumed here; attached to the trait sort at the
-        // patch site below (ignored for non-trait lets).
-        Map<String, IrSort> traitTypeParams = peek().kind() == AltToken.Kind.LBRACKET
-                ? parseTypeParamSlot()
-                : new LinkedHashMap<>();
+        // A retired parametric-trait form (`let X[type T]:Type{…}`) — consume the
+        // slot so the `:Type{` below reaches the trait-migration error (in
+        // parseSort) rather than a generic one. Traits are now declared with the
+        // `trait` keyword (parseTrait); `let` no longer declares them.
+        if (peek().kind() == AltToken.Kind.LBRACKET) parseTypeParamSlot();
         if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
             return parseDictDecompositionLetTop(start, name);
         }
@@ -1295,35 +1294,6 @@ public final class AltParser {
                     "let '" + name + "' needs either a sort annotation (':Sort') "
                             + "or a value ('= EXPR')",
                     start.origin());
-        }
-        // Trait declaration: `let X:Type{...}` (no value). Lower to TypeAlias
-        // with the binding's name patched into the trait sort. Each contract
-        // method is also registered in `declaredFunctionReturns` under
-        // `TraitName.methodName` so method-call routing on trait-typed
-        // receivers (e.g., `d.quack()` where `d:Duck`) finds them.
-        if (declaredSort instanceof IrSort.Trait t) {
-            if (value != null) {
-                throw new ParseException(
-                        "let '" + name + "' with trait sort can't have a value — "
-                                + "trait declarations are type-level only",
-                        start.origin());
-            }
-            declaredTraits.add(name);
-            IrSort.Trait named = new IrSort.Trait(
-                    name, t.methods(), t.attributes(), t.associatedTypes(),
-                    traitTypeParams, t.operators(), t.origin());
-            for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
-                declaredFunctionReturns.put(
-                        name + "." + e.getKey(), e.getValue().returnSort());
-            }
-            // A data attribute is a computed projection — accessing it through
-            // the trait view (`d.weight`, d:Duck) routes to the satisfier's
-            // `Type.weight(this)` producer, so register `TraitName.attr` as a
-            // 0-arg accessor return (mirrors the method registration above).
-            for (Map.Entry<String, IrSort> e : named.attributes().entrySet()) {
-                declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue());
-            }
-            return new IrStmt.TypeAlias(name, named, start.origin());
         }
         // S6: promotion via value synthesis — `let x:[Target:@.f==v] = partial;`.
         // The `;` requests synthesis; the value (a DIFFERENT struct) supplies the
@@ -2060,11 +2030,14 @@ public final class AltParser {
                 AltToken typeTok = consume();   // type
                 return new IrSort.Named(IrSort.SELF_TYPE, t.spanTo(typeTok));
             }
-            // `Type{...}` — trait literal at sort level. The trait's name is
-            // empty here (it's anonymous); parseLet patches it with the
-            // let-binding's name before producing the TypeAlias.
+            // `Type{...}` as a sort is retired: traits are declared with the
+            // `trait` keyword (parseTrait), not via a `Type{…}` sort literal.
             if (t.text().equals("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
-                return parseTraitTypeLiteral();
+                throw new ParseException(
+                        "Traits are declared with the `trait` keyword now — write "
+                                + "`trait NAME{ … }`, not `let NAME:Type{ … }` "
+                                + "(the `Type{…}` trait sort was retired).",
+                        t.origin());
             }
             // `Name{e1, e2, …}` — a construction-pin return sort over a declared
             // struct (S5): desugars to `[Name:@ == Name(e1, …)]`, so spec-only
@@ -2188,15 +2161,58 @@ public final class AltParser {
     }
 
     /**
-     * Parses {@code Type{methodName:MethodSort, ...}} — the trait literal.
-     * Each entry must be {@code methodName:[Method(...):Ret]} (method
-     * sort). The returned {@link IrSort.Trait} has an empty placeholder
-     * name; {@link #parseLet} patches it with the binding name from the
-     * enclosing {@code let X:Type{...}} declaration.
+     * Parses a trait declaration: {@code trait NAME[type T, …]{ members }}.
+     * Lowers to a {@link IrStmt.TypeAlias} binding NAME to an {@link IrSort.Trait}
+     * — the dedicated declarator that replaced the retired {@code let NAME:Type{…}}
+     * form. The optional {@code [type T, …]} slot makes the trait parametric
+     * (docs/type-parameters.md §2.1). Each contract method/attribute is also
+     * registered in {@code declaredFunctionReturns} under {@code NAME.member} so
+     * method-call routing on trait-typed receivers (e.g. {@code d.quack()} where
+     * {@code d:Duck}) finds them.
      */
-    private IrSort.Trait parseTraitTypeLiteral() throws ParseException {
-        AltToken typeTok = expect(AltToken.Kind.IDENT);  // "Type"
-        AltToken open = expect(AltToken.Kind.LBRACE);
+    private IrStmt parseTrait() throws ParseException {
+        AltToken start = expectKeyword("trait");
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        String name = nameTok.text();
+        // Optional `[type T, …]` parametric slot — directly after the name, before
+        // the `{` body. Unambiguous: a trait body is `{…}`, the slot is `[…]`.
+        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+                ? parseTypeParamSlot()
+                : new LinkedHashMap<>();
+        IrSort.Trait body = parseTraitMembers(start);
+        if (peek().kind() == AltToken.Kind.EQUALS) {
+            throw new ParseException(
+                    "A `trait` declaration is type-level only and cannot have a value "
+                            + "(`= …`).", peek().origin());
+        }
+        declaredTraits.add(name);
+        IrSort.Trait named = new IrSort.Trait(
+                name, body.methods(), body.attributes(), body.associatedTypes(),
+                typeParams, body.operators(), body.origin());
+        for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
+            declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
+        }
+        // A data attribute is a computed projection — accessing it through the
+        // trait view (`d.weight`, d:Duck) routes to the satisfier's
+        // `Type.weight(this)` producer, so register `TraitName.attr` as a 0-arg
+        // accessor return (mirrors the method registration above).
+        for (Map.Entry<String, IrSort> e : named.attributes().entrySet()) {
+            declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue());
+        }
+        return new IrStmt.TypeAlias(name, named, named.origin());
+    }
+
+    /**
+     * Parses the {@code { member, ... }} body of a {@code trait NAME{...}}
+     * declaration (the brace block after the name + optional type-param slot).
+     * A member is {@code name:[Method(...):Ret]} (a method), {@code name:Sort}
+     * (a data attribute), {@code op:[Dispatch(...)]} (an operator contract), or
+     * {@code type X[:Bound]} (an associated type). The returned
+     * {@link IrSort.Trait} has a placeholder name; {@link #parseTrait} patches it
+     * with the declared name and the type-param slot.
+     */
+    private IrSort.Trait parseTraitMembers(AltToken headTok) throws ParseException {
+        expect(AltToken.Kind.LBRACE);
         Map<String, IrSort.Method> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
         // Associated types — member name → bound (null = unbounded `type X`; a
@@ -2285,10 +2301,10 @@ public final class AltParser {
             first = false;
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
-        // Placeholder name; parseLet patches it with the binding's name.
+        // Placeholder name; parseTrait patches it with the declared name.
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
-                typeTok.spanTo(close));
+                headTok.spanTo(close));
     }
 
     /**

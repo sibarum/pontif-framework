@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Free type parameters (docs/type-parameters.md), slice 3a — the `[type T]` slot
- * on a TRAIT (`let Expr[type T]:Type{…}`): declare it after the name, scope it
+ * on a TRAIT (`trait Expr[type T]{…}`): declare it after the name, scope it
  * over the trait's member sorts. This is the type *parameter* (chosen from
  * outside, §2.1), distinct from an associated type (fixed by the implementor).
  * Declaration-level; the trait-application sort `[Expr[Int]]` and parametric
@@ -32,7 +32,7 @@ class TypeParameterTraitTest {
     @Test
     void parametricTrait_withTypeParamInMembers_declares() {
         compiles("""
-                let Producer[type T]:Type{ make:[Method():T] }
+                trait Producer[type T]{ make:[Method():T] }
                 0
                 """);
     }
@@ -40,7 +40,7 @@ class TypeParameterTraitTest {
     @Test
     void parametricTrait_multipleParams_inAnyPosition() {
         compiles("""
-                let Mapper[type A, type B]:Type{ apply:[Method(A):B] }
+                trait Mapper[type A, type B]{ apply:[Method(A):B] }
                 0
                 """);
     }
@@ -49,7 +49,7 @@ class TypeParameterTraitTest {
     void parametricTrait_typeParam_doesNotLeak() {
         // `T` is scoped to the trait's members; elsewhere it is unknown.
         PontifCompiler.CompileResult.Failed f = rejects("""
-                let Producer[type T]:Type{ make:[Method():T] }
+                trait Producer[type T]{ make:[Method():T] }
                 function f(x:T):Int -> 1
                 f(5)
                 """);

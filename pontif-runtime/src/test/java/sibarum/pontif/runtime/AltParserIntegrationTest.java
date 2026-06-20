@@ -403,12 +403,12 @@ class AltParserIntegrationTest {
     @Test
     void trait_endToEnd_fromAltSyntax() throws Exception {
         // The full Pontif trait story, top to bottom:
-        //   - Declare a trait via `let Duck:Type{...}`.
+        //   - Declare a trait via `trait Duck{...}`.
         //   - Declare a struct via `struct Donald(...)`.
         //   - Assign the trait via `assign trait Donald:Duck { ... }`.
         //   - Function takes a trait-typed param; call with a Donald.
         String src = """
-                let Duck:Type{quack:[Method():Int]}
+                trait Duck{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> this.name + 100
@@ -424,7 +424,7 @@ class AltParserIntegrationTest {
     void trait_directTraitMethodCall_fromAltSyntax() throws Exception {
         // Trait.method call directly on a struct value — slice-1 fallback.
         String src = """
-                let Duck:Type{quack:[Method():Int]}
+                trait Duck{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> 42

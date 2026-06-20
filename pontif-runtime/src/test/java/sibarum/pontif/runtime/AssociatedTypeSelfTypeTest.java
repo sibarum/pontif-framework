@@ -38,7 +38,7 @@ class AssociatedTypeSelfTypeTest {
     }
 
     private static final String EXPR = """
-            let Expr:Type{
+            trait Expr{
               copy:[Method():this.type],
               val:[Method():Int]
             }
@@ -74,7 +74,7 @@ class AssociatedTypeSelfTypeTest {
         // copy declared to return Add (a sibling Expr type), not the impl's own
         // type — `this.type` substitutes to Lit, so the contract requires Lit.
         PontifCompiler.CompileResult.Failed f = rejects("""
-                let Expr:Type{
+                trait Expr{
                   copy:[Method():this.type]
                 }
                 struct Lit(value:Int)

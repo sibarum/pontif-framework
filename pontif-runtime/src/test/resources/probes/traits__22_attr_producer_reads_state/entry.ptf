@@ -1,4 +1,4 @@
-let Labeled:Type{ tag:Int }
+trait Labeled{ tag:Int }
 
 struct Crate(base:Int)
 

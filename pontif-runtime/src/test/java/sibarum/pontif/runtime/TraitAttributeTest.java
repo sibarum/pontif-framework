@@ -44,7 +44,7 @@ class TraitAttributeTest {
     void attributeProducer_accessibleOnInstance() {
         // Ipsum has no `weight` field; the impl provides it as a projection.
         assertEquals("1", run("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 assign trait Ipsum:Heavyish {
                   weight:Int -> 1
@@ -59,7 +59,7 @@ class TraitAttributeTest {
         // A producer is a projection over `this` (existence-only attribute, so
         // no refinement obligation — it just reads instance state).
         assertEquals("12", run("""
-                let Labeled:Type{ tag:Int }
+                trait Labeled{ tag:Int }
                 struct Crate(base:Int)
                 assign trait Crate:Labeled {
                   tag:Int -> this.base + 2
@@ -74,7 +74,7 @@ class TraitAttributeTest {
         // The struct coerces to the trait; the trait-view attribute resolves to
         // the producer (upcast + downcast are free — attributes are projections).
         assertEquals("1", run("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 assign trait Ipsum:Heavyish {
                   weight:Int -> 1
@@ -90,7 +90,7 @@ class TraitAttributeTest {
         // trait → struct is free: the value kept its concrete identity, so the
         // downcast recovers Ipsum's own fields (no information was lost).
         assertEquals("5", run("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 assign trait Ipsum:Heavyish {
                   weight:Int -> 1
@@ -108,7 +108,7 @@ class TraitAttributeTest {
         // satisfier) must be rejected — the value can't masquerade as a type it
         // isn't.
         var r = runner.run(compiler.compileAlt("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 struct Other(name:Int)
                 assign trait Ipsum:Heavyish { weight:Int -> 1 }
@@ -128,7 +128,7 @@ class TraitAttributeTest {
         // Lorem already brings `weight:[Int:@>0]`, so the impl provides only the
         // method — the field satisfies the attribute (no producer needed).
         assertEquals("9", run("""
-                let Heavyish:Type{ ping:[Method():Int], weight:[Int:@>0] }
+                trait Heavyish{ ping:[Method():Int], weight:[Int:@>0] }
                 struct Lorem(weight:[Int:@>0], name:Int)
                 assign trait Lorem:Heavyish {
                   ping():Int -> 7
@@ -143,7 +143,7 @@ class TraitAttributeTest {
     @Test
     void missingAttribute_incomplete_rejected() {
         String err = reject("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Sit(name:Int)
                 assign trait Sit:Heavyish { }
                 42
@@ -156,7 +156,7 @@ class TraitAttributeTest {
     @Test
     void fieldAndProducer_overAssignment_rejected() {
         String err = reject("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Lorem(weight:[Int:@>0])
                 assign trait Lorem:Heavyish {
                   weight:Int -> 9
@@ -171,7 +171,7 @@ class TraitAttributeTest {
     @Test
     void producerForUnknownAttribute_overAssignment_rejected() {
         String err = reject("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 assign trait Ipsum:Heavyish {
                   weight:Int -> 1
@@ -188,7 +188,7 @@ class TraitAttributeTest {
     void fieldNotProvablyRefined_failClosed_rejected() {
         // Dolor's `weight:Int` isn't provably > 0, and no producer is given.
         String err = reject("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Dolor(weight:Int)
                 assign trait Dolor:Heavyish { }
                 42
@@ -201,7 +201,7 @@ class TraitAttributeTest {
     void producerViolatesRefinement_failClosed_rejected() {
         // The producer must satisfy the CONTRACT refinement [Int:@>0]; 0 doesn't.
         String err = reject("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 assign trait Ipsum:Heavyish {
                   weight:Int -> 0

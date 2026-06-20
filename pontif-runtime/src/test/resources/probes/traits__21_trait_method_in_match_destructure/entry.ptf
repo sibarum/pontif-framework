@@ -1,4 +1,4 @@
-let Sized:Type{
+trait Sized{
   size:[Method():Int]
 }
 

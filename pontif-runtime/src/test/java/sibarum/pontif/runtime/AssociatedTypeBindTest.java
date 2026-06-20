@@ -32,7 +32,7 @@ class AssociatedTypeBindTest {
     }
 
     private static final String EXPR = """
-            let Expr:Type{
+            trait Expr{
               type T,
               simplify:[Method():Expr],
               evaluate:[Method():T]

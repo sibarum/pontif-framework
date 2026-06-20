@@ -41,7 +41,7 @@ class OperatorTraitContractTest {
         // `+` is witnessed by the free overload; the empty impl block carries the
         // satisfaction claim, and `v + v` routes to that overload.
         assertEquals("2", run("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vector(x:Int, y:Int)
                 function +(a:Vector, b:Vector):Vector -> Vector(a.x + b.x, a.y + b.y)
                 assign trait Vector:Numeric { }
@@ -53,7 +53,7 @@ class OperatorTraitContractTest {
     @Test
     void missingOperatorOverload_rejected() {
         String err = reject("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vector(x:Int, y:Int)
                 assign trait Vector:Numeric { }
                 0
@@ -65,7 +65,7 @@ class OperatorTraitContractTest {
     void wrongReturnType_notWitnessed_rejected() {
         // `+(Vector, Vector):Int` is not the homogeneous `(T,T):T` shape.
         String err = reject("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vector(x:Int, y:Int)
                 function +(a:Vector, b:Vector):Int -> a.x + b.x
                 assign trait Vector:Numeric { }
@@ -78,7 +78,7 @@ class OperatorTraitContractTest {
     void wrongOperandType_notWitnessed_rejected() {
         // An overload exists under `+`, but not over (Vector, Vector).
         String err = reject("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vector(x:Int, y:Int)
                 struct Other(z:Int)
                 function +(a:Other, b:Other):Other -> Other(a.z + b.z)
@@ -91,7 +91,7 @@ class OperatorTraitContractTest {
     @Test
     void multipleOperators_oneMissing_rejected() {
         String err = reject("""
-                let Numeric:Type{
+                trait Numeric{
                   +:[Dispatch(this.type, this.type):this.type],
                   *:[Dispatch(this.type, this.type):this.type]
                 }
@@ -107,7 +107,7 @@ class OperatorTraitContractTest {
     void multipleOperators_allWitnessed_compiles() {
         // v=(2,3): (v*v).x = 2*2 = 4; (v+v).x = 2+2 = 4; sum = 8.
         assertEquals("8", run("""
-                let Numeric:Type{
+                trait Numeric{
                   +:[Dispatch(this.type, this.type):this.type],
                   *:[Dispatch(this.type, this.type):this.type]
                 }
@@ -125,7 +125,7 @@ class OperatorTraitContractTest {
         // The method is implemented in the block; the operator is witnessed by the
         // free overload — both kinds verified in one impl.
         assertEquals("5", run("""
-                let Showy:Type{
+                trait Showy{
                   +:[Dispatch(this.type, this.type):this.type],
                   size:[Method():Int]
                 }

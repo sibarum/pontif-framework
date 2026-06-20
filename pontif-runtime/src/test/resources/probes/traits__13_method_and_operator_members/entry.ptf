@@ -1,4 +1,4 @@
-let Showy:Type{
+trait Showy{
   +:[Dispatch(this.type, this.type):this.type],
   size:[Method():Int]
 }

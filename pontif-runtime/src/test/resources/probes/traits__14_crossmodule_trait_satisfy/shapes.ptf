@@ -2,7 +2,7 @@ module geo.shapes
 
 exports @.{Point}
 
-let Duck:Type{
+trait Duck{
   quack:[Method():Int]
 }
 

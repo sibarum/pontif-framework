@@ -1,4 +1,4 @@
-let Sized:Type{ size:[Method():Int] }
+trait Sized{ size:[Method():Int] }
 struct Vec(x:Int, y:Int)
 struct Bare(z:Int)
 assign trait Vec:Sized {

@@ -1,4 +1,4 @@
-let Expr:Type{
+trait Expr{
   simplify:[Method():Expr]
 }
 

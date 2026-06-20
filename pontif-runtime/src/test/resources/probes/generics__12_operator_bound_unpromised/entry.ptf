@@ -1,4 +1,4 @@
-let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
 struct Vec(x:Int, y:Int)
 function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
 function -(a:Vec, b:Vec):Vec -> Vec(a.x - b.x, a.y - b.y)

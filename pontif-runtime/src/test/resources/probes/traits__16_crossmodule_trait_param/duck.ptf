@@ -2,6 +2,6 @@ module contracts.duck
 
 exports @.{Duck}
 
-let Duck:Type{
+trait Duck{
   quack:[Method():Int]
 }

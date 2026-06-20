@@ -165,7 +165,7 @@ class ReadmeSnippetTest {
     @Test
     void readmeTraitMethodSnippet_evaluatesTo107() {
         assertEquals("107", runGated("""
-                let Greeter:Type{ greet:[Method():Int] }
+                trait Greeter{ greet:[Method():Int] }
 
                 struct Formal(rank:Int)
                 struct Casual(mood:Int)
@@ -188,7 +188,7 @@ class ReadmeSnippetTest {
     @Test
     void readmeTraitProducerSnippet_evaluatesTo1() {
         assertEquals("1", runGated("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
 
                 struct Ipsum(name:Int)
 
@@ -204,7 +204,7 @@ class ReadmeSnippetTest {
     @Test
     void readmeTraitCoercionSnippet_roundTripsTo5() {
         assertEquals("5", runGated("""
-                let Heavyish:Type{ weight:[Int:@>0] }
+                trait Heavyish{ weight:[Int:@>0] }
 
                 struct Ipsum(name:Int)
 
@@ -260,7 +260,7 @@ class ReadmeSnippetTest {
     @Test
     void readmeParametricTraitSnippet_evaluatesTo42() {
         assertEquals("42", runGated("""
-                let Container[type E]:Type{ get:[Method():E] }
+                trait Container[type E]{ get:[Method():E] }
 
                 struct Box[type T](value:T)
 

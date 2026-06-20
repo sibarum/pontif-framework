@@ -2,7 +2,7 @@ module num.vector
 
 exports @.{Vector}
 
-let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
 
 struct Vector(x:Int, y:Int)
 

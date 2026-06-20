@@ -73,7 +73,7 @@ class OperatorCompletenessTest {
     // --- Step C: trait-typed operands ---
 
     private static final String NUMERIC =
-            "let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }\n"
+            "trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }\n"
             + "struct Vec(x:Int, y:Int)\n"
             + "function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)\n"
             + "assign trait Vec:Numeric { }\n";

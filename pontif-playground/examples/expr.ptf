@@ -1,10 +1,10 @@
-let Expr:Type{
+trait Expr{
   simplify:[Method():Expr],
   evaluate:[Method():Expr],
   copy:[Method():this.type]
 }
 
-let Literal[type T]:Type{
+trait Literal[type T]{
 		  value:T
 }
 

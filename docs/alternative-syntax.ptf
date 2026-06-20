@@ -265,7 +265,7 @@ function same(a:Point, b:Point):Bool -> a == b
 # `assign trait`; satisfaction is checked at narrowing time by SortChecker
 # and dispatch is resolved at runtime by consulting the TraitRegistry.
 # Narrowing handles polymorphism — no parallel trait-dispatch mechanism.
-let Duck:Type{
+trait Duck{
   quack:[Method():Int]
 }
 

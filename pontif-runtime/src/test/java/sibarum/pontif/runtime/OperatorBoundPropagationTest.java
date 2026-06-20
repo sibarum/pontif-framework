@@ -36,7 +36,7 @@ class OperatorBoundPropagationTest {
     @Test
     void genericBodyUsesBoundOperator_compilesAndRuns() {
         assertEquals("4", run("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vec(x:Int, y:Int)
                 function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
                 assign trait Vec:Numeric { }
@@ -50,7 +50,7 @@ class OperatorBoundPropagationTest {
         // `let c = a + b` gives c:E (the contract result is the self type), so the
         // following `c + a` is also checked/typed over E — reach via narrowing.
         assertEquals("5", run("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vec(x:Int, y:Int)
                 function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
                 assign trait Vec:Numeric { }
@@ -64,7 +64,7 @@ class OperatorBoundPropagationTest {
     @Test
     void genericBodyUsesUnboundedOperator_rejected() {
         String err = reject("""
-                let Numeric:Type{ +:[Dispatch(this.type, this.type):this.type] }
+                trait Numeric{ +:[Dispatch(this.type, this.type):this.type] }
                 struct Vec(x:Int, y:Int)
                 function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
                 function -(a:Vec, b:Vec):Vec -> Vec(a.x - b.x, a.y - b.y)

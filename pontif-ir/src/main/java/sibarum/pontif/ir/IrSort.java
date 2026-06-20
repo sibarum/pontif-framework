@@ -214,7 +214,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // null values — Map.copyOf would not.
             associatedTypes = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(associatedTypes));
-            // `[type T]` slot parameters on the trait (`let Expr[type T]:Type{…}`,
+            // `[type T]` slot parameters on the trait (`trait Expr[type T]{…}`,
             // docs/type-parameters.md §2.1) — distinct from associatedTypes:
             // parameters are chosen from OUTSIDE (the user writes `Expr[Int]`),
             // associated types are fixed by the implementor. Null = unbounded.

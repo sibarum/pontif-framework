@@ -30,7 +30,7 @@ class RecursiveTraitTest {
     void selfReferentialTraitDeclaration_compiles() {
         // The bare declaration alone used to fail with the alias-cycle error.
         assertEquals("0", run("""
-                let Expr:Type{
+                trait Expr{
                   simplify:[Method():Expr]
                 }
                 0
@@ -40,8 +40,8 @@ class RecursiveTraitTest {
     @Test
     void mutuallyRecursiveTraits_compile() {
         assertEquals("0", run("""
-                let Ping:Type{ toPong:[Method():Pong] }
-                let Pong:Type{ toPing:[Method():Ping] }
+                trait Ping{ toPong:[Method():Pong] }
+                trait Pong{ toPing:[Method():Ping] }
                 0
                 """));
     }
@@ -51,7 +51,7 @@ class RecursiveTraitTest {
         // A concrete type implements the recursive trait; its method returns the
         // trait (here, itself coerced to Expr). The result downcasts back.
         assertEquals("5", run("""
-                let Expr:Type{
+                trait Expr{
                   simplify:[Method():Expr]
                 }
                 struct Lit(value:Int)

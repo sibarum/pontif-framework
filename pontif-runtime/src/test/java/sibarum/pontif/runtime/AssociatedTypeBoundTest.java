@@ -31,11 +31,11 @@ class AssociatedTypeBoundTest {
     }
 
     private static final String SETUP = """
-            let Showable:Type{ describe:[Method():Int] }
+            trait Showable{ describe:[Method():Int] }
             struct Tag(n:Int)
             assign trait Tag:Showable { describe():Int -> this.n }
 
-            let Box:Type{
+            trait Box{
               type T:Showable,
               get:[Method():T]
             }

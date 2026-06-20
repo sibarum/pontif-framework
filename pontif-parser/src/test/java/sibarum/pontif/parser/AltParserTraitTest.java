@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests for alt-syntax trait surface:
  * <ul>
- *   <li>{@code let Duck:Type{methodName:[Method(...):Ret], ...}} — trait
+ *   <li>{@code trait Duck{methodName:[Method(...):Ret], ...}} — trait
  *       declaration, lowers to {@link IrStmt.TypeAlias} with
  *       {@link IrSort.Trait}.</li>
  *   <li>{@code assign trait Donald:Duck { methodName(params):Ret -> body }} —
@@ -28,11 +28,11 @@ class AltParserTraitTest {
         return AltParser.parseModule(src, "t");
     }
 
-    // --- let X:Type{...} ----------------------------------------------------
+    // --- trait X{...} ----------------------------------------------------
 
     @Test
     void traitDecl_lowersToTypeAliasWithTraitSort() throws Exception {
-        IrModule m = parse("let Duck:Type{quack:[Method():Int]}");
+        IrModule m = parse("trait Duck{quack:[Method():Int]}");
         IrStmt.TypeAlias ta = assertInstanceOf(IrStmt.TypeAlias.class, m.statements().get(0));
         assertEquals("Duck", ta.name());
         IrSort.Trait trait = assertInstanceOf(IrSort.Trait.class, ta.sort());
@@ -42,7 +42,7 @@ class AltParserTraitTest {
 
     @Test
     void traitDecl_methodWithParams_parses() throws Exception {
-        IrModule m = parse("let Eater:Type{eat:[Method(Int):Int]}");
+        IrModule m = parse("trait Eater{eat:[Method(Int):Int]}");
         IrStmt.TypeAlias ta = (IrStmt.TypeAlias) m.statements().get(0);
         IrSort.Trait trait = (IrSort.Trait) ta.sort();
         IrSort.Method eatSig = trait.methods().get("eat");
@@ -52,7 +52,7 @@ class AltParserTraitTest {
     @Test
     void traitDecl_multipleMethods_parses() throws Exception {
         IrModule m = parse("""
-                let Duck:Type{
+                trait Duck{
                   quack:[Method():Int],
                   eat:[Method(Int):Int]
                 }
@@ -65,15 +65,23 @@ class AltParserTraitTest {
     void traitDecl_withValue_throws() {
         // Trait sorts can't have values; trait decls are type-level only.
         ParseException ex = assertThrows(ParseException.class, () ->
-                parse("let Duck:Type{quack:[Method():Int]} = 5"));
+                parse("trait Duck{quack:[Method():Int]} = 5"));
         assertTrue(ex.getMessage().toLowerCase().contains("trait"));
+    }
+
+    @Test
+    void traitDecl_retiredLetTypeForm_throwsMigrationError() {
+        // The old `let NAME:Type{…}` trait form is retired in favor of `trait NAME{…}`.
+        ParseException ex = assertThrows(ParseException.class, () ->
+                parse("let Duck:Type{quack:[Method():Int]}"));
+        assertTrue(ex.getMessage().contains("trait"));
     }
 
     @Test
     void traitDecl_nonMethodMember_isTypedAttribute() throws Exception {
         // A non-Method member sort is a typed DATA attribute (existence + type),
         // not an error — methods and attributes live together in `Type{…}`.
-        IrModule m = parse("let Boxed:Type{width:Int, height:Int}");
+        IrModule m = parse("trait Boxed{width:Int, height:Int}");
         IrSort.Trait trait = (IrSort.Trait) ((IrStmt.TypeAlias) m.statements().get(0)).sort();
         assertEquals(0, trait.methods().size());
         assertEquals(2, trait.attributes().size());
@@ -82,7 +90,7 @@ class AltParserTraitTest {
 
     @Test
     void traitDecl_methodsAndAttributesTogether_parse() throws Exception {
-        IrModule m = parse("let Heavyish:Type{ping:[Method():Int], weight:[Int:@>0]}");
+        IrModule m = parse("trait Heavyish{ping:[Method():Int], weight:[Int:@>0]}");
         IrSort.Trait trait = (IrSort.Trait) ((IrStmt.TypeAlias) m.statements().get(0)).sort();
         assertTrue(trait.methods().containsKey("ping"));
         assertInstanceOf(IrSort.Refined.class, trait.attributes().get("weight"));
@@ -91,7 +99,7 @@ class AltParserTraitTest {
     @Test
     void traitDecl_memberWithoutType_throws() {
         // A member name with no type is rejected (no typeless attribute).
-        assertThrows(ParseException.class, () -> parse("let Duck:Type{weight}"));
+        assertThrows(ParseException.class, () -> parse("trait Duck{weight}"));
     }
 
     // --- assign trait X:Y { ... } -------------------------------------------
@@ -99,7 +107,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_singleMethod_lowersToTraitImpl() throws Exception {
         IrModule m = parse("""
-                let Duck:Type{quack:[Method():Int]}
+                trait Duck{quack:[Method():Int]}
                 struct Donald(name:Int)
                 assign trait Donald:Duck {
                   quack():Int -> 42
@@ -121,7 +129,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_methodUsesSelf_parsesCorrectly() throws Exception {
         IrModule m = parse("""
-                let Sized:Type{size:[Method():Int]}
+                trait Sized{size:[Method():Int]}
                 struct Point(x:Int, y:Int)
                 assign trait Point:Sized {
                   size():Int -> this.x + this.y
@@ -138,7 +146,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_methodWithUserParam_selfPrependedAndUserParamFollows() throws Exception {
         IrModule m = parse("""
-                let Eater:Type{eat:[Method(Int):Int]}
+                trait Eater{eat:[Method(Int):Int]}
                 struct Cow(mass:Int)
                 assign trait Cow:Eater {
                   eat(food:Int):Int -> this.mass + food
@@ -155,7 +163,7 @@ class AltParserTraitTest {
     @Test
     void traitImpl_multipleMethods_allParsed() throws Exception {
         IrModule m = parse("""
-                let Duck:Type{
+                trait Duck{
                   quack:[Method():Int],
                   eat:[Method(Int):Int]
                 }
@@ -175,7 +183,7 @@ class AltParserTraitTest {
     void traitImpl_keywordAsMethodName_throws() {
         ParseException ex = assertThrows(ParseException.class, () ->
                 parse("""
-                        let Duck:Type{match:[Method():Int]}
+                        trait Duck{match:[Method():Int]}
                         struct Donald(name:Int)
                         assign trait Donald:Duck {
                           match():Int -> 42

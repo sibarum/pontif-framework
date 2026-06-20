@@ -1,4 +1,4 @@
-let Heavyish:Type{ weight:[Int:@>0] }
+trait Heavyish{ weight:[Int:@>0] }
 
 struct Sit(name:Int)
 

@@ -35,7 +35,7 @@ class AltParserOperatorTraitTest {
 
     @Test
     void operatorMember_landsInOperators_notMethodsOrAttributes() throws Exception {
-        IrSort.Trait trait = traitOf("let Numeric:Type{+:[Dispatch(this.type, this.type):this.type]}");
+        IrSort.Trait trait = traitOf("trait Numeric{+:[Dispatch(this.type, this.type):this.type]}");
         assertEquals("Numeric", trait.name());
         assertTrue(trait.operators().containsKey("+"), "operator '+' should land in operators()");
         assertTrue(trait.methods().isEmpty(), "no method members");
@@ -51,7 +51,7 @@ class AltParserOperatorTraitTest {
     @Test
     void multipleOperatorMembers() throws Exception {
         IrSort.Trait trait = traitOf("""
-                let Numeric:Type{
+                trait Numeric{
                   +:[Dispatch(this.type, this.type):this.type],
                   *:[Dispatch(this.type, this.type):this.type]
                 }
@@ -63,7 +63,7 @@ class AltParserOperatorTraitTest {
     @Test
     void operatorAndMethodMembers_coexist() throws Exception {
         IrSort.Trait trait = traitOf("""
-                let Showy:Type{
+                trait Showy{
                   +:[Dispatch(this.type, this.type):this.type],
                   show:[Method():Int]
                 }
@@ -75,7 +75,7 @@ class AltParserOperatorTraitTest {
 
     @Test
     void comparisonOperatorMember() throws Exception {
-        IrSort.Trait trait = traitOf("let Ord:Type{<:[Dispatch(this.type, this.type):this.type]}");
+        IrSort.Trait trait = traitOf("trait Ord{<:[Dispatch(this.type, this.type):this.type]}");
         assertTrue(trait.operators().containsKey("<"));
     }
 
@@ -84,14 +84,14 @@ class AltParserOperatorTraitTest {
     @Test
     void mixedOperandContract_rejectedWithClearError() {
         ParseException e = assertThrows(ParseException.class,
-                () -> parse("let Bad:Type{+:[Dispatch(this.type, Int):this.type]}"));
+                () -> parse("trait Bad{+:[Dispatch(this.type, Int):this.type]}"));
         assertTrue(e.getMessage().contains("homogeneous"), () -> e.getMessage());
     }
 
     @Test
     void nonSelfResultContract_rejected() {
         ParseException e = assertThrows(ParseException.class,
-                () -> parse("let Bad:Type{+:[Dispatch(this.type, this.type):Int]}"));
+                () -> parse("trait Bad{+:[Dispatch(this.type, this.type):Int]}"));
         assertTrue(e.getMessage().contains("homogeneous"), () -> e.getMessage());
     }
 
@@ -100,14 +100,14 @@ class AltParserOperatorTraitTest {
     @Test
     void operatorMemberWithNonDispatchSort_rejected() {
         ParseException e = assertThrows(ParseException.class,
-                () -> parse("let Bad:Type{+:[Method(this.type):this.type]}"));
+                () -> parse("trait Bad{+:[Method(this.type):this.type]}"));
         assertTrue(e.getMessage().contains("Dispatch"), () -> e.getMessage());
     }
 
     @Test
     void nonOverloadableOperatorMember_rejected() {
         ParseException e = assertThrows(ParseException.class,
-                () -> parse("let Bad:Type{&:[Dispatch(this.type, this.type):this.type]}"));
+                () -> parse("trait Bad{&:[Dispatch(this.type, this.type):this.type]}"));
         assertTrue(e.getMessage().contains("overloadable"), () -> e.getMessage());
     }
 
@@ -115,7 +115,7 @@ class AltParserOperatorTraitTest {
     void duplicateOperatorMember_rejected() {
         ParseException e = assertThrows(ParseException.class,
                 () -> parse("""
-                        let Bad:Type{
+                        trait Bad{
                           +:[Dispatch(this.type, this.type):this.type],
                           +:[Dispatch(this.type, this.type):this.type]
                         }

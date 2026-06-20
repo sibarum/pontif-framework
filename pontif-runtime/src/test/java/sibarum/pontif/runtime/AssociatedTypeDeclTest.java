@@ -32,7 +32,7 @@ class AssociatedTypeDeclTest {
     @Test
     void associatedType_inReturnPosition_isInScope() {
         compiles("""
-                let Producer:Type{
+                trait Producer{
                   type T,
                   get:[Method():T]
                 }
@@ -43,7 +43,7 @@ class AssociatedTypeDeclTest {
     @Test
     void associatedType_inArgumentAndNestedPositions_isInScope() {
         compiles("""
-                let Sink:Type{
+                trait Sink{
                   type T,
                   put:[Method(T):Sink],
                   swap:[Method(T):T]
@@ -57,7 +57,7 @@ class AssociatedTypeDeclTest {
         // `Undeclared` is neither a primitive, a declared type, nor an
         // associated type of this trait — still an Unknown sort.
         PontifCompiler.CompileResult.Failed f = rejects("""
-                let Producer:Type{
+                trait Producer{
                   type T,
                   get:[Method():Undeclared]
                 }
@@ -73,8 +73,8 @@ class AssociatedTypeDeclTest {
         // impl's binding actually satisfies the bound is slice 4; this is just
         // that the bounded declaration parses and validates.)
         compiles("""
-                let Showable:Type{ describe:[Method():Int] }
-                let Box:Type{
+                trait Showable{ describe:[Method():Int] }
+                trait Box{
                   type T:Showable,
                   get:[Method():T]
                 }
@@ -86,7 +86,7 @@ class AssociatedTypeDeclTest {
     void associatedTypeName_doesNotLeakOutsideTheTrait() {
         // `T` is scoped to Producer; using it as a sort elsewhere is unknown.
         PontifCompiler.CompileResult.Failed f = rejects("""
-                let Producer:Type{
+                trait Producer{
                   type T,
                   get:[Method():T]
                 }
