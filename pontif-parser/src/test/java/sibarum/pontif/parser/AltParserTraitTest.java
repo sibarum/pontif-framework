@@ -70,6 +70,16 @@ class AltParserTraitTest {
     }
 
     @Test
+    void anonymousTypeSort_usableInAnySortPosition_parses() throws Exception {
+        // `Type{…}` is an anonymous trait sort literal usable wherever a sort can
+        // appear (the unified type-spec system, parallel to `[Int:@>0]`), not only
+        // in a `trait` declaration. Here: a parameter sort. (Parses without error.)
+        IrModule m = parse("function f(d:Type{quack:[Method():Int]}):Int -> 1");
+        IrStmt.FunctionDecl fn = (IrStmt.FunctionDecl) m.statements().get(0);
+        assertTrue(fn.params().get(0).sort() instanceof IrSort.Trait);
+    }
+
+    @Test
     void traitDecl_retiredLetTypeForm_throwsMigrationError() {
         // The old `let NAME:Type{…}` trait form is retired in favor of `trait NAME{…}`.
         ParseException ex = assertThrows(ParseException.class, () ->

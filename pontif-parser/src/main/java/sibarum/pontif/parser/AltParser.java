@@ -1277,6 +1277,16 @@ public final class AltParser {
                 declaredSortAliases.add(name);
                 return new IrStmt.TypeAlias(name, aliased, start.origin());
             }
+            // A NAMED trait uses the `trait` declarator, not `let` (a body-binding
+            // form). Note the anonymous `Type{…}` sort itself stays usable in any
+            // sort position (parseSort) — part of the unified type-spec system;
+            // only naming one via `let` is redirected to `trait`.
+            if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+                throw new ParseException(
+                        "Declare a named trait with `trait " + name + "{ … }` — `let` is a "
+                                + "binding form, not the declarator for traits.",
+                        peek().origin());
+            }
             declaredSort = parseSort();
         }
         IrExpr value = null;
@@ -2030,14 +2040,15 @@ public final class AltParser {
                 AltToken typeTok = consume();   // type
                 return new IrSort.Named(IrSort.SELF_TYPE, t.spanTo(typeTok));
             }
-            // `Type{...}` as a sort is retired: traits are declared with the
-            // `trait` keyword (parseTrait), not via a `Type{…}` sort literal.
+            // `Type{...}` — an anonymous trait sort literal, usable in ANY sort
+            // position (param/return/nested in unions/refinements), part of the
+            // unified type-spec system (parallel to `[Int:@>0]`). The
+            // `trait NAME{…}` declarator (parseTrait) names one; this is the
+            // anonymous form. (Naming a trait via `let NAME:Type{…}` is redirected
+            // to `trait` in parseLet, but the anonymous sort stays first-class.)
             if (t.text().equals("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
-                throw new ParseException(
-                        "Traits are declared with the `trait` keyword now — write "
-                                + "`trait NAME{ … }`, not `let NAME:Type{ … }` "
-                                + "(the `Type{…}` trait sort was retired).",
-                        t.origin());
+                consume();  // "Type"
+                return parseTraitMembers(t);
             }
             // `Name{e1, e2, …}` — a construction-pin return sort over a declared
             // struct (S5): desugars to `[Name:@ == Name(e1, …)]`, so spec-only
@@ -2203,13 +2214,14 @@ public final class AltParser {
     }
 
     /**
-     * Parses the {@code { member, ... }} body of a {@code trait NAME{...}}
-     * declaration (the brace block after the name + optional type-param slot).
+     * Parses the {@code { member, ... }} brace block of a trait sort, after the
+     * head token. Used two ways: by {@link #parseTrait} for a named declaration
+     * ({@code trait NAME{...}}, name patched in afterward), and by the sort parser
+     * for the anonymous {@code Type{...}} sort literal usable in any sort position.
      * A member is {@code name:[Method(...):Ret]} (a method), {@code name:Sort}
      * (a data attribute), {@code op:[Dispatch(...)]} (an operator contract), or
      * {@code type X[:Bound]} (an associated type). The returned
-     * {@link IrSort.Trait} has a placeholder name; {@link #parseTrait} patches it
-     * with the declared name and the type-param slot.
+     * {@link IrSort.Trait} has a placeholder name until a declaration patches it.
      */
     private IrSort.Trait parseTraitMembers(AltToken headTok) throws ParseException {
         expect(AltToken.Kind.LBRACE);
