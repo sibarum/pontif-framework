@@ -32,7 +32,11 @@ memory `project_type_spec_layering`.*
   **receiver-relative** bounds (`at(i:[Int:@<this.count])`); **value-indexed struct
   sorts** (`OutOfRange(i)`); and **named-parameter method sorts** (`[Method(i:Int):…i…]`,
   rejected at `AltParser:2686` today). First consumer = `Indexed` (`docs/indexed-streams.md`).
-  Needs a war doc. **Deepest, but no longer cold.**
+  **War doc: `docs/dependent-sorts.md` (PROPOSED)** — substrate-first; slice 1 =
+  `IrSort.Method` carries param names (the fulcrum, deletes the `:2686` guard); binder
+  references + scope + substitution next; discharge deferred behind `[!!]`. **Chosen as
+  the FIRST facet** (it's foundational — the others are built on it; §1 of the doc).
+  Deepest, but no longer cold.
 - **Structural (anonymous) traits.** `function f(x:Type{m:[Method():Int]})` parses but
   dispatch is unwired — spike: `No method 'm' on type '_pending'`. Fix: resolve methods
   against the receiver's trait CONTRACT members (named or anonymous), not its name; add
