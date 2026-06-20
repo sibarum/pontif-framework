@@ -136,7 +136,15 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
     }
 
-    record Method(List<IrSort> paramSorts, IrSort returnSort, Origin origin) implements IrSort {
+    /**
+     * A method/function sort. {@code paramNames} is either empty (a positional sort,
+     * {@code [Method(Int,Int):R]}) or one name per parameter (a named sort,
+     * {@code [Method(i:Int,j:Int):R]}) — never partially named. Names are the binders a
+     * dependent return/param sort may reference (WAR(dependent-sorts), slice 1 carries
+     * them; slice 2 resolves references to them).
+     */
+    record Method(List<IrSort> paramSorts, List<String> paramNames, IrSort returnSort, Origin origin)
+            implements IrSort {
         public Method {
             if (paramSorts == null) {
                 throw new IllegalArgumentException("Method paramSorts must be non-null");
@@ -145,6 +153,18 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                 throw new IllegalArgumentException("Method returnSort must be non-null");
             }
             paramSorts = List.copyOf(paramSorts);
+            paramNames = paramNames == null ? List.of() : List.copyOf(paramNames);
+            if (!paramNames.isEmpty() && paramNames.size() != paramSorts.size()) {
+                throw new IllegalArgumentException(
+                        "Method paramNames, when present, must be one per parameter "
+                                + "(got " + paramNames.size() + " names for "
+                                + paramSorts.size() + " params)");
+            }
+        }
+
+        /** Back-compat: a positional method sort — no parameter names. */
+        public Method(List<IrSort> paramSorts, IrSort returnSort, Origin origin) {
+            this(paramSorts, List.of(), returnSort, origin);
         }
     }
 

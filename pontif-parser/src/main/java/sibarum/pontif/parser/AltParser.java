@@ -2694,28 +2694,30 @@ public final class AltParser {
     }
 
     /**
-     * Parses {@code (P1, P2, ...):R} after the {@code Method} keyword.
-     * Only positional/anonymous param sorts are accepted in slice 7. Named
-     * params ({@code (x:Int)}) require {@link IrSort.Method} to carry param
-     * names — tracked as deferred work.
+     * Parses {@code (P1, P2, ...):R} after the {@code Method} keyword. Each parameter
+     * is either positional ({@code Int}) or named ({@code i:Int}); a sort is all-named
+     * or all-positional (mixing is an error). Named parameters are the binders a
+     * dependent return/param sort references (WAR(dependent-sorts), slice 1: names are
+     * parsed and carried on {@link IrSort.Method}; slice 2 resolves references to them).
      *
-     * <p>The returned {@link IrSort.Method} uses the {@code Method} token's
-     * origin; the caller may rebuild with a wider span if it has the closing
-     * {@code ]} on hand.
+     * <p>The returned {@link IrSort.Method} uses the {@code Method} token's origin; the
+     * caller may rebuild with a wider span if it has the closing {@code ]} on hand.
      */
     private IrSort.Method parseFunctionSortBody(AltToken funcTok) throws ParseException {
         expect(AltToken.Kind.LPAREN);
         List<IrSort> paramSorts = new ArrayList<>();
+        List<String> paramNames = new ArrayList<>();
+        int named = 0;
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RPAREN) {
             if (!first) expect(AltToken.Kind.COMMA);
             if (peek().kind() == AltToken.Kind.IDENT
                     && peek(1).kind() == AltToken.Kind.COLON) {
-                throw new ParseException(
-                        "Named-parameter method sorts (e.g., [Method(x:Int):Ret]) "
-                                + "are not yet supported — IrSort.Method needs param-name "
-                                + "support. Use positional form for now.",
-                        peek().origin());
+                paramNames.add(expect(AltToken.Kind.IDENT).text());
+                expect(AltToken.Kind.COLON);
+                named++;
+            } else {
+                paramNames.add("");  // positional placeholder (dropped unless all named)
             }
             paramSorts.add(parseSort());
             first = false;
@@ -2723,7 +2725,13 @@ public final class AltParser {
         expect(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
-        return new IrSort.Method(paramSorts, returnSort, funcTok.origin());
+        if (named != 0 && named != paramSorts.size()) {
+            throw new ParseException(
+                    "Method sort mixes named and positional parameters — name all of "
+                            + "them or none.", funcTok.origin());
+        }
+        List<String> names = named == 0 ? List.of() : paramNames;
+        return new IrSort.Method(paramSorts, names, returnSort, funcTok.origin());
     }
 
     /**

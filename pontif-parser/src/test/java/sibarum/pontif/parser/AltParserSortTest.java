@@ -237,13 +237,30 @@ class AltParserSortTest {
     }
 
     @Test
-    void functionSort_namedParams_notYetSupported() {
-        // [Method(x:Int):Ret] — named params would let return refinements
-        // reference the param, but IrSort.Method doesn't carry names yet.
+    void functionSort_positionalParams_haveNoNames() throws Exception {
+        // Positional sorts keep the empty-names (positional) form.
+        IrSort.Method f = (IrSort.Method) sort("[Method(Int, Bool):Int]");
+        assertTrue(f.paramNames().isEmpty(), "positional sort carries no names");
+    }
+
+    @Test
+    void functionSort_namedParams_carryNames() throws Exception {
+        // [Method(i:Int, j:Bool):Int] — named params now parse and carry their names
+        // (WAR(dependent-sorts) slice 1: IrSort.Method holds param names).
+        IrSort.Method f = (IrSort.Method) sort("[Method(i:Int, j:Bool):Int]");
+        assertEquals(2, f.paramSorts().size());
+        assertEquals(java.util.List.of("i", "j"), f.paramNames());
+        assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
+        assertEquals("Bool", ((IrSort.Named) f.paramSorts().get(1)).name());
+    }
+
+    @Test
+    void functionSort_mixedNamedAndPositional_isError() {
+        // Name all parameters or none — mixing is rejected.
         ParseException ex = assertThrows(ParseException.class,
-                () -> sort("[Method(x:Int):Int]"));
-        assertTrue(ex.getMessage().contains("Named-parameter"),
-                "expected error about named-parameter; got: " + ex.getMessage());
+                () -> sort("[Method(i:Int, Bool):Int]"));
+        assertTrue(ex.getMessage().contains("mixes named and positional"),
+                "expected mixed-params error; got: " + ex.getMessage());
     }
 
     @Test

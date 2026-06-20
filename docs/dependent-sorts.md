@@ -173,11 +173,14 @@ Honesty is preserved at every rung: rung 1 is total (can't lie), rung 2 degrades
 Per the rewrite rule (`feedback_vertical_slices`): each slice is end-to-end.
 
 0. **This doc ratified** (§6 decisions).
-1. **`IrSort.Method` carries parameter names.** Parser accepts `[Method(i:Int):R]`
-   (delete the `:2686` guard); names thread through sort-checker/dispatch/contract
-   validation, ignored where unused. Green = existing suite unchanged + new
-   named-param-method-sort parse/round-trip tests. **No binder references yet, no
-   discharge.** The small, mechanical fulcrum everything waits on.
+1. **`IrSort.Method` carries parameter names. LANDED (2026-06-20).**
+   `IrSort.Method` gained `List<String> paramNames` (canonical 4-arg + a 3-arg
+   back-compat constructor, so all ~20 construction sites compiled unchanged); the
+   parser accepts `[Method(i:Int):R]` (the `:2686` guard deleted) and rejects mixing
+   named/positional. Names are carried but **not yet referenced** by any sort (slice 2)
+   and there is **no discharge**. Green: existing pontif-parser/ir/runtime suites
+   unchanged + new `AltParserSortTest` cases (named carry names, positional stay
+   nameless, mixed rejected). The fulcrum is in place.
 2. **Binder references in sorts + scope + substitution (§3).** A param/return sort may
    name a parameter, `this`, or `this.field`; resolved in the signature scope;
    substituted at application; the synthesis-pin path folded into the general
