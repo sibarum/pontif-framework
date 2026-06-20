@@ -11,6 +11,47 @@ Regression meter: `mvn install -Dmaven.test.skip=true -q` then
 
 ---
 
+## ⭐ Type-system convergence — one scoped type-level binding substrate (4 facets)
+
+*Discovered 2026-06-20 (design dialogue): structural traits, named Type fragments,
+dependent sorts, and generics are NOT independent — they're projections of ONE
+substrate, **scoped type-level bindings that can reference each other** (`[type T]` =
+binder, `let X:Type=frag` = definition, `this.count`/`i`-in-a-return = value-reference;
+a parametric fragment `gte(n)=[@>=n]` is a generic if `n` is a type, a dependent type
+if a value). Build the shared substrate by pulling ONE consumer-driven slice — do NOT
+design a grand calculus up front (lens-not-cage). Layering: `trait`/`struct` are
+root-level declarators (registered/dispatched); `let X:Type=…` is a locally-scopable
+fragment binding (scoping/locality is the essence of `let`). Status per facet tracked
+in `docs/feature-matrix.md` (the `Depend`/`TypeFrag`/`Traits`/`Struct` columns);
+memory `project_type_spec_layering`.*
+
+- **Dependent sorts (the war — was "step 2").** PARTIAL today, not zero: return
+  value-pins already reference params (`ackermann:[Int:@==y_0+1]`, `SpecOnlySynthesisTest`,
+  receipt report). The war EXTENDS this to: a refinement referencing a sibling
+  param / another field's value (`struct Window(n, data:[Indexed:@.count==n])`);
+  **receiver-relative** bounds (`at(i:[Int:@<this.count])`); **value-indexed struct
+  sorts** (`OutOfRange(i)`); and **named-parameter method sorts** (`[Method(i:Int):…i…]`,
+  rejected at `AltParser:2686` today). First consumer = `Indexed` (`docs/indexed-streams.md`).
+  Needs a war doc. **Deepest, but no longer cold.**
+- **Structural (anonymous) traits.** `function f(x:Type{m:[Method():Int]})` parses but
+  dispatch is unwired — spike: `No method 'm' on type '_pending'`. Fix: resolve methods
+  against the receiver's trait CONTRACT members (named or anonymous), not its name; add
+  a call-site structural-satisfaction check. Nominal satisfaction (`assign trait`)
+  already works. **Highest payoff-per-effort** (no new runtime axis; reuses
+  bound-checking). The existential form of a generic bound (`x:Type{…}` ≈
+  `[type T:«contract»](x:T)` with T hidden).
+- **Named Type fragments.** `let gtz:Type = [@>0]`, applied `[Int:gtz]` →
+  `[Int:@>=0]` (base-polymorphic, composable with `&`/`|`). Complete-sort aliases
+  already work (`ReusableSortTest`, `TypeAliasIntegrationTest`); the new bit is
+  **baseless predicate fragments + apply-to-base** (the alias defers the base to the
+  use site, dodging the contextual-base gap). **Smallest / gentlest** way to first
+  exercise local type-level binding. Scope v1 to nullary fragments (no params); a
+  *parametric* fragment is a generic and is the next rung.
+- **Sub-traits.** `trait Indexed[type T]:Stream[T]{…}` — the `:Super` slot the rename
+  freed. To satisfy `B`, also satisfy `A`; a `B`-satisfier is accepted where `A` is
+  expected. Needs the `Stream` trait first (streams slice 2b). **QoL, deprioritized
+  by James — not critical path.**
+
 ## ⭐ Next up — dispatch unification (the valuable remaining rung)
 
 *The inference-engine unification (Cluster 5) is done — one engine, `NarrowingInference`,
@@ -163,6 +204,58 @@ Spec: `docs/conservation-receipts.md` / `docs/conservation-algebra.md`. In prior
 - **Char narrows:** Char IS discrete, so `[Char:@=='a']` singletons + ranges
   (`[Char:@>='a' & @<='z']`) may route through integer discharge — revisit
   `BoundAnalysisRules.containsFrac` and the `SymExpr.Chr` abstention notes.
+
+## Indexed streams — random access as a named capability (PROPOSED — `docs/indexed-streams.md`)
+
+*James reversed `streams.md`'s "no random-access indexing" (2026-06-19): base `Stream`
+still can't index, but `Indexed` (a sub-trait, is-a Stream, tag survives) names the
+capability for storage-backed sequences. `Array` is the first implementor. Spelling
+`xs(i)` already ruled by the bracket/paren law. Scope ruled additive.*
+
+- **FOUNDATIONS GAP (found 2026-06-19, blocks Slice 1 as originally scoped).** Three
+  Slice-1 assumptions do not exist in code: (1) there is **no `Stream` trait** —
+  `std.stream` is flat free-functions over `[Element|Leaf]` (`BuiltinModules.java:116`),
+  the trait is doc-only (streams slice 2b); (2) there is **no sub-trait machinery** —
+  `IrSort.Trait` has no supertrait field, no parser syntax, trait inheritance deferred
+  (`traits.md:282`), so `Indexed : Stream` is inexpressible; (3) there is **no `Array`**
+  (ruled out at the semantic level, depends on unbuilt actions). What DOES exist and is
+  usable: trait DATA attributes (`count` as attribute), unions + bare-arm match
+  (`[Present|OutOfRange]`), and — the reframe — **tuples are the natural first
+  implementor** (ordered, immutable, static `count` via `RecordValue` `_tuple`), not
+  Array. Open altitude decision (James): realize the Stream/Indexed is-a via the unified
+  **narrowing/sort substrate** (no new machinery — preferred) vs build trait-inheritance.
+- **Slice 1 (re-scoped, pending altitude) — `Indexed` + total `at` on tuples.**
+  `count` as a data attribute + total `at(i):[Present(T)|OutOfRange]` (out-of-bounds is a
+  match arm — can't lie, no proof machinery). First implementor = the tuple/aggregate
+  substrate, NOT Array. Interaction to rule: does dynamic `xs(i)` reopen the deliberately-
+  forbidden value-level positional access (`p._0`, `AltParser.java:3214`)? (They differ —
+  static field-style vs dynamic option-returning — but confirm.)
+- **Slice 2 — refined `xs(i):T` via receiver-relative refinement.** `i:[Int: @>=0 & @ <
+  this.count]` (`@`=index, `this`=receiver, `this.count`=FIELD ref — NOT `@.length`,
+  which collides). `count` is a trait DATA attribute (a stored field, honest because
+  values are immutable), so this needs only (a) a refinement may name `this`, (b) the
+  same `@.field` field-access machinery pointed at `this` — it does NOT need
+  `@.method(...)`-predicate sort-checking. What remains is (c) value-dependent bounds
+  discharge (BoundAnalysis/IntegerDischarge; provable for literals + Iterate-bounded
+  indices, else degrades to `[!!T]` hazard). Sibling of the parked "named-parameter
+  method sorts" item (dependent *return* refinement). Soundness rides value
+  immutability (no TOCTOU on `this.count`).
+- **Slice 3 — literals as `Indexed`** (`(1,2,3)` carries static `count` → fixed accesses
+  prove clean) → **Slice 4 — `Iterate` + index → GPU** (unblocks supirvast vector-add
+  WITHOUT tuple columns; likely retires supirvast path-3).
+- **Existing in-code debt noticed (2026-06-19):** `std.stream` ships **interim
+  leniencies** (`BuiltinModules.java:67-73`) — `Element.head` and combinator params typed
+  loose (`_`), and combinator bodies left "residual" in the conservation ledger. These are
+  the placeholders the unbuilt **Stream trait + `[Stream(T)]` sort form** (streams slices
+  2a/2b, `docs/streams.md`) will tighten. Already tracked in the streams slice plan;
+  surfaced here per the no-kludge sweep. Building `Indexed` on the narrowing substrate
+  should tighten these rather than add a parallel loose path.
+- **Endgame (deferred) — `Fin`-style index sort** (rung 3): `Fin(this.count())` via the
+  free-type-parameter machinery; out-of-bounds unrepresentable, no `OutOfRange` arm.
+- **Amend on ratification** (not yet done): the "no indexing" ruling in `streams.md` /
+  `glossary.md` / `strings.md` → "no indexing on *base* Stream." **Open:** does pure
+  random access make `Array` pure-side (the action-side framing was only ever about
+  un-indexed memory-order walking)? `count`/`length`/`size`; `Present`/`OutOfRange` names.
 
 ## Instance methods on primitives (WANT — not yet designed)
 
