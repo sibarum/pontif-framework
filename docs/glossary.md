@@ -384,7 +384,7 @@ Becomes "authentic by attribution" when signed by a trusted Proof
 Authority — see PA entry.
 
 **trait** — A named method contract that nominal struct types opt into.
-Declared as a sort: `let Duck:Type{quack:[Method():Audio]}`. Types
+Declared as a sort: `trait Duck{quack:[Method():Audio]}`. Types
 satisfy a trait via `assign trait T:Duck { ... }`, which both declares
 the impl methods and registers the (`T`, `Duck`) pair in the
 `TraitRegistry`. *Pontif's polymorphism mechanism is narrowing, not a
@@ -410,7 +410,7 @@ name: `[Interval:@.lo <= @.hi]`), not anonymous data.
 
 **`Type`** — Pontif's kind name for the sort-of-sorts. A trait sort
 has kind `Type`. The syntactic form `Type{methodName:FunctionSort, ...}`
-constructs a trait contract; combined with `let X:Type{...}` it
+constructs a trait contract; combined with `trait X{...}` it
 declares a named trait. *Reserved keyword in the alt parser.*
 
 **spec-only function** — A function declaration with no body, where the

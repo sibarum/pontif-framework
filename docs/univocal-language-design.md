@@ -145,7 +145,7 @@ let x:AnyNumberNotZero = 1 # 1 and 0.5 pass; 0 and 0.0 would fail.
 
 # The following is existing working behavior.
 struct Point(x:Int, y:Int)
-let Sized:Type{
+trait Sized{
   magnitude:[Method():Int]
 }
 

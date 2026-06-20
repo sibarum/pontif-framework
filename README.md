@@ -198,7 +198,7 @@ type supplies its own implementation, and a function written against the trait
 dispatches to whichever implementation the runtime value carries:
 
 ```pontif
-let Greeter:Type{ greet:[Method():Int] }
+trait Greeter{ greet:[Method():Int] }
 
 struct Formal(rank:Int)
 struct Casual(mood:Int)
@@ -225,7 +225,7 @@ module-coherent multi-dispatch the rest of the language uses, keyed on the recei
 Members can also be typed **data attributes** — a pure projection of the struct:
 
 ```pontif
-let Heavyish:Type{ weight:[Int:@>0] }
+trait Heavyish{ weight:[Int:@>0] }
 
 struct Ipsum(name:Int)
 
@@ -248,7 +248,7 @@ independent information is added — a struct coerces to a trait it satisfies, a
 back, **freely in both directions**:
 
 ```pontif
-let Heavyish:Type{ weight:[Int:@>0] }
+trait Heavyish{ weight:[Int:@>0] }
 
 struct Ipsum(name:Int)
 
@@ -356,7 +356,7 @@ A trait can be parametric too, and a struct forwards its *own* parameter into th
 trait it satisfies — so the element type rides each value, per value:
 
 ```pontif
-let Container[type E]:Type{ get:[Method():E] }
+trait Container[type E]{ get:[Method():E] }
 
 struct Box[type T](value:T)
 

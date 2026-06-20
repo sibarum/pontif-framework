@@ -23,7 +23,7 @@ describe method contracts."
 Decl form:
 
 ```
-let Duck:Type{
+trait Duck{
   quack:[Method():Audio],
   eat:[Method(food:Food):Poop]
 }
@@ -47,7 +47,7 @@ makes operator use *decidable at definition time* instead of failing at
 a runtime dispatch miss.
 
 ```
-let Numeric:Type{
+trait Numeric{
   +:[Dispatch(this.type, this.type):this.type],
   *:[Dispatch(this.type, this.type):this.type]
 }
@@ -224,7 +224,7 @@ from the trait's contract.
 ### Step 4 — alt syntax
 
 ```
-let Duck:Type{
+trait Duck{
   quack:[Method():Audio],
   eat:[Method(food:Food):Poop]
 }
@@ -243,8 +243,10 @@ describe(Donald("Donald", DARK_GREEN))
 ```
 
 Parser additions:
-- `let X:Type{...}` parses as a trait declaration (`IrStmt.TraitDecl`).
-  Inside the braces, each entry is `name:FunctionSort`.
+- `trait X{...}` parses as a trait declaration (lowers to `IrStmt.TypeAlias`
+  binding `X` to an `IrSort.Trait`). Inside the braces, each entry is `name:Sort`
+  (a `[Method(...):R]` member, a data attribute, an operator contract, or an
+  associated `type`).
 - `assign trait X:Y { ... }` parses as a trait impl
   (`IrStmt.TraitImpl`). Inside the braces, each entry is a method
   decl in compact form (no `method` keyword, no `Type.` prefix).
@@ -263,7 +265,7 @@ Bottom-up, each slice testable end-to-end via the layer below.
    Tested via constructed IR + IrCompiler pipeline.
 3. **S-expr reference.** Surface form for the IR shapes, testable via
    existing S-expr test infrastructure.
-4. **Alt syntax.** `let X:Type{...}` and `assign trait X:Y {...}`.
+4. **Alt syntax.** `trait X{...}` and `assign trait X:Y {...}`.
 
 ## Open follow-ups
 

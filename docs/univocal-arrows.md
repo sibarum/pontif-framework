@@ -77,10 +77,11 @@ both directions, so the polymorphism is free.
 
 ### The sort side: members live in `Type{…}` (the `@{}` cell), typed
 
-A trait is written `Type{ … }` — the braces ARE the `@{}` cell of the operator
-algebra (a type's members by name; see "The Operator Algebra" in
-docs/univocal-language-design.md). Methods and data attributes are members
-together, each `name:Type`. Strict typing is the lever: a bare `@.coef != 0`
+A trait is *declared* `trait NAME{ … }`; the brace block `{ … }` is the `@{}` cell
+of the operator algebra (a type's members by name; see "The Operator Algebra" in
+docs/univocal-language-design.md), and `Type{ … }` is the **anonymous** form of that
+same cell — a sort usable in any sort position. Methods and data attributes are
+members together, each `name:Type`. Strict typing is the lever: a bare `@.coef != 0`
 clause **cannot** impose `coef` on its own, because then `coef` would be untyped
 — which is forbidden. So every required member is declared, with a type, inside
 `Type{…}`. Strict typing forces the "closed" reading: the "open" reading would
@@ -88,11 +89,11 @@ produce a typeless attribute the rules outlaw.
 
 ```
 # Members are name:Type. Methods use the Method sort; attributes a value sort.
-let Pingable:Type{ ping:[Method():Int] };                    # method only
+trait Pingable{ ping:[Method():Int] };                    # method only
 
-let Heavyish:Type{ ping:[Method():Int], weight:[Int:@>0] };  # method + refined attr
+trait Heavyish{ ping:[Method():Int], weight:[Int:@>0] };  # method + refined attr
 
-let Boxed:Type{ width:Int, height:Int };                     # existence + type only
+trait Boxed{ width:Int, height:Int };                     # existence + type only
 ```
 
 Two forms of attribute requirement, both inside `Type{…}`:

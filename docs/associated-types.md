@@ -24,7 +24,7 @@ A trait may declare a member that is itself a **type**, introduced with the
 `type` declarator:
 
 ```pontif
-let Expr:Type{
+trait Expr{
   type T,                       # an associated type — bound per implementor
   simplify:[Method():Expr],
   evaluate:[Method():T]         # T may appear in any position (here, the return)
@@ -96,7 +96,7 @@ A trait introduces an associated type with the `type` declarator, sitting among
 the ordinary members:
 
 ```pontif
-let Expr:Type{
+trait Expr{
   type T,
   simplify:[Method():Expr],
   evaluate:[Method():T]
@@ -109,7 +109,7 @@ the truth, and removes the kind-guessing. An **unbounded** associated type is
 `R`," the type-level reading of the `refine` operator (`@:[]` on a type):
 
 ```pontif
-let Container:Type{
+trait Container{
   type Element:Showable,                  # Element must satisfy Showable
   first:[Method():Element],
   describe:[Method():String]              # can call Element's Showable interface
@@ -289,7 +289,7 @@ substitution) while checking its impls. After per-impl substitution (G6) the `T`
 references become concrete and validate normally.
 
 ## G5 — self-referential traits trip the alias-cycle guard
-`let Expr:Type{ simplify:[Method():Expr] }` fails with *"Cyclic type alias
+`trait Expr{ simplify:[Method():Expr] }` fails with *"Cyclic type alias
 chain: Expr → Expr"*. `AliasResolver` enters every **non-structural** TypeAlias
 into the alias table for inlining (`AliasResolver.java:66`) — traits included —
 and the cycle detector (`AliasResolver.java:149`) fires when the trait's own

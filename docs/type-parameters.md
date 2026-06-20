@@ -108,7 +108,7 @@ function id[type E](x:E):E
 struct   Box[type T](value:T)
 struct   Pair[type A, type B](first:A, second:B)
 struct   Sub[type T]:[Base:rel](value:T)    # [type T] binds, :[Base] refines, (…) fields
-let      Expr[type T, type R]:Type{ process:[Method(T):R], … }   # a trait, too
+trait Expr[type T, type R]{ process:[Method(T):R], … }   # a trait, too
 ```
 
 The slot is a **comma-separated list**, so multiple parameters are just
@@ -136,7 +136,7 @@ name, and the bound variable is forwarded into the trait's bracket:
 
 ```pontif
 struct Element[type T](head:T, rest:[Element[T]|Leaf])
-let    Stream[type E]:Type{ head:[Method():E] }
+trait Stream[type E]{ head:[Method():E] }
 
 assign trait Element[type T]:Stream[T] {   # [type T] BINDS T; [T] forwards it
     head():T -> this.head                   # `this` is Element[T]; method sigs use T
