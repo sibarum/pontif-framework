@@ -108,6 +108,11 @@ Three concrete forms, all forced by `Indexed`'s honest `at` (`docs/indexed-strea
    call — immutability makes the field reading sound; `project_indexed_streams`).
 3. **Value-indexed struct sort** — a struct pinned to a binder's value:
    `OutOfRange(i)` ≡ `[OutOfRange: @.at == i]` (the failure carries which index).
+   **Not new syntax** (RULED, spike-confirmed 2026-06-20): *both* spellings already
+   work for **literals** — `[OutOfRange(2)]` (positional ctor arg) and
+   `[OutOfRange:@.at==2]` (named field) parse, type-check, and run today. The
+   dependent delta is purely **the operand: literal → in-scope binder** (`i` a
+   parameter). One generalization of existing machinery, not a from-scratch form.
 
 **Self-reference law holds** (`project_self_reference_law`): `@` = refinement-self
 only; `this` = receiver; `this.type` = runtime-actual self (already works,
@@ -204,9 +209,10 @@ The plan assumes the §2 scope at **substrate-first** ambition. To confirm:
 2. **Slice 1 standalone.** Ship `IrSort.Method` param-names as its own green commit
    first (the fulcrum, no behavior change), before any binder-reference semantics?
    (Recommended — it's the change everything waits on and it's low-risk.)
-3. **`OutOfRange(i)` value-indexed struct sorts** — confirm these ride the named-
-   refinement value-pin machinery (`OutOfRange(i)` ≡ `[OutOfRange:@.at==i]`,
-   `project_named_refinements`) rather than new machinery.
+3. ~~`OutOfRange(i)` value-indexed struct sorts ride existing machinery?~~ **RESOLVED
+   (spike, 2026-06-20):** yes — both `[OutOfRange(2)]` (positional) and
+   `[OutOfRange:@.at==2]` (named) already work for literals (`project_named_refinements`);
+   the dependent delta is the operand `literal → binder`. No new sort form needed.
 
 Already RULED in dialogue: dependent sorts is the foundational facet (build first);
 substrate ≠ discharge (discharge is rung 2, deferred behind `[!!]`); total
