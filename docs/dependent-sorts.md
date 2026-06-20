@@ -143,6 +143,27 @@ Probe meter: new `callgate__*` probes (provable pass, provable-fail reject, depe
 substituted reject, match-narrowed pass, dynamic-unguarded reject) + the existing
 suite as the regression/blast-radius meter.
 
+### Implementation entry point (resume here)
+
+Slice 2, in order — grounded in the code as of `b1d7c72`/doc rewrite:
+
+- **(a)** `StaticDispatch` (`pontif-ir/.../StaticDispatch.java`) is **two-valued**
+  (`Resolved`/`Unresolved`) but `matchStatus` is internally three-valued
+  (PASSED/FAILED/RESIDUAL). Expose the three-way verdict *additively* (a `classify(...)`
+  returning the status) without disturbing `inferCall`'s `Resolved/Unresolved` consumer.
+- **(b)** Add cross-arg/receiver **substitution** into dependent param sorts before the
+  `Refinements.imply` in `matchStatus` (so `g`'s `[Int:@<x]` becomes `[Int:@<5]` →
+  FAILED, not RESIDUAL).
+- **(c)** New module pass `firstUnprovableCall(module)` in `PontifCompiler`, mirroring
+  `firstUnprovableReturn` (`:348`), invoked in `compileModule` (~`:269`). Walk every
+  call with its in-scope narrowings (reuse `NarrowingInference`'s per-call resolution),
+  classify, **FAILED → compile error**.
+- **(d) MEASURE FIRST:** run (c) in **report-only** mode (log, don't error) over the
+  full suite; count FAILED vs RESIDUAL calls before flipping the universal on. That
+  number decides RESIDUAL's policy and is the war's migration cost (report it, §5).
+
+The three holes to close (all FAILED): `h(-3)`, `manhattan(Point(-2,7))`, `g(5,7)`.
+
 ---
 
 ## 5. Blast radius — measure, don't assume
