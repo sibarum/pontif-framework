@@ -1369,6 +1369,7 @@ public final class AltParser {
             // sees imported structs this parser can't).
             if (declaredBase != null && inferredBase != null
                     && !inferredBase.equals("_record")
+                    && !inferredBase.equals("_")  // unknown floor — parser can't prove a mismatch, so abstain
                     && !intToDecimal
                     && !declaredSortAliases.contains(declaredBase)  // alias base unknown until resolved
                     && !declaredBase.equals(inferredBase)) {
@@ -3695,6 +3696,7 @@ public final class AltParser {
             // parseLet) — AggregatePromotion stamps and validates at IR time.
             if (declaredBase != null && inferredBase != null
                     && !inferredBase.equals("_record")
+                    && !inferredBase.equals("_")  // unknown floor — parser can't prove a mismatch, so abstain
                     && !intToDecimal
                     && !declaredBase.equals(inferredBase)) {
                 if ("Stream".equals(declaredBase) && TUPLE_SENTINEL.equals(inferredBase)) {

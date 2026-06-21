@@ -55,6 +55,26 @@ class StreamMapTest {
     }
 
     @Test
+    void spreadOverNothingReturningFn_dropsOmittedElements() throws Exception {
+        // Slice 2b: a function that returns Nothing (pontif.core) at the stream
+        // channel drops that element — the lossy filter shape. keep maps to Int or
+        // Nothing; the 1 and 2 become Nothing and drop, leaving (3, 4).
+        CompileResult r = compiler.compileAlt("""
+                requires pontif.core.{Stream, Nothing}
+                let null:Nothing = Nothing()
+                function keep(x:Int):[Int|Nothing] -> match x {
+                  [@>2] -> x
+                  [_]   -> null
+                }
+                let s:Stream[Int] = (1, 2, 3, 4)
+                keep(&s)""", "m.ptf");
+        CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "a lossy filter should compile; got " + r);
+        Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        assertEquals("(3, 4)", String.valueOf(val));
+    }
+
+    @Test
     void multipleSpreads_rejected_untilZipSlice() {
         // Two `&` args (zip / fan-in) is a later sub-slice — must fail clearly now.
         CompileResult r = compiler.compileAlt("""

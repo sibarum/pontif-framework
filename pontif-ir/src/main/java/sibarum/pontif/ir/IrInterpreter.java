@@ -220,7 +220,11 @@ public final class IrInterpreter {
                         if (k == null) throw new RuntimeCheckException(
                                 "Iterate: write to unknown output '" + w.output() + "'", it.origin());
                         switch (k) {
-                            case STREAM -> streams.get(w.output()).add(v);
+                            // Nothing (pontif.core) is the universal omission value:
+                            // writing it to a stream channel drops the element — the
+                            // lossy filter shape (docs/stream-war.md §3). Other
+                            // channels thread it as an ordinary value.
+                            case STREAM -> { if (!isNothing(v)) streams.get(w.output()).add(v); }
                             case ACCUMULATOR -> accumulators.put(w.output(), v);  // write next (read prior was via frame)
                             default -> throw new RuntimeCheckException(
                                     "Iterate: write to " + k + " not yet implemented (slice 1)", it.origin());
@@ -244,6 +248,20 @@ public final class IrInterpreter {
         }
         if (result.size() == 1) return result.values().iterator().next();
         return new RecordValue(result);
+    }
+
+    /**
+     * Whether {@code v} is the {@code Nothing} omission value (pontif.core) — a
+     * zero-field record of that nominal. The check is by type name: {@code Nothing}
+     * is the one universal omission value (docs/stream-war.md §3), so any value
+     * carrying that nominal omits at a stream channel.
+     */
+    private static boolean isNothing(Object v) {
+        if (!(v instanceof RecordValue rv) || rv.typeName() == null) return false;
+        String n = rv.typeName();
+        // Cross-module construction qualifies the nominal ("pontif.core/Nothing");
+        // a same-module use is bare ("Nothing"). Match either.
+        return n.equals("Nothing") || n.endsWith("/Nothing");
     }
 
     /** Seals an accumulated stream into a positional record (tuple) — the native sequence value. */

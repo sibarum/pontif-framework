@@ -66,13 +66,18 @@ public final class BuiltinModules {
      * external {@code next()} to expose; the Source-obligation shape is deferred
      * until builtin streams are exercised). Sub-traits ({@code IndexedStream}) and a
      * real backing arrive in later slices; for now a tuple literal autoboxes into
-     * {@code Stream[E]}. Written in Pontif source, like {@code std.stream}.
+     * {@code Stream[E]}. Also home to {@code Nothing} (slice 2b) — the universal
+     * omission value ({@code let null:Nothing = Nothing()}); a fragment that returns
+     * {@code Nothing} at a stream channel drops that element (the lossy filter shape,
+     * docs/stream-war.md §3). Written in Pontif source, like {@code std.stream}.
      */
     private static IrModule pontifCore() {
         String source = """
-                exports @.{Stream}
+                exports @.{Stream, Nothing}
 
                 trait Stream[type E]{}
+
+                struct Nothing()
 
                 0
                 """;
