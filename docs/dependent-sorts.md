@@ -1,8 +1,14 @@
 # Dependent sorts & the call gate: proving arguments route, at compile time
 
 **Status: WAR — EXECUTING (design ratified via dialogue, 2026-06-20).** Slice 1
-(`IrSort.Method` parameter names) **LANDED** (`8aab30a`). The remaining work is **the
-call gate** — the missing dual of the return gate. Markers: **RULED** = settled ·
+(`IrSort.Method` parameter names) **LANDED** (`8aab30a`). **Slice 2 is COMPLETE** — all of (a) `classify`/`Verdict`, (d) report-only measurement,
+the `imply`-hardening prerequisite (`Failed` ⟺ provably disjoint; corpus FAILED 59 → 0,
+§5.1), (b) dependent-param sibling/receiver substitution, and (c) the live gate
+(`FAILED → compile error`) have **LANDED**, suite green. The call gate — the missing dual
+of the return gate — now rejects provably-misrouting calls at compile time and closes the
+§0 holes (`h(-3)`, `g(5,7)`). What remains is the deferred **RESIDUAL policy** (the no-lie
+sweep — a separate ruling, §5.1) and the later slices (3: `Indexed` consumer; 4:
+diagnostics). Markers: **RULED** = settled ·
 **DERIVED** = follows from ruled material + standing laws · **VERIFIED** = confirmed
 by a run/spike · **OPEN** = undecided.
 
@@ -147,35 +153,134 @@ suite as the regression/blast-radius meter.
 
 Slice 2, in order — grounded in the code as of `b1d7c72`/doc rewrite:
 
-- **(a)** `StaticDispatch` (`pontif-ir/.../StaticDispatch.java`) is **two-valued**
-  (`Resolved`/`Unresolved`) but `matchStatus` is internally three-valued
-  (PASSED/FAILED/RESIDUAL). Expose the three-way verdict *additively* (a `classify(...)`
-  returning the status) without disturbing `inferCall`'s `Resolved/Unresolved` consumer.
-- **(b)** Add cross-arg/receiver **substitution** into dependent param sorts before the
-  `Refinements.imply` in `matchStatus` (so `g`'s `[Int:@<x]` becomes `[Int:@<5]` →
-  FAILED, not RESIDUAL).
-- **(c)** New module pass `firstUnprovableCall(module)` in `PontifCompiler`, mirroring
-  `firstUnprovableReturn` (`:348`), invoked in `compileModule` (~`:269`). Walk every
-  call with its in-scope narrowings (reuse `NarrowingInference`'s per-call resolution),
-  classify, **FAILED → compile error**.
-- **(d) MEASURE FIRST:** run (c) in **report-only** mode (log, don't error) over the
-  full suite; count FAILED vs RESIDUAL calls before flipping the universal on. That
-  number decides RESIDUAL's policy and is the war's migration cost (report it, §5).
+- **(a) DONE (`StaticDispatch.classify` + `Verdict`).** The three-way verdict is now
+  exposed *additively*: `StaticDispatch.classify(overloads, args[, registry])` →
+  `Verdict.{PASSED,RESIDUAL,FAILED}`, reusing the same private `matchStatus`. `resolve`'s
+  `Resolved/Unresolved` consumer (`inferCall`) is untouched — `resolve` still collapses
+  FAILED+RESIDUAL into `Unresolved`; `classify` keeps them apart for the gate.
+- **(d) DONE — MEASURED (report-only, see §5).** `CallGate.walk(module)`
+  (`pontif-ir`) classifies every in-jurisdiction call (a `Call` whose name has registered
+  overloads), threading in-scope narrowings exactly as `NarrowingInference` does (param
+  seedings, `let`, `match`-arm hypotheses, `Iterate` element patterns).
+  `PontifCompiler.reportCallGate` logs the counts to stderr, **opt-in** behind
+  `-Dpontif.callgate.report=true` (off by default — measurement scaffolding, not a
+  standing pass). **Suite result: 237 RESIDUAL, 59 FAILED, 54 PASSED** (call sites across
+  all suite compiles; PASSED-only modules unsummed). See §5 for the decisive finding.
+- **(imply-hardening) DONE — the §5 prerequisite is cleared.** `Refinements.imply` now
+  reserves `Failed` for the *provably disjoint*: union subsumption is peeled before the
+  kind-mismatch catch-all (tighter-union `(A|…) ⊑ L` iff every branch ⊑ L; looser-union
+  `T ⊑ (B|…)` iff T implies some branch, else Residual — never a false reject), and a
+  refinement is related to a structural sort through its base (`[Countdown:p] ⊑ Countdown`
+  via `Countdown ⊑ Countdown`; an unresolvable `_tuple`/`_record` base → Residual; only a
+  refined **primitive** base stays a sound `Failed` against a struct). **Re-measured: the
+  corpus FAILED count dropped 59 → 0**, no test regressions, the scalar-disjointness path
+  (the genuine `h(-3)` holes) still `Failed`. Pinned by 6 cases in `StructuralSortTest`.
+- **(b) DONE — sibling substitution in `StaticDispatch.matchStatus`.** Before the
+  `imply`, each sibling parameter pinned to a singleton arg (`Refinements.uniqueValue`)
+  is substituted into the other params' dependent predicates (`substituteSiblings`), so
+  `g`'s `[Int:@<x]` becomes `[Int:@<5]` and `g(5,7)` FAILS provably. Self (`@`) is
+  untouched; a non-singleton/absent sibling leaves the dependent sort residual (no
+  invented value). Receiver-relative `[Int:@<this.n]` rides the same path (bind `this`).
+  Pinned by `StaticDispatchTest` (provable-fail / provable-pass / unpinned-residual).
+- **(c) DONE — the live gate.** `PontifCompiler.firstUnprovableCall` (the dual of
+  `firstUnprovableReturn`) runs `CallGate.walk` and rejects the first **FAILED** call;
+  invoked in `compileModule`. RESIDUAL abstains (the no-lie sweep is deferred). Two
+  refinements fell out of wiring it live: (1) `CallGate.walk` also visits `module.main()`
+  (the top-level expression is not a statement), so a bare top-level call is gated; (2)
+  **arity is not the gate's jurisdiction** — `classify` weighs only arity-matching
+  overloads and abstains (RESIDUAL) when none match, so a wrong-arg-count call (or a
+  metareference/lambda invocation lowered to a 0-param `let`) is left to the existing
+  "No matching method/function" diagnostics rather than mis-reported as a refinement
+  failure. End-to-end pinned by `CallGateTest` (rejects `h(-3)` + dependent `g(5,7)`,
+  accepts the satisfied calls, abstains on residual).
 
-The three holes to close (all FAILED): `h(-3)`, `manhattan(Point(-2,7))`, `g(5,7)`.
+The three holes to close (all genuinely FAILED): `h(-3)`, `manhattan(Point(-2,7))`,
+`g(5,7)` — *none are in the test corpus* (spike-only), so the corpus FAILED count
+measures something else entirely (§5).
 
 ---
 
-## 5. Blast radius — measure, don't assume
+## 5. Blast radius — MEASURED (2026-06-20, report-only walk over the full suite)
 
-"A never-proven claim is a compile error" is a strong universal: it converts every
-currently-runtime-checked or silently-passing call into a compile error unless the
-args are statically provable. An eyeball estimate put ~10% of test calls on dynamic
-args — but the discharge engine already proves arithmetic-on-narrowed values
-(`n-1>0` under `n>1`), so the real figure is likely lower. **Slice 2 measures it**: wire
-the gate, run the full suite, count the calls that now error. That count is the
-war's migration cost and tells us whether this is a patch or a sweep — reported, not
-assumed (R1: no suppression, no silent caps).
+The gate's classifier (`CallGate.walk`) ran report-only over every test compile.
+Counts (call sites, summed across all compiles; identical on repeat runs; PASSED-only
+modules not summed):
+
+| verdict | count | meaning |
+|---|---:|---|
+| **FAILED** | 59 | every overload provably excluded — the gate's would-be compile errors |
+| **RESIDUAL** | 237 | undecided — the prove-from-hypotheses-or-error population |
+| **PASSED** | 54+ | provably routes (undercount; quiet modules unsummed) |
+
+**The decisive finding: the FAILED count is NOT migration cost — it is a soundness
+defect in `Refinements.imply`.** Every one of the 59 FAILED sites is in a program that
+**compiles and runs correctly** (its suite test passes). None is one of §0's genuine
+provable-disjointness holes (`h(-3)` etc. aren't in the corpus). Two families, one root
+cause — `imply`'s catch-all at `Refinements.java:378-382` returns `Failed` for
+"different sort kinds" on pairings that are actually subset relations:
+
+- **`std.stream/concat` (40×) and friends** — arg `Element` (a struct) vs param
+  `[Element|Leaf]` (a union *containing it*). `imply(Structural, Union)` has no
+  union-membership case → hits the catch-all → `Failed`. Correct answer: `Passed`.
+- **`Countdown.toZero`, `N.ping`/`N.pong` (recursive methods)** — arg
+  `[Countdown:@.n==n-1]` (a refined struct) vs param `Countdown` (its own base).
+  `imply(Refined-struct, Structural)` → catch-all → `Failed`. Correct: `Passed`.
+- **operators (`+`, `*`, `//`, cross-module `app.cd/+`, `num.frac//`)** — same class of
+  kind-pairing the narrowing engine doesn't model as a subset.
+
+A `Failed` that means "I couldn't relate these sort kinds" is **not** the same as
+"provably disjoint" — yet the gate (step (c)) reads `Failed` as the latter. **Flipping
+FAILED → compile error today would reject valid recursion, methods, and stream
+combinators.** So the war reorders: a new prerequisite — *make `imply`'s `Failed` ⟺
+provably disjoint* (add the struct∈union membership case; route refined-struct-vs-base
+through the structural/refinement subset check; reserve `Failed` for genuine
+disjointness, else `Residual`) — must land **before** step (c), alongside step (b)'s
+substitution.
+
+### 5.1 Prerequisite cleared — re-measured FAILED 59 → 0 (2026-06-20)
+
+The `imply`-hardening landed (entry point, "imply-hardening DONE"). Re-running the
+report-only walk over the full suite:
+
+| verdict | before | after |
+|---|---:|---:|
+| **FAILED** | 59 | **0** |
+| RESIDUAL | 237 | 240 |
+| PASSED | 54+ | 86+ |
+
+Every former FAILED was a false positive and is now `Passed` or `Residual`; the suite is
+green (no regressions). Both families closed: `std.stream/concat` now routes (its
+recursive call lands on RESIDUAL only because `NarrowingInference` doesn't track the
+`a.rest` field-access narrowing — a *precision* gap, not a soundness one); the recursive
+methods (`toZero`, `ping`/`pong`) and the refined-tuple call (`swap`/`dup`) all clear.
+Crucially, the scalar-disjointness path is untouched — `[Int:@==-3] ⊑ [Int:@>0]` still
+`Failed` — so the genuine §0 holes will still reject once (b)+(c) wire them in. The
+hardening only retired the `Failed`s that meant "couldn't relate the kinds." With the
+corpus FAILED count at 0, **step (c) can flip without rejecting anything valid in the
+suite** — the remaining work is RESIDUAL's policy and (b)'s dependent-param substitution.
+
+The **237 RESIDUAL** is the real prove-or-error surface (e.g. `std.stream/exchange` 80×,
+`partition`/`map`/`concat` 40× each, recursive `sum` 26×, `factorial` 8×) — the genuine
+migration cost, and it is large: this is a sweep, not a patch. RESIDUAL's policy
+(prove-from-in-scope-hypotheses, else error) is what the bulk of the work will be.
+Reported, not assumed (R1: no suppression, no silent caps).
+
+### 5.2 Gate live — FAILED → compile error shipped (2026-06-20)
+
+(b) and (c) landed on top of the cleared prerequisite. The gate now rejects a FAILED
+call at compile time; the suite is green with **0 corpus FAILED** (the only FAILEDs are
+`CallGateTest`'s own deliberate `h(-3)`/`g(5,7)`). Wiring it live taught two boundaries,
+both folded into `CallGate`/`classify`: the walk must visit `module.main()` (top-level
+calls aren't statements), and **arity mismatch is out of jurisdiction** — `classify`
+abstains (RESIDUAL) when no overload matches arity, leaving wrong-arg-count and
+metareference/lambda-invocation errors to the existing "No matching method/function"
+diagnostics. `FAILED` is now exclusively "an arity-matching overload exists, its
+refinement is provably violated."
+
+**Deferred (a separate ruling): the RESIDUAL → error sweep.** The no-lie law says an
+unproven refinement is an error, which would promote the 240 RESIDUAL calls. That is the
+large migration and is left for an explicit decision — the gate ships today on the safe,
+provable-disjoint subset.
 
 ---
 
@@ -200,11 +305,22 @@ default (`[!!]` is the opt-in escape).
 Marked / to-mark with `WAR(dependent-sorts)`:
 
 - `IrSort.Method` — parameter names (slice 1, **done**).
-- `SortChecker` `Call` case — today only checks name existence ("overload-mismatch at
-  dispatch time"); slice 2 adds the call gate here (or a dedicated pass mirroring
-  `firstUnprovableReturn`).
-- `StaticDispatch` — flips from "defer on provable-Failed" to "reject"; adds cross-arg/
-  receiver substitution into dependent param sorts.
-- `IrInterpreter` dispatch-failure path — the runtime error the gate preempts.
+- `SortChecker` `Call` case — still only checks name existence; the call gate lives in a
+  dedicated pass (`PontifCompiler.firstUnprovableCall`) mirroring `firstUnprovableReturn`,
+  **done**.
+- `StaticDispatch` — `classify`/`Verdict` (slice 2 (a)) + sibling/receiver substitution in
+  `matchStatus` (`substituteSiblings`, slice 2 (b)) + arity-out-of-jurisdiction in
+  `classify` (slice 2 (c)), all **done**. (`resolve`'s two-valued consumer untouched.)
+- `Refinements.imply` (`pontif-core`) — **DONE (slice-2 prerequisite):** `Failed` now
+  means *provably disjoint*, never "couldn't relate sort kinds". Union subsumption (both
+  sides) + refinement-through-base peels before the kind-mismatch catch-all; `isPrimitiveBase`
+  guards the sound-Failed case. Corpus FAILED 59 → 0 (§5.1); pinned by `StructuralSortTest`.
+- `CallGate` (`pontif-ir`) — the classifier walk (slice 2 (d)); walks statements **and**
+  `module.main()`. Consumed two ways: `PontifCompiler.reportCallGate` (opt-in measurement,
+  `-Dpontif.callgate.report=true`) and `firstUnprovableCall` (the live FAILED→error gate,
+  (c)). **Done.**
+- `IrInterpreter` dispatch-failure path — the runtime error the gate preempts for FAILED;
+  still the live path for **arity** mismatches (the gate abstains on those by design) and
+  for RESIDUAL calls (pending the no-lie sweep).
 - The construction-gate / synthesis path — already sound; the call gate is the
-  symmetric front-end for arguments.
+  symmetric front-end for arguments. **Slice 2 complete.**

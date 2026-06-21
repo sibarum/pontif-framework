@@ -93,6 +93,20 @@ public final class Refinements {
         return name != null && simplifier.registry().containsKey(name);
     }
 
+    /**
+     * A built-in scalar base name (the kinds {@link #primitiveKindGate} bites on).
+     * A refinement over one of these is provably disjoint from a struct/tuple; a
+     * refinement over any other base ({@code _tuple}, {@code _record}, an inline
+     * shape, an unresolved name) shares a kind with aggregates and is at worst
+     * undecided against one — never a kind-clash {@code Failed}.
+     */
+    private static boolean isPrimitiveBase(String name) {
+        return switch (name) {
+            case "Int", "Decimal", "Bool", "Char", "String" -> true;
+            default -> false;
+        };
+    }
+
     public static ProofResult satisfies(SymExpr value, Sort sort, Simplifier simplifier) {
         // Resolve a nominal struct reference to its definition so its shape is
         // checked. Terminates by the finite value even on a recursive type:
@@ -375,6 +389,53 @@ public final class Refinements {
         if (tighter.isMethod() && looser.isMethod()) {
             return implyFunction(tighter, looser, simplifier, assumed);
         }
+        // Union and refinement subsumption — peeled BEFORE the kind-mismatch
+        // catch-all below. WAR(dependent-sorts) §5: imply's `Failed` must mean
+        // PROVABLY DISJOINT, never "couldn't relate the sort kinds". A union is the
+        // join of its branches; a refinement is its base narrowed by a predicate —
+        // so a struct meeting `[Element|Leaf]`, or a refined struct meeting its own
+        // base, is a subset relation, not a kind clash. (The old catch-all reported
+        // both as Failed, the false-positive families the call-gate measurement
+        // surfaced.)
+        // tighter-union checked FIRST: `(A₁|…) ⊑ looser` iff every branch ⊑ looser,
+        // which is complete whatever looser's shape — including a union looser (so
+        // `(E|L) ⊑ (E|L)` proves via each branch, rather than the weaker
+        // implies-some-branch test below returning Residual on an identical union).
+        if (tighter.isUnion()) {
+            return implyUnionTighter(tighter, looser, simplifier, assumed);
+        }
+        if (looser.isUnion()) {
+            return implyUnionLooser(tighter, looser, simplifier, assumed);
+        }
+        // A refined struct ⊆ its base struct: `[Countdown:@.n==k] ⊑ Countdown`
+        // reduces to `Countdown ⊑ Countdown` (the predicate only narrows further).
+        if (tighter.isRefined() && looser.isStructural()) {
+            Sort tBase = resolveNominal(Sort.of(tighter.name()), simplifier.registry());
+            if (tBase.isStructural()) {
+                return imply(tBase, looser, simplifier, assumed);
+            }
+            // A non-resolvable structural-ish base (`_tuple`/`_record`/an inline
+            // shape) shares a kind with the struct — not provably disjoint, but its
+            // member sorts aren't recoverable from the predicate alone → undecided.
+            // Only a refined PRIMITIVE base is provably not a struct (catch-all).
+            if (!isPrimitiveBase(tighter.name())) {
+                return ProofResult.residual(SymExpr.var(tighter + " ⊑ " + looser));
+            }
+        }
+        // A struct meeting a refined struct: fit the base shape, then the predicate
+        // is a residual obligation (the value must still discharge it).
+        if (tighter.isStructural() && looser.isRefined()) {
+            Sort lBase = resolveNominal(Sort.of(looser.name()), simplifier.registry());
+            if (lBase.isStructural()) {
+                ProofResult base = imply(tighter, lBase, simplifier, assumed);
+                return base.isPassed() ? ProofResult.residual(looser.predicate()) : base;
+            }
+            if (!isPrimitiveBase(looser.name())) {
+                return ProofResult.residual(looser.predicate());
+            }
+            // looser's base is a primitive → a struct is provably not a refined
+            // primitive; fall through to the catch-all (a sound Failed).
+        }
         if (tighter.isStructural() || looser.isStructural()
                 || tighter.isMethod() || looser.isMethod()) {
             return ProofResult.failed(
@@ -395,6 +456,53 @@ public final class Refinements {
         }
         SymExpr obligation = new SymExpr.Cmp(tighter.predicate(), SymExpr.CmpOp.LE, looser.predicate());
         return ProofResult.residual(obligation);
+    }
+
+    /**
+     * {@code tighter ⊑ (B₁ | … | Bₙ)} — passes if {@code tighter} implies some
+     * branch. Implying a single branch is <em>sufficient</em> but not
+     * <em>necessary</em> (a tighter sort can span branches, e.g. {@code [Int:@>=0]}
+     * vs {@code [Int:0] | [Int:@>0]}), so the no-branch-matched case is
+     * {@link ProofResult.Residual}, never {@code Failed} — abstain, never a false
+     * reject. This upholds the invariant that {@code Failed} ⟺ provably disjoint.
+     */
+    private static ProofResult implyUnionLooser(Sort tighter, Sort looser, Simplifier simplifier,
+                                                Coinduction.Assumed assumed) {
+        ProofResult firstResidual = null;
+        for (Sort branch : looser.unionBranches()) {
+            ProofResult r = imply(tighter, branch, simplifier, assumed);
+            if (r.isPassed()) {
+                return ProofResult.passed();
+            }
+            if (firstResidual == null && r instanceof ProofResult.Residual) {
+                firstResidual = r;
+            }
+        }
+        return firstResidual != null
+                ? firstResidual
+                : ProofResult.residual(SymExpr.var(tighter + " ∈ " + looser));
+    }
+
+    /**
+     * {@code (A₁ | … | Aₙ) ⊑ looser} — holds iff <em>every</em> branch implies
+     * {@code looser}. A branch that provably fails makes the whole union fail
+     * (the failing branch is a witness); otherwise residual if any branch is
+     * undecided, else passed.
+     */
+    private static ProofResult implyUnionTighter(Sort tighter, Sort looser, Simplifier simplifier,
+                                                 Coinduction.Assumed assumed) {
+        boolean anyResidual = false;
+        for (Sort branch : tighter.unionBranches()) {
+            ProofResult r = imply(branch, looser, simplifier, assumed);
+            if (r instanceof ProofResult.Failed) {
+                return r;
+            }
+            if (r instanceof ProofResult.Residual) {
+                anyResidual = true;
+            }
+        }
+        return anyResidual ? ProofResult.residual(SymExpr.var(tighter + " ⊑ " + looser))
+                : ProofResult.passed();
     }
 
     private static ProofResult implyFunction(Sort tighter, Sort looser, Simplifier simplifier,

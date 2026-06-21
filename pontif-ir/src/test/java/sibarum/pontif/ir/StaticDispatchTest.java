@@ -139,6 +139,43 @@ class StaticDispatchTest {
 
     // --- Return sort plumbing -----------------------------------------------
 
+    // --- Dependent param substitution (WAR(dependent-sorts) slice 2 (b)) -----
+
+    /** g(x:Int, i:[Int:@<x]) — i's sort depends on the sibling x. */
+    private static IrStmt.FunctionDecl gDependent() {
+        IrSort depParam = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.LT, IrExpr.self(), IrExpr.var("x")));
+        return IrStmt.functionDecl("g",
+                List.of(new IrParam("x", IrSort.named("Int")), new IrParam("i", depParam)),
+                IrSort.named("Int"), IrExpr.lit(0));
+    }
+
+    private static IrSort eq(long v) {
+        return IrSort.refined("Int", IrExpr.binOp(IrExpr.Op.EQ, IrExpr.self(), IrExpr.lit(v)));
+    }
+
+    @Test
+    void dependentParam_substitutedSibling_provableFail_classifiesFailed() {
+        // g(5, 7): substitute x↦5 ⇒ i:[Int:@<5]; 7 ⊀ 5 ⇒ provable FAILED (the §0 hole).
+        assertEquals(StaticDispatch.Verdict.FAILED,
+                StaticDispatch.classify(List.of(gDependent()), List.of(EQ_5, eq(7))));
+    }
+
+    @Test
+    void dependentParam_substitutedSibling_provablePass_classifiesPassed() {
+        // g(5, 3): x↦5 ⇒ i:[Int:@<5]; 3 < 5 ⇒ PASSED.
+        assertEquals(StaticDispatch.Verdict.PASSED,
+                StaticDispatch.classify(List.of(gDependent()), List.of(EQ_5, eq(3))));
+    }
+
+    @Test
+    void dependentParam_unpinnedSibling_staysResidual() {
+        // x's arg is [Int:@>0], not a singleton ⇒ no value to substitute for x ⇒
+        // i:[Int:@<x] can't be decided ⇒ RESIDUAL (we never invent a value).
+        assertEquals(StaticDispatch.Verdict.RESIDUAL,
+                StaticDispatch.classify(List.of(gDependent()), List.of(POSITIVE, eq(7))));
+    }
+
     @Test
     void resolved_exposesDeclaredReturnSort() {
         IrSort returnSort = IrSort.refined("Int",

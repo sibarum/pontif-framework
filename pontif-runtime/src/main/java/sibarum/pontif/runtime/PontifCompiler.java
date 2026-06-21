@@ -260,6 +260,20 @@ public final class PontifCompiler {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + e.getMessage()));
         }
+        // Call-gate measurement — WAR(dependent-sorts) §5: opt-in (off by default)
+        // report of the FAILED/RESIDUAL/PASSED counts, so the RESIDUAL migration
+        // surface stays a measured number. Independent of the gate below.
+        reportCallGate(module, sourceName);
+        // Call gate — WAR(dependent-sorts) slice 2 step (c). The dual of the return
+        // gate: at every call site, reject when the arguments PROVABLY fail every
+        // overload's parameter refinements (a disjoint narrowing — `imply` now means
+        // provably-disjoint, §5.1). RESIDUAL (undecided) abstains for now; promoting
+        // it to a hard error is the no-lie sweep, gated on a separate ruling. Closes
+        // the §0 holes (`h(-3)`, `g(5,7)` once its sibling is pinned, etc.).
+        Optional<String> unprovableCall = firstUnprovableCall(module);
+        if (unprovableCall.isPresent()) {
+            return new CompileResult.Failed(RunResult.error(unprovableCall.get()));
+        }
         // Return-refinement gate: reject a declared return the proof system
         // can't discharge (and no proof is supplied). Sound but incomplete —
         // it only rejects on a positive NOT-DISCHARGED verdict over a graph
@@ -345,6 +359,82 @@ public final class PontifCompiler {
      * unknown function, or a proof orphaned by a dropped return refinement are
      * all hard errors.
      */
+    /**
+     * WAR(dependent-sorts) slice 2 step (d) — the call gate in <b>report-only</b>
+     * mode. Classifies every in-jurisdiction call site (a {@code Call} whose name
+     * has registered overloads) three ways via {@link sibarum.pontif.ir.CallGate}
+     * and logs the FAILED/RESIDUAL counts to stderr so the suite-wide blast radius
+     * is measured before the gate rejects anything (docs/dependent-sorts.md §5).
+     *
+     * <p>FAILED = a provable routing failure (the gate's future compile error);
+     * RESIDUAL = undecided (the kernel couldn't exclude every overload). Quiet
+     * when a module has neither, to keep PASSED-only modules out of the log. This
+     * method never errors and never affects the compile result — abstains on any
+     * throw, mirroring the return gate's out-of-scope policy.
+     */
+    private static void reportCallGate(IrModule module, String sourceName) {
+        // Opt-in: this is measurement scaffolding (step (d)), not a standing pass.
+        // Off by default so ordinary compiles stay quiet; run the suite with
+        // -Dpontif.callgate.report=true to re-measure. Removed/replaced at step (c).
+        if (!Boolean.getBoolean("pontif.callgate.report")) {
+            return;
+        }
+        sibarum.pontif.ir.CallGate.Report report;
+        try {
+            report = sibarum.pontif.ir.CallGate.walk(module);
+        } catch (Exception | StackOverflowError e) {
+            return;  // measurement must never break a compile
+        }
+        long failed = report.count(sibarum.pontif.ir.StaticDispatch.Verdict.FAILED);
+        long residual = report.count(sibarum.pontif.ir.StaticDispatch.Verdict.RESIDUAL);
+        if (failed == 0 && residual == 0) {
+            return;
+        }
+        long passed = report.count(sibarum.pontif.ir.StaticDispatch.Verdict.PASSED);
+        System.err.println("WAR(dependent-sorts) callgate: module=" + sourceName
+                + " PASSED=" + passed + " RESIDUAL=" + residual + " FAILED=" + failed);
+        for (var c : report.of(sibarum.pontif.ir.StaticDispatch.Verdict.FAILED)) {
+            System.err.println("WAR(dependent-sorts) callgate   FAILED   call=" + c.functionName()
+                    + " @ " + c.origin() + "  " + c.detail());
+        }
+        for (var c : report.of(sibarum.pontif.ir.StaticDispatch.Verdict.RESIDUAL)) {
+            System.err.println("WAR(dependent-sorts) callgate   RESIDUAL call=" + c.functionName()
+                    + " @ " + c.origin());
+        }
+    }
+
+    /**
+     * WAR(dependent-sorts) slice 2 step (c) — the call gate. The first call site
+     * whose arguments PROVABLY fail every candidate overload's parameter
+     * refinements (a {@code FAILED} verdict from {@link sibarum.pontif.ir.CallGate}
+     * — now reliably "provably disjoint", §5.1), as an error message; empty when
+     * every call routes or is merely undecided ({@code RESIDUAL} abstains).
+     *
+     * <p>Mirrors {@link #firstUnprovableReturn}'s abstain-on-throw policy: a module
+     * the walk can't classify yields no error rather than a spurious one. The dual
+     * of the return gate — the return gate proves a body fits its declared return;
+     * this proves an argument fits the parameter it's passed to.
+     */
+    private static Optional<String> firstUnprovableCall(IrModule module) {
+        sibarum.pontif.ir.CallGate.Report report;
+        try {
+            report = sibarum.pontif.ir.CallGate.walk(module);
+        } catch (Exception | StackOverflowError e) {
+            return Optional.empty();  // outside the walk's scope → abstain
+        }
+        List<sibarum.pontif.ir.CallGate.CallSite> failed =
+                report.of(sibarum.pontif.ir.StaticDispatch.Verdict.FAILED);
+        if (failed.isEmpty()) {
+            return Optional.empty();
+        }
+        sibarum.pontif.ir.CallGate.CallSite c = failed.get(0);
+        return Optional.of("Cannot prove the call to '" + c.functionName() + "' at "
+                + c.origin() + " routes — the argument(s) provably violate the parameter "
+                + "refinement(s) of every overload. Prove it (narrow the arguments), "
+                + "supply a proof, weaken the parameter sort, or mark the parameter "
+                + "[!!Sort] to defer the check to runtime.");
+    }
+
     private static Optional<String> firstUnprovableReturn(IrModule module) {
         ReceiptGraph graph;
         try {

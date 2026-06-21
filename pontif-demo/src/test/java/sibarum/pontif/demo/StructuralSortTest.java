@@ -322,4 +322,79 @@ class StructuralSortTest {
         assertTrue(((ProofResult.Failed) r2).witness().contains("public"),
                 "diagnostic should name the missing member; got: " + ((ProofResult.Failed) r2).witness());
     }
+
+    // --- imply across sort KINDS (WAR(dependent-sorts) §5: Failed ⟺ provably disjoint) ---
+    // Before the hardening, imply's "different sort kinds" catch-all reported these
+    // subset relations as Failed — the false-positive families the call-gate
+    // measurement surfaced (a struct vs a union containing it; a refined struct vs
+    // its own base). Failed must be reserved for the genuinely disjoint.
+
+    @Test
+    void structImpliesUnionContainingIt() throws Exception {
+        // Element ⊑ [Element|Leaf] — membership, not a kind clash.
+        Sort element = Sort.structural("Element", Map.of("head", Sort.of("Int"), "rest", Sort.of("Leaf")));
+        Sort leaf = Sort.structural("Leaf", Map.of());
+        Sort union = Sort.union(List.of(Sort.of("Element"), Sort.of("Leaf")));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Element", element, "Leaf", leaf));
+        assertTrue(Refinements.imply(Sort.of("Element"), union, withReg).isPassed(),
+                "a struct must imply a union that contains it");
+    }
+
+    @Test
+    void unionImpliesIdenticalUnion() throws Exception {
+        // [Element|Leaf] ⊑ [Element|Leaf] — every branch implies the looser union.
+        Sort element = Sort.structural("Element", Map.of("head", Sort.of("Int"), "rest", Sort.of("Leaf")));
+        Sort leaf = Sort.structural("Leaf", Map.of());
+        Sort union = Sort.union(List.of(Sort.of("Element"), Sort.of("Leaf")));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Element", element, "Leaf", leaf));
+        assertTrue(Refinements.imply(union, union, withReg).isPassed(),
+                "a union must imply itself");
+    }
+
+    @Test
+    void refinedStructImpliesItsBase() throws Exception {
+        // [Countdown:@.n == 3] ⊑ Countdown — the predicate only narrows the base.
+        Sort countdown = Sort.structural("Countdown", Map.of("n", Sort.of("Int")));
+        Sort refined = Sort.refined("Countdown",
+                SymExpr.cmp(SymExpr.fieldAccess(SymExpr.self(), "n"), SymExpr.CmpOp.EQ, SymExpr.lit(3)));
+        Simplifier withReg = SIMPLIFIER.withRegistry(Map.of("Countdown", countdown));
+        assertTrue(Refinements.imply(refined, Sort.of("Countdown"), withReg).isPassed(),
+                "a refined struct must imply its own base struct");
+    }
+
+    @Test
+    void refinedTupleVsStructuralTuple_isUndecidedNotFailed() throws Exception {
+        // [_tuple:@._0==1 & @._1==true] vs _tuple{_0:Int, _1:Bool}: the base kind
+        // matches (both tuples), but the predicate's field sorts aren't recoverable
+        // from the refinement alone — undecided, NOT a kind-clash Failed.
+        Sort refinedTuple = Sort.refined("_tuple",
+                SymExpr.and(
+                        SymExpr.cmp(SymExpr.fieldAccess(SymExpr.self(), "_0"), SymExpr.CmpOp.EQ, SymExpr.lit(1)),
+                        SymExpr.cmp(SymExpr.fieldAccess(SymExpr.self(), "_1"), SymExpr.CmpOp.EQ, SymExpr.bool(true))));
+        Sort tupleSort = Sort.structural("_tuple", Map.of("_0", Sort.of("Int"), "_1", Sort.of("Bool")));
+        ProofResult r = Refinements.imply(refinedTuple, tupleSort, SIMPLIFIER);
+        assertFalse(r.isPassed(), "can't prove the field sorts from the predicate alone");
+        assertTrue(r.isResidual(), "but a tuple base is not disjoint from a tuple — must be Residual, got: " + r);
+    }
+
+    @Test
+    void refinedPrimitiveVsStruct_staysFailed() throws Exception {
+        // [Int:@>0] vs a struct IS provably disjoint — an int is never a record.
+        // The hardening must not soften this to Residual.
+        Sort refinedInt = Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
+        Sort struct = Sort.structural("Empty", Map.of());
+        assertInstanceOf(ProofResult.Failed.class, Refinements.imply(refinedInt, struct, SIMPLIFIER),
+                "a refined primitive and a struct are disjoint kinds");
+    }
+
+    @Test
+    void scalarDisjointness_staysFailed() throws Exception {
+        // The genuine call-gate hole (`h(-3)` against `[Int:@>0]`): scalar
+        // disjointness must still register as Failed — the hardening only touched
+        // struct/union/tuple kind-pairings, not the arithmetic path.
+        Sort negThree = Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.EQ, SymExpr.lit(-3)));
+        Sort positive = Sort.refined("Int", SymExpr.cmp(SymExpr.self(), SymExpr.CmpOp.GT, SymExpr.lit(0)));
+        assertInstanceOf(ProofResult.Failed.class, Refinements.imply(negThree, positive, SIMPLIFIER),
+                "[Int:@==-3] is provably disjoint from [Int:@>0]");
+    }
 }
