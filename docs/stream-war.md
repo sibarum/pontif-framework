@@ -237,9 +237,14 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 
 ## 7. Slice plan (vertical, each end-to-end green)
 
-1. **`trait Stream` + trait-extends-trait machinery**; `Stream` in `pontif.core`;
-   tuple literal → a real immutable-array-backed `Stream[T]` (not the forgetful
-   autobox). The spine ruling (§2) needed here.
+1. **`trait Stream` + trait-extends-trait machinery.** trait-extends **LANDED** (slice
+   1a — contract merge + transitive dispatch). `trait Stream[type E]{}` (marker, no
+   contract member yet — ruling (i): internal iteration, no external `next()`) now
+   lives in the `pontif.core` builtin module, **importable** (`requires
+   pontif.core.{Stream}`), and a tuple literal autoboxes into `Stream[E]` with element
+   checking (slice 1b, `StreamTraitTest`). **Remaining:** the real immutable-array
+   backing (1c, deferred — the figurative tuple-as-Stream works for now) and migrating
+   the figurative `BUILTIN_PARAMETRIC_TYPES` "Stream" onto the trait.
 2. **The synthesis-fragment primitive** — `&` spread, `Nothing`/`null`, explicit
    return-type ascription — single stream channel (map-shape) first.
 3. **Multi-channel** — accumulators (fold/scan), fan-out (fork), fan-in/zip.

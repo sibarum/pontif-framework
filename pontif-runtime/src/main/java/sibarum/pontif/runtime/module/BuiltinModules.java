@@ -42,6 +42,9 @@ public final class BuiltinModules {
     /** The sequence-substrate builtin module's name (docs/streams.md). */
     public static final String STD_STREAM = "std.stream";
 
+    /** The language-core builtin module's name (docs/stream-war.md): the {@code Stream} trait. */
+    public static final String PONTIF_CORE = "pontif.core";
+
     private BuiltinModules() {}
 
     /** All builtin modules, by name. */
@@ -51,7 +54,35 @@ public final class BuiltinModules {
         mods.put(STD_PROOF, stdProof());
         mods.put(STD_CONSERVATION, stdConservation());
         mods.put(STD_STREAM, stdStream());
+        mods.put(PONTIF_CORE, pontifCore());
         return mods;
+    }
+
+    /**
+     * The language-core module (docs/stream-war.md): home of the {@code Stream}
+     * trait — the pure provable membrane over stateful sources. Base {@code Stream}
+     * is a <b>marker capability</b> (no callable contract member yet — internal
+     * iteration drives a source via the {@code Iterate} construct, so there is no
+     * external {@code next()} to expose; the Source-obligation shape is deferred
+     * until builtin streams are exercised). Sub-traits ({@code IndexedStream}) and a
+     * real backing arrive in later slices; for now a tuple literal autoboxes into
+     * {@code Stream[E]}. Written in Pontif source, like {@code std.stream}.
+     */
+    private static IrModule pontifCore() {
+        String source = """
+                exports @.{Stream}
+
+                trait Stream[type E]{}
+
+                0
+                """;
+        try {
+            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(source, PONTIF_CORE);
+            return new IrModule(PONTIF_CORE, parsed.statements(), parsed.main());
+        } catch (sibarum.pontif.parser.ParseException pe) {
+            throw new IllegalStateException(
+                    "pontif.core's builtin source failed to parse: " + pe.getMessage(), pe);
+        }
     }
 
     /**
