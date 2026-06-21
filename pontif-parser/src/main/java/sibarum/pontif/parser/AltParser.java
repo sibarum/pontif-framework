@@ -3305,18 +3305,25 @@ public final class AltParser {
                 if (expr instanceof IrExpr.FieldAccess fa) {
                     IrExpr receiver = rewriteTopLevelLetAccess(fa.base());
                     if (isValueReceiver(receiver)) {
-                        expr = new IrExpr.MethodCall(receiver, fa.fieldName(), args, callOrigin);
+                        String method = fa.fieldName();
+                        expr = lowerSpreadCall(args,
+                                a -> new IrExpr.MethodCall(receiver, method, a, callOrigin),
+                                callOrigin);
                         continue;
                     }
                 }
 
                 // Otherwise it's a Call on a dotted name, or an Apply on an
-                // arbitrary expression.
+                // arbitrary expression. A `&`-spread argument turns either into a
+                // per-element stream map (docs/stream-war.md §3).
                 String dotted = extractDottedName(expr);
                 if (dotted != null) {
-                    expr = new IrExpr.Call(dotted, args, callOrigin);
+                    expr = lowerSpreadCall(args, a -> new IrExpr.Call(dotted, a, callOrigin),
+                            callOrigin);
                 } else {
-                    expr = new IrExpr.Apply(expr, args, callOrigin);
+                    IrExpr fn = expr;
+                    expr = lowerSpreadCall(args, a -> new IrExpr.Apply(fn, a, callOrigin),
+                            callOrigin);
                 }
             } else if (t.kind() == AltToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
@@ -3458,6 +3465,11 @@ public final class AltParser {
             throws ParseException {
         List<IrExpr> args = parseArgList();
         AltToken close = expect(AltToken.Kind.RPAREN);
+        if (anySpread(args)) {
+            throw new ParseException(
+                    "`&` spread is only valid in a function/fragment call, not the struct "
+                            + "literal '" + typeName + "'", openParen.origin());
+        }
         List<String> declaredFields = new ArrayList<>(decl.members().keySet());
         if (args.size() != declaredFields.size()) {
             throw new ParseException(
@@ -4346,12 +4358,86 @@ public final class AltParser {
     private List<IrExpr> parseArgList() throws ParseException {
         List<IrExpr> args = new ArrayList<>();
         if (peek().kind() == AltToken.Kind.RPAREN) return args;
-        args.add(parseExpr());
+        args.add(parseArg());
         while (peek().kind() == AltToken.Kind.COMMA) {
             consume();
-            args.add(parseExpr());
+            args.add(parseArg());
         }
         return args;
+    }
+
+    /**
+     * Reserved callee name for the transient <em>spread</em> marker: a {@code &expr}
+     * argument is wrapped as {@code Call(SPREAD_SENTINEL, [source])} so it rides the
+     * existing {@code List<IrExpr>} arg shape without a new IR variant. It never
+     * survives parsing — {@link #lowerSpreadCall} consumes every spread when the
+     * enclosing call is built. The {@code &} can't appear in a user identifier, so
+     * the name can't collide.
+     */
+    private static final String SPREAD_SENTINEL = "&spread";
+
+    /**
+     * One call argument, recognizing the stream-<em>spread</em> prefix {@code &expr}
+     * (docs/stream-war.md §3). A leading {@code &} at the start of an argument is
+     * unambiguous — binary {@code &} (refinement conjunction) only occurs inside a
+     * refinement bracket, never as an expression head — so it marks the argument as
+     * a per-element spread over a stream. Anything else is an ordinary argument.
+     */
+    private IrExpr parseArg() throws ParseException {
+        if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
+            AltToken amp = consume();
+            IrExpr source = parseExpr();
+            return new IrExpr.Call(SPREAD_SENTINEL, List.of(source), amp.origin());
+        }
+        return parseExpr();
+    }
+
+    private static boolean isSpread(IrExpr arg) {
+        return arg instanceof IrExpr.Call c && SPREAD_SENTINEL.equals(c.functionName());
+    }
+
+    private static boolean anySpread(List<IrExpr> args) {
+        return args.stream().anyMatch(AltParser::isSpread);
+    }
+
+    /**
+     * Lowers a call carrying a {@code &}-spread argument to an {@link IrExpr.Iterate}
+     * — the synthesis-fragment primitive, slice 2a (docs/stream-war.md §3, the
+     * single-stream <em>map</em> shape). {@code rebuild} reconstructs the underlying
+     * call form (a {@code Call}, {@code Apply}, or {@code MethodCall}) given the
+     * per-element argument list; the one spread position is replaced by the bound
+     * element, and the whole call becomes the body of a one-output stream iteration:
+     * each element of the source is mapped through the function and emitted.
+     *
+     * <p>Exactly one spread is the map shape; multiple spreads (zip) and tuple-return
+     * fan-out are later sub-slices, rejected here with a pointer.
+     */
+    private IrExpr lowerSpreadCall(
+            List<IrExpr> args, java.util.function.Function<List<IrExpr>, IrExpr> rebuild, Origin o)
+            throws ParseException {
+        int spreadAt = -1;
+        for (int i = 0; i < args.size(); i++) {
+            if (isSpread(args.get(i))) {
+                if (spreadAt != -1) {
+                    throw new ParseException(
+                            "Multiple `&` spreads in one call (zip / fan-in) is not implemented "
+                                    + "yet — slice 2c; docs/stream-war.md §3", o);
+                }
+                spreadAt = i;
+            }
+        }
+        if (spreadAt == -1) return rebuild.apply(args);
+
+        IrExpr source = ((IrExpr.Call) args.get(spreadAt)).args().get(0);
+        String element = "$e" + (syntheticCounter++);
+        List<IrExpr> perElement = new ArrayList<>(args);
+        perElement.set(spreadAt, new IrExpr.Var(element, o));
+        IrExpr body = rebuild.apply(perElement);
+
+        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+        IrExpr.Arm arm = new IrExpr.Arm(
+                IrSort.named("_"), List.of(new IrExpr.Write("default", null, body)));
+        return new IrExpr.Iterate(source, element, List.of(out), List.of(arm), o);
     }
 
     /**

@@ -1,4 +1,4 @@
-# Stream war: the pure membrane over stateful sources
+ and # Stream war: the pure membrane over stateful sources
 
 **Status: WAR — DECLARED (design session 2026-06-21).** The enemy is the
 `Element|Leaf` cons-cell `Stream`; the replacement is `Stream` as a **trait** plus
@@ -247,6 +247,21 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    the figurative `BUILTIN_PARAMETRIC_TYPES` "Stream" onto the trait.
 2. **The synthesis-fragment primitive** — `&` spread, `Nothing`/`null`, explicit
    return-type ascription — single stream channel (map-shape) first.
+   - **Slice 2a LANDED** (the map shape, ordinary-fn first — James's cut): a `&s`
+     spread argument on *any* single-return function call lowers to `IrExpr.Iterate`
+     (one default `STREAM` output, a wildcard arm applying the fn per element), so
+     `double(&s)` → `(2,4,6,8)` and a `Stream[Int]`-typed binding autoboxes the result
+     (`StreamMapTest`). `&` is detected at the head of a call argument (unambiguous —
+     binary `&` only occurs inside a refinement bracket); multiple spreads (zip) are
+     rejected with a slice-2c pointer. Wired through `Call`/`Apply`/`MethodCall` via
+     `AltParser.lowerSpreadCall`; the spread rides a transient `&spread` call sentinel
+     (no new IR variant). The `Iterate` engine already did `STREAM`/`ACCUMULATOR`, so
+     this was pure parser/IR.
+   - **Remaining:** 2b — the fragment-literal grammar `let f:[ (el:Int) -> match… ]`
+     (new syntactic form, a `[…]` carrying a function body) + `Nothing`/`null` in
+     `pontif.core` + `null`-drop on stream writes (the lossy `filter` shape); 2c —
+     multi-channel (accumulators/fold, fan-out/fork, fan-in/zip) + the explicit
+     `expr:[Shape]` result ascription with `._N` projection.
 3. **Multi-channel** — accumulators (fold/scan), fan-out (fork), fan-in/zip.
 4. **`IndexedStream : Stream`** — `count` + `at`, rungs 1–2 (`indexed-streams.md`);
    the discharge foundation already exists.
