@@ -115,6 +115,49 @@ public final class CallGate {
         return sb.append("]").toString();
     }
 
+    /**
+     * Tags a RESIDUAL call for the no-lie-sweep measurement (does promoting
+     * RESIDUAL→error have legitimate targets, or would it reject valid code?):
+     * <ul>
+     *   <li>{@code residual:type-only} — no arity-matching overload param carries a
+     *       refinement predicate; the no-lie rule (obligation = {@code arg ⊨ pred})
+     *       doesn't apply. Erroring here would reject ordinary type/union narrowing.</li>
+     *   <li>{@code residual:multi-overload} — &gt;1 arity-matching overload, at least
+     *       one refined: almost always exhaustively-covered recursion (`sum(n-1)` under
+     *       {[Int:0],[Int:@>0]}). The overload SET covers the arg; erroring would
+     *       reject valid recursion. Needs overload-union exhaustiveness, not a flip.</li>
+     *   <li>{@code residual:obligation} — a single refined overload whose predicate the
+     *       arg can't prove: the genuine no-lie target (the §0 holes' shape).</li>
+     * </ul>
+     */
+    private static String residualCategory(List<IrStmt.FunctionDecl> overloads, int arity) {
+        List<IrStmt.FunctionDecl> arityMatch = overloads.stream()
+                .filter(o -> o.params().size() == arity).toList();
+        boolean anyRefined = arityMatch.stream()
+                .anyMatch(o -> o.params().stream().anyMatch(p -> mentionsRefinement(p.sort())));
+        if (!anyRefined) return "residual:type-only";
+        if (arityMatch.size() > 1) return "residual:multi-overload";
+        return "residual:obligation";  // detail appended by caller for triage
+    }
+
+    /** As {@link #residualCategory} but with the arg/param dump for obligation-residuals. */
+    private static String residualDetail(List<IrStmt.FunctionDecl> overloads, List<IrSort> argNarrowings) {
+        String cat = residualCategory(overloads, argNarrowings.size());
+        return cat.equals("residual:obligation")
+                ? cat + "  " + failedDetail(overloads, argNarrowings) : cat;
+    }
+
+    /** Whether an IrSort carries a refinement predicate anywhere (recursively). */
+    private static boolean mentionsRefinement(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Refined ignored -> true;
+            case IrSort.Structural s -> s.members().values().stream().anyMatch(CallGate::mentionsRefinement);
+            case IrSort.Union u -> u.branches().stream().anyMatch(CallGate::mentionsRefinement);
+            case IrSort.Intersection i -> i.branches().stream().anyMatch(CallGate::mentionsRefinement);
+            default -> false;
+        };
+    }
+
     private static InferenceContext seedParams(InferenceContext ctx, List<IrParam> params) {
         InferenceContext seeded = ctx;
         for (IrParam p : params) {
@@ -137,12 +180,24 @@ public final class CallGate {
                 if (overloads != null && !overloads.isEmpty()) {
                     List<IrSort> argNarrowings = new ArrayList<>(c.args().size());
                     for (IrExpr arg : c.args()) {
-                        argNarrowings.add(NarrowingInference.infer(arg, ctx));
+                        // inferArg (not infer): bound a value-pin over the in-scope
+                        // hypotheses so a decremented/recursive arg discharges against a
+                        // weaker param refinement (n-1 under n>0 → [Int:@>=0]). Safe
+                        // because the gate's FAILED is disjoint-based (gateFit).
+                        argNarrowings.add(NarrowingInference.inferArg(arg, ctx));
                     }
                     StaticDispatch.Verdict v =
                             StaticDispatch.classify(overloads, argNarrowings, ctx.sortRegistry());
-                    String detail = v == StaticDispatch.Verdict.FAILED
-                            ? failedDetail(overloads, argNarrowings) : "";
+                    String detail = switch (v) {
+                        case FAILED -> failedDetail(overloads, argNarrowings);
+                        // Categorize RESIDUAL for the no-lie-sweep measurement: is the
+                        // undecided verdict a genuine unproven refinement PREDICATE
+                        // obligation, or merely type/union narrowing the no-lie rule
+                        // doesn't govern? And is the function multi-overload (likely
+                        // exhaustively-covered recursion — valid, not a target)?
+                        case RESIDUAL -> residualDetail(overloads, argNarrowings);
+                        case PASSED -> "";
+                    };
                     sink.add(new CallSite(c.functionName(), v, c.origin(), detail));
                 }
                 for (IrExpr arg : c.args()) {

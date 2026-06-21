@@ -282,6 +282,36 @@ unproven refinement is an error, which would promote the 240 RESIDUAL calls. Tha
 large migration and is left for an explicit decision — the gate ships today on the safe,
 provable-disjoint subset.
 
+### 5.3 Discharge foundation — hypothesis-bounded args + disjoint-based FAILED (2026-06-21)
+
+Built as slice 3's foundation (the Indexed consumer needs it). Two pieces, both
+reusing existing machinery:
+
+- **`NarrowingInference.inferArg`** — at a call site, an `Int` value-pin is projected
+  over the in-scope hypotheses to a bound: `[Int:@==n-1]` under `n:[Int:@>0]` →
+  `[Int:@>=0]` (the same `BoundAnalysis`/`closeOver` projection the return gate uses).
+  This is what lets a decremented/recursive arg discharge against a weaker param
+  refinement. The call gate (`CallGate`) uses it for arg narrowings.
+- **`StaticDispatch.gateFit` + `provablyDisjoint`** — the gate's FAILED is now
+  **disjoint-based**, distinct from `matchStatus`'s subset-based exclusion (which
+  `resolve`/dispatch keeps). The lesson that forced this: bounding an arg to a *range*
+  exposed that `imply`'s scalar `Failed` means **"not a subset," not "disjoint"** —
+  `[Int:@>=0]` is not ⊆ `[Int:@>0]` yet *overlaps* it. The first attempt (inferArg
+  alone) wrongly rejected multi-overload `factorial` because the bounded arg straddled
+  `{[Int:0],[Int:@>0]}` and each overload reported subset-`Failed`. `provablyDisjoint`
+  decides true emptiness via `BoundAnalysis` (`@==-3 ∩ @>0 = ∅` excludes; `@>=0 ∩ @>0 ≠ ∅`
+  abstains), completing `Failed ⟺ provably disjoint` for scalars (the struct/union case
+  landed in §5.1).
+
+Result (suite green, no regressions): **single-overload inductive recursion now PROVES**
+(`fac(n-1)` → PASSED), **multi-overload recursion abstains** (`sum(n-1)` →
+RESIDUAL, never rejected), provable misroutes FAIL (`h(-3)`, `g(5,7)`), and an
+overlapping/uncertain arg is RESIDUAL. Exhaustiveness (proving multi-overload recursion
+PASSED rather than abstaining) is deliberately **not** built — slice 3's `at` is a single
+refined method, so it isn't needed; multi-overload abstention is sound. Pinned by
+`StaticDispatchTest` (range-overlap→residual, range-disjoint→failed) and `CallGateTest`
+(single- and multi-overload recursion compile).
+
 ---
 
 ## 6. Lineage

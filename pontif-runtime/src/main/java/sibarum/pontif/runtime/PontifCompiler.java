@@ -398,7 +398,7 @@ public final class PontifCompiler {
                     + " @ " + c.origin() + "  " + c.detail());
         }
         for (var c : report.of(sibarum.pontif.ir.StaticDispatch.Verdict.RESIDUAL)) {
-            System.err.println("WAR(dependent-sorts) callgate   RESIDUAL call=" + c.functionName()
+            System.err.println("WAR(dependent-sorts) callgate   " + c.detail() + " call=" + c.functionName()
                     + " @ " + c.origin());
         }
     }

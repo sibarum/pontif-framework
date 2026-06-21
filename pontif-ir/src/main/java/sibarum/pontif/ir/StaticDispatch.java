@@ -6,6 +6,7 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.predicates.BoundAnalysis;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -159,23 +160,103 @@ public final class StaticDispatch {
             List<IrSort> argNarrowings,
             java.util.Map<String, Sort> registry) {
         boolean anyArityMatch = false;
-        boolean anyPassed = false;
-        boolean anyResidual = false;
+        boolean anyMatch = false;
+        boolean anyUndecided = false;
         for (IrStmt.FunctionDecl ov : overloads) {
             if (ov.params().size() != argNarrowings.size()) {
                 continue;  // arity mismatch — not a refinement failure; abstain below
             }
             anyArityMatch = true;
-            switch (matchStatus(ov, argNarrowings, registry)) {
-                case PASSED -> anyPassed = true;
-                case RESIDUAL -> anyResidual = true;
-                case FAILED -> { /* refinement-disjoint */ }
+            switch (gateFit(ov, argNarrowings, registry)) {
+                case MATCHES -> anyMatch = true;
+                case UNDECIDED -> anyUndecided = true;
+                case EXCLUDED -> { /* arg provably disjoint from this overload */ }
             }
         }
         if (!anyArityMatch) return Verdict.RESIDUAL;
-        if (anyPassed) return Verdict.PASSED;
-        if (anyResidual) return Verdict.RESIDUAL;
-        return Verdict.FAILED;
+        if (anyMatch) return Verdict.PASSED;
+        if (anyUndecided) return Verdict.RESIDUAL;
+        return Verdict.FAILED;  // every arity-matching overload provably excluded
+    }
+
+    /**
+     * Per-overload fit for the call <em>gate</em> — distinct from {@link #matchStatus}
+     * (which {@link #resolve} uses for dispatch). The difference is the exclusion
+     * criterion: the gate excludes an overload only when an argument is <em>provably
+     * disjoint</em> from a parameter (the call can't route here), never on mere
+     * subset-failure. This is what keeps a hypothesis-bounded range arg honest:
+     * {@code [Int:@>=0]} vs {@code [Int:@>0]} is not-a-subset but <em>overlaps</em>, so
+     * it is {@link OverloadFit#UNDECIDED} (abstain), not excluded — only a genuine
+     * empty intersection (a singleton {@code -3} vs {@code @>0}) excludes. So the gate's
+     * FAILED verdict means PROVABLY MISROUTES, the no-lie boundary.
+     */
+    private enum OverloadFit { MATCHES, EXCLUDED, UNDECIDED }
+
+    private static OverloadFit gateFit(IrStmt.FunctionDecl ov, List<IrSort> args,
+                                       java.util.Map<String, Sort> registry) {
+        Simplifier simp = new Simplifier(List.of()).withRegistry(registry);
+        Sort[] argSorts = new Sort[args.size()];
+        Map<String, SymExpr> siblingValues = new HashMap<>();
+        for (int j = 0; j < args.size(); j++) {
+            if (args.get(j) == null) continue;
+            try {
+                argSorts[j] = IrCompiler.compileSort(args.get(j));
+            } catch (CompileException ce) {
+                continue;
+            }
+            java.util.Optional<SymExpr> value = Refinements.uniqueValue(argSorts[j]);
+            if (value.isPresent()) {
+                siblingValues.put(ov.params().get(j).name(), value.get());
+            }
+        }
+        boolean allPassed = true;
+        for (int i = 0; i < args.size(); i++) {
+            Sort argSort = argSorts[i];
+            if (argSort == null) {  // unknown arg — this param can't pass, can't exclude
+                allPassed = false;
+                continue;
+            }
+            try {
+                Sort paramSort = substituteSiblings(
+                        IrCompiler.compileSort(ov.params().get(i).sort()), siblingValues);
+                ProofResult pr = Refinements.imply(argSort, paramSort, simp);
+                if (pr instanceof ProofResult.Passed) {
+                    continue;
+                }
+                allPassed = false;
+                if (provablyDisjoint(argSort, paramSort, simp)) {
+                    return OverloadFit.EXCLUDED;  // arg ∩ this param = ∅ → can't route here
+                }
+            } catch (CompileException ce) {
+                allPassed = false;
+            }
+        }
+        return allPassed ? OverloadFit.MATCHES : OverloadFit.UNDECIDED;
+    }
+
+    /**
+     * Whether {@code arg} is PROVABLY disjoint from {@code param} (empty
+     * intersection — no value satisfies both). For two {@code Int} refinements this
+     * is decided by the integer engine: a value variable constrained by <em>both</em>
+     * predicates yields an empty {@link BoundAnalysis} interval iff they contradict
+     * (so {@code @==-3} ∩ {@code @>0} = ∅, but {@code @>=0} ∩ {@code @>0} ≠ ∅). For
+     * other sort kinds it defers to {@link Refinements#imply}'s {@code Failed} —
+     * which the slice-2 hardening already made mean provably-disjoint for
+     * struct/union/kind pairings. Sound and conservative: an undecidable case yields
+     * {@code false} (not disjoint → the gate abstains), never a false exclusion.
+     */
+    private static boolean provablyDisjoint(Sort arg, Sort param, Simplifier simp) {
+        if (isIntRefined(arg) && isIntRefined(param)) {
+            SymExpr self = SymExpr.var("·self");  // synthetic binder, won't collide
+            return BoundAnalysis.bound(self, List.of(
+                    Substitute.applySelf(arg.predicate(), self),
+                    Substitute.applySelf(param.predicate(), self))).isEmpty();
+        }
+        return Refinements.imply(arg, param, simp) instanceof ProofResult.Failed;
+    }
+
+    private static boolean isIntRefined(Sort s) {
+        return s.isRefined() && "Int".equals(s.name());
     }
 
     // --- Internals ---------------------------------------------------------

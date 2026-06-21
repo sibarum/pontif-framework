@@ -62,6 +62,36 @@ class CallGateTest {
     }
 
     @Test
+    void acceptsRecursiveDecrementedCall() {
+        // Single-overload inductive recursion: fac(n-1) under the [@>0] arm — n-1 is
+        // bounded to [Int:@>=0] from the hypothesis n>0 (inferArg), which satisfies
+        // the param [Int:@>=0]. The gate must PROVE this routes, not reject it.
+        CompileResult r = compiler.compileAlt("""
+                module m
+                function fac(n:[Int:@>=0]):[Int:@>=1] -> match n {
+                  [@==0] -> 1
+                  [@>0]  -> n * fac(n-1)
+                }
+                fac(5)""", "fac-rec.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "single-overload inductive recursion must compile; got " + r);
+    }
+
+    @Test
+    void acceptsMultiOverloadRecursion() {
+        // Multi-overload recursion: sum(n-1) bounded to [Int:@>=0] STRADDLES the
+        // {[Int:0],[Int:@>0]} overloads — not a subset of either, but disjoint from
+        // neither. Must abstain (RESIDUAL), never reject (the regression we fixed).
+        CompileResult r = compiler.compileAlt("""
+                module m
+                function sum(n:[Int:0]):Int   -> 0
+                function sum(n:[Int:@>0]):Int -> n + sum(n-1)
+                sum(5)""", "sum-rec.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "multi-overload recursion must compile (abstain, not reject); got " + r);
+    }
+
+    @Test
     void abstainsOnResidualCall() {
         // pass(n) where n:Int is unrefined: the arg can't be proven to satisfy
         // @>0, but it isn't provably disjoint either → RESIDUAL → the gate

@@ -159,6 +159,30 @@ public final class NarrowingInference {
     }
 
     /**
+     * Infers an argument's narrowing <em>for call-site discharge</em>, projecting an
+     * {@code Int} value-pin over the in-scope variables it mentions to a
+     * hypothesis-derived bound: {@code [Int:@==n-1]} under {@code n:[Int:@>0]}
+     * becomes {@code [Int:@>=0]} (via {@link BoundAnalysis}, the same projection
+     * {@link #closeOver} does at scope boundaries). This lets the call gate discharge
+     * a decremented/recursive argument against a weaker parameter refinement —
+     * {@code imply([Int:@>=0], [Int:@>=0])} passes, where the raw pin
+     * {@code [Int:@==n-1]} only yielded residual because {@code imply} never saw the
+     * hypothesis {@code n>0}.
+     *
+     * <p>Sound and monotonic: the bound is a sound over-approximation under the env's
+     * facts, so it never proves a false fit; when no projection applies it falls back
+     * to the raw narrowing. (Safe to feed the gate only because the gate's FAILED is
+     * disjoint-based — a bounded range that overlaps a param is residual, not a false
+     * reject; see {@code StaticDispatch.gateFit}.)
+     */
+    public static IrSort inferArg(IrExpr arg, InferenceContext ctx) {
+        IrSort narrowing = infer(arg, ctx);
+        if (narrowing == null) return null;
+        IrSort closed = closeOver(narrowing, ctx.typeEnv().keySet(), ctx);
+        return closed != null ? closed : narrowing;
+    }
+
+    /**
      * The <em>floor</em> layer: {@link #infer}'s narrowed sort when it has
      * one, else the coarse <em>base</em> sort (bare {@code Int}/{@code Bool}/
      * {@code Decimal}/{@code String}/struct). Where {@link #infer} returns

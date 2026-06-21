@@ -176,6 +176,30 @@ class StaticDispatchTest {
                 StaticDispatch.classify(List.of(gDependent()), List.of(POSITIVE, eq(7))));
     }
 
+    // --- Gate disjointness: FAILED ⟺ provably disjoint, not subset-failure --------
+
+    private static final IrSort GE_0 = IrSort.refined("Int",
+            IrExpr.binOp(IrExpr.Op.GE, IrExpr.self(), IrExpr.lit(0)));
+
+    @Test
+    void rangeArgOverlappingParam_isResidualNotFailed() {
+        // f(x:[Int:@>0]) with arg narrowed to [Int:@>=0]: not a subset (0 ∉ @>0)
+        // but they OVERLAP (all positives) → undecided, NOT a provable misroute.
+        // (Before disjoint-based FAILED this wrongly classified FAILED — the bug
+        // that broke multi-overload recursion when args were bounded to ranges.)
+        IrStmt.FunctionDecl f = decl("f", POSITIVE, IrSort.named("Int"));
+        assertEquals(StaticDispatch.Verdict.RESIDUAL,
+                StaticDispatch.classify(List.of(f), List.of(GE_0)));
+    }
+
+    @Test
+    void rangeArgDisjointFromParam_isFailed() {
+        // f(x:[Int:@>0]) with arg [Int:@<0]: empty intersection → provably misroutes.
+        IrStmt.FunctionDecl f = decl("f", POSITIVE, IrSort.named("Int"));
+        assertEquals(StaticDispatch.Verdict.FAILED,
+                StaticDispatch.classify(List.of(f), List.of(NEGATIVE)));
+    }
+
     @Test
     void resolved_exposesDeclaredReturnSort() {
         IrSort returnSort = IrSort.refined("Int",
