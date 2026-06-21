@@ -3193,6 +3193,12 @@ public final class AltParser {
         while (true) {
             AltToken t = peek();
             if (t.kind() != AltToken.Kind.OP) break;
+            // A line-leading `&` is the spread prefix (`&s:[…]` as its own
+            // statement), not infix conjunction — disambiguate by position, the
+            // same same-line rule the postfix chain uses. Without this, a prior
+            // statement's value (`let s = (1,2,3,4)`) greedily absorbs the next
+            // line's `&s` as `(…) & s`.
+            if ("&".equals(t.text()) && !postfixOpensOnSameLine(t)) break;
             int prec = precedence(t.text());
             if (prec < minPrec) break;
             consume();
@@ -3270,6 +3276,13 @@ public final class AltParser {
     }
 
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
+        // Spread-ascription `&s:[transform]` — the inline/anonymous face of applying
+        // a transform per element over a stream (docs/stream-war.md §3). `&a:[x]` ≡
+        // `x(&a)`; this is the lambda-to-its-named-function counterpart. A leading
+        // `&` is unambiguous (binary `&` is handled by the infix loop in parseExpr).
+        if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
+            return parseSpreadAscription();
+        }
         IrExpr expr = parsePrimary();
         // Postfix: .IDENT (field access), (args) (positional call or struct
         // literal), {x=val,...} (by-name struct literal) — left-to-right.
@@ -3905,6 +3918,32 @@ public final class AltParser {
         // application (and the construction gate) pins it where it matters.
         IrSort returnSort = inferMaximalSort(body);
         return new IrExpr.Lambda(params, returnSort, body, open.spanTo(close));
+    }
+
+    /**
+     * Spread-ascription `&source:[transform]` (docs/stream-war.md §3, slice 2d-1):
+     * applies a per-element transform over a stream — the inline/anonymous face of
+     * {@code transform(&source)}. The leading {@code &} is already at {@code peek()}.
+     * Lowers identically to the call form by routing through {@link #lowerSpreadCall}
+     * ({@code &a:[frag]} ≡ {@code frag(&a)}). Today the transform must be an inline
+     * fragment literal; named/coercion transforms in the {@code [..]} are slice 2d-3.
+     */
+    private IrExpr parseSpreadAscription() throws ParseException {
+        AltToken amp = consume();  // `&`
+        IrExpr source = parseExpr();  // the stream; stops at the COLON (not an OP)
+        expect(AltToken.Kind.COLON);
+        Origin o = amp.origin();
+        IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
+        if (looksLikeFragmentLiteral()) {
+            IrExpr.Lambda frag = parseFragmentLiteral();
+            return lowerSpreadCall(List.of(spread),
+                    a -> new IrExpr.Apply(frag, a, o), o);
+        }
+        throw new ParseException(
+                "`&s:[…]` expects an inline fragment transform here, e.g. "
+                        + "`[ (el:Int) -> … ]` — coercion transforms `[A -> B]` are "
+                        + "slice 2d-3; docs/stream-war.md §3",
+                peek().origin());
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */

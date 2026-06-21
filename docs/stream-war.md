@@ -343,12 +343,19 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    - **Remaining: 2d — re-cut around the transform-spectrum ruling (§3).** The
      application form is now **`&s:[transform]`** (ascription, `[…]` in sort
      position), NOT `fragment(&s)`. Sub-cuts, ordinary-shapes-first as before:
-     - **2d-1 (the spelling pivot):** parse `&s` as a standalone **spread
-       expression** (today `&` only lives in a call's arg list), then postfix
-       `:[transform]` ascription that lowers to the same `Iterate` the
-       `lowerSpreadCall` path builds. Re-expresses the *working* map+filter shapes
-       in the ruled syntax — same runtime, new surface. (The `fragment(&s)` /
-       `[…](&s)` forms become legacy; keep or retire per James.)
+     - **2d-1 LANDED (the ascription face).** `&s:[ (el:Int) -> … ]` parses
+       (`AltParser.parseSpreadAscription`, hooked at the head of
+       `parsePrimaryWithPostfix`) and lowers through the *same* `lowerSpreadCall` as
+       the call form — `&a:[frag]` ≡ `frag(&a)`. Both map and filter work in the
+       ruled syntax (`StreamFragmentTest.spreadAscription_*`). **Both forms stay**
+       (RULED — James): the call form `x(&a)`/`x(&b)` is the **named-reuse** face
+       (bind once, apply to many streams), the `&s:[…]` form is the **inline /
+       anonymous** face — function vs lambda, two spellings of one operation,
+       neither legacy. Required a grammar fix: a **line-leading `&` is the spread
+       prefix, not infix conjunction** (the binary loop now breaks on a not-same-line
+       `&`, mirroring the same-line postfix rule) — else a prior `let`'s value
+       absorbs the next line's `&s` as `(…) & s`. (Caveat: a genuinely multi-line
+       `a &\n b` conjunction must now parenthesize or stay on one line.)
      - **2d-2 (codomain = channel shape):** the arrow's **result type** drives the
        channels — inferred when the inputs pin them (value-arg in → accumulator
        out), written in the codomain when they don't (fork). No trailing

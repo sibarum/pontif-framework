@@ -50,6 +50,34 @@ class StreamFragmentTest {
     }
 
     @Test
+    void spreadAscription_inlineMap() throws Exception {
+        // The inline/anonymous face: `&s:[ (el)-> … ]` ≡ applying the transform per
+        // element. No name needed.
+        assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
+                let s = (1, 2, 3, 4)
+                &s:[ (el:Int) -> el * 2 ]""")));
+    }
+
+    @Test
+    void spreadAscription_inlineFilter_dropsNothing() {
+        // The canonical filteredLossy line in the ruled syntax: &s:[ fragment ].
+        CompileResult r = compiler.compileAlt("""
+                requires pontif.core.{Stream, Nothing}
+                let null:Nothing = Nothing()
+                let s:Stream[Int] = (1, 2, 3, 4)
+                &s:[
+                  (el:Int) -> match el {
+                    [@>2] -> el
+                    [_]   -> null
+                  }
+                ]""", "m.ptf");
+        CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "the inline ascription filter should compile; got " + r);
+        Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        assertEquals("(3, 4)", String.valueOf(val));
+    }
+
+    @Test
     void fragment_filter_dropsNothing() {
         // The canonical filteredLossy line: a fragment whose arms return the
         // element or null; spread over the stream, the nulls drop.
