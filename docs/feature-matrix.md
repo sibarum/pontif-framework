@@ -15,19 +15,19 @@ are gaps, partials, or deliberate absences are explained in [Notes](#notes).
 column** (scoped, not a full sweep); cosmetic changes trigger nothing. If a cited
 test is renamed or deleted, its cell is stale by construction — that's the detector.
 
-| Symbol | Description                                |
-|--------|--------------------------------------------|
-| ^^^    | Fully supported, witnessed.                |
-| ^^     | All relevant functionality supported, witnessed. |
+| Symbol | Description                                         |
+|--------|-----------------------------------------------------|
+| ^^^    | Fully supported, witnessed.                         |
+| ^^     | All relevant functionality supported, witnessed.    |
 | ^      | Intentionally not supported, N/A (a design choice). |
-| /      | Partially implemented — not complete.      |
-| WIP    | Work-in-progress.                          |
-| !      | Critical path — incomplete (needed, not built). |
-| !!     | Critical path — needs design.              |
-| X      | Not supported, nofix.                      |
-| ?      | New requirement — not scoped or committed. |
-| *      | Future roadmap, aspirational, nice-to-have.|
-|        | (blank) No requirement identified.         |
+| /      | Partially implemented — not complete.               |
+| WIP    | Work-in-progress.                                   |
+| !      | Critical path — incomplete (needed, not built).     |
+| !!     | Critical path — needs design.                       |
+| X      | Not supported, nofix.                               |
+| ?      | New requirement — not scoped or committed.          |
+| *      | Future roadmap, aspirational, nice-to-have.         |
+|        | (blank) No requirement identified.                  |
 
 Columns: **this** = `@`/`this`/`this.type` self-reference · **Refine** = refinement
 sorts `[Base:pred]` · **Depend** = sorts referencing *value* binders (param,
@@ -37,22 +37,27 @@ sort fragments · **Iter** = stream/iteration substrate · **Infer** = narrowing
 inference · **Synth** = `;` value/spec synthesis · **Proofs** = proof discharge /
 receipt graph · **Nominal** = by-name typing · **Struct** = shape-based typing.
 
-| Construct       | this | Refine | Depend | Generic | Traits | TypeFrag | Iter | Infer | Synth | Proofs | Nominal | Struct |
-|-----------------|------|--------|--------|---------|--------|----------|------|-------|-------|--------|---------|--------|
-| @               | ^^^  | ^^^    | /      | ^^      |        | ?        |      | ^^^   | ^^^   | ^^^    | ^^      | ^^     |
-| let             | ^^   | ^^^    | /      | ^^      | ^^     | /        |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
-| struct          | ^^   | ^^^    | !!     | ^^^     | ^^^    | ^^       | ^    | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
-| trait           | ^^^  | ^^^    | !!     | ^^^     | ^^^    | !        |      | ^^    |       | ^^     | ^^^     | !      |
-| match           |      | ^^^    |        |         | ^^     |          |      | ^^^   |       | ^^     | ^^^     | ^^^    |
-| destructuring   | ^^   | ^^     |        | ^^      |        |          |      | ^^    |       | ^^     | ^^^     | ^^^    |
-| assign trait    | ^^   | ^^     | !!     | ^^^     | ^^^    | !        |      | ^^    |       | ^^     | ^^^     | !      |
-| assign proof    |      | ^^^    |        |         |        |          |      | ^^    |       | ^^^    | ^^      |        |
-| function        | ^    | ^^^    | /      | ^^^     | ^^^    | ^^       |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^     |
-| method          | ^^^  | ^^^    | !!     | ^^      | ^^^    | ^^       |      | ^^^   | ^^    | ^^     | ^^^     | ^^     |
-| ; (synthesize)  | ^    | ^^^    | /      | ^^      |        | /        |      | ^^    | ^^^   | ^^^    |         |        |
-| Stream          |      | ^^     |        | *       | !      |          | ^^   | ^^    |       |        | ^^      | ^^^    |
-| Indexed         | !    | !      | !!     | !       | !      |          | !    |       |       |        | !       | !      |
-| iter            |      | ^^     |        | *       |        |          | /    | ^^    |       |        |         | ^^     |
+| Construct      | this | Refine | Depend | Generic | Traits | TypeFrag | Iter | Infer | Synth | Proofs | Nominal | Struct |
+|----------------|------|--------|--------|---------|--------|----------|------|-------|-------|--------|---------|--------|
+| @              | ^^^  | ^^^    | /      | ^^      |        | ?        |      | ^^^   | ^^^   | ^^^    | ^^      | ^^     |
+| let            | ^^   | ^^^    | /      | ^^      | ^^     | /        |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
+| struct         | ^^   | ^^^    | !!     | ^^^     | ^^^    | ^^       | ^    | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
+| trait          | ^^^  | ^^^    | !!     | ^^^     | ^^^    | !        |      | ^^    |       | ^^     | ^^^     | !      |
+| match          |      | ^^^    |        |         | ^^     |          |      | ^^^   |       | ^^     | ^^^     | ^^^    |
+| destructuring  | ^^   | ^^     |        | ^^      |        |          |      | ^^    |       | ^^     | ^^^     | ^^^    |
+| assign trait   | ^^   | ^^     | !!     | ^^^     | ^^^    | !        |      | ^^    |       | ^^     | ^^^     | !      |
+| assign proof   |      | ^^^    |        |         |        |          |      | ^^    |       | ^^^    | ^^      |        |
+| function       | ^    | ^^^    | /      | ^^^     | ^^^    | ^^       |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^     |
+| method         | ^^^  | ^^^    | !!     | ^^      | ^^^    | ^^       |      | ^^^   | ^^    | ^^     | ^^^     | ^^     |
+| ; (synthesize) | ^    | ^^^    | /      | ^^      |        | /        |      | ^^    | ^^^   | ^^^    |         |        |
+| Stream         |      | ^^     |        | *       | !      |          | ^^   | ^^    |       |        | ^^      | ^^^    |
+| Indexed        | !    | !      | !!     | !       | !      |          | !    |       |       |        | !       | !      |
+| iter           |      | ^^     |        | *       |        |          | /    | ^^    |       |        |         | ^^     |
+| op overloading |      |        |        |         |        |          |      |       |       |        |         |        |
+| multi-dispatch |      |        |        |         |        |          |      |       |       |        |         |        |
+| module         |      |        |        |         |        |          |      |       |       |        |         |        |
+| requires       |      |        |        |         |        |          |      |       |       |        |         |        |
+| exports        |      |        |        |         |        |          |      |       |       |        |         |        |
 
 ---
 
