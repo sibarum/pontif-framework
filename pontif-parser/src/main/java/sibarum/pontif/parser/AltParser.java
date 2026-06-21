@@ -2190,6 +2190,15 @@ public final class AltParser {
         Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
                 ? parseTypeParamSlot()
                 : new LinkedHashMap<>();
+        // Optional `: BaseTrait` — trait extension (WAR(stream)). `trait B : A {…}`
+        // makes B extend A: an impl of B must satisfy A's contract too, and a B is-a A
+        // (validated/registered by SortChecker + the trait registry, where every trait
+        // is visible — the base may be forward-declared or imported, so not checked here).
+        String baseTrait = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            expect(AltToken.Kind.COLON);
+            baseTrait = expect(AltToken.Kind.IDENT).text();
+        }
         IrSort.Trait body = parseTraitMembers(start);
         if (peek().kind() == AltToken.Kind.EQUALS) {
             throw new ParseException(
@@ -2199,7 +2208,7 @@ public final class AltParser {
         declaredTraits.add(name);
         IrSort.Trait named = new IrSort.Trait(
                 name, body.methods(), body.attributes(), body.associatedTypes(),
-                typeParams, body.operators(), body.origin());
+                typeParams, body.operators(), baseTrait, body.origin());
         for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }

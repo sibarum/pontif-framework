@@ -281,7 +281,7 @@ public final class AliasResolver {
                 // Operator contract members are self-typed Dispatch sorts
                 // (this.type only) — no aliases to resolve — so pass through verbatim.
                 yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
-                        t.typeParams(), t.operators(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -467,7 +467,7 @@ public final class AliasResolver {
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
-                        t.typeParams(), t.operators(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());
@@ -534,6 +534,7 @@ public final class AliasResolver {
         }
         // Operator contract members are self-typed (this.type), not over the
         // trait's [type T] params, so type-var substitution leaves them unchanged.
-        return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.operators(), tr.origin());
+        return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.operators(),
+                tr.baseTrait(), tr.origin());
     }
 }

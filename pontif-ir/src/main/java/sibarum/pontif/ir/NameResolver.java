@@ -215,7 +215,7 @@ public final class NameResolver {
                 // type names to FQN-resolve — so carry them through verbatim.
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
-                        t.typeParams(), t.operators(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

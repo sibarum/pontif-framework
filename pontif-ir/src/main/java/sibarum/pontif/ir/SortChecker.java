@@ -163,6 +163,60 @@ public final class SortChecker {
      * count} (self prepended). Also validates the methods' own sorts
      * recursively and checks their bodies via {@link #checkExpr}.
      */
+    /**
+     * Flattens a trait's base-trait chain into a single effective contract: own
+     * members unioned with every transitive base trait's members (WAR(stream)
+     * trait-extends-trait). Merged base-first so a derived trait may refine a base
+     * member (own entry wins on a name collision). A base that names no declared
+     * trait, or a cyclic chain, is a hard error. A root trait (no base) is returned
+     * unchanged. (Base type-parameter substitution across a parametric base — e.g.
+     * {@code IndexedStream[E] : Stream[E]} — is a follow-up; this merges members
+     * structurally, which covers the non-parametric and same-binder cases.)
+     */
+    private static IrSort.Trait flattenTrait(
+            IrSort.Trait trait, Map<String, IrSort.Trait> traitContracts,
+            sibarum.pontif.core.Origin origin)
+            throws CompileException {
+        if (trait.baseTrait() == null) {
+            return trait;
+        }
+        List<IrSort.Trait> chain = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        IrSort.Trait cur = trait;
+        while (cur != null) {
+            if (!seen.add(cur.name())) {
+                throw new CompileException(
+                        "Trait '" + trait.name() + "' has a cyclic base-trait chain at '"
+                                + cur.name() + "'", origin);
+            }
+            chain.add(cur);
+            String base = cur.baseTrait();
+            if (base == null) break;
+            IrSort.Trait next = traitContracts.get(base);
+            if (next == null) {
+                throw new CompileException(
+                        "Trait '" + cur.name() + "' extends unknown trait '" + base
+                                + "' (no trait declaration in scope)", origin);
+            }
+            cur = next;
+        }
+        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        Map<String, IrSort> attributes = new LinkedHashMap<>();
+        Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
+        Map<String, IrSort> typeParams = new LinkedHashMap<>();
+        Map<String, IrSort.Dispatch> operators = new LinkedHashMap<>();
+        for (int i = chain.size() - 1; i >= 0; i--) {  // root-first → derived overrides base
+            IrSort.Trait c = chain.get(i);
+            methods.putAll(c.methods());
+            attributes.putAll(c.attributes());
+            associatedTypes.putAll(c.associatedTypes());
+            typeParams.putAll(c.typeParams());
+            operators.putAll(c.operators());
+        }
+        return new IrSort.Trait(trait.name(), methods, attributes, associatedTypes,
+                typeParams, operators, trait.baseTrait(), trait.origin());
+    }
+
     private static void validateTraitImpl(
             IrStmt.TraitImpl ti,
             Map<String, IrSort.Trait> traitContracts,
@@ -170,14 +224,20 @@ public final class SortChecker {
             Map<String, IrSort.Structural> structDefs,
             Set<String> satisfies,
             Map<String, List<IrStmt.FunctionDecl>> overloads) throws CompileException {
-        IrSort.Trait contract = traitContracts.get(ti.traitName());
-        if (contract == null) {
+        IrSort.Trait ownContract = traitContracts.get(ti.traitName());
+        if (ownContract == null) {
             throw new CompileException(
                     "Trait impl '" + ti.typeName() + " : " + ti.traitName()
                             + "' references unknown trait '" + ti.traitName()
                             + "' (no trait declaration in module)",
                     ti.origin());
         }
+        // WAR(stream) trait-extends-trait: the EFFECTIVE contract an impl must satisfy
+        // is the trait's own members plus, transitively, every base trait's members
+        // (`trait IndexedStream : Stream` ⟹ an impl of IndexedStream must also provide
+        // Stream's contract). Flattened base-first so a derived trait may refine a base
+        // member; a missing/cyclic base is a hard error.
+        IrSort.Trait contract = flattenTrait(ownContract, traitContracts, ti.origin());
 
         // Associated types: each `type X` the trait declares must be bound
         // exactly once (`type X = [Sort]`), and a binding for an undeclared

@@ -205,7 +205,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     record Trait(String name, Map<String, IrSort.Method> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                  Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
-                 Origin origin) implements IrSort {
+                 String baseTrait, Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -248,13 +248,27 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // implemented in the block — a later slice; the parser only collects them.
             operators = java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(operators));
+            // baseTrait: the extended trait's name (`trait B : A` → "A"), or null for a
+            // root trait. WAR(stream): trait-extends-trait — an impl of B must satisfy
+            // A's contract too, and a B is-a A for dispatch (SortChecker/TraitRegistry).
+            if (baseTrait != null && baseTrait.isEmpty()) {
+                baseTrait = null;
+            }
+        }
+
+        /** Back-compat: a trait with no base trait (a root trait). */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Origin origin) {
+            this(name, methods, attributes, associatedTypes, typeParams, operators, null, origin);
         }
 
         /** Back-compat: a trait with no operator contract members. */
         public Trait(String name, Map<String, IrSort.Method> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                      Map<String, IrSort> typeParams, Origin origin) {
-            this(name, methods, attributes, associatedTypes, typeParams, Map.of(), origin);
+            this(name, methods, attributes, associatedTypes, typeParams, Map.of(), null, origin);
         }
 
         /** Back-compat: a trait with no type parameters. */

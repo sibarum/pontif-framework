@@ -65,9 +65,13 @@ now or maybe ever.
   `IndexedStream`'s additions in one block, and the value is-a `Stream` automatically
   (subset/narrowing is-a, `univocal-language-design`). Applying base + sub separately
   is a possible convenience, not the default.
-- **NEEDS BUILDING:** trait-*extends*-trait machinery. Today only `assign trait Type :
-  Trait` (a type implements a trait) exists — there is no `trait X : Y` (a trait
-  extending a trait).
+- **trait-*extends*-trait — contract-merge LANDED (slice 1a, 2026-06-21).** `trait B : A`
+  now parses (`IrSort.Trait.baseTrait`), and an `assign trait T : B` impl must satisfy
+  the **flattened** contract — B's members ∪ A's transitively (`SortChecker.flattenTrait`;
+  base-first merge so a derived trait may refine; unknown/cyclic base = hard error).
+  Pinned by `TraitExtendsTest`. **Remaining:** transitive *dispatch* satisfaction (a `B`
+  value is-a `A` in the trait registry, for bare-trait-receiver dispatch) and
+  parametric-base type-arg substitution (`IndexedStream[E] : Stream[E]`).
 - **The spine — re-observability is per-source (RULED 2026-06-21, James).** A
   tuple/array literal **can be re-observed** (map/fold it twice, same result;
   conservation's "read = Observation, doesn't consume" holds). Other sources
