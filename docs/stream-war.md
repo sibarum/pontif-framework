@@ -105,6 +105,65 @@ There is **no `map`, `filter`, or `fold` primitive**. There is one construct: a
 (`map`/`filter`/`fold` will return *later* as library sugar over this — **out of
 scope for now**.)
 
+### Ascription is a transform spectrum (RULED 2026-06-21, James)
+
+The deepest reframe of the war, and it makes the fragment *not a new construct*:
+a fragment is **type ascription** where the type-language is allowed to be a
+**transform**, not only a predicate. `:` keeps its single meaning — *"this value
+goes through this type"* — across a spectrum:
+
+```pontif
+x:[TypeA]                              # confirm membership — the IDENTITY transform
+x:[TypeA -> TypeB]                     # coercion — the type refinement transforms x
+x:[a:TypeA -> TypeB(a.value)]          # explicit conversion (named binder, result expr)
+x:[a:TypeA -> b:[TypeB(a.value)] -> TypeC(b)]   # a chain of transforms
+```
+
+Membership is the **degenerate (identity) case** of transformation — *"it was a
+type system all along."* Just as destructuring compresses boilerplate extracting
+values from arguments, **type fragments compress boilerplate in contextual data
+conversion** (coercion). Consequences (each a corollary, not a new rule):
+
+- **`:` is not overloaded.** One operator over a richer type algebra; the earlier
+  "`:` means transform-by now" worry dissolves — confirm/refine/coerce/map are one
+  spectrum.
+- **No separate `:[Shape]` output ascription.** The output channel shape *is the
+  codomain of the arrow*. `fold`'s `(Stream[Int], Int)` is where the transform
+  lands, not a trailing claim. Channel kinds come from the codomain — **inferred
+  when the inputs pin them** (a value-arg in → accumulator out), **written in the
+  arrow's result type when they don't** (fan-out: one stream in, two streams out,
+  so `(Stream, Stream)` can't be read off the inputs).
+- **`:` applies, `&` distributes.** `:` runs the transform on its subject; `&`
+  lifts it over the elements of a stream. So `s:[el:Int -> …]` would run a
+  *per-element* transform on the *whole* stream (a domain error); **`&s:[…]` maps
+  it**. `map` is therefore a **corollary of spread + transform**, never primitive —
+  and this keeps the `[…]` in **sort position** (right of `:`), honoring the
+  bracket/paren law (`[]` for types) that `fragment(&s)` / `[…](&s)` broke.
+- **Refinement and transform compose in one bracket.** `x:[Int:@>0 -> Decimal]` =
+  *"x is a positive Int, then coerce to Decimal"* — guard the domain (`:`), then
+  advance it (`->`). A new legal form the frame produces, not a re-spelling.
+- **Bare `[A -> B]` (no body) resolves to a *registered* coercion or is a compile
+  error** (no-lie — never invent a conversion). That is exactly the closed-primitive
+  implicit set (`Int→Decimal`) from the explicit-coercion ruling, viewed through
+  this lens; otherwise write the body `[a:A -> B(…)]`.
+
+Canonical application form (supersedes `fragment(&s)`):
+
+```pontif
+let filteredLossy = &s:[
+  (el:Int) ->
+  match el
+    [@>2] -> el
+    [_]   -> null
+]
+```
+
+Placement: neighbors are coercive subtyping, arrows, "compiling to categories";
+what is **distinctly Pontif** is the whole spectrum (confirm / refine / coerce /
+map) on one `:` with the value on the left and the conservation law underneath —
+so the stream combinators aren't a library grafted on, they are *what the type
+system already does, distributed*.
+
 ### The positional-channel model (RULED)
 
 Each tuple position is a **channel**; input position *i* ↔ output position *i*:
@@ -281,10 +340,26 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
      re-dispatch a bound **metareference** (the `()`-law); extended so a 0-arg let
      holding a **Closure** is invoked with the call's args — so the spread-lowered
      `Call("filter",[elem])` applies the fragment with no parse-time tracking.
-   - **Remaining:** 2d — multi-channel (accumulators/fold, fan-out/fork, fan-in/zip)
-     and the explicit `expr:[Shape]` result ascription with `._N` projection (the
-     `fold`/`fork` lines of the canonical example, which still don't parse). The
-     single-channel map+filter shapes are fully working.
+   - **Remaining: 2d — re-cut around the transform-spectrum ruling (§3).** The
+     application form is now **`&s:[transform]`** (ascription, `[…]` in sort
+     position), NOT `fragment(&s)`. Sub-cuts, ordinary-shapes-first as before:
+     - **2d-1 (the spelling pivot):** parse `&s` as a standalone **spread
+       expression** (today `&` only lives in a call's arg list), then postfix
+       `:[transform]` ascription that lowers to the same `Iterate` the
+       `lowerSpreadCall` path builds. Re-expresses the *working* map+filter shapes
+       in the ruled syntax — same runtime, new surface. (The `fragment(&s)` /
+       `[…](&s)` forms become legacy; keep or retire per James.)
+     - **2d-2 (codomain = channel shape):** the arrow's **result type** drives the
+       channels — inferred when the inputs pin them (value-arg in → accumulator
+       out), written in the codomain when they don't (fork). No trailing
+       `:[Shape]`. Delivers `fold` (accumulator) and `fork` (fan-out), `._N`
+       projection, and `zip` (multi-`&` leading tuple `(&a,&b):[…]`).
+     - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
+       coercion — `x:[A -> B]` (registered) and `x:[a:A -> B(…)]` (explicit), plus
+       refinement+transform composition `[Int:@>0 -> Decimal]`. Unifies with the
+       explicit-coercion ruling (`docs/dispatch-unification.md`, `(Type:value)`).
+     The single-channel map+filter **semantics** are fully working today (slices
+     2a–2c) under the `fragment(&s)` surface; 2d-1 moves them onto `&s:[…]`.
 3. **Multi-channel** — accumulators (fold/scan), fan-out (fork), fan-in/zip.
 4. **`IndexedStream : Stream`** — `count` + `at`, rungs 1–2 (`indexed-streams.md`);
    the discharge foundation already exists.
