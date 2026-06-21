@@ -21,6 +21,11 @@ public final class TraitRegistry {
 
     private final Map<String, Set<String>> satisfiers = new HashMap<>();
     private final Set<String> declaredTraits = new HashSet<>();
+    // WAR(stream) trait-extends-trait: each trait's base (`trait B : A` → B↦A), for
+    // transitive satisfaction — a T satisfying B is-a A, so dispatch on a bare A-typed
+    // receiver resolves a T value. Consulted query-time (#satisfies), so it is
+    // independent of register/declare ordering.
+    private final Map<String, String> baseTrait = new HashMap<>();
 
     /**
      * Declares that {@code traitName} is a known trait, even before any
@@ -29,10 +34,22 @@ public final class TraitRegistry {
      * Idempotent.
      */
     public TraitRegistry declareTrait(String traitName) {
+        return declareTrait(traitName, null);
+    }
+
+    /**
+     * As {@link #declareTrait(String)} but also records {@code traitName}'s base
+     * trait ({@code trait B : A} ⟹ {@code declareTrait("B", "A")}) for transitive
+     * satisfaction. A null/empty base records no extension. Idempotent.
+     */
+    public TraitRegistry declareTrait(String traitName, String base) {
         if (traitName == null || traitName.isEmpty()) {
             throw new IllegalArgumentException("traitName must be non-empty");
         }
         declaredTraits.add(traitName);
+        if (base != null && !base.isEmpty()) {
+            baseTrait.put(traitName, base);
+        }
         return this;
     }
 
@@ -65,7 +82,27 @@ public final class TraitRegistry {
     public boolean satisfies(String traitName, String typeName) {
         if (traitName == null || typeName == null) return false;
         Set<String> set = satisfiers.get(traitName);
-        return set != null && set.contains(typeName);
+        if (set != null && set.contains(typeName)) return true;
+        // Transitive (WAR(stream)): typeName may satisfy a SUB-trait whose base-chain
+        // reaches traitName — a T implementing IndexedStream is-a Stream. Walk each
+        // trait typeName directly satisfies up its base chain looking for traitName.
+        for (Map.Entry<String, Set<String>> e : satisfiers.entrySet()) {
+            if (e.getValue().contains(typeName) && isAncestorTrait(traitName, e.getKey())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether {@code ancestor} is a (strict) base trait of {@code trait}, transitively. */
+    private boolean isAncestorTrait(String ancestor, String trait) {
+        Set<String> seen = new HashSet<>();
+        String cur = baseTrait.get(trait);
+        while (cur != null && seen.add(cur)) {
+            if (cur.equals(ancestor)) return true;
+            cur = baseTrait.get(cur);
+        }
+        return false;
     }
 
     /** Read-only view of the satisfier set for a trait — empty if unregistered. */

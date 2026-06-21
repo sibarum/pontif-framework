@@ -69,9 +69,11 @@ now or maybe ever.
   now parses (`IrSort.Trait.baseTrait`), and an `assign trait T : B` impl must satisfy
   the **flattened** contract — B's members ∪ A's transitively (`SortChecker.flattenTrait`;
   base-first merge so a derived trait may refine; unknown/cyclic base = hard error).
-  Pinned by `TraitExtendsTest`. **Remaining:** transitive *dispatch* satisfaction (a `B`
-  value is-a `A` in the trait registry, for bare-trait-receiver dispatch) and
-  parametric-base type-arg substitution (`IndexedStream[E] : Stream[E]`).
+  Pinned by `TraitExtendsTest`. **Transitive dispatch satisfaction also LANDED** — a `B`
+  value is-a `A` in `TraitRegistry` (query-time base-chain walk), so a bare `A`-typed
+  receiver resolves a `B` value (`useBase(v:Base)` called with a `Derived` value
+  dispatches `Base.a` → `T.a`). **Remaining:** parametric-base type-arg substitution
+  (`IndexedStream[E] : Stream[E]`), deferred until `IndexedStream` lands.
 - **The spine — re-observability is per-source (RULED 2026-06-21, James).** A
   tuple/array literal **can be re-observed** (map/fold it twice, same result;
   conservation's "read = Observation, doesn't consume" holds). Other sources

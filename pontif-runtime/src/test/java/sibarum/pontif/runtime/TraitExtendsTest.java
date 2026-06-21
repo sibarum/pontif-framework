@@ -62,6 +62,25 @@ class TraitExtendsTest {
     }
 
     @Test
+    void baseTraitParam_dispatchesSubTraitValue_transitively() {
+        // A function takes a bare BASE-trait param; called with a value whose type
+        // satisfies a SUB-trait. Transitive satisfaction (a T : Derived is-a Base)
+        // must let the trait-fallback dispatch resolve Base.a → T.a.
+        String result = run("""
+                trait Base{ a:[Method():Int] }
+                trait Derived:Base{ b:[Method():Int] }
+                struct T(x:Int)
+                assign trait T:Derived {
+                  a():Int -> 10
+                  b():Int -> 20
+                }
+                function useBase(v:Base):Int -> v.a()
+                useBase(T(0))""");
+        assertEquals("10", result,
+                () -> "a Derived value must dispatch through its base trait Base; got " + result);
+    }
+
+    @Test
     void subTraitExtendingUnknownTrait_isRejected() {
         // `Derived : Missing` where Missing is undeclared → hard error at impl time.
         CompileResult r = compiler.compileAlt("""

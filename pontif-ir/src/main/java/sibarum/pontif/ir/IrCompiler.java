@@ -137,7 +137,7 @@ public final class IrCompiler {
                     // bare-named param sorts can be identified as traits at
                     // dispatch time, even before any impl block is seen.
                     if (ta.sort() instanceof IrSort.Trait t) {
-                        dispatch.traitRegistry().declareTrait(t.name());
+                        dispatch.traitRegistry().declareTrait(t.name(), t.baseTrait());
                     }
                 }
                 case IrStmt.Proof p -> { /* proof metadata; consumed by the return-refinement gate (PontifCompiler), never compiled or evaluated */ }
