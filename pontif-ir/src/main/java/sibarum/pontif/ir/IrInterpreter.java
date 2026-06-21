@@ -803,9 +803,17 @@ public final class IrInterpreter {
                             name, List.of(), checker(module));
                     if (zero instanceof DispatchResult.Resolved z) {
                         CompiledModule.CompiledFunction zf = module.functions().get(z.decl());
-                        if (zf != null && eval(zf.body(), Environment.empty(), module)
-                                instanceof sibarum.pontif.core.types.DispatchValue dv) {
-                            return dispatchByName(dv.functionName(), call, env, module);
+                        if (zf != null) {
+                            Object bound = eval(zf.body(), Environment.empty(), module);
+                            if (bound instanceof sibarum.pontif.core.types.DispatchValue dv) {
+                                return dispatchByName(dv.functionName(), call, env, module);
+                            }
+                            // A let bound to a fragment/lambda VALUE: applying it
+                            // with args invokes the closure — the synthesis fragment
+                            // as a first-class value (docs/stream-war.md §3).
+                            if (bound instanceof Closure closure) {
+                                return closure.invoke(argValues, this, module);
+                            }
                         }
                     }
                 }

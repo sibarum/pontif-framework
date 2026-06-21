@@ -270,10 +270,21 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
      on `_` and defers to the IR `ConstructionGate` (which sees imported structs) and
      the runtime binding-claim check. Required so `let null:Nothing = Nothing()`
      (imported constructor → inferred `_`) is accepted.
-   - **Remaining:** 2c — the fragment-literal grammar `let f:[ (el:Int) -> match… ]`
-     (new syntactic form, a `[…]` carrying a function body — today fails
-     `Expected COMMA but got COLON`); multi-channel (accumulators/fold, fan-out/fork,
-     fan-in/zip); the explicit `expr:[Shape]` result ascription with `._N` projection.
+   - **Slice 2c LANDED** (the fragment literal — James ruled **first-class value**,
+     the lambda replacement, over desugar-to-function). `let f:[ (el:Int) -> body ]`
+     parses to an `IrExpr.Lambda` (a `Closure` at runtime) bound as a 0-arg let sorted
+     `[Method(el:Int):Ret]` (`AltParser.parseFragmentLiteral`, detected by a NAMED
+     param head `( IDENT :` — no tuple/Method sort starts that way). A fragment is a
+     callable value: `double(3)` applies it directly, `double(&s)` spreads it (map),
+     and the canonical `filter(&s)` over `(1,2,3,4)` → `(3,4)` (`StreamFragmentTest`).
+     The enabler: `IrInterpreter.dispatchValues` already reached through a 0-arg let to
+     re-dispatch a bound **metareference** (the `()`-law); extended so a 0-arg let
+     holding a **Closure** is invoked with the call's args — so the spread-lowered
+     `Call("filter",[elem])` applies the fragment with no parse-time tracking.
+   - **Remaining:** 2d — multi-channel (accumulators/fold, fan-out/fork, fan-in/zip)
+     and the explicit `expr:[Shape]` result ascription with `._N` projection (the
+     `fold`/`fork` lines of the canonical example, which still don't parse). The
+     single-channel map+filter shapes are fully working.
 3. **Multi-channel** — accumulators (fold/scan), fan-out (fork), fan-in/zip.
 4. **`IndexedStream : Stream`** — `count` + `at`, rungs 1–2 (`indexed-streams.md`);
    the discharge foundation already exists.

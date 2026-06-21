@@ -1258,6 +1258,27 @@ public final class AltParser {
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
+            // Fragment literal: `let f:[ (el:Int) -> body ]` — a first-class
+            // synthesis-fragment value (docs/stream-war.md §3). The `[…]` carries
+            // params + body (no `= value`); the binding lowers to a 0-arg let
+            // returning the lambda, sorted as the Method contract. Distinguished
+            // from an ordinary `[…]` sort by a NAMED param head (`( IDENT :`), which
+            // no tuple/Method sort begins with.
+            if (looksLikeFragmentLiteral()) {
+                IrExpr.Lambda frag = parseFragmentLiteral();
+                List<IrSort> paramSorts = new ArrayList<>();
+                List<String> paramNames = new ArrayList<>();
+                for (IrParam p : frag.params()) {
+                    paramSorts.add(p.sort());
+                    paramNames.add(p.name());
+                }
+                IrSort methodSort = new IrSort.Method(
+                        paramSorts, paramNames, frag.returnSort(), start.origin());
+                declaredTopLevelLets.put(name, methodSort);
+                if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+                return new IrStmt.FunctionDecl(
+                        name, List.of(), methodSort, frag, start.origin(), true);
+            }
             // `let NAME:Type[sortExpr]` — a reusable sort alias (refinements, unions
             // of refined bases, named sorts). It's a type-level declaration with no
             // value, lowered to a TypeAlias the AliasResolver inlines — the bracketed
@@ -3853,6 +3874,47 @@ public final class AltParser {
      * fold (current/next), group-by (put), the completed-iterator result, and the
      * conservation checks are not in this slice.
      */
+    /**
+     * A <em>fragment literal</em>: {@code [ (el:Int) -> body ]} — the synthesis
+     * fragment as a first-class value (docs/stream-war.md §3, slice 2c). Parses to
+     * an {@link IrExpr.Lambda} (a {@code Closure} at runtime), the lambda
+     * replacement: a value you can bind, pass, and apply (notably by {@code &}
+     * spread). The opening {@code [} is at {@code peek()}. Params scope the body,
+     * mirroring {@link #parseFunction}.
+     */
+    private IrExpr.Lambda parseFragmentLiteral() throws ParseException {
+        AltToken open = expect(AltToken.Kind.LBRACKET);
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
+        expect(AltToken.Kind.ARROW);
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
+        IrExpr body;
+        try {
+            body = wrapParamDestructures(parseExpr(), destrs);
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+        AltToken close = expect(AltToken.Kind.RBRACKET);
+        // Return sort is inferred from the body; the explicit `:[Shape]` on the
+        // application (and the construction gate) pins it where it matters.
+        IrSort returnSort = inferMaximalSort(body);
+        return new IrExpr.Lambda(params, returnSort, body, open.spanTo(close));
+    }
+
+    /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */
+    private boolean looksLikeFragmentLiteral() {
+        return peek().kind() == AltToken.Kind.LBRACKET
+                && peek(1).kind() == AltToken.Kind.LPAREN
+                && peek(2).kind() == AltToken.Kind.IDENT
+                && peek(3).kind() == AltToken.Kind.COLON;
+    }
+
     private IrExpr parseIter() throws ParseException {
         AltToken start = consume();  // `iter`
         expect(AltToken.Kind.LPAREN);
