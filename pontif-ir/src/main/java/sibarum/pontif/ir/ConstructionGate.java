@@ -190,6 +190,10 @@ final class ConstructionGate {
             Map<String, IrSort.Structural> structs) throws CompileException {
         IrSort claim = l.claim();
         if (claim == null || !gated(claim, structs)) return null;
+        // A parametric Stream[T] claim is kept for the runtime element check (§8.6):
+        // the element type of a computed stream isn't statically decidable, so this is
+        // always an UNKNOWN — skip classify (which judges base sorts, not elements).
+        if (isParametricStream(claim)) return claim;
         IrSort arg = argSort(value, ctx, structs);
         return switch (classify(arg, claim, structs)) {
             case FITS -> null;  // discharged — provable fit, no runtime check
@@ -420,10 +424,27 @@ final class ConstructionGate {
         return switch (field) {
             case IrSort.Refined ref -> true;
             case IrSort.Named n -> structs.containsKey(n.name());
+            case IrSort.Trait t -> isParametricStream(t);
             case IrSort.Union u -> u.branches().stream().anyMatch(b -> gated(b, structs));
             case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> gated(b, structs));
             default -> false;
         };
+    }
+
+    /**
+     * A resolved parametric {@code Stream[T]} (bare or linker-qualified) — the only
+     * trait whose parametric contract is checkable today (WAR(stream) §8.6: a stream
+     * is a sequence of its element type). Other parametric traits carry their args but
+     * get no invented invariant, so they are NOT gated here.
+     */
+    private static boolean isParametricStream(IrSort s) {
+        if (s instanceof IrSort.Trait t && !t.typeArgs().isEmpty()) return isStreamName(t.name());
+        if (s instanceof IrSort.Named n && !n.typeArgs().isEmpty()) return isStreamName(n.name());
+        return false;
+    }
+
+    private static boolean isStreamName(String n) {
+        return n != null && (n.equals("Stream") || n.endsWith("/Stream"));
     }
 
     /**
@@ -437,6 +458,7 @@ final class ConstructionGate {
         return switch (field) {
             case IrSort.Refined ref -> true;
             case IrSort.Named n -> true;
+            case IrSort.Trait t -> isParametricStream(t);
             case IrSort.Union u ->
                     u.branches().stream().allMatch(b -> runtimeCheckable(b, structs));
             case IrSort.Intersection i ->

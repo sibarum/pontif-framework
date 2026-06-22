@@ -205,7 +205,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     record Trait(String name, Map<String, IrSort.Method> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                  Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
-                 String baseTrait, Origin origin) implements IrSort {
+                 String baseTrait, List<IrSort> typeArgs, Origin origin) implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -254,6 +254,21 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             if (baseTrait != null && baseTrait.isEmpty()) {
                 baseTrait = null;
             }
+            // typeArgs: the APPLIED type arguments (`Stream[Int]` → [Int]), distinct
+            // from typeParams (the declaration slots). Empty for a bare/declaration-site
+            // trait; populated by AliasResolver.applyTypeArgs when a parametric trait is
+            // instantiated. WAR(stream) §8.6: carrying these closes the no-lie hole where
+            // the element type of a computed Stream was dropped at resolution.
+            typeArgs = typeArgs == null ? List.of() : List.copyOf(typeArgs);
+        }
+
+        /** Back-compat: the pre-typeArgs canonical signature — no applied type arguments. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     String baseTrait, Origin origin) {
+            this(name, methods, attributes, associatedTypes, typeParams, operators,
+                    baseTrait, List.of(), origin);
         }
 
         /** Back-compat: a trait with no base trait (a root trait). */
@@ -261,7 +276,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                      Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
                      Origin origin) {
-            this(name, methods, attributes, associatedTypes, typeParams, operators, null, origin);
+            this(name, methods, attributes, associatedTypes, typeParams, operators,
+                    null, List.of(), origin);
         }
 
         /** Back-compat: a trait with no operator contract members. */

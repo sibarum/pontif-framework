@@ -213,9 +213,13 @@ public final class NameResolver {
                 }
                 // Operator contract members are self-typed Dispatch sorts — no
                 // type names to FQN-resolve — so carry them through verbatim.
+                // Applied typeArgs (§8.6 carrier) ARE resolved — an element type may
+                // be a user type needing FQN-qualification — and preserved.
+                List<IrSort> resolvedArgs = new ArrayList<>(t.typeArgs().size());
+                for (IrSort a : t.typeArgs()) resolvedArgs.add(rewriteSort(a, m, table));
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), resolvedArgs, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

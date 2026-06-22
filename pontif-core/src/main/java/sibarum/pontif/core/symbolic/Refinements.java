@@ -112,6 +112,15 @@ public final class Refinements {
         // checked. Terminates by the finite value even on a recursive type:
         // descent only follows members present in the runtime record.
         sort = resolveNominal(sort, simplifier.registry());
+        // Parametric Stream contract (WAR(stream) §8.6): a Stream[T] is satisfied by a
+        // stream value (a positional tuple) iff every element satisfies T. This closes
+        // the no-lie hole where a COMPUTED stream's element type went unchecked (a
+        // literal was element-checked at parse, an Iterate result was not). Other
+        // parametric traits carry their type args but get NO invented invariant — only
+        // Stream's contract ("a sequence of T") is known, so only it is checked.
+        if (sort.typeArgs() != null && !sort.typeArgs().isEmpty() && isStreamSort(sort.name())) {
+            return satisfiesStreamElements(value, sort.typeArgs().get(0), simplifier);
+        }
         if (sort.isStructural()) {
             return satisfiesStructural(value, sort, simplifier);
         }
@@ -192,6 +201,42 @@ public final class Refinements {
     private static ProofResult satisfiesBareNamed(SymExpr value, Sort sort, Simplifier simplifier) {
         ProofResult kind = primitiveKindGate(value, sort.name(), simplifier);
         return kind != null ? kind : ProofResult.passed();
+    }
+
+    /** The Stream trait, bare ({@code Stream}) or linker-qualified ({@code …/Stream}). */
+    private static boolean isStreamSort(String name) {
+        return name != null && (name.equals("Stream") || name.endsWith("/Stream"));
+    }
+
+    /**
+     * A {@code Stream[T]} is satisfied iff every element of the stream value (a
+     * positional tuple) satisfies the element type {@code elem} — the parametric
+     * contract that closes the §8.6 no-lie hole. A non-tuple value (a symbolic stream
+     * / opaque source handle) can't be walked here, so it stays lenient — its own
+     * typing governs. Fails on the first concrete mismatch; propagates residual if an
+     * element is undecidable (deferring to the runtime claim check, where it is
+     * concrete). Element checks reuse {@link #satisfies}, so the Int→Decimal embedding
+     * is honored automatically.
+     */
+    private static ProofResult satisfiesStreamElements(SymExpr value, Sort elem, Simplifier simplifier) {
+        if (!(simplifier.simplify(value) instanceof SymExpr.Record rec)) {
+            return ProofResult.passed();
+        }
+        int idx = 0;
+        SymExpr residual = null;
+        for (SymExpr m : rec.members().values()) {
+            ProofResult pr = satisfies(m, elem, simplifier);
+            if (pr instanceof ProofResult.Failed) {
+                return ProofResult.failed(
+                        "Stream element " + idx + " (" + m + ") does not satisfy the declared "
+                                + "element type " + elem);
+            }
+            if (pr instanceof ProofResult.Residual res) {
+                residual = res.obligation();
+            }
+            idx++;
+        }
+        return residual == null ? ProofResult.passed() : ProofResult.residual(residual);
     }
 
     /**

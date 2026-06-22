@@ -347,7 +347,14 @@ public final class IrCompiler {
                 // TraitRegistry to find satisfying concrete types — the
                 // method contract itself is only needed at compile time for
                 // SortChecker validation, not at runtime.
-                yield Sort.of(t.name());
+                // Applied type args are carried so a parametric contract (Stream's
+                // element type) can be checked at runtime — WAR(stream) §8.6.
+                if (t.typeArgs().isEmpty()) {
+                    yield Sort.of(t.name());
+                }
+                List<Sort> args = new ArrayList<>(t.typeArgs().size());
+                for (IrSort a : t.typeArgs()) args.add(compileSort(a));
+                yield Sort.of(t.name(), args);
             }
             case IrSort.Union u -> {
                 java.util.List<Sort> branches = new java.util.ArrayList<>(u.branches().size());

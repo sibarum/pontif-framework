@@ -497,7 +497,8 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
      fails loudly rather than hanging on a generator whose guard never trips. That cap
      is a backstop, **not** the proof — a follow-up sub-cut should gate non-terminating
      generators at compile time. (b) The codomain element-type of the emitted stream
-     rides the same §8.6 no-lie hole as any computed stream. Does *not* resurrect `Element|Leaf` — the unfold is
+     is now checked like any computed stream — §8.6 closed (a `Stream[T]`-typed binding
+     of `count(…)._0` verifies each emitted element against `T`). Does *not* resurrect `Element|Leaf` — the unfold is
    the hidden backing behind the membrane (a §4 stream source).
 10. **Empty `()` and single-element tuple/stream literals** — neither parses today
     (`()` is a parse error; `(x)` is grouping → a scalar; `(x,)` doesn't parse).
@@ -523,21 +524,33 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    stand up `pontif.core` and retire it.
 5. **The combinator sugar surface** (`map`/`filter`/`fold`) — deferred, but its shape
    should fit the query-DSL grain (`project_query_dsl`).
-6. **`Stream[T]` element-type checking for computed streams — a NO-LIE HOLE (found
-   2026-06-21).** `let z:Stream[String] = double(&s)` (an `Int` stream) compiles and
-   runs — the element type is never checked. A `Stream[T]` *literal* is element-checked
-   at parse (`requireStreamElements`), but a *computed* stream (an `Iterate`) is not.
-   **Root cause is deeper than a runtime backstop:** `Stream` is a **marker trait**
-   (empty contract), so when `Stream[String]` resolves, `AliasResolver.applyTypeArgs`
-   substitutes `E↦String` into *nothing* and the resolved `IrSort.Trait` has **no slot
-   to record the instantiated arg** — `String` is gone by IR time (confirmed: the claim
-   reaches `ConstructionGate` as `Trait[pontif.core/Stream]`, type arg dropped). And the
-   core `Sort` has no type-args field either, so `Refinements.satisfies` can't check it.
-   **The real fix is a parametric-trait feature:** a resolved trait must carry its
-   instantiated type args (`E=String`), after which a gate/runtime element check is
-   straightforward. Scope/approach is James's call — it touches trait resolution and is
-   not stream-specific (any parametric trait). A runtime backstop alone is insufficient
-   because the arg never reaches runtime.
+6. **`Stream[T]` element-type checking for computed streams — NO-LIE HOLE CLOSED
+   (2026-06-22, Approach 1 — the full parametric-trait carrier, James's call).**
+   `let z:Stream[String] = double(&s)` (an `Int` stream) is now **rejected**; a matching
+   `Stream[Int]` passes (`StreamElementCheckTest`). The fix, in two slices:
+   - **Slice A — the carrier.** A resolved trait now carries its **applied** type args,
+     distinct from its declaration slots: `IrSort.Trait` gained a `typeArgs` field
+     (back-compat 8-arg ctor keeps the ~13 declaration sites compiling), set by
+     `AliasResolver.applyTypeArgs` and preserved through every resolver rebuild
+     (`AliasResolver` ×2, `NameResolver` — which also FQN-resolves the args).
+     `core.Sort` gained a matching `typeArgs` field + `Sort.of(name, typeArgs)`, and
+     `IrCompiler.compileSort`'s Trait case carries them, so `E=String` survives to the
+     gate/runtime. Pure plumbing, behavior-neutral (full suite green).
+   - **Slice B — the check.** `Refinements.satisfies` now treats a `Stream[T]` (bare or
+     qualified) over a tuple value as: *every element satisfies `T`* (reusing
+     `satisfies`, so the Int→Decimal embedding is honored; empty stream passes
+     vacuously; a non-tuple/opaque source stays lenient). The runtime claim fires
+     because `ConstructionGate` now treats a parametric `Stream` as `gated` +
+     `runtimeCheckable` and `gateClaim` keeps it (was being **stripped** before — a
+     `Trait` claim hit `default→false`, which is *why* the parser's existing top-level
+     `LetIn` claim-wrap never checked anything). No new gate wrap was needed once the
+     claim survives.
+   - **Honest scope.** The element check is **Stream-specific** (`isParametricStream`):
+     other parametric traits now *carry* their args but get **no invented invariant** —
+     only Stream's "sequence of `T`" contract is known, so only it is checked (no-lie).
+     Pre-existing imprecision left untouched: a spread's *inferred* sort is
+     `Stream[<fragment-sort>]` rather than `Stream[<element-sort>]` — harmless now (the
+     inferred sort isn't the runtime claim), but a latent inference bug to revisit.
 
 ---
 

@@ -280,8 +280,9 @@ public final class AliasResolver {
                 }
                 // Operator contract members are self-typed Dispatch sorts
                 // (this.type only) — no aliases to resolve — so pass through verbatim.
+                // Preserve any applied typeArgs (§8.6 carrier).
                 yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -470,7 +471,7 @@ public final class AliasResolver {
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());
@@ -511,7 +512,12 @@ public final class AliasResolver {
         }
         Map<String, IrSort> binds = new HashMap<>();
         for (int i = 0; i < params.size(); i++) binds.put(params.get(i), args.get(i));
-        return substituteTraitBody(tr, binds);
+        IrSort.Trait body = substituteTraitBody(tr, binds);
+        // Record the APPLIED args on the resolved trait (`Stream[Int]` → typeArgs=[Int])
+        // so the element type survives to the gate/runtime — WAR(stream) §8.6.
+        return new IrSort.Trait(body.name(), body.methods(), body.attributes(),
+                body.associatedTypes(), body.typeParams(), body.operators(),
+                body.baseTrait(), args, body.origin());
     }
 
     /**

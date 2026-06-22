@@ -16,9 +16,13 @@ public record Sort(
         List<Sort> unionBranches,
         List<Sort> intersectionBranches,
         List<Sort> dispatchKeySorts,
-        Sort dispatchReturnSort) {
+        Sort dispatchReturnSort,
+        List<Sort> typeArgs) {
 
     public Sort {
+        if (typeArgs != null) {
+            typeArgs = List.copyOf(typeArgs);
+        }
         if (members != null) {
             // Preserve insertion order — struct field iteration order is
             // load-bearing for destructure / construction; Map.copyOf would
@@ -40,15 +44,25 @@ public record Sort(
     }
 
     public static Sort of(String name) {
-        return new Sort(name, null, null, null, null, null, null, null, null);
+        return new Sort(name, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * A named sort carrying applied type arguments — the core-Sort image of a
+     * resolved parametric trait ({@code Stream[Int]} → {@code of("…/Stream", [Int])}).
+     * The args survive to the gate/runtime so a parametric contract (e.g. Stream's
+     * element type) can be checked — WAR(stream) §8.6.
+     */
+    public static Sort of(String name, List<Sort> typeArgs) {
+        return new Sort(name, null, null, null, null, null, null, null, null, typeArgs);
     }
 
     public static Sort refined(String name, SymExpr predicate) {
-        return new Sort(name, predicate, null, null, null, null, null, null, null);
+        return new Sort(name, predicate, null, null, null, null, null, null, null, null);
     }
 
     public static Sort structural(String name, Map<String, Sort> members) {
-        return new Sort(name, null, members, null, null, null, null, null, null);
+        return new Sort(name, null, members, null, null, null, null, null, null, null);
     }
 
     public static Sort method(List<Sort> params, Sort returnSort) {
@@ -58,7 +72,7 @@ public record Sort(
             n.append(params.get(i));
         }
         n.append(") -> ").append(returnSort);
-        return new Sort(n.toString(), null, null, params, returnSort, null, null, null, null);
+        return new Sort(n.toString(), null, null, params, returnSort, null, null, null, null, null);
     }
 
     /**
@@ -73,7 +87,7 @@ public record Sort(
             n.append(keySorts.get(i));
         }
         n.append("):").append(returnSort);
-        return new Sort(n.toString(), null, null, null, null, null, null, keySorts, returnSort);
+        return new Sort(n.toString(), null, null, null, null, null, null, keySorts, returnSort, null);
     }
 
     /**
@@ -92,7 +106,7 @@ public record Sort(
             if (i > 0) n.append(" | ");
             n.append(branches.get(i));
         }
-        return new Sort(n.toString(), null, null, null, null, branches, null, null, null);
+        return new Sort(n.toString(), null, null, null, null, branches, null, null, null, null);
     }
 
     /**
@@ -109,7 +123,7 @@ public record Sort(
             if (i > 0) n.append(" & ");
             n.append(branches.get(i));
         }
-        return new Sort(n.toString(), null, null, null, null, null, branches, null, null);
+        return new Sort(n.toString(), null, null, null, null, null, branches, null, null, null);
     }
 
     public boolean isRefined() {
