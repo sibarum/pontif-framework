@@ -3714,6 +3714,32 @@ public final class AltParser {
         IrSort declaredSort = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
+            // Fragment literal in a NESTED let — `let m:[ (el:A) -> … ]` inside a function
+            // body (docs/stream-war.md §8b, gap B). `let` works anywhere a let is
+            // permitted, so the same branch parseLet has at top level lives here too; the
+            // `[…]` IS the value (no `= EXPR`), and the rest of the block is the let-in
+            // body. Bound as a Method-sorted closure value.
+            if (looksLikeFragmentLiteral()) {
+                IrExpr.Lambda frag = parseFragmentLiteral();
+                List<IrSort> paramSorts = new ArrayList<>();
+                List<String> paramNames = new ArrayList<>();
+                for (IrParam p : frag.params()) {
+                    paramSorts.add(p.sort());
+                    paramNames.add(p.name());
+                }
+                IrSort methodSort = new IrSort.Method(
+                        paramSorts, paramNames, frag.returnSort(), start.origin());
+                IrSort prev = currentScope.get(name);
+                boolean had = currentScope.containsKey(name);
+                currentScope.put(name, methodSort);
+                IrExpr fragBody;
+                try {
+                    fragBody = parseExpr();
+                } finally {
+                    if (had) currentScope.put(name, prev); else currentScope.remove(name);
+                }
+                return new IrExpr.LetIn(name, methodSort, frag, fragBody, start.origin());
+            }
             declaredSort = parseSort();
         }
         expect(AltToken.Kind.EQUALS);

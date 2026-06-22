@@ -591,15 +591,24 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
   not a 1-tuple** — `parseTupleSortBody` returns the single member for a one-component
   paren (mirroring the value side; a 1-tuple is the trailing-comma `(S,)`, a §7.10 slice).
   So `[(Int)]` ≡ `[Int]`.
-  - **Still open — the arrow spelling.** `[(Int)->Int]` / `[Int->Int]` doesn't parse: an
-    `[A->B]` *arrow sort* isn't implemented (the transform-spectrum sort, conceptually a
-    function type). The working function-type spelling today is the keyword form
-    `[Method(A):R]`. Whether the canonical fragment type is the arrow `[A->B]`, the
-    keyword `[Method(A):R]`, or both unified is a **syntax ruling** (reserved for James).
-- **(B) `let` fragments only parse at top level — OPEN.** Nested `let m:[ … ]` inside a
-  function body goes through `parseLetExpr`, which has no fragment-literal branch — it
-  reads `[…]` as a type annotation and demands `= value`. Violates the let-anywhere
-  unification (scoping is the essence of `let`).
+  - **The fragment type is `[Method(A):R]` — settled (James 2026-06-22).** A fragment is
+    an *anonymous method that isn't a Dispatch*, so it is a `Method`. `[A->R]` is **not** a
+    function type — it is a **type-conversion sequence** (so `[(Int)->Int]` is a tautology,
+    never useful as written; an earlier "arrow function type" reading was a misunderstanding).
+    Conversion is the **output-transform** dual of destructuring's **input-transform**:
+    destructuring traverses an argument type to pull values into scope; a conversion takes
+    the native return value and transforms it. Both are fragments — *any function = a
+    destructuring + a conversion sequence* — the synthesis substrate, same `:`-applies-a-
+    transform spine as the ascription ruling (`principle_ascription_is_transform`). So there
+    is no arrow-sort gap for the fragment *type*; the `[A->R]` conversion sequence is its
+    own (synthesis) concept.
+- **(B) `let` fragments anywhere — LANDED (2026-06-22).** `parseLetExpr` (nested lets,
+  inside a function body) gained the same fragment-literal branch `parseLet` has at top
+  level: `let m:[ (el)-> … ]` parses, the `[…]` is the value (no `= EXPR`), the rest of
+  the block is the let-in body, bound as a `Method`-sorted closure. Both a direct call
+  `m(x)` and a spread `m(&s)` work (`NestedFragmentTest`) — so James's original `let m:[…]`
+  … `m(&s)` body shape is valid. Honors the let-anywhere unification (scoping is the
+  essence of `let`).
 - **Also open (separate): call-site dispatch.** `map((1,2,3), $double[Int])` type-checks
   but the runtime dispatch can't match a tuple to a `Stream[A]` param or a metaref to a
   `Dispatch(A)` param (*"No matching function 'map'"*). A distinct dispatch-matching gap,
