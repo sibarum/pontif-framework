@@ -1910,11 +1910,12 @@ public final class SortChecker {
      * a {@link IrSort.Named} whose name is a key in {@code bindings} becomes the
      * bound sort. Used to make a trait's dependent contract concrete for one impl.
      *
-     * <p>Package-private so {@link AliasResolver} can reuse it when inlining a
-     * parametric trait reference ({@code Stream[Int]} ⟹ substitute {@code E↦Int}
-     * into the trait's member sorts; docs/type-parameters.md §2.3).
+     * <p>Public so {@link AliasResolver} (inlining a parametric trait reference,
+     * {@code Stream[Int]} ⟹ substitute {@code E↦Int}) and the parser (specializing a
+     * generic function at an explicit type-application {@code map[Int,String](…)},
+     * docs/stream-war.md §8b) can reuse it.
      */
-    static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
+    public static IrSort substituteTypeVars(IrSort sort, Map<String, IrSort> bindings) {
         return switch (sort) {
             case IrSort.Named n -> {
                 // A bound type variable is replaced wholesale; otherwise the head

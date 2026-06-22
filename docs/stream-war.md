@@ -656,10 +656,21 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
   `Refinements.satisfies` instead of the nominal-satisfier check (a tuple satisfies `Stream`
   *structurally*, not nominally). So a **concrete** `map((1,2,3), $double[Int])` now runs →
   `(2,4,6)` (`CallDispatchTest`), and a `String` tuple correctly does *not* match
-  `Stream[Int]` (no-lie). **Remaining for the *generic* map:** a metareference `$double[Int]`
-  (key `[Int]`) against a generic `[Dispatch(A):R]` param (key `[A]`) needs **type-param
-  unification** in dispatch (`A:=Int`) — exact-key matching rejects it today. That's
-  generic-dispatch inference, a distinct (larger) piece than the structural autobox.
+  `Stream[Int]` (no-lie).
+- **Explicit type-application `map[Int,String](…)` LANDED (2026-06-22)** — a generic
+  stream combinator runs end-to-end. The parser parses `name[TypeArgs](args)` in
+  expression position (bracket/paren law: `[]` = types; a `(` must follow the `]`, via a
+  lookahead, so a braceless match arm `value [@>2] -> …` is never mis-read), records the
+  instantiation, and at module assembly **monomorphizes**: a concrete specialization
+  `map$Int$String` is generated with the param/return sorts substituted
+  (`SortChecker.substituteTypeVars`) while the body + declared type-params are kept (so a
+  residual `(el:A)` in the body stays in scope — slice C). The mangled call dispatches
+  **concretely** (no inference), so `map[Int,String](s, $toString[Int])` → `("1","2","3","4")`
+  (`GenericInstantiationTest`). The conventional turbofish escape hatch.
+- **Remaining: inference.** The bare `map(s, $double[Int])` (no explicit args) still needs
+  dispatch-time **type-param unification** — recover `A=Int` from the stream's elements and
+  `R` from the metaref. Distinct, larger piece; explicit type-application is the escape
+  hatch that makes generics usable without it.
 
 ---
 

@@ -207,6 +207,16 @@ public final class AltParser {
     private final Map<String, IrSort> declaredTopLevelLets = new LinkedHashMap<>();
 
     /**
+     * Explicit type-applications of generic functions seen this parse —
+     * {@code map[Int,String](…)} (docs/stream-war.md §8b). Keyed by the mangled
+     * specialization name; the value is the generic function name + its type args. At
+     * module assembly each entry becomes a concrete specialization FunctionDecl.
+     */
+    private record PendingInstantiation(String genericName, List<IrSort> typeArgs) {}
+
+    private final Map<String, PendingInstantiation> pendingTypeInstantiations = new LinkedHashMap<>();
+
+    /**
      * Latest declared return sort for each function/method name (most-recent
      * overload wins). Consulted by {@link #inferMaximalSort} for {@link
      * IrExpr.Call} expressions, where the per-call narrowing isn't computed yet
@@ -321,7 +331,80 @@ public final class AltParser {
                         peek().origin());
             }
         }
+        stmts.addAll(generateInstantiations(stmts));
         return new IrModule(moduleName, stmts, main);
+    }
+
+    /**
+     * Materializes one concrete {@link IrStmt.FunctionDecl} per explicit
+     * type-application (docs/stream-war.md §8b). A generic function's param and return
+     * sorts are substituted with the supplied type args; the body and the declared
+     * type-params are KEPT (so any residual type-var in the body — e.g. a fragment's
+     * {@code (el:A)} — stays in scope for the checker), and the decl gets the mangled
+     * name the call sites target. The result is a CONCRETE-parametered decl that
+     * dispatches without inference.
+     */
+    private List<IrStmt> generateInstantiations(List<IrStmt> stmts) {
+        List<IrStmt> specializations = new ArrayList<>();
+        for (Map.Entry<String, PendingInstantiation> e : pendingTypeInstantiations.entrySet()) {
+            PendingInstantiation inst = e.getValue();
+            IrStmt.FunctionDecl generic = null;
+            for (IrStmt s : stmts) {
+                if (s instanceof IrStmt.FunctionDecl fd
+                        && fd.name().equals(inst.genericName())
+                        && !fd.typeParams().isEmpty()) {
+                    generic = fd;
+                    break;
+                }
+            }
+            if (generic == null) continue;  // unknown/non-generic — dispatch surfaces it
+            List<String> tps = new ArrayList<>(generic.typeParams().keySet());
+            if (tps.size() != inst.typeArgs().size()) continue;  // arity off — let it fail downstream
+            Map<String, IrSort> binds = new LinkedHashMap<>();
+            for (int i = 0; i < tps.size(); i++) binds.put(tps.get(i), inst.typeArgs().get(i));
+            List<IrParam> sparams = new ArrayList<>(generic.params().size());
+            for (IrParam p : generic.params()) {
+                sparams.add(new IrParam(p.name(),
+                        sibarum.pontif.ir.SortChecker.substituteTypeVars(p.sort(), binds)));
+            }
+            IrSort sret = sibarum.pontif.ir.SortChecker.substituteTypeVars(generic.returnSort(), binds);
+            specializations.add(new IrStmt.FunctionDecl(
+                    e.getKey(), sparams, sret, generic.body(), generic.origin(),
+                    generic.topLevelLet(), generic.typeParams()));
+        }
+        return specializations;
+    }
+
+    /**
+     * Lookahead from a {@code [} at {@code peek()}: is this an explicit type-application
+     * {@code name[…](}, i.e. does the matching {@code ]} immediately precede a {@code (}?
+     * Only then is {@code name[…]} a generic instantiation. This keeps a braceless match
+     * arm ({@code match value [@>2] -> …}, where {@code ]} is followed by {@code ->}) from
+     * being mis-read as type-application. Counts only bracket nesting; parens inside the
+     * type args (e.g. {@code [Dispatch(Int):R]}) don't affect the depth.
+     */
+    private boolean typeApplicationAhead() {
+        int depth = 0;
+        for (int i = 0; ; i++) {
+            AltToken.Kind k = peek(i).kind();
+            if (k == AltToken.Kind.EOF) return false;
+            if (k == AltToken.Kind.LBRACKET) {
+                depth++;
+            } else if (k == AltToken.Kind.RBRACKET) {
+                depth--;
+                if (depth == 0) return peek(i + 1).kind() == AltToken.Kind.LPAREN;
+            }
+        }
+    }
+
+    /** Mangles a concrete specialization name: {@code map[Int,String]} → {@code map$Int$String}. */
+    private String mangleInstantiation(String name, List<IrSort> typeArgs) {
+        StringBuilder sb = new StringBuilder(name);
+        for (IrSort a : typeArgs) {
+            String base = baseSortName(a);
+            sb.append("$").append(base == null ? "_" : base);
+        }
+        return sb.toString();
     }
 
     /** Heuristic: a top-level construct starts with a known decl keyword. */
@@ -3297,6 +3380,39 @@ public final class AltParser {
         // literal), {x=val,...} (by-name struct literal) — left-to-right.
         while (true) {
             AltToken t = peek();
+            if (t.kind() == AltToken.Kind.LBRACKET
+                    && expr instanceof IrExpr.Var fnVar
+                    && postfixOpensOnSameLine(t)
+                    && !declaredStructs.containsKey(fnVar.name())
+                    && typeApplicationAhead()) {
+                // Explicit type-application of a generic function: `map[Int, String](args)`
+                // (docs/stream-war.md §8b). The `[…]` are TYPE arguments (bracket/paren
+                // law: `[]` for types); a metareference would be `$`-prefixed. Parse them,
+                // mangle a concrete specialization name, record the instantiation (the
+                // specialization decl is generated at module assembly — param/return sorts
+                // substituted, body + type-params kept so residual `A` stays in scope), and
+                // emit a call to the mangled name, which dispatches CONCRETELY (no
+                // inference). Requires a following `(args)` — a bare `name[T]` value form
+                // is a later slice.
+                consume();  // [
+                List<IrSort> typeArgs = new ArrayList<>();
+                boolean firstArg = true;
+                while (peek().kind() != AltToken.Kind.RBRACKET) {
+                    if (!firstArg) expect(AltToken.Kind.COMMA);
+                    typeArgs.add(parseSort());
+                    firstArg = false;
+                }
+                expect(AltToken.Kind.RBRACKET);
+                String mangled = mangleInstantiation(fnVar.name(), typeArgs);
+                pendingTypeInstantiations.putIfAbsent(
+                        mangled, new PendingInstantiation(fnVar.name(), typeArgs));
+                AltToken open = expect(AltToken.Kind.LPAREN);
+                List<IrExpr> args = parseArgList();
+                AltToken close = expect(AltToken.Kind.RPAREN);
+                Origin callOrigin = open.spanTo(close);
+                expr = lowerSpreadCall(args, a -> new IrExpr.Call(mangled, a, callOrigin), callOrigin);
+                continue;
+            }
             if (t.kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
                 consume();  // DOT
                 AltToken name = consume();
