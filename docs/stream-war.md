@@ -427,6 +427,15 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    driver** ("step until the guard fails"), NOT sugar over the source-driven `Iterate`;
    leans on the halting machinery. Does *not* resurrect `Element|Leaf` — the unfold is
    the hidden backing behind the membrane (a §4 stream source).
+10. **Empty `()` and single-element tuple/stream literals** — neither parses today
+    (`()` is a parse error; `(x)` is grouping → a scalar; `(x,)` doesn't parse).
+    Needed generally, and specifically they unblock **hand-rolled recursive stream
+    construction** (the base case is the empty stream; each step emits a singleton and
+    concatenates) — i.e. the *recursive-concat* path for the generator (§7.9) as plain
+    library recursion, the alternative to the native `Unfold` driver. Likely a
+    trailing-comma singleton (`(x,)`) + `()` for empty; the arity-1/0 cases of the tuple
+    literal. (James, 2026-06-22: "we're going to need empty and single-element tuples
+    eventually anyway.")
 - *Deferred:* `map`/`filter`/`fold` library sugar; the `Fin`-style index endgame.
 
 ---
