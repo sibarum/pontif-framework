@@ -217,6 +217,17 @@ public final class AltParser {
     private final Map<String, PendingInstantiation> pendingTypeInstantiations = new LinkedHashMap<>();
 
     /**
+     * Signatures of declared GENERIC functions (non-empty {@code [type …]} slots), for
+     * inferring type args at a bare call {@code map(s, $d[Int])}: unify each param sort
+     * against the argument's inferred sort to recover the type params, then reuse the
+     * explicit-instantiation path (docs/stream-war.md §8b). Inference is a convenience —
+     * explicit {@code map[Int,R](…)} always works; this just lets you omit the args.
+     */
+    private record GenericSignature(List<IrParam> params, List<String> typeParams) {}
+
+    private final Map<String, GenericSignature> declaredGenericSignatures = new LinkedHashMap<>();
+
+    /**
      * Latest declared return sort for each function/method name (most-recent
      * overload wins). Consulted by {@link #inferMaximalSort} for {@link
      * IrExpr.Call} expressions, where the per-call narrowing isn't computed yet
@@ -395,6 +406,100 @@ public final class AltParser {
                 if (depth == 0) return peek(i + 1).kind() == AltToken.Kind.LPAREN;
             }
         }
+    }
+
+    /**
+     * Infers a generic function's type args at a bare call by unifying each param sort
+     * against the argument's inferred sort (docs/stream-war.md §8b). Returns the mangled
+     * specialization name (recording the instantiation) when every type param is solved,
+     * else null — the caller then leaves the plain call, and explicit {@code f[T](…)} is
+     * required. Skips calls with spread args (the unification target there is an element,
+     * a later refinement).
+     */
+    private String inferGenericInstantiation(String name, List<IrExpr> args) {
+        GenericSignature sig = declaredGenericSignatures.get(name);
+        if (sig == null || anySpread(args) || sig.params().size() != args.size()) return null;
+        // Only monomorphize when the call genuinely can't dispatch as-is: a parameter
+        // whose sort is a `Dispatch(A):R` mentioning a type var — exact-key matching
+        // rejects a metaref there (the generic-map gap). For type vars that appear only
+        // in plain params/return (`idd[E](x:E):E`), the existing call-site derivation
+        // (type-parameters slice 2b) already flows the PRECISE narrowing into the return
+        // for the gate; monomorphizing would coarsen it to the base — so defer to it.
+        boolean needsMono = false;
+        for (IrParam p : sig.params()) {
+            if (p.sort() instanceof IrSort.Dispatch d
+                    && d.keySorts().stream().anyMatch(k ->
+                            k instanceof IrSort.Named kn && sig.typeParams().contains(kn.name()))) {
+                needsMono = true;
+                break;
+            }
+        }
+        if (!needsMono) return null;
+        Map<String, IrSort> binds = new LinkedHashMap<>();
+        for (int i = 0; i < args.size(); i++) {
+            unifyTypeParam(sig.params().get(i).sort(), inferMaximalSort(args.get(i)),
+                    sig.typeParams(), binds);
+        }
+        List<IrSort> typeArgs = new ArrayList<>(sig.typeParams().size());
+        for (String tp : sig.typeParams()) {
+            IrSort bound = binds.get(tp);
+            if (bound == null) return null;  // unsolved — fall back to requiring explicit
+            typeArgs.add(bound);
+        }
+        String mangled = mangleInstantiation(name, typeArgs);
+        pendingTypeInstantiations.putIfAbsent(mangled, new PendingInstantiation(name, typeArgs));
+        return mangled;
+    }
+
+    /**
+     * One-directional unification of a generic param sort (which may mention type vars)
+     * against an argument's concrete inferred sort, recording each solved type var's base
+     * sort into {@code binds} (first binding wins). Handles a bare type var, a parametric
+     * head ({@code Stream[A]} vs {@code Stream[Int]}), and a {@code Dispatch(A):R} contract
+     * (keys + return). Shapes it can't match are skipped — best-effort, like the
+     * construction gate's type-param derivation.
+     */
+    private void unifyTypeParam(IrSort param, IrSort arg, List<String> tvars, Map<String, IrSort> binds) {
+        if (param instanceof IrSort.Named pn) {
+            if (pn.typeArgs().isEmpty() && tvars.contains(pn.name())) {
+                String base = baseSortName(arg);
+                if (base != null) binds.putIfAbsent(pn.name(), IrSort.named(base));
+                return;
+            }
+            if (!pn.typeArgs().isEmpty() && headMatches(pn.name(), arg)) {
+                List<IrSort> aArgs = sortTypeArgs(arg);
+                if (aArgs.size() == pn.typeArgs().size()) {
+                    for (int i = 0; i < aArgs.size(); i++) {
+                        unifyTypeParam(pn.typeArgs().get(i), aArgs.get(i), tvars, binds);
+                    }
+                }
+            }
+            return;
+        }
+        if (param instanceof IrSort.Dispatch pd && arg instanceof IrSort.Dispatch ad) {
+            if (pd.keySorts().size() == ad.keySorts().size()) {
+                for (int i = 0; i < pd.keySorts().size(); i++) {
+                    unifyTypeParam(pd.keySorts().get(i), ad.keySorts().get(i), tvars, binds);
+                }
+            }
+            unifyTypeParam(pd.returnSort(), ad.returnSort(), tvars, binds);
+        }
+    }
+
+    /** The applied type args of a sort, across the forms that carry them (§8.6 trait carrier incl.). */
+    private static List<IrSort> sortTypeArgs(IrSort s) {
+        return switch (s) {
+            case IrSort.Named n -> n.typeArgs();
+            case IrSort.Refined r -> r.typeArgs();
+            case IrSort.Trait t -> t.typeArgs();
+            default -> List.of();
+        };
+    }
+
+    /** Whether {@code arg}'s head name is {@code name}, bare or linker-qualified ({@code …/name}). */
+    private boolean headMatches(String name, IrSort arg) {
+        String b = baseSortName(arg);
+        return b != null && (b.equals(name) || b.endsWith("/" + name));
     }
 
     /** Mangles a concrete specialization name: {@code map[Int,String]} → {@code map$Int$String}. */
@@ -769,6 +874,10 @@ public final class AltParser {
                 IrExpr body = wrapParamDestructures(parseExpr(), destrs);
                 declaredFunctionReturns.put(name, returnSort);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
+                if (!typeParams.isEmpty()) {
+                    declaredGenericSignatures.put(name,
+                            new GenericSignature(params, new ArrayList<>(typeParams.keySet())));
+                }
                 return new IrStmt.FunctionDecl(
                         name, params, returnSort, body, start.origin(), false, typeParams);
             } finally {
@@ -3470,7 +3579,14 @@ public final class AltParser {
                 // per-element stream map (docs/stream-war.md §3).
                 String dotted = extractDottedName(expr);
                 if (dotted != null) {
-                    expr = lowerSpreadCall(args, a -> new IrExpr.Call(dotted, a, callOrigin),
+                    // Generic type-param INFERENCE (docs/stream-war.md §8b): a bare call to
+                    // a generic function infers its type args by unifying each param sort
+                    // against the argument's inferred sort, then reuses the explicit-
+                    // instantiation path. Falls back to the plain call when inference can't
+                    // solve every param (then explicit `f[T](…)` is required).
+                    String inferred = inferGenericInstantiation(dotted, args);
+                    String target = inferred != null ? inferred : dotted;
+                    expr = lowerSpreadCall(args, a -> new IrExpr.Call(target, a, callOrigin),
                             callOrigin);
                 } else {
                     IrExpr fn = expr;

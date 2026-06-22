@@ -667,10 +667,17 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
   residual `(el:A)` in the body stays in scope — slice C). The mangled call dispatches
   **concretely** (no inference), so `map[Int,String](s, $toString[Int])` → `("1","2","3","4")`
   (`GenericInstantiationTest`). The conventional turbofish escape hatch.
-- **Remaining: inference.** The bare `map(s, $double[Int])` (no explicit args) still needs
-  dispatch-time **type-param unification** — recover `A=Int` from the stream's elements and
-  `R` from the metaref. Distinct, larger piece; explicit type-application is the escape
-  hatch that makes generics usable without it.
+- **Inference LANDED (2026-06-22)** — the bare `map(s, $double[Int])` infers `A=Int, R=Int`
+  and runs → `(2,4,6,8)` (`GenericInstantiationTest`). At a bare call to a generic function
+  the parser unifies each param sort against the argument's inferred sort
+  (`inferMaximalSort`, the real engine) to recover the type params, then feeds the **same
+  monomorphization** as explicit type-application — inference is purely "compute the args,
+  then instantiate." **Gated:** it only fires when a param is a `Dispatch(A):R` mentioning a
+  type var (the dispatch gap exact-key matching can't bridge); when the type vars appear
+  only in plain params/return (`idd[E](x:E):E`), it defers to the existing call-site
+  derivation (type-parameters slice 2b), which flows the *precise* narrowing into the return
+  for the construction gate — monomorphizing there would coarsen it. So generic combinators
+  are now usable **both** explicitly and inferred.
 
 ---
 

@@ -38,6 +38,19 @@ class GenericInstantiationTest {
                 map[Int,String](s, $toString[Int])""")));
     }
 
+    @Test void genericMap_inferredTypeArgs_bareCall() {
+        // Inference: no [Int,Int] — A and R are recovered by unifying the param sorts
+        // (Stream[A], Dispatch(A):R) against the args' inferred sorts, then the same
+        // monomorphization runs. The convenience layer over explicit type-application.
+        assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
+                requires pontif.core.{Stream}
+                let s:Stream[Int] = (1,2,3,4)
+                function map[type A, type R]( inputStream:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
+                  &inputStream:[ (element:A) -> mapper(element) ]
+                function double(i:Int):Int -> i * 2
+                map(s, $double[Int])""")));
+    }
+
     @Test void genericMap_explicitTypeApplication_intToInt() {
         // Same generic map, instantiated at [Int,Int] with a doubling metaref.
         assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
