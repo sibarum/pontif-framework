@@ -19,6 +19,7 @@ allowed to lie.
 - [Type extension — a richer type](#type-extension--a-richer-type)
 - [Multiple polymorphism models](#multiple-polymorphism-models)
 - [Generics (Type Parameters)](#generics-type-parameters)
+- [Streams](#streams)
 - [Braces, Brackets, Parenthesis](#braces-brackets-parenthesis)
 - [Operator overloading](#operator-overloading)
 - [Proofs and synthesis](#proofs-and-synthesis)
@@ -378,6 +379,69 @@ struct IntLit:[Literal[Int]:@.value==value](value:Int)
 IntLit(9).value                          # → 9
 ```
 
+## Streams
+
+A `Stream[T]` is the pure, conservation-checked membrane over a sequence (and,
+ultimately, over messy stateful sources). It is a **trait** in `pontif.core` — a tuple
+literal autoboxes into one, element-checked:
+
+```pontif
+requires pontif.core.{Stream, Nothing}
+let s:Stream[Int] = (1, 2, 3, 4)
+```
+
+There is **no `map`/`filter`/`fold` primitive**. There is one construct — the **synthesis
+fragment**, a per-element transform applied to a stream by **spread** (`&`):
+
+```pontif
+&s:[ (el:Int) -> el * 2 ]                     # map        → (2, 4, 6, 8)
+&s:[ (el:Int) -> match el { [@>2]->el; [_]->null } ]   # filter (null drops)  → (3, 4)
+```
+
+Every classic combinator is a configuration of this one idea — the *positional channel*
+model, where each tuple position is a channel and `&` distributes a transform over it:
+
+| operation | shape |
+|-----------|-------|
+| **map** | one stream channel, single return |
+| **filter** | one stream channel, `null` drops (lossy) |
+| **fold / scan** | a stream channel + an accumulator seed (`fold(&s, 0)`) |
+| **fork** | one stream in, a *tuple of stream channels* out (conservative split) |
+| **zip** | several `&` streams walked in lockstep (`(&a, &b):[ (x,y) -> x+y ]`) |
+| **takeWhile** | a *domain-refined* binder is the guard; off-domain **stops** the stream |
+
+A **generator** is the dual of fold — a stream *source* with no `&` input, where **the
+domain refinement is the base case** (it halts exactly when the next state would be
+ill-typed):
+
+```pontif
+let count:[ (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
+            (from, from+1, to) ]
+count(0, 5)._0                                # → (0, 1, 2, 3, 4, 5)
+```
+
+Streams **concatenate** with `+` (the same rule that gives `String + String`, since a
+`String` is a `Char` stream), and a *computed* stream's element type is checked against
+its declaration — `let z:Stream[String] = double(&s)` over an `Int` stream is a compile
+error, not a silent lie.
+
+A fragment is a **first-class value** (the lambda replacement): it can be bound by `let`
+in any scope, passed to a `[Method(A):R]` parameter, and returned. So combinators
+generalize — a generic `map` runs both explicitly and by inference:
+
+```pontif
+function map[type A, type R]( s:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
+  &s:[ (el:A) -> mapper(el) ]
+function toString(i:Int):String -> ""+i
+
+map[Int,String](s, $toString[Int])            # explicit  → ("1", "2", "3", "4")
+map(s, $toString[Int])                         # inferred  (A, R recovered from the args)
+```
+
+This is the **finite** half. Infinite / lazy streams — built by guarded infinite
+recursion and gated by *productivity* — are the next frontier and the substrate for the
+event system; see *What's next* under [Status](#status) and `docs/stream-war.md`.
+
 ## Braces, Brackets, Parenthesis
 
 The brackets are not ad-hoc punctuation. The subject `@` combines with three
@@ -729,6 +793,34 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   uniformly (define an overload only in a module that owns one of its operand/receiver
   types); builtin modules (`std.proof`, `std.stream`, `std.conservation`); cross-module
   struct literals
+- **Streams — a pure membrane over sequences** (`docs/stream-war.md`): a `Stream[T]`
+  trait in `pontif.core` (a tuple literal autoboxes, element-checked); **one iteration
+  primitive, the synthesis fragment** — a per-element transform applied by spread
+  `&s:[…]`, from which **map / filter (null-drop) / fold / scan / fork / zip** all fall
+  out (no separate combinators); **`takeWhile`** via a domain-refined binder (the *stop*
+  disposition); **generators / unfold** (`count(0,5)` — *the domain refinement is the
+  base case*); **concatenation `+`** (lifts to `String +`); and **computed streams are
+  element-type-checked** (no-lie, via a parametric-trait carrier). Fragments are
+  **first-class values** — passed, returned, typed `[Method(A):R]` — and **generic stream
+  combinators** run both **explicitly** (`map[Int,String](s, $toString[Int])`) and by
+  **inference** (`map(s, $double[Int])`)
+
+### What's next
+
+The stream war's *finite* half is largely landed; the two front-line priorities both
+concern streams (see `docs/stream-war.md`):
+
+1. **Finite generator synthesis** — derive a bounded discrete stream from a membership
+   refinement on its element type: `Stream[Int: 0 <= @ < 10]` (with filters, e.g.
+   `& @%2==0`, and traversal direction from the comparison chain) synthesized via the
+   `;` directive. Step-free for the discrete/contiguous case; an explicit guarded step
+   for bounded recurrences. The 2f hand-threaded surface is superseded by this.
+2. **Infinite / lazy streams** — **RULED essential**: they *are* the event system, the
+   concurrency model, and the stateful sources (sockets / queues) the membrane was
+   declared for. Constructed by **guarded infinite recursion**, gated by **productivity**
+   — the coinductive dual of termination ("does it keep emitting?" rather than "does it
+   stop?"). This is its own war (a demand-driven backing + the productivity gate); it
+   also makes the element checks prefix/demand-aware.
 
 See `docs/TODO.md` for the active work list and parked design sketches.
 
