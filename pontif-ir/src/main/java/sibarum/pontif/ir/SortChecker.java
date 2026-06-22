@@ -110,7 +110,7 @@ public final class SortChecker {
                     typeEnv.put(p.name(), p.sort());
                 }
                 validateSortNames(fd.returnSort(), structDefs, fnTypeVars);
-                checkExpr(fd.body(), typeEnv, functionReturns, structDefs);
+                checkExpr(fd.body(), typeEnv, functionReturns, structDefs, fnTypeVars);
                 // Operator bound propagation (dispatch-unification B1): an operator
                 // applied to a value of a trait-bounded type parameter is checked
                 // against the bound's operator contract members — `a + b` over
@@ -538,7 +538,7 @@ public final class SortChecker {
             typeEnv.put(p.name(), p.sort());
         }
         validateSortNames(m.returnSort(), structDefs, typeVars);
-        checkExpr(m.body(), typeEnv, functionReturns, structDefs);
+        checkExpr(m.body(), typeEnv, functionReturns, structDefs, typeVars);
     }
 
     /**
@@ -1157,6 +1157,21 @@ public final class SortChecker {
                                   Map<String, IrSort> functionReturns,
                                   Map<String, IrSort.Structural> structDefs)
             throws CompileException {
+        checkExpr(expr, typeEnv, functionReturns, structDefs, Set.of());
+    }
+
+    /**
+     * @param typeVars the enclosing function/method's {@code [type E]} parameters —
+     *     bound type variables in scope for every sort written in the body, including
+     *     a nested fragment's param/return sorts ({@code &s:[ (el:A) -> … ]}). Without
+     *     threading these, a fragment's {@code A} reads as an unknown sort
+     *     (docs/type-parameters.md; the streams-motivated generics slice).
+     */
+    private static void checkExpr(IrExpr expr, Map<String, IrSort> typeEnv,
+                                  Map<String, IrSort> functionReturns,
+                                  Map<String, IrSort.Structural> structDefs,
+                                  Set<String> typeVars)
+            throws CompileException {
         switch (expr) {
             case IrExpr.Lit l -> {}
             case IrExpr.Dec d -> {}
@@ -1182,7 +1197,7 @@ public final class SortChecker {
             // is a compile error, not a runtime surprise. Key sorts validate
             // like any other sort reference.
             case IrExpr.DispatchRef d -> {
-                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs);
+                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs, typeVars);
                 if (!functionReturns.containsKey(d.functionName())) {
                     throw new CompileException(
                             "Metareference '" + d.functionName()
@@ -1191,12 +1206,12 @@ public final class SortChecker {
                 }
             }
             case IrExpr.BinOp op -> {
-                checkExpr(op.left(), typeEnv, functionReturns, structDefs);
-                checkExpr(op.right(), typeEnv, functionReturns, structDefs);
+                checkExpr(op.left(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(op.right(), typeEnv, functionReturns, structDefs, typeVars);
             }
             case IrExpr.LetIn l -> {
-                validateSortNames(l.declaredSort(), structDefs);
-                checkExpr(l.value(), typeEnv, functionReturns, structDefs);
+                validateSortNames(l.declaredSort(), structDefs, typeVars);
+                checkExpr(l.value(), typeEnv, functionReturns, structDefs, typeVars);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 IrSort bound = l.declaredSort();
                 // An undeclared binder ("_") takes the value's inferred sort,
@@ -1208,7 +1223,7 @@ public final class SortChecker {
                     if (inferred != null) bound = inferred;
                 }
                 extended.put(l.name(), bound);
-                checkExpr(l.body(), extended, functionReturns, structDefs);
+                checkExpr(l.body(), extended, functionReturns, structDefs, typeVars);
             }
             case IrExpr.Call c -> {
                 // The name might be a top-level function/method, OR a locally
@@ -1223,14 +1238,17 @@ public final class SortChecker {
                                     + "of '" + c.functionName() + "' exists at all).",
                             c.origin());
                 }
-                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns, structDefs);
+                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns, structDefs, typeVars);
             }
             case IrExpr.Lambda lam -> {
-                for (IrParam p : lam.params()) validateSortNames(p.sort(), structDefs);
-                validateSortNames(lam.returnSort(), structDefs);
+                // The enclosing function's type params are in scope for a fragment's
+                // own param/return sorts — `&s:[ (el:A) -> … ]` inside a generic fn
+                // (the streams-motivated generics slice).
+                for (IrParam p : lam.params()) validateSortNames(p.sort(), structDefs, typeVars);
+                validateSortNames(lam.returnSort(), structDefs, typeVars);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 for (IrParam p : lam.params()) extended.put(p.name(), p.sort());
-                checkExpr(lam.body(), extended, functionReturns, structDefs);
+                checkExpr(lam.body(), extended, functionReturns, structDefs, typeVars);
             }
             case IrExpr.Apply app -> {
                 // Applying something that can statically NEVER be a function —
@@ -1248,27 +1266,27 @@ public final class SortChecker {
                                     + app.args().size() + " argument(s).",
                             app.origin());
                 }
-                checkExpr(app.fn(), typeEnv, functionReturns, structDefs);
-                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs);
+                checkExpr(app.fn(), typeEnv, functionReturns, structDefs, typeVars);
+                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs, typeVars);
             }
             case IrExpr.Match m -> {
-                checkExpr(m.scrutinee(), typeEnv, functionReturns, structDefs);
+                checkExpr(m.scrutinee(), typeEnv, functionReturns, structDefs, typeVars);
                 for (IrExpr.MatchBranch b : m.branches()) {
-                    validateSortNames(b.pattern(), structDefs);
+                    validateSortNames(b.pattern(), structDefs, typeVars);
                     Map<String, IrSort> branchEnv = new HashMap<>(typeEnv);
                     if (m.scrutinee() instanceof IrExpr.Var v
                             && b.pattern() instanceof IrSort.Structural) {
                         branchEnv.put(v.name(), b.pattern());
                     }
-                    checkExpr(b.result(), branchEnv, functionReturns, structDefs);
+                    checkExpr(b.result(), branchEnv, functionReturns, structDefs, typeVars);
                 }
                 checkMatchTotality(m, typeEnv, functionReturns, structDefs);
             }
             case IrExpr.Record r -> {
-                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs);
+                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs, typeVars);
             }
             case IrExpr.FieldAccess fa -> {
-                checkExpr(fa.base(), typeEnv, functionReturns, structDefs);
+                checkExpr(fa.base(), typeEnv, functionReturns, structDefs, typeVars);
                 IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
                 IrSort.Structural sp = resolveNominal(baseSort, structDefs);
                 // Anonymous aggregates ('_record'/'_tuple') defer field-existence to
@@ -1313,22 +1331,22 @@ public final class SortChecker {
                 // the element binder and the accumulator names are in scope inside
                 // each arm's writes — bind them so the unbound-variable check (the
                 // Var case) doesn't flag them.
-                checkExpr(it.source(), typeEnv, functionReturns, structDefs);
+                checkExpr(it.source(), typeEnv, functionReturns, structDefs, typeVars);
                 Map<String, IrSort> iterEnv = new HashMap<>(typeEnv);
                 iterEnv.put(it.element(), IrSort.named("_"));
                 for (IrExpr.OutputSpec os : it.outputs()) {
                     if (os.init() != null) {
-                        checkExpr(os.init(), typeEnv, functionReturns, structDefs);
+                        checkExpr(os.init(), typeEnv, functionReturns, structDefs, typeVars);
                     }
                     if (os.kind() == IrExpr.OutputKind.ACCUMULATOR) {
                         iterEnv.put(os.name(), IrSort.named("_"));
                     }
                 }
                 for (IrExpr.Arm arm : it.arms()) {
-                    validateSortNames(arm.pattern(), structDefs);
+                    validateSortNames(arm.pattern(), structDefs, typeVars);
                     for (IrExpr.Write w : arm.writes()) {
-                        if (w.key() != null) checkExpr(w.key(), iterEnv, functionReturns, structDefs);
-                        checkExpr(w.value(), iterEnv, functionReturns, structDefs);
+                        if (w.key() != null) checkExpr(w.key(), iterEnv, functionReturns, structDefs, typeVars);
+                        checkExpr(w.value(), iterEnv, functionReturns, structDefs, typeVars);
                     }
                 }
                 // The always-on conservation discipline (§4): output-kind/write
@@ -1341,8 +1359,8 @@ public final class SortChecker {
                 // value is an ordinary sub-expression. Whether the source→target
                 // coercion is actually supported is enforced at eval (slice 1 =
                 // built-in renders to String) — fail-closed there, not here.
-                validateSortNames(cast.targetSort(), structDefs);
-                checkExpr(cast.value(), typeEnv, functionReturns, structDefs);
+                validateSortNames(cast.targetSort(), structDefs, typeVars);
+                checkExpr(cast.value(), typeEnv, functionReturns, structDefs, typeVars);
             }
         }
     }

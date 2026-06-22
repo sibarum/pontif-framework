@@ -569,6 +569,35 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 
 ---
 
+## 8b. Fragments + generics — first-class fragment values (the live front)
+
+Writing a generic `map` surfaced that **fragments are first-class *values* (slice 2c)
+but not first-class *types*** (James, 2026-06-22), three gaps clustered:
+
+- **(C) Type params reach a fragment's sorts — LANDED (2026-06-22).** A function's
+  `[type A, type R]` are now in scope inside a nested fragment's param/return sorts, so
+  `function map[type A, type R](s:Stream[A], d:[Dispatch(A):R]):[Stream[R]] ->
+  &s:[ (el:A) -> d(el) ]` **type-checks** (definition *and* call position). Fix:
+  `SortChecker.checkExpr` gained a `typeVars` parameter threaded from the enclosing
+  `FunctionDecl`/method (it previously dropped to empty when descending into the body,
+  so a fragment's `A` read as an unknown sort). `StreamGenericsTest`. Streams are the
+  motivating use-case for generics — this is the must-have.
+- **(A) Fragments have no usable *type* — OPEN.** Verified: `f:[(Int)->Int]` doesn't
+  parse (the `(Int)` is rejected as a 1-tuple); `f:[Method(Int):Int]` parses but passing
+  a fragment **crashes at runtime** (`toSymExpr` can't symbolize a `Closure`); returning
+  a fragment is blocked. So a fragment can't yet be a param, a return, or a named
+  external type — it's not the lambda replacement it claims to be until this closes.
+- **(B) `let` fragments only parse at top level — OPEN.** Nested `let m:[ … ]` inside a
+  function body goes through `parseLetExpr`, which has no fragment-literal branch — it
+  reads `[…]` as a type annotation and demands `= value`. Violates the let-anywhere
+  unification (scoping is the essence of `let`).
+- **Also open (separate): call-site dispatch.** `map((1,2,3), $double[Int])` type-checks
+  but the runtime dispatch can't match a tuple to a `Stream[A]` param or a metaref to a
+  `Dispatch(A)` param (*"No matching function 'map'"*). A distinct dispatch-matching gap,
+  not a fragment-typing one.
+
+---
+
 ## 9. WAR markers (cut sites)
 
 - `BuiltinModules.STD_STREAM` / `STD_STREAM_SOURCE` — the `Element|Leaf` source to
