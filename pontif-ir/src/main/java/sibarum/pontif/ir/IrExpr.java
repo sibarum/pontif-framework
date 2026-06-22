@@ -339,6 +339,14 @@ public sealed interface IrExpr
      * revise). {@code key} is non-null only for a KEYED target.
      */
     record Write(String output, IrExpr key, IrExpr value) {
+        /**
+         * Reserved output name for a <em>fan</em> write: {@code value} is a tuple
+         * whose position <i>i</i> is routed to output <i>i</i> (the multi-channel
+         * synthesis-fragment return, docs/stream-war.md §3). Evaluated once, then
+         * distributed — so the fragment runs a single time per element.
+         */
+        public static final String FAN = "*";
+
         public Write {
             if (output == null || output.isEmpty()) {
                 throw new IllegalArgumentException("Write output must be non-empty");

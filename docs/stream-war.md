@@ -356,11 +356,24 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        `&`, mirroring the same-line postfix rule) — else a prior `let`'s value
        absorbs the next line's `&s` as `(…) & s`. (Caveat: a genuinely multi-line
        `a &\n b` conjunction must now parenthesize or stay on one line.)
-     - **2d-2 (codomain = channel shape):** the arrow's **result type** drives the
-       channels — inferred when the inputs pin them (value-arg in → accumulator
-       out), written in the codomain when they don't (fork). No trailing
-       `:[Shape]`. Delivers `fold` (accumulator) and `fork` (fan-out), `._N`
-       projection, and `zip` (multi-`&` leading tuple `(&a,&b):[…]`).
+     - **2d-2 LANDED (accumulators — fold/scan).** A value-arg alongside the spread
+       is an accumulator seed (the total-input-marker rule James approved); output
+       arity = input arity, kinds inferred from the markers (spread → STREAM, value →
+       ACCUMULATOR), so **no codomain annotation needed**. The fragment returns a
+       tuple, **fan-distributed** to the channels: `IrExpr.Write.FAN` (`"*"`) is a
+       reserved write evaluated once per element and routed positionally
+       (`IrInterpreter.routeWrite`); `AltParser.lowerSpreadCall` builds the
+       multi-output `Iterate`; `SortChecker` accepts the fan write (it accounts for
+       all channels by construction). `fold(&s, 0)` → `(emptyStream, total)`,
+       `scan(&s, 0)` → `(runningTotals, total)` (`StreamFragmentTest`). Multi-output
+       results with positional `_0.._n` names seal to a `_tuple`.
+       - **Finding (needs a ruling):** `._N` **read-projection is forbidden** —
+         Pontif tuples are *destructure-only* (`let [(a, b)] = …`), and the parser
+         rejects `value._1`. The canonical example wrote `fold(…)._1`; that line can't
+         work as written. Either enable `._N` read-projection, or change the
+         canonical example to destructuring. Tests use `let [(empty, total)] = …`.
+       - **Remaining for 2d-3:** fork (fan-out — extra outputs need the codomain) and
+         zip (multi-`&` — needs a multi-source `Iterate`).
      - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
        coercion — `x:[A -> B]` (registered) and `x:[a:A -> B(…)]` (explicit), plus
        refinement+transform composition `[Int:@>0 -> Decimal]`. Unifies with the

@@ -215,20 +215,28 @@ public final class IrInterpreter {
                 Sort pat = module.sortFor(arm.pattern());
                 if (Refinements.satisfies(sym, pat, checker(module)) instanceof ProofResult.Passed) {
                     for (IrExpr.Write w : arm.writes()) {
-                        Object v = eval(w.value(), frame, module);
+                        // Fan write: the value is a tuple whose position i routes to
+                        // output i — the multi-channel fragment return, evaluated once
+                        // (docs/stream-war.md §3). Distribute positionally.
+                        if (w.output().equals(IrExpr.Write.FAN)) {
+                            Object tup = eval(w.value(), frame, module);
+                            if (!(tup instanceof RecordValue rv)) {
+                                throw new RuntimeCheckException(
+                                        "Iterate: a multi-channel fragment must return a tuple, got "
+                                                + (tup == null ? "null" : tup.getClass().getSimpleName()),
+                                        it.origin());
+                            }
+                            for (IrExpr.OutputSpec os : it.outputs()) {
+                                routeWrite(os.name(), rv.members().get(os.name()), kinds,
+                                        streams, accumulators, it.origin());
+                            }
+                            continue;
+                        }
                         IrExpr.OutputKind k = kinds.get(w.output());
                         if (k == null) throw new RuntimeCheckException(
                                 "Iterate: write to unknown output '" + w.output() + "'", it.origin());
-                        switch (k) {
-                            // Nothing (pontif.core) is the universal omission value:
-                            // writing it to a stream channel drops the element — the
-                            // lossy filter shape (docs/stream-war.md §3). Other
-                            // channels thread it as an ordinary value.
-                            case STREAM -> { if (!isNothing(v)) streams.get(w.output()).add(v); }
-                            case ACCUMULATOR -> accumulators.put(w.output(), v);  // write next (read prior was via frame)
-                            default -> throw new RuntimeCheckException(
-                                    "Iterate: write to " + k + " not yet implemented (slice 1)", it.origin());
-                        }
+                        routeWrite(w.output(), eval(w.value(), frame, module), kinds,
+                                streams, accumulators, it.origin());
                     }
                     matched = true;
                     break;
@@ -247,7 +255,20 @@ public final class IrInterpreter {
                     : accumulators.get(os.name()));
         }
         if (result.size() == 1) return result.values().iterator().next();
-        return new RecordValue(result);
+        // Positional output names (_0.._n — the multi-channel fragment shape) seal to
+        // a tuple, so the result destructures with `let [(a, b)] = …`; named outputs
+        // (the iter() disposition form) stay a plain keyed record.
+        boolean positional = result.keySet().stream().allMatch(IrInterpreter::isPositionalKey);
+        return positional ? new RecordValue("_tuple", result) : new RecordValue(result);
+    }
+
+    /** True for a tuple positional key — {@code _0}, {@code _1}, … (underscore + digits). */
+    private static boolean isPositionalKey(String name) {
+        if (name.length() < 2 || name.charAt(0) != '_') return false;
+        for (int i = 1; i < name.length(); i++) {
+            if (!Character.isDigit(name.charAt(i))) return false;
+        }
+        return true;
     }
 
     /**
@@ -262,6 +283,26 @@ public final class IrInterpreter {
         // Cross-module construction qualifies the nominal ("pontif.core/Nothing");
         // a same-module use is bare ("Nothing"). Match either.
         return n.equals("Nothing") || n.endsWith("/Nothing");
+    }
+
+    /**
+     * Routes one written value to its output by kind: a STREAM appends (dropping the
+     * {@code Nothing} omission value — the lossy filter shape, docs/stream-war.md §3);
+     * an ACCUMULATOR threads the next revision (the prior was read via the frame).
+     */
+    private void routeWrite(
+            String output, Object v, java.util.Map<String, IrExpr.OutputKind> kinds,
+            java.util.Map<String, java.util.List<Object>> streams,
+            java.util.Map<String, Object> accumulators, sibarum.pontif.core.Origin origin) {
+        IrExpr.OutputKind k = kinds.get(output);
+        if (k == null) throw new RuntimeCheckException(
+                "Iterate: write to unknown output '" + output + "'", origin);
+        switch (k) {
+            case STREAM -> { if (!isNothing(v)) streams.get(output).add(v); }
+            case ACCUMULATOR -> accumulators.put(output, v);
+            default -> throw new RuntimeCheckException(
+                    "Iterate: write to " + k + " not yet implemented", origin);
+        }
     }
 
     /** Seals an accumulated stream into a positional record (tuple) — the native sequence value. */

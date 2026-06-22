@@ -1396,7 +1396,16 @@ public final class SortChecker {
             IrExpr.Arm arm = it.arms().get(i);
             java.util.Set<String> placements = new java.util.LinkedHashSet<>();
             int absorptions = 0;
+            boolean hasFan = false;
             for (IrExpr.Write w : arm.writes()) {
+                // A fan write distributes a tuple return to every declared output
+                // positionally (the multi-channel fragment shape, docs/stream-war.md
+                // §3) — it accounts for all channels by construction, so the
+                // single-placement accounting below does not apply.
+                if (w.output().equals(IrExpr.Write.FAN)) {
+                    hasFan = true;
+                    continue;
+                }
                 IrExpr.OutputKind kind = kinds.get(w.output());
                 if (kind == null) {
                     throw new CompileException(
@@ -1418,7 +1427,7 @@ public final class SortChecker {
                     case ACCUMULATOR -> absorptions++;
                 }
             }
-            if (placements.size() > 1) {
+            if (!hasFan && placements.size() > 1) {
                 throw new CompileException(
                         "Iteration arm #" + (i + 1) + " places the element into "
                                 + placements.size() + " streams " + placements
@@ -1426,7 +1435,7 @@ public final class SortChecker {
                                 + " second stream is an emission (a creation), a later slice"
                                 + " (docs/iteration.md §4).", it.origin());
             }
-            if (placements.isEmpty() && absorptions == 0 && !hasDefaultStream) {
+            if (!hasFan && placements.isEmpty() && absorptions == 0 && !hasDefaultStream) {
                 throw new CompileException(
                         "Iteration arm #" + (i + 1) + " accounts for nothing — the element is"
                                 + " neither placed into a stream nor absorbed, and there is no"

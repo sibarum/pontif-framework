@@ -78,6 +78,41 @@ class StreamFragmentTest {
     }
 
     @Test
+    void fold_accumulatesViaSeedArg() {
+        // A value-arg alongside the spread is an accumulator seed (total-input-marker
+        // rule). The fragment returns (streamPos, accPos); fold sends null to the
+        // stream (empty) and threads the running total. Tuples are destructure-only,
+        // so the result is bound positionally — `total` is the final accumulator.
+        CompileResult r = compiler.compileAlt("""
+                requires pontif.core.{Stream, Nothing}
+                let null:Nothing = Nothing()
+                let fold:[ (el:Int, total:Int) -> (null, el + total) ]
+                let s:Stream[Int] = (1, 2, 3, 4)
+                let [(empty, total)] = fold(&s, 0)
+                total""", "m.ptf");
+        CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "fold should compile; got " + r);
+        Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        assertEquals(10L, val);
+    }
+
+    @Test
+    void scan_emitsRunningTotalAndThreads() throws Exception {
+        // scan emits the running accumulator at the stream channel AND threads it:
+        // the stream position is the running totals, the accumulator the final.
+        assertEquals("(1, 3, 6, 10)", String.valueOf(run("""
+                let scan:[ (el:Int, total:Int) -> (el + total, el + total) ]
+                let s = (1, 2, 3, 4)
+                let [(running, final)] = scan(&s, 0)
+                running""")));
+        assertEquals(10L, run("""
+                let scan:[ (el:Int, total:Int) -> (el + total, el + total) ]
+                let s = (1, 2, 3, 4)
+                let [(running, final)] = scan(&s, 0)
+                final"""));
+    }
+
+    @Test
     void fragment_filter_dropsNothing() {
         // The canonical filteredLossy line: a fragment whose arms return the
         // element or null; spread over the stream, the nulls drop.

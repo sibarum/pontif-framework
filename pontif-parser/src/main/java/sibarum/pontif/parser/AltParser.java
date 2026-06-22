@@ -4524,7 +4524,7 @@ public final class AltParser {
                 if (spreadAt != -1) {
                     throw new ParseException(
                             "Multiple `&` spreads in one call (zip / fan-in) is not implemented "
-                                    + "yet — slice 2c; docs/stream-war.md §3", o);
+                                    + "yet — slice 2d-3; docs/stream-war.md §3", o);
                 }
                 spreadAt = i;
             }
@@ -4533,14 +4533,40 @@ public final class AltParser {
 
         IrExpr source = ((IrExpr.Call) args.get(spreadAt)).args().get(0);
         String element = "$e" + (syntheticCounter++);
-        List<IrExpr> perElement = new ArrayList<>(args);
-        perElement.set(spreadAt, new IrExpr.Var(element, o));
-        IrExpr body = rebuild.apply(perElement);
 
-        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+        // Single stream, no other args → the single-channel map/filter shape: the
+        // fragment's return is the (one) stream's per-element emission.
+        if (args.size() == 1) {
+            IrExpr body = rebuild.apply(List.of(new IrExpr.Var(element, o)));
+            IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+            IrExpr.Arm arm = new IrExpr.Arm(
+                    IrSort.named("_"), List.of(new IrExpr.Write("default", null, body)));
+            return new IrExpr.Iterate(source, element, List.of(out), List.of(arm), o);
+        }
+
+        // Multi-channel (fold/scan): one output per input position — the spread is a
+        // STREAM channel, every other (value) arg is an ACCUMULATOR seeded by that
+        // value (the total-input-marker rule, docs/stream-war.md §3: a positional
+        // value is always an accumulator; constants are closed over). Output arity =
+        // input arity; the fragment returns a tuple, fan-distributed to the channels.
+        // Each accumulator's current revision is threaded back in as the matching
+        // argument (read via the iteration frame under the output's name).
+        List<IrExpr.OutputSpec> outputs = new ArrayList<>(args.size());
+        List<IrExpr> perElement = new ArrayList<>(args.size());
+        for (int i = 0; i < args.size(); i++) {
+            String ch = "_" + i;
+            if (i == spreadAt) {
+                outputs.add(new IrExpr.OutputSpec(ch, IrExpr.OutputKind.STREAM, null));
+                perElement.add(new IrExpr.Var(element, o));
+            } else {
+                outputs.add(new IrExpr.OutputSpec(ch, IrExpr.OutputKind.ACCUMULATOR, args.get(i)));
+                perElement.add(new IrExpr.Var(ch, o));
+            }
+        }
+        IrExpr body = rebuild.apply(perElement);
         IrExpr.Arm arm = new IrExpr.Arm(
-                IrSort.named("_"), List.of(new IrExpr.Write("default", null, body)));
-        return new IrExpr.Iterate(source, element, List.of(out), List.of(arm), o);
+                IrSort.named("_"), List.of(new IrExpr.Write(IrExpr.Write.FAN, null, body)));
+        return new IrExpr.Iterate(source, element, outputs, List.of(arm), o);
     }
 
     /**
