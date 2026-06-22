@@ -234,10 +234,20 @@ public final class IrInterpreter {
             }
             SymExpr sym = toSymExpr(element);
             boolean matched = false;
+            boolean halt = false;
             for (IrExpr.Arm arm : it.arms()) {
                 Sort pat = module.sortFor(arm.pattern());
                 if (Refinements.satisfies(sym, pat, checker(module)) instanceof ProofResult.Passed) {
                     for (IrExpr.Write w : arm.writes()) {
+                        // Stop write: the element is out of the guard's domain — halt the
+                        // iteration (the stop disposition, docs/stream-war.md §3, takeWhile).
+                        // The triggering element is NOT emitted; what's sealed so far is the
+                        // result. The source-driven dual of the generator's domain-refinement
+                        // halt (§7.9).
+                        if (w.output().equals(IrExpr.Write.STOP)) {
+                            halt = true;
+                            break;
+                        }
                         // Fan write: the value is a tuple whose position i routes to
                         // output i — the multi-channel fragment return, evaluated once
                         // (docs/stream-war.md §3). Distribute positionally.
@@ -265,6 +275,7 @@ public final class IrInterpreter {
                     break;
                 }
             }
+            if (halt) break;  // stop disposition — seal what's emitted, end the iteration
             if (!matched) throw new RuntimeCheckException(
                     "Iterate: no arm matched element " + element, it.origin());
         }

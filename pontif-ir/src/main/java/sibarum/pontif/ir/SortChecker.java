@@ -1406,6 +1406,13 @@ public final class SortChecker {
                     hasFan = true;
                     continue;
                 }
+                // A stop write is a control-flow disposition (halt the iteration,
+                // docs/stream-war.md §3, takeWhile), not a placement — it routes to no
+                // output. The element that triggers it is intentionally not emitted; the
+                // declared domain guard is the acknowledgement (as filter's null is).
+                if (w.output().equals(IrExpr.Write.STOP)) {
+                    continue;
+                }
                 IrExpr.OutputKind kind = kinds.get(w.output());
                 if (kind == null) {
                     throw new CompileException(

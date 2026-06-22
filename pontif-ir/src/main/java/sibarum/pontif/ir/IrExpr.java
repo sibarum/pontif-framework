@@ -361,6 +361,17 @@ public sealed interface IrExpr
          */
         public static final String FAN = "*";
 
+        /**
+         * Reserved output name for a <em>stop</em> write: when this arm matches, the
+         * source-driven iteration halts after sealing what's been emitted so far — the
+         * <b>stop disposition</b> (docs/stream-war.md §3, takeWhile). The element that
+         * triggered the stop is NOT emitted; {@code value} is ignored. This is the
+         * source-driven dual of the generator's domain-refinement halt (§7.9): a guard
+         * arm emits while the element is in-domain, the catch-all stop arm fires at the
+         * first out-of-domain element.
+         */
+        public static final String STOP = "!stop";
+
         public Write {
             if (output == null || output.isEmpty()) {
                 throw new IllegalArgumentException("Write output must be non-empty");

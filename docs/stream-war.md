@@ -243,10 +243,25 @@ Two consequences:
 
 **Honest scope.** This is the **frame the generator reveals**, not how the iterators
 are built today: current `filter` is null-omission (above), *not* a refinement-guarded
-drop — re-expressing it as one is a future unification, not a present fact. `takeWhile`
-is **predicted** by the frame (filter's stop-disposition sibling) and has **no slice
-yet** — it's the entry the table demands and we haven't built, which is the evidence
-the generalization is real rather than retrofitted.
+drop — re-expressing it as one is a future unification, not a present fact.
+
+**`takeWhile` LANDED (2026-06-22) — the predicted entry, now built.** The frame
+predicted it (filter's stop-disposition sibling) and it was the table's empty cell;
+building it confirmed the generalization is real rather than retrofitted. **RULED
+(Option A, James):** a **domain-refined element binder is the guard** —
+`&s:[ (el:[Int:@<5]) -> el ]` emits while the element is in-domain and **stops** at the
+first that isn't (`(1,2,9,3) → (1,2)`, *not* `(1,2,3)` — it halts, doesn't skip).
+filter keeps the body-`null` drop; a refined binder is takeWhile. It reuses the whole
+stack — spread lowering, the source-driven `Iterate` engine, per-element arm-matching
+via `Refinements.satisfies`, and the dependent-sorts discharge (provably-in ⇒ identity
+map, provably-disjoint ⇒ empty, residual ⇒ the runtime guard). The **only** new
+mechanism is the `IrExpr.Write.STOP` disposition: `evalIterate` breaks the element loop
+after sealing what's emitted (`SortChecker` skips it like `FAN`; `AltParser.lowerTakeWhile`
+builds the guard arm + catch-all stop arm). This is exactly the generator's
+domain-refinement halt (§7.9) with a `&s` source instead of threaded accumulators —
+*"takeWhile is the generator with the source added back."* `StreamTakeWhileTest`.
+(Inline `&s:[…]` face only; the named call form `tw(&s)` is a follow-up — like the
+generator, it needs the callee's param sort, which isn't local at the call site.)
 
 ### Canonical example (the final prototype, 2026-06-21)
 

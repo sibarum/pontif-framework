@@ -3991,8 +3991,35 @@ public final class AltParser {
                 && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
             return lowerSpreadFanout(source, frag, st, o);
         }
+        // takeWhile (RULED Option A): a domain-refined element binder IS the guard —
+        // emit while the element is in-domain, STOP at the first that isn't (the stop
+        // disposition, docs/stream-war.md §3). The source-driven dual of the generator's
+        // domain-refinement halt (§7.9). filter keeps the body-`null` drop; a refined
+        // binder is takeWhile.
+        if (frag.params().size() == 1 && frag.params().get(0).sort() instanceof IrSort.Refined) {
+            return lowerTakeWhile(source, frag, o);
+        }
         return lowerSpreadCall(List.of(spread),
                 a -> new IrExpr.Apply(frag, a, o), o);
+    }
+
+    /**
+     * Lowers a takeWhile (docs/stream-war.md §3, RULED Option A): {@code &s:[ (el:[G])
+     * -> body ]}. The binder's domain refinement {@code G} becomes the guard arm
+     * (in-domain → emit {@code body}); a catch-all stop arm halts the iteration at the
+     * first out-of-domain element (the {@link IrExpr.Write#STOP} disposition). The
+     * triggering element is not emitted. Reuses the source-driven {@code Iterate} engine
+     * + arm-matching; only the stop write is new.
+     */
+    private IrExpr lowerTakeWhile(IrExpr source, IrExpr.Lambda frag, Origin o) {
+        String element = "$e" + (syntheticCounter++);
+        IrSort guard = frag.params().get(0).sort();
+        IrExpr body = new IrExpr.Apply(frag, List.of(new IrExpr.Var(element, o)), o);
+        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+        IrExpr.Arm emit = new IrExpr.Arm(guard, List.of(new IrExpr.Write("default", null, body)));
+        IrExpr.Arm stop = new IrExpr.Arm(IrSort.named("_"),
+                List.of(new IrExpr.Write(IrExpr.Write.STOP, null, new IrExpr.Var(element, o))));
+        return new IrExpr.Iterate(source, element, List.of(out), List.of(emit, stop), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */
