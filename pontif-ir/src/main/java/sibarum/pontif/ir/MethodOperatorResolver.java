@@ -442,6 +442,15 @@ public final class MethodOperatorResolver {
             if (op == IrExpr.Op.EQ || op == IrExpr.Op.NE || op == IrExpr.Op.APPROX) {
                 return;   // structural equality is always defined
             }
+            // Stream concatenation: `+` is a BUILT-IN structural append on streams
+            // (slice 2e — the same rule lifted to String +), NOT a trait contract
+            // member, so it's defined on a Stream-typed operand the way structural
+            // equality is. (Element-type compatibility of the result rides the §8.6
+            // gap, as for any computed stream.)
+            if (op == IrExpr.Op.ADD
+                    && (isStreamTrait(leftTrait) || isStreamTrait(rightTrait))) {
+                return;
+            }
             String sym = BuiltinOperators.symbol(op);
             if (op == IrExpr.Op.AND || op == IrExpr.Op.OR) {
                 throw new CompileException(
@@ -499,6 +508,11 @@ public final class MethodOperatorResolver {
     }
 
     /** The nominal base type name of a sort, or null if it has none. */
+    /** The Stream trait, bare or linker-qualified — the one trait with a built-in `+` (concat). */
+    private static boolean isStreamTrait(IrSort.Trait t) {
+        return t != null && (t.name().equals("Stream") || t.name().endsWith("/Stream"));
+    }
+
     private static String baseName(IrSort sort) {
         if (sort == null) return null;
         return switch (sort) {
