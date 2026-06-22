@@ -582,11 +582,20 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
   `FunctionDecl`/method (it previously dropped to empty when descending into the body,
   so a fragment's `A` read as an unknown sort). `StreamGenericsTest`. Streams are the
   motivating use-case for generics — this is the must-have.
-- **(A) Fragments have no usable *type* — OPEN.** Verified: `f:[(Int)->Int]` doesn't
-  parse (the `(Int)` is rejected as a 1-tuple); `f:[Method(Int):Int]` parses but passing
-  a fragment **crashes at runtime** (`toSymExpr` can't symbolize a `Closure`); returning
-  a fragment is blocked. So a fragment can't yet be a param, a return, or a named
-  external type — it's not the lambda replacement it claims to be until this closes.
+- **(A) Fragments as first-class passable/returnable values — LANDED (2026-06-22).** A
+  fragment can now be **passed** to a `[Method(A):R]` parameter and **returned** from a
+  function, then invoked (`FragmentValueTest`). The crash is fixed: `toSymExpr` maps a
+  `Closure` to a curried `SymExpr.Lam` chain of its arity, so the `[Method…]` parameter
+  check (`Refinements.satisfiesFunction`, which only needs arity-depth + a return-position
+  value) matches instead of throwing. Also **RULED + fixed (James): `(S)` is grouping,
+  not a 1-tuple** — `parseTupleSortBody` returns the single member for a one-component
+  paren (mirroring the value side; a 1-tuple is the trailing-comma `(S,)`, a §7.10 slice).
+  So `[(Int)]` ≡ `[Int]`.
+  - **Still open — the arrow spelling.** `[(Int)->Int]` / `[Int->Int]` doesn't parse: an
+    `[A->B]` *arrow sort* isn't implemented (the transform-spectrum sort, conceptually a
+    function type). The working function-type spelling today is the keyword form
+    `[Method(A):R]`. Whether the canonical fragment type is the arrow `[A->B]`, the
+    keyword `[Method(A):R]`, or both unified is a **syntax ruling** (reserved for James).
 - **(B) `let` fragments only parse at top level — OPEN.** Nested `let m:[ … ]` inside a
   function body goes through `parseLetExpr`, which has no fragment-literal branch — it
   reads `[…]` as a type annotation and demands `= value`. Violates the let-anywhere

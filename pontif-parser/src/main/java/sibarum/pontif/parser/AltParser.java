@@ -2664,11 +2664,18 @@ public final class AltParser {
                             + "refer to fields by name, e.g. [Interval:@.lo <= @.hi].",
                     peek().origin());
         }
-        if (members.size() < 2) {
+        if (members.isEmpty()) {
             throw new ParseException(
-                    "A tuple needs at least two components; got " + members.size()
-                            + " — use the value directly rather than a 1-tuple",
+                    "An empty tuple sort '()' is not yet supported (the empty/single-element "
+                            + "tuple slice is backlogged, docs/stream-war.md §7.10).",
                     open.origin());
+        }
+        if (members.size() == 1) {
+            // `(S)` is GROUPING, not a 1-tuple — the parenthesized single sort IS S,
+            // mirroring the value side where `(x)` is grouping (RULED James 2026-06-22:
+            // a 1-tuple is the trailing-comma `(S,)`, a separate §7.10 slice). This makes
+            // `[(Int)->Int]` read as `[Int->Int]` — a parenthesized domain, not a 1-tuple.
+            return members.values().iterator().next();
         }
         IrSort.Structural tuple = new IrSort.Structural(TUPLE_SENTINEL, members, open.origin());
         if (!discards.isEmpty()) literalConstrainedFields.put(tuple, discards);

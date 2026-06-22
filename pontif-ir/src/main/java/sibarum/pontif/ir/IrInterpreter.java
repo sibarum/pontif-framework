@@ -1127,6 +1127,20 @@ public final class IrInterpreter {
     }
 
     private static SymExpr toSymExpr(Object value) {
+        // A fragment value (a Closure) passed as an argument or bound: represent it as a
+        // curried Lam chain of its arity so a [Method(…):R] parameter check
+        // (Refinements.satisfiesFunction) matches by depth — the lambda-replacement
+        // becoming a first-class, passable/returnable value (docs/stream-war.md §8b).
+        // The body is opaque: satisfiesFunction only needs the arity and a value in
+        // return position, not the closure's actual (IrExpr) body.
+        if (value instanceof Closure cl) {
+            SymExpr body = SymExpr.var("$fragmentBody");
+            java.util.List<IrParam> ps = cl.lambda().params();
+            for (int i = ps.size() - 1; i >= 0; i--) {
+                body = SymExpr.lam(ps.get(i).name(), body);
+            }
+            return body;
+        }
         if (value instanceof Long l) return SymExpr.lit(l);
         if (value instanceof Integer i) return SymExpr.lit(i.longValue());
         if (value instanceof BigDecimal d) return SymExpr.dec(d);
