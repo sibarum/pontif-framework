@@ -7,6 +7,7 @@ import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.symbolic.Simplifier;
+import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
@@ -341,6 +342,169 @@ public final class IrInterpreter {
         java.util.Map<String, Object> m = new LinkedHashMap<>();
         for (int i = 0; i < elems.size(); i++) m.put("_" + i, elems.get(i));
         return new RecordValue("_tuple", m);
+    }
+
+    /**
+     * Runtime backstop on the unfold driver: a generator whose domain refinement
+     * never goes false would loop forever. Until the static halting proof (the bound
+     * engine, docs/stream-war.md §7.9) gates non-terminating generators at compile
+     * time, the driver caps the step count and fails loudly rather than hanging. This
+     * is a backstop, not the proof — a well-typed generator never reaches it.
+     */
+    private static final int UNFOLD_STEP_CAP = 1_000_000;
+
+    /**
+     * Whether {@code returnSort} is a <em>generator codomain</em> (docs/stream-war.md
+     * §7.9): a tuple carrying at least one {@code Stream[T]} channel <b>and</b> at
+     * least one bare (accumulator) channel. That mix is the unfold signal — a stream
+     * <em>output</em> threaded by accumulator state, with no {@code &} input. A pure
+     * stream codomain (a plain map fragment) or an all-stream tuple (fork) is not a
+     * generator; nor is a plain {@code T} / tuple-of-{@code T} return.
+     */
+    static boolean isGeneratorCodomain(IrSort returnSort) {
+        if (!(returnSort instanceof IrSort.Structural st)
+                || !TUPLE_SENTINEL.equals(st.name())) {
+            return false;
+        }
+        boolean hasStream = false, hasAccumulator = false;
+        for (IrSort member : st.members().values()) {
+            if (isStreamChannel(member)) hasStream = true; else hasAccumulator = true;
+        }
+        return hasStream && hasAccumulator;
+    }
+
+    private static final String TUPLE_SENTINEL = "_tuple";
+
+    /**
+     * Whether a codomain channel sort is a stream channel ({@code Stream[T]}). The
+     * base name is bare ({@code "Stream"}) in a single file but qualified
+     * ({@code "pontif.core/Stream"}) once the linker resolves the imported trait —
+     * match either, the same bare-or-qualified rule {@link #isNothing} uses.
+     */
+    private static boolean isStreamChannel(IrSort s) {
+        String n = sortBaseName(s);
+        return n != null && (n.equals("Stream") || n.endsWith("/Stream"));
+    }
+
+    /** The base (head) name of a sort, or {@code null} for the nameless composites. */
+    private static String sortBaseName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            case IrSort.Trait t -> t.name();
+            case IrSort.Method f -> null;
+            case IrSort.Dispatch d -> "Dispatch";
+            case IrSort.Union u -> null;
+            case IrSort.Intersection i -> null;
+        };
+    }
+
+    /**
+     * The unfold / generator driver (docs/stream-war.md §7.9, slice 2f) — the
+     * <em>dual of fold</em> and a new execution driver, NOT sugar over the
+     * source-driven {@link IrExpr.Iterate}. There is no {@code &} source; the fragment
+     * has accumulator inputs (seeded by the call args) and a tuple codomain mixing
+     * {@code Stream[T]} output channel(s) with bare accumulator channel(s). Each step
+     * binds the params to the current accumulator state, emits the stream channels, and
+     * threads the accumulator channels to the next step. <b>The domain refinement is
+     * the base case</b> (the universal per-channel guard, §3): the unfold halts exactly
+     * when the current state would make a param ill-typed — the same guard
+     * {@code filter}/{@code takeWhile} apply to source elements, here on the threaded
+     * accumulators with the <em>stop</em> disposition.
+     */
+    Object driveGenerator(IrExpr.Lambda lambda, List<Object> seeds,
+                          Environment captured, CompiledModule module) {
+        List<IrParam> params = lambda.params();
+        IrSort.Structural codomain = (IrSort.Structural) lambda.returnSort();
+        List<IrSort> channels = new ArrayList<>(codomain.members().values());
+        boolean[] isStream = new boolean[channels.size()];
+        int accCount = 0;
+        for (int c = 0; c < channels.size(); c++) {
+            isStream[c] = isStreamChannel(channels.get(c));
+            if (!isStream[c]) accCount++;
+        }
+        if (accCount != params.size()) {
+            throw new RuntimeCheckException(
+                    "Generator: the number of accumulator channels (" + accCount
+                            + ") must equal the number of parameters (" + params.size()
+                            + ") — each accumulator channel threads one parameter; "
+                            + "docs/stream-war.md §7.9", lambda.origin());
+        }
+
+        Object[] state = seeds.toArray();
+        Map<Integer, java.util.List<Object>> streamBufs = new LinkedHashMap<>();
+        for (int c = 0; c < channels.size(); c++) {
+            if (isStream[c]) streamBufs.put(c, new ArrayList<>());
+        }
+        Simplifier checker = checker(module);
+
+        int step = 0;
+        while (guardHolds(params, state, module, checker)) {
+            if (step++ > UNFOLD_STEP_CAP) {
+                throw new RuntimeCheckException(
+                        "Generator did not halt within " + UNFOLD_STEP_CAP + " steps — its "
+                                + "domain refinement never went false (the static halting proof "
+                                + "is pending; docs/stream-war.md §7.9)", lambda.origin());
+            }
+            Environment frame = captured;
+            for (int i = 0; i < params.size(); i++) {
+                frame = frame.extend(params.get(i).name(), state[i]);
+            }
+            Object res = eval(lambda.body(), frame, module);
+            if (!(res instanceof RecordValue rv)) {
+                throw new RuntimeCheckException(
+                        "Generator body must return a tuple matching its codomain, got "
+                                + (res == null ? "null" : res.getClass().getSimpleName()),
+                        lambda.origin());
+            }
+            Object[] nextState = new Object[params.size()];
+            int accIdx = 0;
+            for (int c = 0; c < channels.size(); c++) {
+                Object cv = rv.members().get("_" + c);
+                if (isStream[c]) {
+                    if (!isNothing(cv)) streamBufs.get(c).add(cv);
+                } else {
+                    nextState[accIdx++] = cv;
+                }
+            }
+            state = nextState;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        int accIdx = 0;
+        for (int c = 0; c < channels.size(); c++) {
+            result.put("_" + c, isStream[c]
+                    ? sealStream(streamBufs.get(c))
+                    : state[accIdx++]);
+        }
+        return new RecordValue(TUPLE_SENTINEL, result);
+    }
+
+    /**
+     * The per-step domain guard: do all parameter refinements hold at the current
+     * accumulator state? Each param's refinement predicate gets {@code @} bound to
+     * its own current value (via {@link Substitute#applySelf}) and every cross-
+     * reference to a sibling parameter ({@code to:[Int:@>=from]}) substituted to that
+     * sibling's current value, then simplified — the guard holds iff every predicate
+     * reduces to true. The first state that fails ends the unfold (the base case).
+     */
+    private boolean guardHolds(List<IrParam> params, Object[] state,
+                               CompiledModule module, Simplifier checker) {
+        Map<String, SymExpr> binds = new LinkedHashMap<>();
+        for (int i = 0; i < params.size(); i++) {
+            binds.put(params.get(i).name(), toSymExpr(state[i]));
+        }
+        for (int i = 0; i < params.size(); i++) {
+            Sort coreSort = module.sortFor(params.get(i).sort());
+            if (!coreSort.isRefined()) continue;
+            SymExpr pred = Substitute.applySelf(coreSort.predicate(), toSymExpr(state[i]));
+            pred = Substitute.apply(pred, binds);
+            if (!(checker.simplify(pred) instanceof SymExpr.Bool b && b.value())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Object evalMatch(IrExpr.Match match, Environment env, CompiledModule module) {

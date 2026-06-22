@@ -205,6 +205,49 @@ an accumulator via its `Int` output position. **OPEN detail:** whether `f(&s)` o
 `Stream[T|Nothing]` (keep) — the explicit `:[Stream[T]]` appears to be what chooses to
 strip.)
 
+### Domain refinement is the universal per-channel guard (RULED 2026-06-22, James)
+
+The generator's standout — *"the domain refinement is the base case"* (§7.9) — is
+**not generator-specific**. A domain refinement is a **per-step applicability guard
+on an input channel**: the fragment runs at a step only if every input channel's
+refinement holds at the value flowing into that channel. Every iterator is one point
+in a 2-axis space:
+
+1. **Which channel is guarded** — a *source/element* channel (fed by `&s`) vs. an
+   *accumulator/threaded* channel (fed by the previous step's output).
+2. **What disposition fires when the guard fails** — **drop** / **stop** / **hazard**
+   (`[!!]`) / **compile-error**.
+
+| iterator | guarded channel | value source | guard-fail disposition |
+|---|---|---|---|
+| `map` | (none — element trivially in domain) | source | — (vacuous / identity) |
+| `filter` | source element | source | **drop** (lossy) |
+| `takeWhile` | source element | source | **stop** |
+| `fold` / `scan` | accumulator | prev step | (source-bounded ⇒ guard trivial) |
+| **generator/unfold** (2f) | accumulator (threaded state) | prev step | **stop** (terminate) |
+
+Two consequences:
+
+- **The generator is `takeWhile` with the source removed.** Source-driven iterators
+  halt when the *source* is exhausted; the generator has no source, so the domain
+  refinement on the *accumulator* becomes the only thing that can halt it. It's the
+  same guard `filter`/`takeWhile` apply to source elements, relocated to the threaded
+  channel (and for `count` it's *relational* — `to:[@>=from]` across two accumulators,
+  tripping when `from+1` overruns `to`).
+- **`filter` and the generator's halt are one operation under two dispositions.**
+  out-of-domain element → *drop* is filter; out-of-domain next-state → *stop* is the
+  generator; no declared disposition → the `[!!]` runtime hazard; provably-always-out
+  → dead-fragment compile error; provably-always-in → the identity no-op (membership).
+  This **is** the three-valued no-lie gate (provably-in / provably-disjoint /
+  residual), reused as the iteration guard.
+
+**Honest scope.** This is the **frame the generator reveals**, not how the iterators
+are built today: current `filter` is null-omission (above), *not* a refinement-guarded
+drop — re-expressing it as one is a future unification, not a present fact. `takeWhile`
+is **predicted** by the frame (filter's stop-disposition sibling) and has **no slice
+yet** — it's the entry the table demands and we haven't built, which is the evidence
+the generalization is real rather than retrofitted.
+
 ### Canonical example (the final prototype, 2026-06-21)
 
 ```pontif
@@ -416,16 +459,45 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    Structural (sequential append), composes with the per-element spread
    (`double(&s) + s`). `StreamConcatTest`. (Element-type checking of the result rides
    the deferred §8.6 gap, same as any computed stream.)
-9. **Generator / unfold** (2f) — a pure **stream *source*** written in the language,
-   the **dual of fold**: accumulator inputs, a `Stream[T]` *output* channel, **no `&`
-   input**. Explicit-codomain form (RULED — James, the channel-consistent version):
+9. **Generator / unfold (2f) LANDED (2026-06-22).** A pure **stream *source*** written
+   in the language, the **dual of fold**: accumulator inputs, a `Stream[T]` *output*
+   channel, **no `&` input**. Explicit-codomain form (RULED — James, the
+   channel-consistent version):
    `let count:[ (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-   (from, from+1, to) ]`, `count(0,5)._0` → `(0,1,2,3,4,5)`. The standout: **the
-   domain refinement is the base case** — the unfold halts exactly when its next state
-   would be ill-typed (`to>=from` goes false), provably terminating via the bound
-   engine (here `from` strictly increases toward a fixed `to`). A **new execution
-   driver** ("step until the guard fails"), NOT sugar over the source-driven `Iterate`;
-   leans on the halting machinery. Does *not* resurrect `Element|Leaf` — the unfold is
+   (from, from+1, to) ]`, `count(0,5)._0` → `(0,1,2,3,4,5)` (`StreamGeneratorTest`).
+   The standout: **the domain refinement is the base case** — the unfold halts exactly
+   when its next state would be ill-typed (`to>=from` goes false; here `from` strictly
+   increases toward a fixed `to`). A **new execution driver** ("step until the guard
+   fails"), NOT sugar over the source-driven `Iterate`. **This guard is the universal
+   per-channel applicability guard (§3):** the generator is `takeWhile` with the source
+   removed — same guard, relocated from a source element to the threaded accumulator,
+   with the **stop** disposition.
+   - **How it landed.** A fragment whose codomain is a tuple mixing `Stream[T]`
+     channel(s) with bare accumulator channel(s) is the generator signal
+     (`IrInterpreter.isGeneratorCodomain`); `Closure.invoke` routes such an
+     application to `IrInterpreter.driveGenerator` (the step loop) instead of a single
+     body evaluation. (The stream-channel detector matches both the bare `Stream` and
+     the linker-qualified `pontif.core/Stream` — a file with `requires
+     pontif.core.{Stream}` resolves the codomain channel to the qualified trait, and
+     missing that made the unfold silently collapse to one body eval in the editor;
+     pinned by `generator_firesThroughLinkedEditorPath_withRequires`.) Each step seeds
+     the accumulator channels from the call args (in
+     codomain order), binds the params to the current state, evals the body to the
+     codomain tuple, emits the stream channel(s) (dropping `Nothing`) and threads the
+     accumulator channel(s). The per-step **guard** (`guardHolds`) substitutes `@`→the
+     param's current value (`Substitute.applySelf`) and each sibling cross-reference
+     (`to:[Int:@>=from]`) →its current value (`Substitute.apply`), then simplifies — the
+     unfold runs while every param refinement reduces to true, and the first state that
+     fails ends it (the base case). **No new IR node and no pass threading** — the call
+     stays a plain `Call`/`Apply`, so every resolver/visitor is untouched; the driver
+     lives entirely in the interpreter (a true new execution driver, just runtime-sited).
+   - **Honest scope / follow-ups.** (a) Detection + the halt are **runtime**, not
+     static — the static halting *proof* via the bound engine (`from` strictly
+     increases toward fixed `to`) is **not yet wired**; a `UNFOLD_STEP_CAP` backstop
+     fails loudly rather than hanging on a generator whose guard never trips. That cap
+     is a backstop, **not** the proof — a follow-up sub-cut should gate non-terminating
+     generators at compile time. (b) The codomain element-type of the emitted stream
+     rides the same §8.6 no-lie hole as any computed stream. Does *not* resurrect `Element|Leaf` — the unfold is
    the hidden backing behind the membrane (a §4 stream source).
 10. **Empty `()` and single-element tuple/stream literals** — neither parses today
     (`()` is a parse error; `(x)` is grouping → a scalar; `(x,)` doesn't parse).

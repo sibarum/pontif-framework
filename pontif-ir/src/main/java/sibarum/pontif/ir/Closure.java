@@ -18,6 +18,13 @@ public record Closure(IrExpr.Lambda lambda, Environment captured) {
                             + " argument(s), got " + args.size(),
                     lambda.origin());
         }
+        // A fragment with a generator codomain (a tuple mixing a Stream[T] output
+        // channel with accumulator channels, no `&` input) is an unfold/generator:
+        // applying it drives the step-until-the-guard-fails loop, not a single body
+        // evaluation (docs/stream-war.md §7.9, slice 2f).
+        if (IrInterpreter.isGeneratorCodomain(lambda.returnSort())) {
+            return interpreter.driveGenerator(lambda, args, captured, module);
+        }
         Environment env = captured;
         for (int i = 0; i < args.size(); i++) {
             env = env.extend(lambda.params().get(i).name(), args.get(i));
