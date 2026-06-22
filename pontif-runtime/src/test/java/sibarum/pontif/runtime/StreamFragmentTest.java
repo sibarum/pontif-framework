@@ -88,8 +88,7 @@ class StreamFragmentTest {
                 let null:Nothing = Nothing()
                 let fold:[ (el:Int, total:Int) -> (null, el + total) ]
                 let s:Stream[Int] = (1, 2, 3, 4)
-                let [(empty, total)] = fold(&s, 0)
-                total""", "m.ptf");
+                fold(&s, 0)._1""", "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "fold should compile; got " + r);
         Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());

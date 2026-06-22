@@ -116,12 +116,14 @@ class TupleTest {
                 () -> run("struct Point(x:Int, y:Int)\nlet [Point(a)] = Point(1, 2) a"));
     }
 
-    // --- destructure-only: a value's positional component can't be read ---
+    // --- positional projection: a value's component reads with `._N` (RULED
+    //     2026-06-21 — the read-access sibling of destructuring; every aggregate
+    //     has both forms, tuples no exception) ---
 
     @Test
-    void valueLevelPositionalAccess_isRejected() {
-        assertThrows(ParseException.class,
-                () -> run("let p = (1, 2) p._0"));
+    void valueLevelPositionalAccess_reads() throws Exception {
+        assertEquals(1L, run("let p = (1, 2) p._0"));
+        assertEquals(2L, run("let p = (1, 2) p._1"));
     }
 
     // --- per-component refinement in a tuple sort (whole-tuple refinement is Slice 1.5) ---

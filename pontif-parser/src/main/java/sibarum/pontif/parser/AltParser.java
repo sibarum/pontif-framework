@@ -3291,19 +3291,11 @@ public final class AltParser {
             if (t.kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
                 consume();  // DOT
                 AltToken name = consume();
-                // Destructure-only: a positional key (_0, _1, …) can't be read
-                // off a value expression. The only positional projection allowed
-                // is `@._N` inside a sort's refinement predicate (base is the
-                // SelfRef `@`); a tuple component is otherwise reached only by
-                // destructuring. This keeps tuples honest — no silent component
-                // extraction that bypasses the arity-total pattern.
-                if (isPositionalKey(name.text()) && !(expr instanceof IrExpr.SelfRef)) {
-                    throw new ParseException(
-                            "Tuple components are destructure-only — '." + name.text()
-                                    + "' can't be read off a value; bind it with "
-                                    + "`let [(...)] = …` or a match pattern.",
-                            t.origin());
-                }
+                // Positional projection `value._N` reads a tuple component, the
+                // read-access sibling of destructuring (`let [(a, b)] = …`) — every
+                // other aggregate has both a read and a destructure form, and tuples
+                // are no exception (RULED 2026-06-21, James). `@._N` in a refinement
+                // predicate (base is the SelfRef `@`) is the same projection.
                 expr = new IrExpr.FieldAccess(expr, name.text(), t.origin());
             } else if (t.kind() == AltToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
                 AltToken open = consume();

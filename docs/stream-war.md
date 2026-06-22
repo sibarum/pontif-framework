@@ -367,11 +367,11 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        all channels by construction). `fold(&s, 0)` → `(emptyStream, total)`,
        `scan(&s, 0)` → `(runningTotals, total)` (`StreamFragmentTest`). Multi-output
        results with positional `_0.._n` names seal to a `_tuple`.
-       - **Finding (needs a ruling):** `._N` **read-projection is forbidden** —
-         Pontif tuples are *destructure-only* (`let [(a, b)] = …`), and the parser
-         rejects `value._1`. The canonical example wrote `fold(…)._1`; that line can't
-         work as written. Either enable `._N` read-projection, or change the
-         canonical example to destructuring. Tests use `let [(empty, total)] = …`.
+       - **`._N` read-projection RULED IN (2026-06-21, James).** Destructure-only
+         would have made tuples the *only* aggregate without a read form; there's no
+         reason not to have both. Removed the parser's destructure-only rejection, so
+         `value._N` is an ordinary field access (the read-access sibling of
+         `let [(a, b)] = …`). The canonical `fold(&s, 0)._1` now works as written.
        - **Remaining for 2d-3:** fork (fan-out — extra outputs need the codomain) and
          zip (multi-`&` — needs a multi-source `Iterate`).
      - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
