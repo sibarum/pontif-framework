@@ -112,6 +112,37 @@ class StreamFragmentTest {
     }
 
     @Test
+    void fork_fansOutToTwoStreams() {
+        // A tuple codomain of stream channels is fan-out (fork): each element is
+        // routed to exactly one of two output streams (null drops the other) — the
+        // conservative split. The codomain distinguishes this from a stream-of-tuples.
+        CompileResult r = compiler.compileAlt("""
+                requires pontif.core.{Stream, Nothing}
+                let null:Nothing = Nothing()
+                let s:Stream[Int] = (1, 2, 3, 4)
+                &s:[
+                  (el:Int):(Stream[Int], Stream[Int]) -> match el {
+                    [@>2] -> (el, null)
+                    [_]   -> (null, el)
+                  }
+                ]""", "m.ptf");
+        CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "fork should compile; got " + r);
+        Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        // _0 collects the >2 elements, _1 the rest — no loss, no duplication.
+        assertEquals("((3, 4), (1, 2))", String.valueOf(val));
+    }
+
+    @Test
+    void mapReturningTuple_isStreamOfTuples_notFork() throws Exception {
+        // The dual: a tuple body with NO codomain is a plain map producing a stream
+        // of pairs — proving the codomain is what selects fan-out.
+        assertEquals("((1, 2), (2, 4), (3, 6))", String.valueOf(run("""
+                let s = (1, 2, 3)
+                &s:[ (el:Int) -> (el, el * 2) ]""")));
+    }
+
+    @Test
     void fragment_filter_dropsNothing() {
         // The canonical filteredLossy line: a fragment whose arms return the
         // element or null; spread over the stream, the nulls drop.

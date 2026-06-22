@@ -3893,6 +3893,15 @@ public final class AltParser {
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        // Optional codomain `(params):Codomain -> body`, mirroring a function decl.
+        // It is the output channel shape (docs/stream-war.md §3): a tuple codomain of
+        // `Stream[T]` positions is the fan-out (fork) signal that distinguishes a
+        // tuple-of-streams from a stream-of-tuples (a plain map).
+        IrSort declaredCodomain = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();
+            declaredCodomain = parseSort();
+        }
         expect(AltToken.Kind.ARROW);
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
@@ -3906,9 +3915,9 @@ public final class AltParser {
             currentScope.putAll(savedScope);
         }
         AltToken close = expect(AltToken.Kind.RBRACKET);
-        // Return sort is inferred from the body; the explicit `:[Shape]` on the
-        // application (and the construction gate) pins it where it matters.
-        IrSort returnSort = inferMaximalSort(body);
+        // The codomain is the declared output shape when written; otherwise inferred
+        // from the body (the construction gate judges it where it matters).
+        IrSort returnSort = declaredCodomain != null ? declaredCodomain : inferMaximalSort(body);
         return new IrExpr.Lambda(params, returnSort, body, open.spanTo(close));
     }
 
@@ -3928,6 +3937,15 @@ public final class AltParser {
         IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
         if (looksLikeFragmentLiteral()) {
             IrExpr.Lambda frag = parseFragmentLiteral();
+            // Fan-out (fork): a tuple codomain of stream channels routes each element
+            // to one of several output streams (docs/stream-war.md §3). The codomain
+            // distinguishes this from a stream-of-tuples (a plain map with a tuple
+            // body and no codomain).
+            if (frag.returnSort() instanceof IrSort.Structural st
+                    && TUPLE_SENTINEL.equals(st.name())
+                    && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
+                return lowerSpreadFanout(source, frag, st, o);
+            }
             return lowerSpreadCall(List.of(spread),
                     a -> new IrExpr.Apply(frag, a, o), o);
         }
@@ -4556,6 +4574,41 @@ public final class AltParser {
             }
         }
         IrExpr body = rebuild.apply(perElement);
+        IrExpr.Arm arm = new IrExpr.Arm(
+                IrSort.named("_"), List.of(new IrExpr.Write(IrExpr.Write.FAN, null, body)));
+        return new IrExpr.Iterate(source, element, outputs, List.of(arm), o);
+    }
+
+    /** Whether a codomain channel sort is a stream channel ({@code Stream[T]}) vs an accumulator (bare {@code T}). */
+    private boolean isStreamChannelSort(IrSort s) {
+        return "Stream".equals(baseSortName(s));
+    }
+
+    /**
+     * Lowers a fan-out (fork): {@code &s:[ (el):(Stream[T], Stream[U]) -> (a, b) ]}
+     * — one stream in, several streams out (docs/stream-war.md §3). The codomain's
+     * tuple positions are the output streams; the per-element fragment returns a
+     * tuple, fan-distributed so each element is routed (a {@code null} position drops,
+     * so routing each element to exactly one output is the conservative split). The
+     * fragment takes the single element as its one parameter.
+     */
+    private IrExpr lowerSpreadFanout(
+            IrExpr source, IrExpr.Lambda frag, IrSort.Structural codomain, Origin o)
+            throws ParseException {
+        if (frag.params().size() != 1) {
+            throw new ParseException(
+                    "A fan-out fragment over one stream takes exactly one parameter (the "
+                            + "element); got " + frag.params().size()
+                            + " — multi-input fan-out is a later slice; docs/stream-war.md §3", o);
+        }
+        String element = "$e" + (syntheticCounter++);
+        List<IrExpr.OutputSpec> outputs = new ArrayList<>();
+        int i = 0;
+        for (String key : codomain.members().keySet()) {
+            outputs.add(new IrExpr.OutputSpec("_" + i, IrExpr.OutputKind.STREAM, null));
+            i++;
+        }
+        IrExpr body = new IrExpr.Apply(frag, List.of(new IrExpr.Var(element, o)), o);
         IrExpr.Arm arm = new IrExpr.Arm(
                 IrSort.named("_"), List.of(new IrExpr.Write(IrExpr.Write.FAN, null, body)));
         return new IrExpr.Iterate(source, element, outputs, List.of(arm), o);

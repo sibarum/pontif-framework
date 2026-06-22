@@ -372,8 +372,19 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
          reason not to have both. Removed the parser's destructure-only rejection, so
          `value._N` is an ordinary field access (the read-access sibling of
          `let [(a, b)] = …`). The canonical `fold(&s, 0)._1` now works as written.
-       - **Remaining for 2d-3:** fork (fan-out — extra outputs need the codomain) and
-         zip (multi-`&` — needs a multi-source `Iterate`).
+     - **2d-3 fork LANDED (fan-out).** A tuple codomain of `Stream[T]` channels is the
+       fan-out signal: `&s:[ (el:Int):(Stream[Int], Stream[Int]) -> (a, b) ]` routes
+       each element to one of several output streams (`null` drops the others — the
+       conservative split). `parseFragmentLiteral` now parses an optional
+       `(params):Codomain -> body` (mirrors a function decl, stored in the Lambda's
+       returnSort); `AltParser.lowerSpreadFanout` builds the multi-stream Iterate via
+       the FAN write. **The codomain is the disambiguator**: a tuple body *with* a
+       stream-channel codomain is fork (tuple-of-streams); *without* one it's a plain
+       map producing a stream-of-tuples — both tested (`StreamFragmentTest.fork_*`,
+       `mapReturningTuple_isStreamOfTuples_notFork`).
+       - **Remaining for 2d-3: zip** (multi-`&`) — needs a multi-source `Iterate`
+         (the engine iterates one `source` today; zip walks N in lockstep), an IR +
+         interpreter change.
      - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
        coercion — `x:[A -> B]` (registered) and `x:[a:A -> B(…)]` (explicit), plus
        refinement+transform composition `[Int:@>0 -> Decimal]`. Unifies with the
