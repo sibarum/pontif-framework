@@ -143,6 +143,18 @@ class StreamFragmentTest {
     }
 
     @Test
+    void compose_spreadOverASpreadResult() throws Exception {
+        // `&square(&s)` spreads over the result of another spread — operations
+        // compose because a spread source is just an expression (here an Iterate).
+        // s=(1,2,3); square→(1,4,9); zip(&s, &…)→(1+1, 2+4, 3+9).
+        assertEquals("(2, 6, 12)", String.valueOf(run("""
+                let square:[ (item:Int):Stream[Int] -> item * item ]
+                let zip:[ (left:Int, right:Int):Stream[Int] -> left + right ]
+                let s = (1, 2, 3)
+                zip(&s, &square(&s))""")));
+    }
+
+    @Test
     void zip_walksTwoStreamsInLockstep() throws Exception {
         // (&a, &b) walks both in lockstep; the element binds to the pair, which the
         // fragment destructures into (x, y). Vector-add: x + y per position.
