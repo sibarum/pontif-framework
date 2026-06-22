@@ -3967,9 +3967,18 @@ public final class AltParser {
         }
         IrExpr.Lambda frag = parseFragmentLiteral();
 
-        // Multiple sources → zip (fan-in): walk them in lockstep.
+        // Multiple sources → zip (fan-in): route through lowerSpreadCall (the same
+        // path the call form `zip(&a, &b)` takes), wrapping each source as a spread.
         if (sources.size() > 1) {
-            return lowerZip(sources, frag, o);
+            if (frag.params().size() != sources.size()) {
+                throw new ParseException(
+                        "A zip fragment takes one parameter per spread stream — got "
+                                + frag.params().size() + " parameter(s) for " + sources.size()
+                                + " streams; docs/stream-war.md §3", o);
+            }
+            List<IrExpr> markers = new ArrayList<>(sources.size());
+            for (IrExpr s : sources) markers.add(new IrExpr.Call(SPREAD_SENTINEL, List.of(s), o));
+            return lowerSpreadCall(markers, a -> new IrExpr.Apply(frag, a, o), o);
         }
         IrExpr source = sources.get(0);
         IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
@@ -3984,34 +3993,6 @@ public final class AltParser {
         }
         return lowerSpreadCall(List.of(spread),
                 a -> new IrExpr.Apply(frag, a, o), o);
-    }
-
-    /**
-     * Lowers zip / fan-in: {@code (&a, &b):[ (x, y) -> body ]} — N streams walked in
-     * lockstep (docs/stream-war.md §3), stopping at the shortest. Builds a multi-source
-     * {@link IrExpr.Iterate} whose {@code element} binds, per step, to the positional
-     * tuple of the i-th value from each source; the body destructures it into the
-     * fragment's parameters (via the now-ordinary {@code ._N} projection).
-     */
-    private IrExpr lowerZip(List<IrExpr> sources, IrExpr.Lambda frag, Origin o)
-            throws ParseException {
-        if (frag.params().size() != sources.size()) {
-            throw new ParseException(
-                    "A zip fragment takes one parameter per spread stream — got "
-                            + frag.params().size() + " parameter(s) for " + sources.size()
-                            + " streams; docs/stream-war.md §3", o);
-        }
-        String element = "$e" + (syntheticCounter++);
-        List<IrExpr> destructured = new ArrayList<>(sources.size());
-        for (int i = 0; i < sources.size(); i++) {
-            destructured.add(new IrExpr.FieldAccess(new IrExpr.Var(element, o), "_" + i, o));
-        }
-        IrExpr body = new IrExpr.Apply(frag, destructured, o);
-        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
-        IrExpr.Arm arm = new IrExpr.Arm(
-                IrSort.named("_"), List.of(new IrExpr.Write("default", null, body)));
-        List<IrExpr> coSources = new ArrayList<>(sources.subList(1, sources.size()));
-        return new IrExpr.Iterate(sources.get(0), coSources, element, List.of(out), List.of(arm), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */
@@ -4586,19 +4567,38 @@ public final class AltParser {
     private IrExpr lowerSpreadCall(
             List<IrExpr> args, java.util.function.Function<List<IrExpr>, IrExpr> rebuild, Origin o)
             throws ParseException {
-        int spreadAt = -1;
+        List<Integer> spreadPositions = new ArrayList<>();
         for (int i = 0; i < args.size(); i++) {
-            if (isSpread(args.get(i))) {
-                if (spreadAt != -1) {
-                    throw new ParseException(
-                            "Multiple `&` spreads in one call (zip / fan-in) is not implemented "
-                                    + "yet — slice 2d-3; docs/stream-war.md §3", o);
-                }
-                spreadAt = i;
-            }
+            if (isSpread(args.get(i))) spreadPositions.add(i);
         }
-        if (spreadAt == -1) return rebuild.apply(args);
+        if (spreadPositions.isEmpty()) return rebuild.apply(args);
 
+        // Multiple spreads → zip (fan-in): the streams are walked in lockstep
+        // (docs/stream-war.md §3). The element binds to a tuple of the i-th value from
+        // each, which the fragment destructures via `._N`. Works for both faces — the
+        // call form `zip(&a, &b)` and the ascription `(&a, &b):[…]` route here.
+        if (spreadPositions.size() > 1) {
+            if (spreadPositions.size() != args.size()) {
+                throw new ParseException(
+                        "zip mixed with accumulator/constant args is not implemented yet — "
+                                + "every argument must be a `&stream`; docs/stream-war.md §3", o);
+            }
+            List<IrExpr> sources = new ArrayList<>(args.size());
+            for (IrExpr a : args) sources.add(((IrExpr.Call) a).args().get(0));
+            String elem = "$e" + (syntheticCounter++);
+            List<IrExpr> perElement = new ArrayList<>(args.size());
+            for (int i = 0; i < args.size(); i++) {
+                perElement.add(new IrExpr.FieldAccess(new IrExpr.Var(elem, o), "_" + i, o));
+            }
+            IrExpr zipBody = rebuild.apply(perElement);
+            IrExpr.OutputSpec zipOut = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+            IrExpr.Arm zipArm = new IrExpr.Arm(
+                    IrSort.named("_"), List.of(new IrExpr.Write("default", null, zipBody)));
+            List<IrExpr> coSources = new ArrayList<>(sources.subList(1, sources.size()));
+            return new IrExpr.Iterate(sources.get(0), coSources, elem, List.of(zipOut), List.of(zipArm), o);
+        }
+
+        int spreadAt = spreadPositions.get(0);
         IrExpr source = ((IrExpr.Call) args.get(spreadAt)).args().get(0);
         String element = "$e" + (syntheticCounter++);
 

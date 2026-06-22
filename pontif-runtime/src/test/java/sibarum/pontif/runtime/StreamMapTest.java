@@ -75,14 +75,13 @@ class StreamMapTest {
     }
 
     @Test
-    void multipleSpreads_rejected_untilZipSlice() {
-        // Two `&` args (zip / fan-in) is a later sub-slice — must fail clearly now.
-        CompileResult r = compiler.compileAlt("""
+    void multipleSpreads_zip() throws Exception {
+        // Two `&` args zip element-wise (slice 2d-3) — works on any function, not
+        // just fragments: add(&s, &t) is vector-add.
+        assertEquals("(5, 7, 9)", String.valueOf(run("""
                 function add(a:Int, b:Int):Int -> a + b
                 let s = (1, 2, 3)
                 let t = (4, 5, 6)
-                add(&s, &t)""", "m.ptf");
-        assertInstanceOf(CompileResult.Failed.class, r,
-                () -> "multi-spread (zip) is not implemented yet; got " + r);
+                add(&s, &t)""")));
     }
 }

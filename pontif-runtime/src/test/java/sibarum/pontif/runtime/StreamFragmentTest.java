@@ -153,6 +153,15 @@ class StreamFragmentTest {
     }
 
     @Test
+    void zip_callForm_namedFragment() throws Exception {
+        // The named-reuse face: a bound zip fragment applied with two spreads.
+        assertEquals("(2, 4, 6)", String.valueOf(run("""
+                let zip:[ (left:Int, right:Int) -> left + right ]
+                let s = (1, 2, 3)
+                zip(&s, &s)""")));
+    }
+
+    @Test
     void zip_raggedStopsAtShortest() throws Exception {
         // Unequal lengths stop at the shortest stream (standard zip).
         assertEquals("(11, 22)", String.valueOf(run("""
