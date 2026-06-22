@@ -569,6 +569,46 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 
 ---
 
+## 8c. Infinite streams (RULED 2026-06-22, James) — the coinductive half
+
+**Infinite streams are essential — they ARE the event system, the concurrency model,
+the stateful sources (sockets/queues) §1 was declared for. Full stop.** And the
+construction model is **virtually-infinite recursion, with guardrails.** This rules the
+§2 spine: base `Stream` is the *conserved/single-observation* case, and the lazy/infinite
+case is first-class, not an afterthought.
+
+**The guardrail, made precise: PRODUCTIVITY — the coinductive dual of termination.**
+
+| | finite stream | infinite stream |
+|---|---|---|
+| construct | bounded iteration / fold | guarded (co)recursion / unfold |
+| the gate | **termination** — *does it stop?* (the bound engine; "domain refinement is the base case") | **productivity** — *does it keep emitting in finite time?* (each recursive call is guarded under an emit) |
+| consume | materialize the whole tuple | observe a **finite prefix on demand** |
+
+So "with guardrails" = a **productivity check** (the recursive call must sit under a
+stream emission, doing bounded work before each emit) — the exact mirror of the halting
+gate, just on the greatest-fixed-point side.
+
+**Honest technical consequence — it breaks an assumption the current checker rests on.**
+The existing `Coinduction` module is *type-level* (greatest-fixed-point sort relations,
+Amadio–Cardelli), and it explicitly notes value-directed `satisfies(value, sort)` does
+**not** need coinduction because *"descent is bounded by the finite runtime value."* An
+infinite stream value violates exactly that premise — so the element checks we just built
+(§8.6, `Refinements.satisfies` walking a tuple) assume finiteness and must become
+**prefix/demand-aware** for infinite streams. This is an evaluation-model change (a
+demand-driven stream backing), not a syntax tweak.
+
+**Pieces this implies (its own war, sketch):** a lazy/demand-driven stream backing;
+corecursive/fixpoint stream definitions (`Stream[f(@, seed)]` with `@` = the stream
+itself); the productivity gate; prefix-aware observation tying into conservation
+(observing = a Placement that consumes a finite prefix); and it is the substrate for the
+**actions / event** architecture (`project_actions_architecture`). Surfaces (RULED-direction,
+not yet built): membership/direction/filter for **finite** ranges; guarded-conversion
+`seed:[guard -> step]` for **bounded** recurrences; **(co)recursion** for **infinite**
+streams (`fibonacci` needs single-element tuples §7.10 + laziness + the fixpoint return).
+
+---
+
 ## 8b. Fragments + generics — first-class fragment values (the live front)
 
 Writing a generic `map` surfaced that **fragments are first-class *values* (slice 2c)
