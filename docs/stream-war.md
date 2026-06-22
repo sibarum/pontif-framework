@@ -396,6 +396,25 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    the discharge foundation already exists.
 5. **Demolition** — remove `Element|Leaf`; migrate or retire the combinator tests.
 6. **Builtin API impls** — file / GPU first (unblock supirvast vector-add).
+7. **`zip`** (the rest of 2d-3) — multi-`&` fan-in: `(&a, &b):[ (x, y) -> … ]` walks
+   N sources in lockstep. Needs a **multi-source `Iterate`** (`source` becomes plural;
+   touches every `Iterate`-visiting pass) + a ragged-length ruling (lean: stop at the
+   shortest). The lockstep dual to the generator's unfold driver.
+8. **Stream concat `+`** (2e) — `Stream + Stream` appends, **generalizing the String
+   `+`** (String is a `Char` stream), so it's the same `+`-concatenates-sequences rule
+   lifted, not a new overload. Structural (sequential append), orthogonal to the
+   per-element spread. Tuple-backed today → merge-and-renumber `_0.._n`.
+9. **Generator / unfold** (2f) — a pure **stream *source*** written in the language,
+   the **dual of fold**: accumulator inputs, a `Stream[T]` *output* channel, **no `&`
+   input**. Explicit-codomain form (RULED — James, the channel-consistent version):
+   `let count:[ (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
+   (from, from+1, to) ]`, `count(0,5)._0` → `(0,1,2,3,4,5)`. The standout: **the
+   domain refinement is the base case** — the unfold halts exactly when its next state
+   would be ill-typed (`to>=from` goes false), provably terminating via the bound
+   engine (here `from` strictly increases toward a fixed `to`). A **new execution
+   driver** ("step until the guard fails"), NOT sugar over the source-driven `Iterate`;
+   leans on the halting machinery. Does *not* resurrect `Element|Leaf` — the unfold is
+   the hidden backing behind the membrane (a §4 stream source).
 - *Deferred:* `map`/`filter`/`fold` library sugar; the `Fin`-style index endgame.
 
 ---
