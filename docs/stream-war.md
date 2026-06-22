@@ -409,10 +409,13 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    N sources in lockstep. Needs a **multi-source `Iterate`** (`source` becomes plural;
    touches every `Iterate`-visiting pass) + a ragged-length ruling (lean: stop at the
    shortest). The lockstep dual to the generator's unfold driver.
-8. **Stream concat `+`** (2e) — `Stream + Stream` appends, **generalizing the String
-   `+`** (String is a `Char` stream), so it's the same `+`-concatenates-sequences rule
-   lifted, not a new overload. Structural (sequential append), orthogonal to the
-   per-element spread. Tuple-backed today → merge-and-renumber `_0.._n`.
+8. **Stream concat `+` (2e) LANDED.** `a + b` on two positional streams appends b's
+   elements after a's — `IrInterpreter.evalBinOp` ADD-case + `concatTuples`
+   (merge-and-renumber `_0.._n`), placed before struct-operator dispatch. Generalizes
+   String `+` (String is a `Char` stream), the same rule lifted — not a new overload.
+   Structural (sequential append), composes with the per-element spread
+   (`double(&s) + s`). `StreamConcatTest`. (Element-type checking of the result rides
+   the deferred §8.6 gap, same as any computed stream.)
 9. **Generator / unfold** (2f) — a pure **stream *source*** written in the language,
    the **dual of fold**: accumulator inputs, a `Stream[T]` *output* channel, **no `&`
    input**. Explicit-codomain form (RULED — James, the channel-consistent version):

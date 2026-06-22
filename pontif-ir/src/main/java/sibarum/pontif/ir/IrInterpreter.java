@@ -327,6 +327,15 @@ public final class IrInterpreter {
         }
     }
 
+    /** Concatenates two positional streams (tuples) into one, renumbering keys _0.._n. */
+    private static Object concatTuples(RecordValue a, RecordValue b) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        int i = 0;
+        for (Object v : a.members().values()) m.put("_" + i++, v);
+        for (Object v : b.members().values()) m.put("_" + i++, v);
+        return new RecordValue("_tuple", m);
+    }
+
     /** Seals an accumulated stream into a positional record (tuple) — the native sequence value. */
     private static Object sealStream(java.util.List<Object> elems) {
         java.util.Map<String, Object> m = new LinkedHashMap<>();
@@ -478,6 +487,15 @@ public final class IrInterpreter {
         // over a trait-bounded type parameter E, whose operands are abstract at
         // compile time but concrete struct values here. Built-in Int/Bool/Decimal
         // operands never reach this point.
+        // Stream concatenation: `a + b` on two positional streams (tuple-backed)
+        // appends b's elements after a's — generalizing String `+` (a String is a
+        // Char stream), the same +-concatenates-sequences rule lifted to any Stream
+        // (docs/stream-war.md §7, slice 2e). Structural, not per-element.
+        if (op.op() == IrExpr.Op.ADD
+                && l instanceof RecordValue lr && "_tuple".equals(lr.typeName())
+                && r instanceof RecordValue rr && "_tuple".equals(rr.typeName())) {
+            return concatTuples(lr, rr);
+        }
         if (l instanceof RecordValue || r instanceof RecordValue) {
             String sym = dispatchOperatorSymbol(op.op());
             if (sym != null) {
