@@ -649,10 +649,17 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
   `m(x)` and a spread `m(&s)` work (`NestedFragmentTest`) — so James's original `let m:[…]`
   … `m(&s)` body shape is valid. Honors the let-anywhere unification (scoping is the
   essence of `let`).
-- **Also open (separate): call-site dispatch.** `map((1,2,3), $double[Int])` type-checks
-  but the runtime dispatch can't match a tuple to a `Stream[A]` param or a metaref to a
-  `Dispatch(A)` param (*"No matching function 'map'"*). A distinct dispatch-matching gap,
-  not a fragment-typing one.
+- **Call-site dispatch — tuple→`Stream` LANDED (2026-06-22); generic-key unification still
+  open.** A positional tuple now **matches a `Stream[T]` parameter** in dispatch (the §4
+  autobox applied at the call boundary, with elements checked against `T` per §8.6):
+  `DispatchTable.enforceTraitParams` routes a `_tuple` arg vs a Stream-named param through
+  `Refinements.satisfies` instead of the nominal-satisfier check (a tuple satisfies `Stream`
+  *structurally*, not nominally). So a **concrete** `map((1,2,3), $double[Int])` now runs →
+  `(2,4,6)` (`CallDispatchTest`), and a `String` tuple correctly does *not* match
+  `Stream[Int]` (no-lie). **Remaining for the *generic* map:** a metareference `$double[Int]`
+  (key `[Int]`) against a generic `[Dispatch(A):R]` param (key `[A]`) needs **type-param
+  unification** in dispatch (`A:=Int`) — exact-key matching rejects it today. That's
+  generic-dispatch inference, a distinct (larger) piece than the structural autobox.
 
 ---
 

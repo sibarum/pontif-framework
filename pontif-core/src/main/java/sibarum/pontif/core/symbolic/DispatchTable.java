@@ -75,7 +75,7 @@ public final class DispatchTable {
             // Trait-typed param matching: bare-named sorts whose names are
             // registered traits get strict satisfaction-checking, overriding
             // Refinements.satisfies's default permissive Passed.
-            call = enforceTraitParams(call, c, arguments);
+            call = enforceTraitParams(call, c, arguments, simplifier);
             if (call.canExecute()) {
                 matching.add(new MatchingCandidate(c, call));
             }
@@ -129,7 +129,7 @@ public final class DispatchTable {
      * no impls can't be called usefully anyway.
      */
     private CompiledCall enforceTraitParams(
-            CompiledCall call, FunctionDecl decl, List<SymExpr> arguments) {
+            CompiledCall call, FunctionDecl decl, List<SymExpr> arguments, Simplifier simplifier) {
         List<CompiledCall.ParameterOutcome> updated = new ArrayList<>(call.outcomes().size());
         boolean changed = false;
         for (CompiledCall.ParameterOutcome outcome : call.outcomes()) {
@@ -143,6 +143,16 @@ public final class DispatchTable {
             boolean satisfies = arg instanceof SymExpr.Record r
                     && r.typeName() != null
                     && traitRegistry.satisfies(paramSort.name(), r.typeName());
+            // A positional tuple satisfies a Stream[T] parameter STRUCTURALLY — the §4
+            // autobox: a tuple IS a stream, with elements checked against T (§8.6,
+            // Refinements.satisfiesStreamElements). Nominal satisfiers cover the other
+            // traits; only Stream accepts a bare tuple this way (WAR(stream) call-site
+            // dispatch — a generic/concrete map can take a `(1,2,3)` argument).
+            if (!satisfies && isStreamName(paramSort.name())
+                    && arg instanceof SymExpr.Record rt && "_tuple".equals(rt.typeName())) {
+                satisfies = Refinements.satisfies(arg, paramSort, simplifier)
+                        instanceof sibarum.pontif.core.symbolic.algebra.ProofResult.Passed;
+            }
             if (satisfies) {
                 if (outcome instanceof CompiledCall.ParameterOutcome.StaticallyPassed) {
                     updated.add(outcome);
@@ -177,6 +187,11 @@ public final class DispatchTable {
             return false;
         }
         return traitRegistry.isDeclaredTrait(sort.name());
+    }
+
+    /** The Stream trait, bare or linker-qualified (the one trait a bare tuple autoboxes to). */
+    private static boolean isStreamName(String name) {
+        return name != null && (name.equals("Stream") || name.endsWith("/Stream"));
     }
 
     /**
