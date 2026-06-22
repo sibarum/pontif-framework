@@ -439,6 +439,21 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    stand up `pontif.core` and retire it.
 5. **The combinator sugar surface** (`map`/`filter`/`fold`) — deferred, but its shape
    should fit the query-DSL grain (`project_query_dsl`).
+6. **`Stream[T]` element-type checking for computed streams — a NO-LIE HOLE (found
+   2026-06-21).** `let z:Stream[String] = double(&s)` (an `Int` stream) compiles and
+   runs — the element type is never checked. A `Stream[T]` *literal* is element-checked
+   at parse (`requireStreamElements`), but a *computed* stream (an `Iterate`) is not.
+   **Root cause is deeper than a runtime backstop:** `Stream` is a **marker trait**
+   (empty contract), so when `Stream[String]` resolves, `AliasResolver.applyTypeArgs`
+   substitutes `E↦String` into *nothing* and the resolved `IrSort.Trait` has **no slot
+   to record the instantiated arg** — `String` is gone by IR time (confirmed: the claim
+   reaches `ConstructionGate` as `Trait[pontif.core/Stream]`, type arg dropped). And the
+   core `Sort` has no type-args field either, so `Refinements.satisfies` can't check it.
+   **The real fix is a parametric-trait feature:** a resolved trait must carry its
+   instantiated type args (`E=String`), after which a gate/runtime element check is
+   straightforward. Scope/approach is James's call — it touches trait resolution and is
+   not stream-specific (any parametric trait). A runtime backstop alone is insufficient
+   because the arg never reaches runtime.
 
 ---
 
