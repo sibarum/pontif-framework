@@ -379,8 +379,11 @@ public final class NameResolver {
                     }
                     arms.add(new IrExpr.Arm(rewriteSort(arm.pattern(), m, table), ws));
                 }
+                List<IrExpr> coSources = new ArrayList<>(it.coSources().size());
+                for (IrExpr cs : it.coSources()) coSources.add(rewrite(cs, m, table));
                 yield new IrExpr.Iterate(
-                        rewrite(it.source(), m, table), it.element(), outs, arms, it.origin());
+                        rewrite(it.source(), m, table), coSources, it.element(),
+                        outs, arms, it.origin());
             }
             // The cast's target sort names a type — FQN-resolve it like any sort.
             case IrExpr.Cast cast -> new IrExpr.Cast(

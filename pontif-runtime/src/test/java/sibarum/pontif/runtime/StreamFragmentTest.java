@@ -143,6 +143,25 @@ class StreamFragmentTest {
     }
 
     @Test
+    void zip_walksTwoStreamsInLockstep() throws Exception {
+        // (&a, &b) walks both in lockstep; the element binds to the pair, which the
+        // fragment destructures into (x, y). Vector-add: x + y per position.
+        assertEquals("(11, 22, 33)", String.valueOf(run("""
+                let a = (1, 2, 3)
+                let b = (10, 20, 30)
+                (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
+    }
+
+    @Test
+    void zip_raggedStopsAtShortest() throws Exception {
+        // Unequal lengths stop at the shortest stream (standard zip).
+        assertEquals("(11, 22)", String.valueOf(run("""
+                let a = (1, 2, 3, 4)
+                let b = (10, 20)
+                (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
+    }
+
+    @Test
     void fragment_filter_dropsNothing() {
         // The canonical filteredLossy line: a fragment whose arms return the
         // element or null; spread over the stream, the nulls drop.

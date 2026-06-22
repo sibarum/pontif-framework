@@ -287,11 +287,18 @@ public sealed interface IrExpr
      * <p>One {@code IrExpr} variant; {@link OutputSpec}/{@link Arm}/{@link Write}
      * are plain records (not variants), so an exhaustive {@code IrExpr} switch
      * needs a single new case. The sub-expressions a pass must recurse into are
-     * {@code source}, each {@code OutputSpec.init}, and each {@code Write.key} /
-     * {@code Write.value}; the patterns are {@code Arm.pattern} sorts.
+     * {@code source} and each {@code coSources} entry, each {@code OutputSpec.init},
+     * and each {@code Write.key} / {@code Write.value}; the patterns are
+     * {@code Arm.pattern} sorts.
+     *
+     * <p><b>{@code coSources}</b> are additional sources walked in <em>lockstep</em>
+     * with {@code source} — the zip / fan-in shape (docs/stream-war.md §3). When
+     * non-empty, {@code element} binds, per step, to a positional tuple of the i-th
+     * value from {@code source} then each co-source (stopping at the shortest), which
+     * the body destructures. Empty for the ordinary single-source iteration.
      */
-    record Iterate(IrExpr source, String element, List<OutputSpec> outputs,
-                   List<Arm> arms, Origin origin) implements IrExpr {
+    record Iterate(IrExpr source, List<IrExpr> coSources, String element,
+                   List<OutputSpec> outputs, List<Arm> arms, Origin origin) implements IrExpr {
         public Iterate {
             if (source == null) {
                 throw new IllegalArgumentException("Iterate source must be non-null");
@@ -299,8 +306,15 @@ public sealed interface IrExpr
             if (element == null || element.isEmpty()) {
                 throw new IllegalArgumentException("Iterate element binding must be non-empty");
             }
+            coSources = List.copyOf(coSources);
             outputs = List.copyOf(outputs);
             arms = List.copyOf(arms);
+        }
+
+        /** Single-source iteration (no zip) — the common case; co-sources empty. */
+        public Iterate(IrExpr source, String element, List<OutputSpec> outputs,
+                       List<Arm> arms, Origin origin) {
+            this(source, List.of(), element, outputs, arms, origin);
         }
     }
 

@@ -77,6 +77,7 @@ public final class IrFreeVars {
                 // `element` and the accumulator names are bound inside the body;
                 // the source and accumulator inits are evaluated outside it.
                 collect(it.source(), bound, free);
+                for (IrExpr cs : it.coSources()) collect(cs, bound, free);  // zip lockstep sources
                 java.util.Set<String> inner = new java.util.HashSet<>(bound);
                 inner.add(it.element());
                 for (IrExpr.OutputSpec os : it.outputs()) {

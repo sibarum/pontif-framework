@@ -259,7 +259,9 @@ public final class MethodOperatorResolver {
                         ws.add(new IrExpr.Write(w.output(), w.key() == null ? null : rewriteExpr(w.key(), ctx), rewriteExpr(w.value(), ctx)));
                     arms.add(new IrExpr.Arm(arm.pattern(), ws));
                 }
-                yield new IrExpr.Iterate(rewriteExpr(it.source(), ctx), it.element(), outs, arms, it.origin());
+                List<IrExpr> coSources = new ArrayList<>(it.coSources().size());
+                for (IrExpr cs : it.coSources()) coSources.add(rewriteExpr(cs, ctx));
+                yield new IrExpr.Iterate(rewriteExpr(it.source(), ctx), coSources, it.element(), outs, arms, it.origin());
             }
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(), rewriteExpr(cast.value(), ctx), cast.origin());
         };

@@ -401,8 +401,11 @@ public final class AliasResolver {
                     }
                     arms.add(new IrExpr.Arm(substituteResolved(arm.pattern(), resolved), ws));
                 }
+                List<IrExpr> coSources = new ArrayList<>(it.coSources().size());
+                for (IrExpr cs : it.coSources()) coSources.add(rewriteExpr(cs, resolved));
                 yield new IrExpr.Iterate(
-                        rewriteExpr(it.source(), resolved), it.element(), outs, arms, it.origin());
+                        rewriteExpr(it.source(), resolved), coSources, it.element(),
+                        outs, arms, it.origin());
             }
             // A cast's target sort is a sort reference — resolve aliases in it too.
             case IrExpr.Cast cast -> new IrExpr.Cast(

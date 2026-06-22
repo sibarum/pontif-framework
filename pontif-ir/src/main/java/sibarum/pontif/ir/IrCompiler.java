@@ -299,6 +299,7 @@ public final class IrCompiler {
                 // interpreter resolves them via CompiledModule.sortFor), and the
                 // write values' sorts.
                 registerSortsInExpr(it.source(), map);
+                for (IrExpr cs : it.coSources()) registerSortsInExpr(cs, map);  // zip lockstep sources
                 for (IrExpr.OutputSpec os : it.outputs()) {
                     if (os.init() != null) registerSortsInExpr(os.init(), map);
                 }

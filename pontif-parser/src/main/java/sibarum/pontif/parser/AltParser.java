@@ -3280,7 +3280,9 @@ public final class AltParser {
         // a transform per element over a stream (docs/stream-war.md §3). `&a:[x]` ≡
         // `x(&a)`; this is the lambda-to-its-named-function counterpart. A leading
         // `&` is unambiguous (binary `&` is handled by the infix loop in parseExpr).
-        if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
+        if ((peek().kind() == AltToken.Kind.OP && "&".equals(peek().text()))
+                || (peek().kind() == AltToken.Kind.LPAREN
+                        && peek(1).kind() == AltToken.Kind.OP && "&".equals(peek(1).text()))) {
             return parseSpreadAscription();
         }
         IrExpr expr = parsePrimary();
@@ -3930,30 +3932,86 @@ public final class AltParser {
      * fragment literal; named/coercion transforms in the {@code [..]} are slice 2d-3.
      */
     private IrExpr parseSpreadAscription() throws ParseException {
-        AltToken amp = consume();  // `&`
-        IrExpr source = parseExpr();  // the stream; stops at the COLON (not an OP)
-        expect(AltToken.Kind.COLON);
-        Origin o = amp.origin();
-        IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
-        if (looksLikeFragmentLiteral()) {
-            IrExpr.Lambda frag = parseFragmentLiteral();
-            // Fan-out (fork): a tuple codomain of stream channels routes each element
-            // to one of several output streams (docs/stream-war.md §3). The codomain
-            // distinguishes this from a stream-of-tuples (a plain map with a tuple
-            // body and no codomain).
-            if (frag.returnSort() instanceof IrSort.Structural st
-                    && TUPLE_SENTINEL.equals(st.name())
-                    && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
-                return lowerSpreadFanout(source, frag, st, o);
+        AltToken start = peek();
+        Origin o = start.origin();
+        // Subject: a single `&stream`, or a parenthesized tuple of them `(&a, &b)` —
+        // the zip / fan-in form (docs/stream-war.md §3).
+        List<IrExpr> sources = new ArrayList<>();
+        if (peek().kind() == AltToken.Kind.LPAREN) {
+            consume();  // `(`
+            boolean first = true;
+            while (peek().kind() != AltToken.Kind.RPAREN) {
+                if (!first) expect(AltToken.Kind.COMMA);
+                if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
+                    consume();  // `&`
+                } else {
+                    throw new ParseException(
+                            "Each element of a `(&a, &b)` spread tuple must be a `&stream`; "
+                                    + "got '" + peek().text() + "'", peek().origin());
+                }
+                sources.add(parseExpr());  // stops at COMMA / RPAREN (neither is an OP)
+                first = false;
             }
-            return lowerSpreadCall(List.of(spread),
-                    a -> new IrExpr.Apply(frag, a, o), o);
+            expect(AltToken.Kind.RPAREN);
+        } else {
+            consume();  // `&`
+            sources.add(parseExpr());  // stops at the COLON (not an OP)
         }
-        throw new ParseException(
-                "`&s:[…]` expects an inline fragment transform here, e.g. "
-                        + "`[ (el:Int) -> … ]` — coercion transforms `[A -> B]` are "
-                        + "slice 2d-3; docs/stream-war.md §3",
-                peek().origin());
+        expect(AltToken.Kind.COLON);
+        if (!looksLikeFragmentLiteral()) {
+            throw new ParseException(
+                    "`&s:[…]` expects an inline fragment transform here, e.g. "
+                            + "`[ (el:Int) -> … ]` — coercion transforms `[A -> B]` are "
+                            + "slice 2d-3; docs/stream-war.md §3",
+                    peek().origin());
+        }
+        IrExpr.Lambda frag = parseFragmentLiteral();
+
+        // Multiple sources → zip (fan-in): walk them in lockstep.
+        if (sources.size() > 1) {
+            return lowerZip(sources, frag, o);
+        }
+        IrExpr source = sources.get(0);
+        IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
+        // Fan-out (fork): a tuple codomain of stream channels routes each element to
+        // one of several output streams (docs/stream-war.md §3). The codomain
+        // distinguishes this from a stream-of-tuples (a plain map with a tuple body
+        // and no codomain).
+        if (frag.returnSort() instanceof IrSort.Structural st
+                && TUPLE_SENTINEL.equals(st.name())
+                && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
+            return lowerSpreadFanout(source, frag, st, o);
+        }
+        return lowerSpreadCall(List.of(spread),
+                a -> new IrExpr.Apply(frag, a, o), o);
+    }
+
+    /**
+     * Lowers zip / fan-in: {@code (&a, &b):[ (x, y) -> body ]} — N streams walked in
+     * lockstep (docs/stream-war.md §3), stopping at the shortest. Builds a multi-source
+     * {@link IrExpr.Iterate} whose {@code element} binds, per step, to the positional
+     * tuple of the i-th value from each source; the body destructures it into the
+     * fragment's parameters (via the now-ordinary {@code ._N} projection).
+     */
+    private IrExpr lowerZip(List<IrExpr> sources, IrExpr.Lambda frag, Origin o)
+            throws ParseException {
+        if (frag.params().size() != sources.size()) {
+            throw new ParseException(
+                    "A zip fragment takes one parameter per spread stream — got "
+                            + frag.params().size() + " parameter(s) for " + sources.size()
+                            + " streams; docs/stream-war.md §3", o);
+        }
+        String element = "$e" + (syntheticCounter++);
+        List<IrExpr> destructured = new ArrayList<>(sources.size());
+        for (int i = 0; i < sources.size(); i++) {
+            destructured.add(new IrExpr.FieldAccess(new IrExpr.Var(element, o), "_" + i, o));
+        }
+        IrExpr body = new IrExpr.Apply(frag, destructured, o);
+        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+        IrExpr.Arm arm = new IrExpr.Arm(
+                IrSort.named("_"), List.of(new IrExpr.Write("default", null, body)));
+        List<IrExpr> coSources = new ArrayList<>(sources.subList(1, sources.size()));
+        return new IrExpr.Iterate(sources.get(0), coSources, element, List.of(out), List.of(arm), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */

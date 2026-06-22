@@ -197,14 +197,36 @@ public final class IrInterpreter {
         // A stream is a positional record (a tuple literal `(1,2,3)`); iterate its
         // members in order. (Element/Leaf cons-chains are retired here — trees use
         // recursion, streams are native; docs/iteration.md §7.1, James 2026-06-15.)
-        Object srcVal = eval(it.source(), env, module);
-        if (!(srcVal instanceof RecordValue srcRec)) {
-            throw new RuntimeCheckException(
-                    "Iterate: source must be a stream (a positional record / tuple), got "
-                            + (srcVal == null ? "null" : srcVal.getClass().getSimpleName()),
-                    it.origin());
+        // With co-sources (zip / fan-in, docs/stream-war.md §3) the sources are walked
+        // in lockstep, stopping at the shortest, and `element` binds to a tuple of the
+        // i-th value from each.
+        List<IrExpr> sourceExprs = new ArrayList<>();
+        sourceExprs.add(it.source());
+        sourceExprs.addAll(it.coSources());
+        List<List<Object>> columns = new ArrayList<>(sourceExprs.size());
+        int steps = Integer.MAX_VALUE;
+        for (IrExpr se : sourceExprs) {
+            Object sv = eval(se, env, module);
+            if (!(sv instanceof RecordValue rec)) {
+                throw new RuntimeCheckException(
+                        "Iterate: source must be a stream (a positional record / tuple), got "
+                                + (sv == null ? "null" : sv.getClass().getSimpleName()),
+                        it.origin());
+            }
+            List<Object> col = new ArrayList<>(rec.members().values());
+            columns.add(col);
+            steps = Math.min(steps, col.size());
         }
-        for (Object element : srcRec.members().values()) {
+        boolean zip = !it.coSources().isEmpty();
+        for (int idx = 0; idx < steps; idx++) {
+            Object element;
+            if (zip) {
+                java.util.Map<String, Object> tuple = new LinkedHashMap<>();
+                for (int s = 0; s < columns.size(); s++) tuple.put("_" + s, columns.get(s).get(idx));
+                element = new RecordValue("_tuple", tuple);
+            } else {
+                element = columns.get(0).get(idx);
+            }
             Environment frame = env.extend(it.element(), element);
             for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
                 frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)

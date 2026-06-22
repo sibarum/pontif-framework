@@ -382,9 +382,18 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        stream-channel codomain is fork (tuple-of-streams); *without* one it's a plain
        map producing a stream-of-tuples — both tested (`StreamFragmentTest.fork_*`,
        `mapReturningTuple_isStreamOfTuples_notFork`).
-       - **Remaining for 2d-3: zip** (multi-`&`) — needs a multi-source `Iterate`
-         (the engine iterates one `source` today; zip walks N in lockstep), an IR +
-         interpreter change.
+     - **2d-3 zip LANDED (fan-in).** `(&a, &b):[ (x, y) -> x + y ]` walks N streams in
+       lockstep, stopping at the shortest. `IrExpr.Iterate` gained a `coSources` list
+       (additional lockstep sources) with a **backward-compatible 5-arg constructor**
+       (empty co-sources), so every single-source call site and `source()`/`element()`
+       accessor is unchanged; `evalIterate` walks all sources by index and binds
+       `element` to a positional tuple of the i-th values, destructured in the body via
+       `._N`. `coSources` threaded through the passes that rewrite/visit `Iterate`
+       (IrFreeVars, IrCompiler sort-reg, AliasResolver, NameResolver,
+       MethodOperatorResolver). `parseSpreadAscription` parses the `(&a, &b)` spread
+       tuple → `AltParser.lowerZip`. Vector-add `(&a, &b):[ (x, y) -> x + y ]` →
+       `(11, 22, 33)`, ragged stops at shortest (`StreamFragmentTest.zip_*`) —
+       **unblocks the supirvast GPU kernel** (`project_supirvast`).
      - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
        coercion — `x:[A -> B]` (registered) and `x:[a:A -> B(…)]` (explicit), plus
        refinement+transform composition `[Int:@>0 -> Decimal]`. Unifies with the
