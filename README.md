@@ -390,12 +390,25 @@ requires pontif.core.{Stream, Nothing}
 let s:Stream[Int] = (1, 2, 3, 4)
 ```
 
-There is **no `map`/`filter`/`fold` primitive**. There is one construct — the **synthesis
-fragment**, a per-element transform applied to a stream by **spread** (`&`):
+Omission during iteration is signalled with the **`Nothing`** value (that is why it is
+imported alongside `Stream`). There is **no built-in `null` keyword** — `null` is just a
+conventional name bound to `Nothing`'s sole value, for readability:
 
 ```pontif
-&s:[ (el:Int) -> el * 2 ]                     # map        → (2, 4, 6, 8)
-&s:[ (el:Int) -> match el { [@>2]->el; [_]->null } ]   # filter (null drops)  → (3, 4)
+let null:Nothing = Nothing()                  # `Nothing()` constructs the imported type's value
+```
+
+There is **no `map`/`filter`/`fold` primitive**. There is one construct — the **synthesis
+fragment**, a per-element transform applied to a stream by **spread** (`&`). A fragment
+that returns `null` for an element **drops** it (that is all `filter` is):
+
+```pontif
+&s:[ (el:Int) -> el * 2 ]                     # map  → (2, 4, 6, 8)
+
+&s:[ (el:Int) ->                              # filter — `null` drops the element
+       match el
+         [@>2] -> el
+         [_]   -> null ]                      # → (3, 4)
 ```
 
 Every classic combinator is a configuration of this one idea — the *positional channel*
@@ -419,6 +432,20 @@ let count:[ (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
             (from, from+1, to) ]
 count(0, 5)._0                                # → (0, 1, 2, 3, 4, 5)
 ```
+
+A finite **range** needs no hand-written step at all: a membership refinement on the
+element type *is* the definition, materialized on request with the `;` directive. The
+traversal **direction is read from the comparison chain**, and any non-bound condition
+filters per element:
+
+```pontif
+let ascending :Stream[Int:0 <= @ < 10];            # → (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+let descending:Stream[Int:10 > @ >= 0];            # → (9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
+let trimmed   :Stream[Int:0 <= @ < 10 & @ != 5];   # → (0, 1, 2, 3, 4, 6, 7, 8, 9)
+```
+
+(Integer bounds, materialized statically; arithmetic-divisibility filters like `@%2==0`
+await modular arithmetic in the discharge kernel — see `docs/TODO.md`.)
 
 Streams **concatenate** with `+` (the same rule that gives `String + String`, since a
 `String` is a `Char` stream), and a *computed* stream's element type is checked against
@@ -799,7 +826,9 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   `&s:[…]`, from which **map / filter (null-drop) / fold / scan / fork / zip** all fall
   out (no separate combinators); **`takeWhile`** via a domain-refined binder (the *stop*
   disposition); **generators / unfold** (`count(0,5)` — *the domain refinement is the
-  base case*); **concatenation `+`** (lifts to `String +`); and **computed streams are
+  base case*); **finite ranges synthesized from a membership refinement**
+  (`Stream[Int:0 <= @ < 10]`, direction read from the comparison chain); **concatenation
+  `+`** (lifts to `String +`); and **computed streams are
   element-type-checked** (no-lie, via a parametric-trait carrier). Fragments are
   **first-class values** — passed, returned, typed `[Method(A):R]` — and **generic stream
   combinators** run both **explicitly** (`map[Int,String](s, $toString[Int])`) and by
@@ -807,20 +836,22 @@ Capabilities that work end-to-end in the Pontif surface syntax:
 
 ### What's next
 
-The stream war's *finite* half is largely landed; the two front-line priorities both
-concern streams (see `docs/stream-war.md`):
+The stream war's *finite* half is now landed — including **finite range synthesis**
+(`Stream[Int:0 <= @ < 10]`, direction from the comparison chain, per-element filters),
+which supersedes the hand-threaded generator for the discrete/contiguous case. Two
+threads remain (see `docs/stream-war.md` and `docs/TODO.md`):
 
-1. **Finite generator synthesis** — derive a bounded discrete stream from a membership
-   refinement on its element type: `Stream[Int: 0 <= @ < 10]` (with filters, e.g.
-   `& @%2==0`, and traversal direction from the comparison chain) synthesized via the
-   `;` directive. Step-free for the discrete/contiguous case; an explicit guarded step
-   for bounded recurrences. The 2f hand-threaded surface is superseded by this.
-2. **Infinite / lazy streams** — **RULED essential**: they *are* the event system, the
+1. **Infinite / lazy streams** — **RULED essential**: they *are* the event system, the
    concurrency model, and the stateful sources (sockets / queues) the membrane was
    declared for. Constructed by **guarded infinite recursion**, gated by **productivity**
    — the coinductive dual of termination ("does it keep emitting?" rather than "does it
    stop?"). This is its own war (a demand-driven backing + the productivity gate); it
    also makes the element checks prefix/demand-aware.
+2. **Modular arithmetic in the discharge kernel** — `%` / `/` are rejected in any
+   refinement predicate today (the kernel is linear), so divisibility filters like
+   `@%2==0` can't yet be written. Unblocking them adds constant-modulus congruences
+   (the divisibility extension Presburger already needs) plus a piecewise-linear
+   case-split for the variable-divisor case.
 
 See `docs/TODO.md` for the active work list and parked design sketches.
 
