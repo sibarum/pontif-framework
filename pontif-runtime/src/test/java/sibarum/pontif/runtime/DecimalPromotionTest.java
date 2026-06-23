@@ -30,12 +30,12 @@ class DecimalPromotionTest {
         RunResult r = run("""
                 struct Ternion(z:Decimal, n:Decimal, w:Decimal)
 
-                function *(left:Ternion, right:Ternion):Ternion -> {
+                function *(left:Ternion, right:Ternion):Ternion -> (
                   let z = left.z*right.z + left.z*right.n + left.n*right.z
                   let n = left.n*right.n + left.z*right.w + left.w*right.z
                   let w = left.w*right.w + left.w*right.n + left.n*right.w
                   Ternion(z, n, w)
-                }
+                )
 
                 let prod = Ternion(0,1.2,0)*Ternion(0,1.5,0)
                 prod.n

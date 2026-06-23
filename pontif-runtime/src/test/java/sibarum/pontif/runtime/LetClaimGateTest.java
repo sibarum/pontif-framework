@@ -77,7 +77,7 @@ class LetClaimGateTest {
 
     @Test
     void provableFit_passes_andClaimIsStripped() {
-        String src = "function h():Int -> { let a:[Int:@==0] = 0\n a }\nh()";
+        String src = "function h():Int -> ( let a:[Int:@==0] = 0\n a )\nh()";
         for (Engine engine : Engine.values()) {
             RunResult r = run(src, engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
@@ -107,7 +107,7 @@ class LetClaimGateTest {
     void overlapClaim_isActuallyStamped() {
         // The value is a bare-Int param — overlaps @==0 without implying it.
         CompiledModule module = compiled(
-                "function g(v:Int):Int -> { let a:[Int:@==0] = v\n a }\ng(0)");
+                "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)");
         IrExpr.LetIn let = findLet(module, "a");
         assertNotNull(let, "expected the let binding in g's body");
         assertNotNull(let.claim(), "overlap must keep the claim for the runtime");
@@ -115,8 +115,8 @@ class LetClaimGateTest {
 
     @Test
     void overlapClaim_passesWhenValueFits_failsWhenItMisses() {
-        String fits = "function g(v:Int):Int -> { let a:[Int:@==0] = v\n a }\ng(0)";
-        String misses = "function g(v:Int):Int -> { let a:[Int:@==0] = v\n a }\ng(1)";
+        String fits = "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)";
+        String misses = "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(1)";
         for (Engine engine : Engine.values()) {
             RunResult ok = run(fits, engine);
             assertFalse(ok.isError(), () -> engine + " got: " + ok.text());

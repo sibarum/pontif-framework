@@ -61,12 +61,12 @@ class ApproxEqualityTest {
                     [Ternion(z, 0, w)] -> Ternion(w, 0, z+1)
                     [Ternion(z, n, w)] -> Ternion(w, 1.0/n, z)
                   }
-                function *(left:Ternion, right:Ternion):Ternion -> {
+                function *(left:Ternion, right:Ternion):Ternion -> (
                   let z = left.z*right.z + left.z*right.n + left.n*right.z
                   let n = left.n*right.n + left.z*right.w + left.w*right.z
                   let w = left.w*right.w + left.w*right.n + left.n*right.w
                   Ternion(z, n, w)
-                }
+                )
                 let u = Ternion(0, 1.2, 0)
                 let p = u * u.inv()
                 p.n ~= 1.0

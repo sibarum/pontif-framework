@@ -203,26 +203,28 @@ class AltParserLetExprTest {
 
     // --- Error case ---------------------------------------------------------
 
-    // --- Block expressions --------------------------------------------------
+    // --- Block expressions (parens) -----------------------------------------
+    // BRACE-AGGREGATES WAR (docs/brace-aggregates.md): the grouping / block role
+    // moved from `{…}` to `(…)`. Braces are now exclusively aggregates; a
+    // let-chain bound to its closing delimiter is written `( let … )`.
 
     @Test
     void blockExpr_unwrapsToInnerExpression() throws Exception {
-        // `{ EXPR }` is a pure delimiter — the block has no IR-level
-        // representation; it evaluates to its inner expression.
-        IrExpr body = parseFunctionBody("{ 5 }");
+        // `( EXPR )` is a pure delimiter — it evaluates to its inner expression.
+        IrExpr body = parseFunctionBody("( 5 )");
         assertEquals(5L, ((IrExpr.Lit) body).value());
     }
 
     @Test
-    void blockExpr_aroundLetChain_terminatesAtClosingBrace() throws Exception {
-        // Multi-let body wrapped in `{...}`. The closing `}` terminates the
+    void blockExpr_aroundLetChain_terminatesAtClosingParen() throws Exception {
+        // Multi-let body wrapped in `(...)`. The closing `)` terminates the
         // innermost let's body parse cleanly.
         IrExpr body = parseFunctionBody("""
-                {
+                (
                   let a = 1
                   let b = 2
                   a + b
-                }""");
+                )""");
         IrExpr.LetIn outer = assertInstanceOf(IrExpr.LetIn.class, body);
         assertEquals("a", outer.name());
         IrExpr.LetIn inner = assertInstanceOf(IrExpr.LetIn.class, outer.body());
@@ -231,18 +233,18 @@ class AltParserLetExprTest {
 
     @Test
     void blockExpr_usableAsLetValue() throws Exception {
-        // `let x = { let y = 5 y + 1 } x * 2`
-        IrExpr body = parseFunctionBody("let x = { let y = 5 y + 1 } x * 2");
+        // `let x = ( let y = 5 y + 1 ) x * 2`
+        IrExpr body = parseFunctionBody("let x = ( let y = 5 y + 1 ) x * 2");
         IrExpr.LetIn outer = assertInstanceOf(IrExpr.LetIn.class, body);
         assertEquals("x", outer.name());
-        // x's value is the inner LetIn (the block unwrapped).
+        // x's value is the inner LetIn (the paren block unwrapped).
         IrExpr.LetIn xValue = assertInstanceOf(IrExpr.LetIn.class, outer.value());
         assertEquals("y", xValue.name());
     }
 
     @Test
     void blockExpr_usableAsCallArg() throws Exception {
-        IrExpr body = parseFunctionBody("test({ let a = 1 a + 1 })");
+        IrExpr body = parseFunctionBody("test(( let a = 1 a + 1 ))");
         IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, body);
         assertEquals(1, call.args().size());
         assertInstanceOf(IrExpr.LetIn.class, call.args().get(0));
@@ -250,15 +252,15 @@ class AltParserLetExprTest {
 
     @Test
     void blockExpr_distinctFromStructLiteral() throws Exception {
-        // Standalone `{...}` is a block (no preceding struct-name root).
-        // `Point{x=1, y=2}` is a by-name struct literal (preceded by Var
-        // resolving via declaredStructs). Both must coexist.
+        // The paren block `( … )` and the by-name struct literal `Point{x=1, y=2}`
+        // (preceded by a Var resolving via declaredStructs) coexist. (Standalone
+        // `{…}` is now a positional aggregate, no longer a block.)
         String src = """
                 struct Point(x:Int, y:Int)
-                function f(n:Int):Int -> {
+                function f(n:Int):Int -> (
                   let p = Point{x=1, y=2}
                   p.x + p.y
-                }
+                )
                 """;
         IrModule m = AltParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = (IrStmt.FunctionDecl) m.statements().get(1);

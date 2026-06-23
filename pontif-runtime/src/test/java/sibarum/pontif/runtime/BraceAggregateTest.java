@@ -56,9 +56,28 @@ class BraceAggregateTest {
     }
 
     @Test
-    void blockExpression_stillWorks_additive() {
-        // The single-expr block `{EXPR}` retires in slice 2 (so `{x}` can be a
-        // 1-element aggregate); for now it still evaluates to its inner expression.
-        assertEquals("5", run("module m\n{5}"));
+    void singleton_isOneElementAggregate() {
+        // S2: `{x}` is a 1-element aggregate (the block role moved to parens).
+        assertEquals("(5)", run("module m\n{5}"));
+        assertEquals("5", run("module m\nlet t = {5}\nt._0"));
+    }
+
+    @Test
+    void empty_isEmptyAggregate() {
+        // S2: `{}` is the empty aggregate — autoboxes to an empty Stream.
+        assertEquals("()", run("module m\nrequires pontif.core.{Stream}\nlet e:Stream[Int] = {}\ne"));
+    }
+
+    @Test
+    void nestedSingleton_wrapsAComposite() {
+        // The case bare parens can't spell: `{{4,5}}` is ONE element that is the
+        // aggregate {4,5} — no grouping collapse, no trailing comma.
+        assertEquals("((4, 5))", run("module m\n{{4, 5}}"));
+    }
+
+    @Test
+    void parenBlock_isTheBlockNow() {
+        // S2: the grouping / let-chain block role lives in parens.
+        assertEquals("6", run("module m\n( let y = 5  y + 1 )"));
     }
 }

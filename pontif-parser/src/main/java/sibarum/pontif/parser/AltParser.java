@@ -5277,39 +5277,31 @@ public final class AltParser {
                 yield inner;
             }
             case LBRACE -> {
-                // Dictionary literal `{a = 1, b = 2}` vs positional aggregate
-                // `{e0, e1, …}` vs block `{ EXPR }`: an `IDENT =` head can't start
-                // a block or positional aggregate (`=` isn't an expression
-                // operator), so one token of lookahead picks the dict.
+                // BRACE-AGGREGATES WAR (docs/brace-aggregates.md): braces are
+                // EXCLUSIVELY the aggregate delimiter — positional `{e0, e1, …}`
+                // (including the singleton `{e}` and empty `{}`) and named
+                // `{a = 1, …}` (the dict). The grouping / block role moved to
+                // parens: `( let y = 5  y + 1 )` already binds a let-chain to its
+                // closing `)`, so braces never group. An `IDENT =` head is the
+                // dict (`=` isn't an expression operator, so one token decides).
                 if (peek(1).kind() == AltToken.Kind.IDENT
                         && peek(2).kind() == AltToken.Kind.EQUALS) {
                     yield parseDictLiteral();
                 }
-                // BRACE-AGGREGATES WAR (docs/brace-aggregates.md): braces are the
-                // aggregate delimiter; parens are reserved for grouping / calls /
-                // param lists. A comma-bearing brace body is a positional aggregate
-                // `{e0, e1, …}` — the brace-delimited sibling of the paren tuple,
-                // lowering to the SAME `_tuple` Record (no new IR node, identical
-                // downstream). Arity >= 2 here; the singleton `{x}` and empty `{}`
-                // collide with the block form below and land with its retirement
-                // (slice 2). Mirrors the LPAREN tuple branch exactly.
+                // Positional aggregate — the brace-delimited sibling of the paren
+                // tuple, lowering to the SAME `_tuple` Record (no new IR node).
+                // `{}` is empty, `{e}` a singleton, `{e0, e1, …}` n-ary.
                 AltToken open = consume();
-                IrExpr inner = parseExpr();
-                if (peek().kind() == AltToken.Kind.COMMA) {
-                    List<IrExpr> elems = new ArrayList<>();
-                    elems.add(inner);
+                List<IrExpr> elems = new ArrayList<>();
+                if (peek().kind() != AltToken.Kind.RBRACE) {
+                    elems.add(parseExpr());
                     while (peek().kind() == AltToken.Kind.COMMA) {
                         consume();
                         elems.add(parseExpr());
                     }
-                    expect(AltToken.Kind.RBRACE);
-                    yield buildTupleLiteral(elems, open.origin());
                 }
-                // Block expression: `{ EXPR }`. A pure delimiter — the block
-                // evaluates to its inner expression with no new semantics.
-                // (WAR slice 2 retires this so `{x}` can be a 1-element aggregate.)
                 expect(AltToken.Kind.RBRACE);
-                yield inner;
+                yield buildTupleLiteral(elems, open.origin());
             }
             case AT -> {
                 // @ is the principal subject — value-under-refinement, or the

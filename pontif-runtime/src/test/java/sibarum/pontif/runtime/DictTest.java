@@ -56,9 +56,11 @@ class DictTest {
     }
 
     @Test
-    void blockExpression_stillParsesAsBlock() throws Exception {
-        // Regression: the dict lookahead must not eat blocks.
-        assertEquals(3L, run("{ let a = 1 let b = 2 a + b }"));
+    void parenBlock_letChain_evaluates() throws Exception {
+        // BRACE-AGGREGATES WAR: the block role is parens now; `{…}` is an
+        // aggregate. The dict literal `{a = 1, b = 2}` (above) and the paren
+        // block must coexist without the dict lookahead eating either.
+        assertEquals(3L, run("( let a = 1 let b = 2 a + b )"));
     }
 
     @Test

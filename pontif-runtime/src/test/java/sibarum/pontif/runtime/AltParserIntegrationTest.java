@@ -620,16 +620,17 @@ class AltParserIntegrationTest {
 
     @Test
     void blockExpr_aroundLetChain_evaluates() throws Exception {
-        // User's example: explicit block braces around a let chain make the
-        // body boundary unambiguous (no greedy-Pratt edge cases).
+        // BRACE-AGGREGATES WAR: the block/grouping role is parens `(…)` now —
+        // explicit parens around a let chain make the body boundary unambiguous
+        // (no greedy-Pratt edge cases). Braces are aggregates only.
         String src = """
                 struct Point(x:Int, y:Int)
                 function shifted(p:Point):Point ->
-                {
+                (
                   let dx = p.x + 1
                   let dy = p.y + 1
                   Point(dx, dy)
-                }
+                )
                 shifted(Point(2, 3)).x + shifted(Point(2, 3)).y
                 """;
         // dx = 3, dy = 4, Point(3, 4); .x + .y = 7
@@ -638,9 +639,9 @@ class AltParserIntegrationTest {
 
     @Test
     void blockExpr_isPureUnwrap() throws Exception {
-        // `{ EXPR }` and `EXPR` are interchangeable at runtime.
-        assertEquals(42L, run("{ 42 }"));
-        assertEquals(42L, run("{ { { 42 } } }"));
+        // `( EXPR )` and `EXPR` are interchangeable at runtime (parens group).
+        assertEquals(42L, run("( 42 )"));
+        assertEquals(42L, run("( ( ( 42 ) ) )"));
     }
 
     @Test
