@@ -48,8 +48,8 @@ class StreamGeneratorTest {
         // unfold halts when `from` overruns `to`. count(0,5) emits 0..5 then stops.
         assertEquals("{0, 1, 2, 3, 4, 5}", String.valueOf(run("""
                 let count:[
-                  (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-                  (from, from+1, to)
+                  (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+                  {from, from+1, to}
                 ]
                 count(0, 5)._0""")));
     }
@@ -60,8 +60,8 @@ class StreamGeneratorTest {
         // stepped one past `to` (the state that tripped the guard), to is unchanged.
         assertEquals(6L, run("""
                 let count:[
-                  (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-                  (from, from+1, to)
+                  (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+                  {from, from+1, to}
                 ]
                 count(0, 5)._1"""));
     }
@@ -72,8 +72,8 @@ class StreamGeneratorTest {
         // the stream channel seals empty (no loss, no fabrication).
         assertEquals("{}", String.valueOf(run("""
                 let count:[
-                  (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-                  (from, from+1, to)
+                  (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+                  {from, from+1, to}
                 ]
                 count(5, 0)._0""")));
     }
@@ -90,8 +90,8 @@ class StreamGeneratorTest {
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 let count:[
-                  (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-                  (from, from+1, to)
+                  (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+                  {from, from+1, to}
                 ]
                 count(0, 10)._0""");
         assertEquals("{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}", String.valueOf(val));
@@ -104,8 +104,8 @@ class StreamGeneratorTest {
         // increment — any state transition halting on a refinement works.
         assertEquals("{5, 4, 3, 2, 1, 0}", String.valueOf(run("""
                 let countDown:[
-                  (from:[Int:@>=0]):(Stream[Int], Int) ->
-                  (from, from - 1)
+                  (from:[Int:@>=0]):{Stream[Int], Int} ->
+                  {from, from - 1}
                 ]
                 countDown(5)._0""")));
     }

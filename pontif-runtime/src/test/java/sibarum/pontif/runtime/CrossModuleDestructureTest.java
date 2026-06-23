@@ -144,11 +144,11 @@ class CrossModuleDestructureTest {
         Files.writeString(dir.resolve("entry.ptf"), """
                 module app.main
                 requires geom.shapes.{Vec}
-                function f(p:[(Vec, Int)]):Int -> match p {
-                  [(Vec(x, y), c)] -> x + y + c
+                function f(p:[{Vec, Int}]):Int -> match p {
+                  [{Vec(x, y), c}] -> x + y + c
                   [_] -> -1
                 }
-                f((Vec(1, 2), 3))
+                f({Vec(1, 2), 3})
                 """);
         assertEquals("6", run(dir, "entry.ptf"));
     }

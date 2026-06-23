@@ -76,10 +76,10 @@ class PositionalParamDestructureTest {
     void tupleTypedParam_stillDestructuredByMatch() {
         // `[(Int, Int)]` is a tuple TYPE, not a destructure — must not be intercepted.
         assertEquals("7", run("""
-                function f(p:[(Int, Int)]):Int -> match p {
-                  [(a, b)] -> a + b
+                function f(p:[{Int, Int}]):Int -> match p {
+                  [{a, b}] -> a + b
                 }
-                f((3, 4))
+                f({3, 4})
                 """));
     }
 

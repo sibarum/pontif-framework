@@ -31,7 +31,7 @@ class StreamTakeWhileTest {
 
     @Test void emitsWhileInDomain_stopsAtFirstFailure() throws Exception {
         assertEquals("{1, 2, 3, 4}", String.valueOf(run("""
-                let s = (1, 2, 3, 4, 5, 6)
+                let s = {1, 2, 3, 4, 5, 6}
                 &s:[ (el:[Int:@<5]) -> el ]""")));
     }
 
@@ -39,26 +39,26 @@ class StreamTakeWhileTest {
         // The decisive test: an in-domain element AFTER an out-of-domain one must NOT
         // appear. filter would yield (1, 2, 3); takeWhile stops at 9 → (1, 2).
         assertEquals("{1, 2}", String.valueOf(run("""
-                let s = (1, 2, 9, 3)
+                let s = {1, 2, 9, 3}
                 &s:[ (el:[Int:@<5]) -> el ]""")));
     }
 
     @Test void emptyWhenFirstElementOutOfDomain() throws Exception {
         assertEquals("{}", String.valueOf(run("""
-                let s = (5, 6, 7)
+                let s = {5, 6, 7}
                 &s:[ (el:[Int:@<5]) -> el ]""")));
     }
 
     @Test void wholeStreamWhenAllInDomain() throws Exception {
         assertEquals("{1, 2, 3}", String.valueOf(run("""
-                let s = (1, 2, 3)
+                let s = {1, 2, 3}
                 &s:[ (el:[Int:@<5]) -> el ]""")));
     }
 
     @Test void transformsTheEmittedElements() throws Exception {
         // takeWhile composes with a map body: emit el*10 while in-domain.
         assertEquals("{10, 20}", String.valueOf(run("""
-                let s = (1, 2, 9, 3)
+                let s = {1, 2, 9, 3}
                 &s:[ (el:[Int:@<5]) -> el * 10 ]""")));
     }
 }

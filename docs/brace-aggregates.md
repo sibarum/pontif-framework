@@ -79,15 +79,19 @@ non-brace mechanism.
    too; `parseSort`/`parseBracketSort` trigger on a leading `{`. `parsePattern` routes through
    `parseSort`, so patterns came along free. Paren forms still parse (additive). Full reactor
    green.
-4. **Mass migration.** Convert `.ptf` examples, alt-syntax test strings, probe resources,
-   and `docs/alternative-syntax.ptf` from parens to braces. The probe harness + suite is the
-   regression meter. (Heaviest: `TupleTest`, `NestedDestructureTest`, `ConservationGateTest`,
-   `streams/ternion/traction.ptf`.)
-5. **Retire paren-aggregates.** `(a, b)` value and `[(Int, Int)]` sort become parse errors
-   pointing at the brace form; `( … )` is grouping/call/param only. Update stragglers. Update
-   the printer/`ReceiptGraphPrinter` to render tuples as `{…}`. Amend the bracket/paren law
-   (`docs/glossary.md`, `project_bracket_paren_law`): `[]` types, `{}` aggregates, `()`
-   grouping/application, `$` names.
+4. **Printer flip + mass migration — LANDED.** `RecordValue` renders tuples as `{…}`; all
+   output-assertion sites migrated. Every alt-syntax input migrated parens→braces: the
+   builtin `std.stream` source (`BuiltinModules` — `partition`'s tuple sort/pattern/values;
+   this single fix cleared ~109 cascading link failures), ~35 test files (via parallel
+   subagents + central verification), `README.md` snippets, and `ReadmeSnippetTest`'s embedded
+   copies. Struct-field nested-tuple checks switched to `{`. **Excluded `examples/*.ptf`**
+   (James handles them; `ternion.ptf` is unaffected — it uses only constructor/call parens).
+5. **Retire paren-aggregates — LANDED.** `(a, b)` value, `[(Int, Int)]` sort, and paren
+   patterns are parse errors pointing at the brace form; bare `(S)` sort-grouping retired too
+   (vestigial — a 1-tuple is `{S}`). `( … )` is grouping / call / param only. Bracket/paren
+   law amended in `docs/glossary.md` (aggregate + tuple entries + the notation-law line:
+   `[]` types, `{}` aggregates, `()` grouping/application, `$` names). Full reactor green
+   (8 modules, 855 runtime tests).
 
 ## Blast radius (inventory 2026-06-22)
 

@@ -45,7 +45,7 @@ class StreamFragmentTest {
         // `&` spreads the fragment over a stream — map, no ceremony.
         assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 let double:[ (el:Int) -> el * 2 ]
-                let s = (1, 2, 3, 4)
+                let s = {1, 2, 3, 4}
                 double(&s)""")));
     }
 
@@ -54,7 +54,7 @@ class StreamFragmentTest {
         // The inline/anonymous face: `&s:[ (el)-> … ]` ≡ applying the transform per
         // element. No name needed.
         assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
-                let s = (1, 2, 3, 4)
+                let s = {1, 2, 3, 4}
                 &s:[ (el:Int) -> el * 2 ]""")));
     }
 
@@ -64,7 +64,7 @@ class StreamFragmentTest {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let s:Stream[Int] = {1, 2, 3, 4}
                 &s:[
                   (el:Int) -> match el {
                     [@>2] -> el
@@ -86,8 +86,8 @@ class StreamFragmentTest {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
-                let fold:[ (el:Int, total:Int) -> (null, el + total) ]
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let fold:[ (el:Int, total:Int) -> {null, el + total} ]
+                let s:Stream[Int] = {1, 2, 3, 4}
                 fold(&s, 0)._1""", "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "fold should compile; got " + r);
@@ -100,14 +100,14 @@ class StreamFragmentTest {
         // scan emits the running accumulator at the stream channel AND threads it:
         // the stream position is the running totals, the accumulator the final.
         assertEquals("{1, 3, 6, 10}", String.valueOf(run("""
-                let scan:[ (el:Int, total:Int) -> (el + total, el + total) ]
-                let s = (1, 2, 3, 4)
-                let [(running, final)] = scan(&s, 0)
+                let scan:[ (el:Int, total:Int) -> {el + total, el + total} ]
+                let s = {1, 2, 3, 4}
+                let [{running, final}] = scan(&s, 0)
                 running""")));
         assertEquals(10L, run("""
-                let scan:[ (el:Int, total:Int) -> (el + total, el + total) ]
-                let s = (1, 2, 3, 4)
-                let [(running, final)] = scan(&s, 0)
+                let scan:[ (el:Int, total:Int) -> {el + total, el + total} ]
+                let s = {1, 2, 3, 4}
+                let [{running, final}] = scan(&s, 0)
                 final"""));
     }
 
@@ -119,11 +119,11 @@ class StreamFragmentTest {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let s:Stream[Int] = {1, 2, 3, 4}
                 &s:[
-                  (el:Int):(Stream[Int], Stream[Int]) -> match el {
-                    [@>2] -> (el, null)
-                    [_]   -> (null, el)
+                  (el:Int):{Stream[Int], Stream[Int]} -> match el {
+                    [@>2] -> {el, null}
+                    [_]   -> {null, el}
                   }
                 ]""", "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
@@ -138,8 +138,8 @@ class StreamFragmentTest {
         // The dual: a tuple body with NO codomain is a plain map producing a stream
         // of pairs — proving the codomain is what selects fan-out.
         assertEquals("{{1, 2}, {2, 4}, {3, 6}}", String.valueOf(run("""
-                let s = (1, 2, 3)
-                &s:[ (el:Int) -> (el, el * 2) ]""")));
+                let s = {1, 2, 3}
+                &s:[ (el:Int) -> {el, el * 2} ]""")));
     }
 
     @Test
@@ -150,7 +150,7 @@ class StreamFragmentTest {
         assertEquals("{2, 6, 12}", String.valueOf(run("""
                 let square:[ (item:Int):Stream[Int] -> item * item ]
                 let zip:[ (left:Int, right:Int):Stream[Int] -> left + right ]
-                let s = (1, 2, 3)
+                let s = {1, 2, 3}
                 zip(&s, &square(&s))""")));
     }
 
@@ -159,8 +159,8 @@ class StreamFragmentTest {
         // (&a, &b) walks both in lockstep; the element binds to the pair, which the
         // fragment destructures into (x, y). Vector-add: x + y per position.
         assertEquals("{11, 22, 33}", String.valueOf(run("""
-                let a = (1, 2, 3)
-                let b = (10, 20, 30)
+                let a = {1, 2, 3}
+                let b = {10, 20, 30}
                 (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
     }
 
@@ -169,7 +169,7 @@ class StreamFragmentTest {
         // The named-reuse face: a bound zip fragment applied with two spreads.
         assertEquals("{2, 4, 6}", String.valueOf(run("""
                 let zip:[ (left:Int, right:Int) -> left + right ]
-                let s = (1, 2, 3)
+                let s = {1, 2, 3}
                 zip(&s, &s)""")));
     }
 
@@ -177,8 +177,8 @@ class StreamFragmentTest {
     void zip_raggedStopsAtShortest() throws Exception {
         // Unequal lengths stop at the shortest stream (standard zip).
         assertEquals("{11, 22}", String.valueOf(run("""
-                let a = (1, 2, 3, 4)
-                let b = (10, 20)
+                let a = {1, 2, 3, 4}
+                let b = {10, 20}
                 (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
     }
 
@@ -195,7 +195,7 @@ class StreamFragmentTest {
                     [_]   -> null
                   }
                 ]
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let s:Stream[Int] = {1, 2, 3, 4}
                 filter(&s)""", "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "the fragment filter should compile; got " + r);

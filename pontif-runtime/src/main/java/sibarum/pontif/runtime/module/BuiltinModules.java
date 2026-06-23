@@ -136,14 +136,14 @@ public final class BuiltinModules {
               [Leaf] -> Leaf()
             }
 
-            function partition(p:_, q:[Element|Leaf]):[([Element|Leaf], [Element|Leaf])] -> match q {
+            function partition(p:_, q:[Element|Leaf]):[{[Element|Leaf], [Element|Leaf]}] -> match q {
               [Element] -> match partition(p, q.rest) {
-                [(yes, no)] -> match p(q.head) {
-                  [Bool:@==true] -> (Element(q.head, yes), no)
-                  _              -> (yes, Element(q.head, no))
+                [{yes, no}] -> match p(q.head) {
+                  [Bool:@==true] -> {Element(q.head, yes), no}
+                  _              -> {yes, Element(q.head, no)}
                 }
               }
-              [Leaf] -> (Leaf(), Leaf())
+              [Leaf] -> {Leaf(), Leaf()}
             }
 
             0

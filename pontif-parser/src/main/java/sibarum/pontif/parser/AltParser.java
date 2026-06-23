@@ -2226,13 +2226,14 @@ public final class AltParser {
 
     public IrSort parseSort() throws ParseException {
         AltToken t = peek();
-        // Bare tuple sort `(S0, S1, …)` — the bracket-free spelling of `[(…)]`.
-        // A param type written `t:(Inner, Int)` (or a tuple PATTERN `(i, k)` in a
-        // braceless match arm) starts at `(`; `parseBracketSort` only reaches the
+        // Bare tuple sort `{S0, S1, …}` — the bracket-free spelling of `[{…}]`.
+        // A param type `t:{Inner, Int}` (or a tuple PATTERN `{i, k}` in a
+        // braceless match arm) starts at `{`; `parseBracketSort` only reaches the
         // tuple body after a `[`, so accept the bare form here for parity. The
         // body grammar (type elements vs positional binders) is governed by
-        // parsingTuplePattern, exactly as in the bracketed path.
-        if (t.kind() == AltToken.Kind.LPAREN || t.kind() == AltToken.Kind.LBRACE) {
+        // parsingTuplePattern, exactly as in the bracketed path. (BRACE-AGGREGATES
+        // WAR: the paren form `(S0, S1)` is retired — parens are grouping/calls.)
+        if (t.kind() == AltToken.Kind.LBRACE) {
             return parseTupleSortBody(t);
         }
         if (t.kind() == AltToken.Kind.LBRACKET) {
@@ -2599,10 +2600,11 @@ public final class AltParser {
         AltToken first = peek();
 
         // Tuple sort: `[{S0, S1, ...}]` — an anonymous positional aggregate.
-        // A leading `{` (or `(` during migration) is unambiguous (the contextual
-        // `[pred]` form below never starts with either). Lowers onto the record
-        // substrate as a structural sort named "_tuple" with positional keys _0.._n.
-        if (first.kind() == AltToken.Kind.LPAREN || first.kind() == AltToken.Kind.LBRACE) {
+        // A leading `{` is unambiguous (the contextual `[pred]` form below never
+        // starts with it). Lowers onto the record substrate as a structural sort
+        // named "_tuple" with positional keys _0.._n. (BRACE-AGGREGATES WAR: the
+        // paren form `[(S0, S1)]` is retired.)
+        if (first.kind() == AltToken.Kind.LBRACE) {
             IrSort tuple = parseTupleSortBody(open);
             expect(AltToken.Kind.RBRACKET);
             return tuple;
@@ -2852,7 +2854,7 @@ public final class AltParser {
                     // [Int:@>0]) — occupies the slot, binds nothing.
                     members.put(key, parseSort());
                     discards.add(key);
-                } else if (t.kind() == AltToken.Kind.LPAREN || t.kind() == AltToken.Kind.LBRACE) {
+                } else if (t.kind() == AltToken.Kind.LBRACE) {
                     // A nested tuple ([{{a, b}, c}]) — binds its components via
                     // the recursive destructure desugar; NOT a discard.
                     members.put(key, parseTupleSortBody(t));
@@ -2865,9 +2867,9 @@ public final class AltParser {
                         renames.put(key, binder.text());
                     }
                 }
-            } else if (peek().kind() == AltToken.Kind.LPAREN || peek().kind() == AltToken.Kind.LBRACE) {
+            } else if (peek().kind() == AltToken.Kind.LBRACE) {
                 // A nested tuple TYPE ([{{Int, Int}, Int}]) — parseSort routes a
-                // leading '('/'{' here too, but recurse directly for parity.
+                // leading '{' here too, but recurse directly for parity.
                 members.put(key, parseTupleSortBody(peek()));
             } else {
                 members.put(key, parseSort());        // type position: a real sort
@@ -3150,9 +3152,9 @@ public final class AltParser {
                 first = false;
                 continue;
             }
-            // A nested tuple pattern as a field ([Pair((a, b), c)]) — binds its
+            // A nested tuple pattern as a field ([Pair({a, b}, c)]) — binds its
             // components via the recursive desugar. NOT a struct-level discard.
-            if (t.kind() == AltToken.Kind.LPAREN) {
+            if (t.kind() == AltToken.Kind.LBRACE) {
                 String posField = positionalField(typeName, clauseIndex, members, t.origin());
                 members.put(posField, parseTupleSortBody(t));
                 first = false;
@@ -3353,8 +3355,8 @@ public final class AltParser {
             members.put(slot, inner);
             return;
         }
-        if (t.kind() == AltToken.Kind.LPAREN) {
-            // Nested tuple pattern as a slot ([Pair((a, b), c)]).
+        if (t.kind() == AltToken.Kind.LBRACE) {
+            // Nested tuple pattern as a slot ([Pair({a, b}, c)]).
             members.put(slot, parseTupleSortBody(t));
             return;
         }
@@ -5266,20 +5268,13 @@ public final class AltParser {
                 }
                 IrExpr inner = parseExpr();
                 if (peek().kind() == AltToken.Kind.COMMA) {
-                    // Tuple literal: (e0, e1, ...) — an anonymous positional
-                    // aggregate. Lowers onto the record substrate as a Record
-                    // with the reserved "_tuple" sentinel name and positional
-                    // keys _0.._n (the sibling of the "_record" sentinel). No
-                    // new IR node: everything downstream consumes it as a
-                    // structural record. Arity >= 2; `(x)` stays grouping.
-                    List<IrExpr> elems = new ArrayList<>();
-                    elems.add(inner);
-                    while (peek().kind() == AltToken.Kind.COMMA) {
-                        consume();
-                        elems.add(parseExpr());
-                    }
-                    expect(AltToken.Kind.RPAREN);
-                    yield buildTupleLiteral(elems, lp.origin());
+                    // BRACE-AGGREGATES WAR: paren-tuples are RETIRED. Parens are
+                    // grouping / calls / param lists only; a positional aggregate
+                    // is written with braces `{e0, e1, …}`.
+                    throw new ParseException(
+                            "A parenthesised tuple is no longer a value — use braces: "
+                                    + "`{e0, e1, …}`. Parentheses are for grouping, calls, and "
+                                    + "parameter lists.", peek().origin());
                 }
                 expect(AltToken.Kind.RPAREN);
                 yield inner;

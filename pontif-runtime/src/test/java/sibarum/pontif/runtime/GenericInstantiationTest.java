@@ -31,7 +31,7 @@ class GenericInstantiationTest {
         assertEquals("{\"1\", \"2\", \"3\", \"4\"}", String.valueOf(run("""
                 module examples.stream
                 requires pontif.core.{Stream, Nothing}
-                let s:Stream[Int] = (1,2,3,4)
+                let s:Stream[Int] = {1,2,3,4}
                 function map[type A, type R]( inputStream:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
                   &inputStream:[ (element:A) -> mapper(element) ]
                 function toString(i:Int):String -> ""+i
@@ -44,7 +44,7 @@ class GenericInstantiationTest {
         // monomorphization runs. The convenience layer over explicit type-application.
         assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 requires pontif.core.{Stream}
-                let s:Stream[Int] = (1,2,3,4)
+                let s:Stream[Int] = {1,2,3,4}
                 function map[type A, type R]( inputStream:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
                   &inputStream:[ (element:A) -> mapper(element) ]
                 function double(i:Int):Int -> i * 2
@@ -55,7 +55,7 @@ class GenericInstantiationTest {
         // Same generic map, instantiated at [Int,Int] with a doubling metaref.
         assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 requires pontif.core.{Stream}
-                let s:Stream[Int] = (1,2,3,4)
+                let s:Stream[Int] = {1,2,3,4}
                 function map[type A, type R]( inputStream:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
                   &inputStream:[ (element:A) -> mapper(element) ]
                 function double(i:Int):Int -> i * 2

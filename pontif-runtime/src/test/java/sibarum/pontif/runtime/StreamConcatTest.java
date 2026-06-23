@@ -30,14 +30,14 @@ class StreamConcatTest {
 
     @Test
     void concat_appendsElements() throws Exception {
-        assertEquals("{1, 2, 3, 4, 5, 6}", String.valueOf(run("(1, 2, 3) + (4, 5, 6)")));
+        assertEquals("{1, 2, 3, 4, 5, 6}", String.valueOf(run("{1, 2, 3} + {4, 5, 6}")));
     }
 
     @Test
     void concat_throughLetBindings() throws Exception {
         assertEquals("{1, 2, 3, 4}", String.valueOf(run("""
-                let a = (1, 2)
-                let b = (3, 4)
+                let a = {1, 2}
+                let b = {3, 4}
                 a + b""")));
     }
 
@@ -47,7 +47,7 @@ class StreamConcatTest {
         // double each of s, then append the originals.
         assertEquals("{2, 4, 6, 1, 2, 3}", String.valueOf(run("""
                 let double:[ (x:Int) -> x * 2 ]
-                let s = (1, 2, 3)
+                let s = {1, 2, 3}
                 double(&s) + s""")));
     }
 }

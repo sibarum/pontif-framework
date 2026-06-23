@@ -81,9 +81,9 @@ class ConservationReportTest {
     @Test
     void swap_witnessesReversibility() throws Exception {
         String src = """
-                function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
-                  match p { [(a, b)] -> (b, a) }
-                swap((1, true))
+                function swap(p:[{Int, Bool}]):[{Bool, Int}] ->
+                  match p { [{a, b}] -> {b, a} }
+                swap({1, true})
                 """;
         ConservationGraph swap = graph(ledger("swap", src), "swap");
         assertTrue(ConservationQueries.reversible(swap).isEmpty(),
@@ -127,9 +127,9 @@ class ConservationReportTest {
     @Test
     void duplication_breaksTheBijection() throws Exception {
         String src = """
-                function dup(p:[(Int, Bool)]):[(Int, Int)] ->
-                  match p { [(a, _)] -> (a, a) }
-                dup((1, true))
+                function dup(p:[{Int, Bool}]):[{Int, Int}] ->
+                  match p { [{a, _}] -> {a, a} }
+                dup({1, true})
                 """;
         ConservationGraph dup = graph(ledger("dup", src), "dup");
         assertTrue(ConservationQueries.duplicated(dup));
@@ -522,9 +522,9 @@ class ConservationReportTest {
         // "branch (irrefutable)".
         String src = """
                 struct P(n:Int, k:Int)
-                function pick(a:P, b:P):Int -> match (a, b)
-                  [(P(0, j), P(0, m))] -> j + m
-                  [(P(i, j), P(x, m))] -> i + x
+                function pick(a:P, b:P):Int -> match {a, b}
+                  [{P(0, j), P(0, m)}] -> j + m
+                  [{P(i, j), P(x, m)}] -> i + x
                 pick(P(0,1), P(0,2))
                 """;
         ConservationGraph g = graph(ledger("tuple-discriminates", src), "pick");

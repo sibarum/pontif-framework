@@ -149,13 +149,13 @@ class ReadmeSnippetTest {
     @Test
     void readmeTuplePatternSnippet_evaluatesTo11() throws Exception {
         String src = """
-                function score(p:[(Int, Int)]):Int -> match p {
-                  [(0, 0)] -> 0
-                  [(0, y)] -> y
-                  [(x, y)] -> x * y
+                function score(p:[{Int, Int}]):Int -> match p {
+                  [{0, 0}] -> 0
+                  [{0, y}] -> y
+                  [{x, y}] -> x * y
                 }
 
-                score((0, 5)) + score((2, 3))
+                score({0, 5}) + score({2, 3})
                 """;
         assertEquals(11L, run(src));
     }
@@ -419,12 +419,12 @@ class ReadmeSnippetTest {
         assertEquals("1", runGated("""
                 requires std.conservation.{Reversible}
 
-                function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
-                  match p { [(a, b)] -> (b, a) }
+                function swap(p:[{Int, Bool}]):[{Bool, Int}] ->
+                  match p { [{a, b}] -> {b, a} }
 
                 proof swap = Reversible()
 
-                let [(x, y)] = swap((1, true)) y
+                let [{x, y}] = swap({1, true}) y
                 """));
     }
 }

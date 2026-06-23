@@ -42,6 +42,6 @@ class StreamGenericsTest {
                 function double(x:Int):Int -> x * 2
                 function map[type A, type R]( s:Stream[A], d:[Dispatch(A):R] ):[Stream[R]] ->
                   &s:[ (el:A) -> d(el) ]
-                map((1,2,3), $double[Int])""");
+                map({1,2,3}, $double[Int])""");
     }
 }

@@ -28,14 +28,14 @@ class CallDispatchTest {
         assertEquals(3L, run("""
                 requires pontif.core.{Stream}
                 function len(s:Stream[Int]):Int -> 3
-                len((1, 2, 3))"""));
+                len({1, 2, 3})"""));
     }
 
     @Test void tupleArg_matchesGenericStreamParam() {
         assertEquals(0L, run("""
                 requires pontif.core.{Stream}
                 function len[type A](s:Stream[A]):Int -> 0
-                len((1, 2, 3))"""));
+                len({1, 2, 3})"""));
     }
 
     @Test void concreteMap_runsEndToEnd() {
@@ -45,7 +45,7 @@ class CallDispatchTest {
                 function double(x:Int):Int -> x * 2
                 function map(s:Stream[Int], d:[Dispatch(Int):Int]):Stream[Int] ->
                   &s:[ (el:Int) -> d(el) ]
-                map((1, 2, 3), $double[Int])""")));
+                map({1, 2, 3}, $double[Int])""")));
     }
 
     @Test void wrongElementType_tupleDoesNotMatchStreamParam() {
@@ -54,7 +54,7 @@ class CallDispatchTest {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream}
                 function len(s:Stream[Int]):Int -> 3
-                len(("a", "b"))""", "m.ptf");
+                len({"a", "b"})""", "m.ptf");
         boolean rejected;
         if (r instanceof CompileResult.Compiled c) {
             try { new IrInterpreter(c.program().simplifier()).eval(c.program().module()); rejected = false; }

@@ -44,10 +44,13 @@ class FragmentValueTest {
                 d(5)"""));
     }
 
-    @Test void groupingParenInSort_isNotAOneTuple() throws Exception {
-        // RULED (James): `(S)` is grouping, not a 1-tuple — so `[(Int)]` ≡ `[Int]`.
+    @Test void oneTupleSort_isBraced_notParens() throws Exception {
+        // BRACE-AGGREGATES WAR: a 1-tuple sort is `{Int}` (braces); the old
+        // `(S)`-grouping-in-a-sort spelling is retired (it was only there to
+        // disambiguate from a 1-tuple, which now has its own brace form). A plain
+        // scalar param is just `[Int]`.
         assertEquals(7L, run("""
-                function id( x:[(Int)] ):Int -> x
+                function id( x:[Int] ):Int -> x
                 id(7)"""));
     }
 }

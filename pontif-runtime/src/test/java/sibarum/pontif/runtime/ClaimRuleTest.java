@@ -101,7 +101,7 @@ class ClaimRuleTest {
     @Test
     void anonymousValues_compareByContent() throws Exception {
         assertEquals(true, run("{x = 1, y = 2} == {x = 1, y = 2}"));
-        assertEquals(true, run("(1, true) == (1, true)"));
+        assertEquals(true, run("{1, true} == {1, true}"));
     }
 
     @Test
@@ -118,16 +118,16 @@ class ClaimRuleTest {
     void wideTupleIntoNarrowTupleParam_isRejected() {
         // (1, true, 99) silently dropped the 99 before this slice.
         assertThrows(Exception.class, () -> run("""
-                function f(p:[(Int, Bool)]):Int -> match p { [(a, b)] -> a }
-                f((1, true, 99))
+                function f(p:[{Int, Bool}]):Int -> match p { [{a, b}] -> a }
+                f({1, true, 99})
                 """));
     }
 
     @Test
     void exactArityTuple_passes() throws Exception {
         assertEquals(1L, run("""
-                function f(p:[(Int, Bool)]):Int -> match p { [(a, b)] -> a }
-                f((1, true))
+                function f(p:[{Int, Bool}]):Int -> match p { [{a, b}] -> a }
+                f({1, true})
                 """));
     }
 

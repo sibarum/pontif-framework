@@ -93,7 +93,7 @@ class StreamCombinatorTest {
                 function isBig(x:Int):Bool -> x > 2
                 match partition($isBig[Int],
                     Element(1, Element(3, Element(2, Element(4, Leaf()))))) {
-                  [(yes, no)] -> %s
+                  [{yes, no}] -> %s
                 }
                 """;
         assertBothEngines(String.format(src, "sum(yes)"), "7");

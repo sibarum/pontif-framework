@@ -175,18 +175,18 @@ The same per-slot composition applies to **tuples** — a slot is pinned to a
 value, bound to a name, or discarded:
 
 ```pontif
-function score(p:[(Int, Int)]):Int -> match p {
-  [(0, 0)] -> 0          # both slots pinned
-  [(0, y)] -> y          # pin the first, bind the second
-  [(x, y)] -> x * y      # bind both — the catch-all
+function score(p:[{Int, Int}]):Int -> match p {
+  [{0, 0}] -> 0          # both slots pinned
+  [{0, y}] -> y          # pin the first, bind the second
+  [{x, y}] -> x * y      # bind both — the catch-all
 }
 
-score((0, 5)) + score((2, 3))   # → 11
+score({0, 5}) + score({2, 3})   # → 11
 ```
 
-The pattern stays bracketed (`[(…)]`) even though the value is written `(…)`:
-`[` is never postfix in Pontif (arrays index by application), so `[…]` is
-unambiguously a pattern — which an unbracketed `(…)` could not be.
+Aggregates are written with braces (`{…}`) — the value `{0, 5}` and, inside a
+match, the pattern `[{…}]`. The `[` makes it unambiguously a pattern (`[` is never
+postfix in Pontif — arrays index by application), while the bare `{…}` is the value.
 
 ## Traits — alternative interfaces
 
@@ -387,7 +387,7 @@ literal autoboxes into one, element-checked:
 
 ```pontif
 requires pontif.core.{Stream, Nothing}
-let s:Stream[Int] = (1, 2, 3, 4)
+let s:Stream[Int] = {1, 2, 3, 4}
 ```
 
 Omission during iteration is signalled with the **`Nothing`** value (that is why it is
@@ -649,12 +649,12 @@ corollary* of a fan-in-free, fan-out-free rewiring:
 ```pontif
 requires std.conservation.{Reversible}
 
-function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
-  match p { [(a, b)] -> (b, a) }
+function swap(p:[{Int, Bool}]):[{Bool, Int}] ->
+  match p { [{a, b}] -> {b, a} }
 
 proof swap = Reversible()          # bijective rewiring — invertibility witnessed
 
-let [(x, y)] = swap((1, true)) y   # → 1
+let [{x, y}] = swap({1, true}) y   # → 1
 ```
 
 ## One inference engine, every stage

@@ -37,16 +37,16 @@ class NestedDestructureTest {
     @Test
     void tupleInStruct() {
         assertEquals("6", run("""
-                struct Pair(t:[(Int, Int)], c:Int)
-                function f(p:Pair):Int -> match p { [Pair((a, b), c)] -> a+b+c  [_] -> -1 }
-                f(Pair((1,2), 3))"""));
+                struct Pair(t:[{Int, Int}], c:Int)
+                function f(p:Pair):Int -> match p { [Pair({a, b}, c)] -> a+b+c  [_] -> -1 }
+                f(Pair({1,2}, 3))"""));
     }
 
     @Test
     void tupleInTuple() {
         assertEquals("6", run("""
-                function f(p:[((Int, Int), Int)]):Int -> match p { [((a, b), c)] -> a+b+c  [_] -> -1 }
-                f(((1,2), 3))"""));
+                function f(p:[{{Int, Int}, Int}]):Int -> match p { [{{a, b}, c}] -> a+b+c  [_] -> -1 }
+                f({{1,2}, 3})"""));
     }
 
     @Test
@@ -54,8 +54,8 @@ class NestedDestructureTest {
         assertEquals("10", run("""
                 struct Inner(a:Int, b:Int)
                 struct Mid(inner:Inner, c:Int)
-                function f(p:[(Mid, Int)]):Int -> match p { [(Mid(Inner(x, y), c), z)] -> x+y+c+z  [_] -> -1 }
-                f((Mid(Inner(1,2),3), 4))"""));
+                function f(p:[{Mid, Int}]):Int -> match p { [{Mid(Inner(x, y), c), z}] -> x+y+c+z  [_] -> -1 }
+                f({Mid(Inner(1,2),3), 4})"""));
     }
 
     @Test
@@ -87,7 +87,7 @@ class NestedDestructureTest {
     @Test
     void topLevelLet_tupleInTuple() {
         assertEquals("6", run("""
-                let [((a, b), c)] = ((1, 2), 3)
+                let [{{a, b}, c}] = {{1, 2}, 3}
                 a + b + c"""));
     }
 }

@@ -98,7 +98,7 @@ class CastAltTest {
     @Test
     void tuple_stillParses() throws Exception {
         // (a, b) is a tuple literal, destructured here to confirm it is not a cast.
-        assertEquals(8L, run("let [(a, b)] = (3, 5) a + b"));
+        assertEquals(8L, run("let [{a, b}] = {3, 5} a + b"));
     }
 
     @Test

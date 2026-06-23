@@ -46,8 +46,12 @@ class BraceAggregateTest {
     }
 
     @Test
-    void parenTuple_stillWorks_additive() {
-        assertEquals("{1, 2, 3}", run("module m\n(1, 2, 3)"));
+    void parenTuple_isRetired() {
+        // S5: paren-tuples are a parse error — braces are the only aggregate form.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("module m\n(1, 2, 3)", "brace.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertTrue(r.isError(), () -> "paren-tuple should be rejected; got " + r.text());
     }
 
     @Test
@@ -114,8 +118,12 @@ class BraceAggregateTest {
     }
 
     @Test
-    void parenSort_stillWorks_additive() {
-        assertEquals("8", run(
-                "module m\nfunction f(p:[(Int, Int)]):Int -> let [(a, b)] = p  a + b\nf((3, 5))"));
+    void parenSort_isRetired() {
+        // S5: the paren tuple-sort `[(Int, Int)]` is a parse error too.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt(
+                        "module m\nfunction f(p:[(Int, Int)]):Int -> 0\nf({3, 5})", "brace.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertTrue(r.isError(), () -> "paren tuple-sort should be rejected; got " + r.text());
     }
 }

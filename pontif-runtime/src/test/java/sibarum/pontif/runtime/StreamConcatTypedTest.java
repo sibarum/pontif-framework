@@ -27,8 +27,8 @@ class StreamConcatTypedTest {
     @Test void concat_onStreamTypedLets() {
         assertEquals("{1, 2, 3, 4}", String.valueOf(run("""
                 requires pontif.core.{Stream}
-                let a:Stream[Int] = (1, 2)
-                let b:Stream[Int] = (3, 4)
+                let a:Stream[Int] = {1, 2}
+                let b:Stream[Int] = {3, 4}
                 a + b""")));
     }
 
@@ -36,6 +36,6 @@ class StreamConcatTypedTest {
         assertEquals("{1, 2, 3, 4}", String.valueOf(run("""
                 requires pontif.core.{Stream}
                 function cat(x:Stream[Int], y:Stream[Int]):Stream[Int] -> x + y
-                cat((1, 2), (3, 4))""")));
+                cat({1, 2}, {3, 4})""")));
     }
 }

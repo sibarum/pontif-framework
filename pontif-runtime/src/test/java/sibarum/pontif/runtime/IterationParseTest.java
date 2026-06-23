@@ -45,7 +45,7 @@ class IterationParseTest {
         // Pure map: only `value`; the bare-value arm → default stream. Single
         // output ⇒ returned directly.
         Object r = run("""
-                iter((1, 2, 3)).{value} {
+                iter({1, 2, 3}).{value} {
                   match value
                     [_] -> value * 2
                 }
@@ -56,7 +56,7 @@ class IterationParseTest {
     @Test
     void filter_partitionsAcceptAndReject() throws Exception {
         RecordValue r = (RecordValue) run("""
-                iter((1, 2, 3)).{value, accept, reject} {
+                iter({1, 2, 3}).{value, accept, reject} {
                   match value
                     [@>1] -> accept(value)
                     [_]   -> reject(value)
@@ -69,7 +69,7 @@ class IterationParseTest {
     @Test
     void filterAndMap_acceptCarriesATransform() throws Exception {
         RecordValue r = (RecordValue) run("""
-                iter((1, 2, 3)).{value, accept, reject} {
+                iter({1, 2, 3}).{value, accept, reject} {
                   match value
                     [@>1] -> accept(value * 10)
                     [_]   -> reject(value)
@@ -84,7 +84,7 @@ class IterationParseTest {
         // A tuple autoboxes into Stream[Int] (one-way, element-gated); iter then
         // consumes that Stream binding.
         Object r = run("""
-                let s:Stream[Int] = (1, 2, 3)
+                let s:Stream[Int] = {1, 2, 3}
                 iter(s).{value} {
                   match value
                     [_] -> value * 2
@@ -96,14 +96,14 @@ class IterationParseTest {
     @Test
     void streamAnnotation_inExpressionLet_autoboxes() throws Exception {
         // The expression-position `let` (inside a function body) autoboxes too.
-        assertEquals(0L, run("function f():Int -> let s:Stream[Int] = (1, 2, 3) 0\nf()\n"));
+        assertEquals(0L, run("function f():Int -> let s:Stream[Int] = {1, 2, 3} 0\nf()\n"));
     }
 
     @Test
     void streamAnnotation_heterogeneousTuple_isRejected() {
         sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 sibarum.pontif.parser.ParseException.class,
-                () -> AltParser.parseModule("let s:Stream[Int] = (1, true, 3)\ns\n", "iter.ptf"));
+                () -> AltParser.parseModule("let s:Stream[Int] = {1, true, 3}\ns\n", "iter.ptf"));
         org.junit.jupiter.api.Assertions.assertTrue(
                 ex.getMessage().contains("Cannot box") && ex.getMessage().contains("Bool"),
                 () -> ex.getMessage());
@@ -112,7 +112,7 @@ class IterationParseTest {
     @Test
     void filter_boolArmsRouteCurrentValue() throws Exception {
         RecordValue r = (RecordValue) run("""
-                iter((0, 1, 2)).{value, accept, reject} {
+                iter({0, 1, 2}).{value, accept, reject} {
                   match value
                     [0] -> false
                     [_] -> true

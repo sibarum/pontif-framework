@@ -29,22 +29,22 @@ class TuplePatternConstraintTest {
     @Test
     void literalComponents_match() {
         assertEquals("1", run("""
-                function f(p:[(Decimal, Decimal)]):Int -> match p {
-                  [(0.0, 0.0)] -> 1
+                function f(p:[{Decimal, Decimal}]):Int -> match p {
+                  [{0.0, 0.0}] -> 1
                   [_]          -> 0
                 }
-                f((0.0, 0.0))
+                f({0.0, 0.0})
                 """));
     }
 
     @Test
     void literalComponents_noMatch() {
         assertEquals("0", run("""
-                function f(p:[(Decimal, Decimal)]):Int -> match p {
-                  [(0.0, 0.0)] -> 1
+                function f(p:[{Decimal, Decimal}]):Int -> match p {
+                  [{0.0, 0.0}] -> 1
                   [_]          -> 0
                 }
-                f((0.0, 1.0))
+                f({0.0, 1.0})
                 """));
     }
 
@@ -52,22 +52,22 @@ class TuplePatternConstraintTest {
     void mixedLiteralAndBinder() {
         // First slot pinned to 0, second bound to y.
         assertEquals("5", run("""
-                function f(p:[(Int, Int)]):Int -> match p {
-                  [(0, y)] -> y
+                function f(p:[{Int, Int}]):Int -> match p {
+                  [{0, y}] -> y
                   [_]      -> -1
                 }
-                f((0, 5))
+                f({0, 5})
                 """));
     }
 
     @Test
     void explicitRefinedComponent() {
         assertEquals("9", run("""
-                function f(p:[(Int, Int)]):Int -> match p {
-                  [([Int:@>0], y)] -> y
+                function f(p:[{Int, Int}]):Int -> match p {
+                  [{[Int:@>0], y}] -> y
                   [_]              -> -1
                 }
-                f((3, 9))
+                f({3, 9})
                 """));
     }
 
@@ -75,10 +75,10 @@ class TuplePatternConstraintTest {
     void allBinders_stillWork() {
         // The original bind-only form is unchanged.
         assertEquals("7", run("""
-                function f(p:[(Int, Int)]):Int -> match p {
-                  [(a, b)] -> a + b
+                function f(p:[{Int, Int}]):Int -> match p {
+                  [{a, b}] -> a + b
                 }
-                f((3, 4))
+                f({3, 4})
                 """));
     }
 
@@ -88,11 +88,11 @@ class TuplePatternConstraintTest {
         // binders (y, n, m) reach the arm body through the recursive destructure.
         assertEquals("7", run("""
                 struct P(a:Int, b:Int)
-                function f(p:[(P, P)]):Int -> match p {
-                  [(P(0, y), P(n, m))] -> y + n + m
+                function f(p:[{P, P}]):Int -> match p {
+                  [{P(0, y), P(n, m)}] -> y + n + m
                   [_]                  -> -1
                 }
-                f((P(0, 3), P(2, 2)))
+                f({P(0, 3), P(2, 2)})
                 """));
     }
 
@@ -101,11 +101,11 @@ class TuplePatternConstraintTest {
         // _0 must be a P with a==0; (P(1,_), _) misses and takes the default arm.
         assertEquals("-1", run("""
                 struct P(a:Int, b:Int)
-                function f(p:[(P, P)]):Int -> match p {
-                  [(P(0, y), P(n, m))] -> y + n + m
+                function f(p:[{P, P}]):Int -> match p {
+                  [{P(0, y), P(n, m)}] -> y + n + m
                   [_]                  -> -1
                 }
-                f((P(1, 3), P(2, 2)))
+                f({P(1, 3), P(2, 2)})
                 """));
     }
 }

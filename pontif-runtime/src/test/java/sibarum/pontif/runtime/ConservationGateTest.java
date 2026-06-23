@@ -77,10 +77,10 @@ class ConservationGateTest {
     void swap_provesReversible() {
         assertEquals("1", runOk("""
                 requires std.conservation.{Reversible}
-                function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
-                  match p { [(a, b)] -> (b, a) }
+                function swap(p:[{Int, Bool}]):[{Bool, Int}] ->
+                  match p { [{a, b}] -> {b, a} }
                 proof swap = Reversible()
-                let [(x, y)] = swap((1, true)) y
+                let [{x, y}] = swap({1, true}) y
                 """));
     }
 
@@ -88,10 +88,10 @@ class ConservationGateTest {
     void duplication_failsNoDuplication() {
         String err = compileError("""
                 requires std.conservation.{NoDuplication}
-                function dup(p:[(Int, Bool)]):[(Int, Int)] ->
-                  match p { [(a, _)] -> (a, a) }
+                function dup(p:[{Int, Bool}]):[{Int, Int}] ->
+                  match p { [{a, _}] -> {a, a} }
                 proof dup = NoDuplication()
-                let [(x, y)] = dup((1, true)) x
+                let [{x, y}] = dup({1, true}) x
                 """);
         assertTrue(err.contains("more than once"), () -> err);
     }

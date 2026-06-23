@@ -40,6 +40,6 @@ class NestedFragmentTest {
                 function dbl(s:Stream[Int]):[Stream[Int]] ->
                   let m:[ (el:Int) -> el * 2 ]
                   m(&s)
-                dbl((1, 2, 3))""")));
+                dbl({1, 2, 3})""")));
     }
 }

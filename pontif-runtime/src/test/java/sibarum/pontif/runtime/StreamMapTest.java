@@ -37,7 +37,7 @@ class StreamMapTest {
         // double(&s) maps the function over every element, sealing to a new stream.
         assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 function double(x:Int):Int -> x * 2
-                let s = (1, 2, 3, 4)
+                let s = {1, 2, 3, 4}
                 double(&s)""")));
     }
 
@@ -47,7 +47,7 @@ class StreamMapTest {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream}
                 function double(x:Int):Int -> x * 2
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let s:Stream[Int] = {1, 2, 3, 4}
                 let doubled:Stream[Int] = double(&s)
                 0""", "m.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
@@ -66,7 +66,7 @@ class StreamMapTest {
                   [@>2] -> x
                   [_]   -> null
                 }
-                let s:Stream[Int] = (1, 2, 3, 4)
+                let s:Stream[Int] = {1, 2, 3, 4}
                 keep(&s)""", "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "a lossy filter should compile; got " + r);
@@ -80,8 +80,8 @@ class StreamMapTest {
         // just fragments: add(&s, &t) is vector-add.
         assertEquals("{5, 7, 9}", String.valueOf(run("""
                 function add(a:Int, b:Int):Int -> a + b
-                let s = (1, 2, 3)
-                let t = (4, 5, 6)
+                let s = {1, 2, 3}
+                let t = {4, 5, 6}
                 add(&s, &t)""")));
     }
 }

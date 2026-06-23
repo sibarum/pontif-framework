@@ -60,13 +60,13 @@ class TupleTest {
 
     @Test
     void destructure_bindsComponentsPositionally() throws Exception {
-        assertEquals(8L, run("let [(a, b)] = (3, 5) a + b"));
+        assertEquals(8L, run("let [{a, b}] = {3, 5} a + b"));
     }
 
     @Test
     void destructure_swapViaTuple() throws Exception {
         // Build a tuple, destructure, rebuild swapped, destructure again.
-        assertEquals(1L, run("let [(a, b)] = (1, 2) let [(c, d)] = (b, a) d"));
+        assertEquals(1L, run("let [{a, b}] = {1, 2} let [{c, d}] = {b, a} d"));
     }
 
     // --- end-to-end: tuple param + match + tuple return ---
@@ -74,9 +74,9 @@ class TupleTest {
     @Test
     void swap_function_tupleParamAndReturn() throws Exception {
         String src = """
-                function swap(p:[(Int, Bool)]):[(Bool, Int)] ->
-                  match p { [(a, b)] -> (b, a) }
-                let [(x, y)] = swap((1, true)) y
+                function swap(p:[{Int, Bool}]):[{Bool, Int}] ->
+                  match p { [{a, b}] -> {b, a} }
+                let [{x, y}] = swap({1, true}) y
                 """;
         assertEquals(1L, run(src));
     }
@@ -85,7 +85,7 @@ class TupleTest {
 
     @Test
     void discard_inTuplePattern_bindsRemaining() throws Exception {
-        assertEquals(4L, run("let [(a, _, c)] = (1, 2, 3) a + c"));
+        assertEquals(4L, run("let [{a, _, c}] = {1, 2, 3} a + c"));
     }
 
     @Test
@@ -97,7 +97,7 @@ class TupleTest {
     void discardedSlot_isNotBound() throws Exception {
         // The discarded slot binds nothing — referencing `_` as a value fails.
         assertThrows(Exception.class,
-                () -> run("let [(a, _)] = (1, 2) a + _"));
+                () -> run("let [{a, _}] = {1, 2} a + _"));
     }
 
     // --- verdict B: positional patterns must be arity-total ---
@@ -106,7 +106,7 @@ class TupleTest {
     void partialTuplePattern_isRejected() {
         // [(a, b)] on a 3-tuple silently drops the third — lying by omission.
         assertThrows(ParseException.class,
-                () -> run("let [(a, b)] = (1, 2, 3) a"));
+                () -> run("let [{a, b}] = {1, 2, 3} a"));
     }
 
     @Test
@@ -122,8 +122,8 @@ class TupleTest {
 
     @Test
     void valueLevelPositionalAccess_reads() throws Exception {
-        assertEquals(1L, run("let p = (1, 2) p._0"));
-        assertEquals(2L, run("let p = (1, 2) p._1"));
+        assertEquals(1L, run("let p = {1, 2} p._0"));
+        assertEquals(2L, run("let p = {1, 2} p._1"));
     }
 
     // --- per-component refinement in a tuple sort (whole-tuple refinement is Slice 1.5) ---
@@ -131,14 +131,14 @@ class TupleTest {
     @Test
     void perComponentRefinedTupleSort_acceptsAndRejects() throws Exception {
         String accept = """
-                function f(p:[([Int:@>0], Bool)]):Int -> match p { [(a, b)] -> a }
-                f((3, true))
+                function f(p:[{[Int:@>0], Bool}]):Int -> match p { [{a, b}] -> a }
+                f({3, true})
                 """;
         assertEquals(3L, run(accept));
 
         String reject = """
-                function f(p:[([Int:@>0], Bool)]):Int -> match p { [(a, b)] -> a }
-                f((-1, true))
+                function f(p:[{[Int:@>0], Bool}]):Int -> match p { [{a, b}] -> a }
+                f({-1, true})
                 """;
         assertThrows(Exception.class, () -> run(reject));
     }
@@ -149,7 +149,7 @@ class TupleTest {
         // and a relationship is a named concept (a struct). Tuples carry only
         // independent per-component constraints. See parseTupleSortBody.
         assertThrows(ParseException.class,
-                () -> run("function f(p:[(Int, Int):@._0 > @._1]):Int -> 0\n0"));
+                () -> run("function f(p:[{Int, Int}:@._0 > @._1]):Int -> 0\n0"));
     }
 
     // --- paired per-component checking: each domain routes via the shared
@@ -161,14 +161,14 @@ class TupleTest {
     @Test
     void decimalComponentRefinement_acceptsAndRejects() throws Exception {
         String accept = """
-                function g(p:[([Decimal:@>0.0], Int)]):Int -> match p { [(a, b)] -> b }
-                g((0.5, 2))
+                function g(p:[{[Decimal:@>0.0], Int}]):Int -> match p { [{a, b}] -> b }
+                g({0.5, 2})
                 """;
         assertEquals(2L, run(accept));
 
         String reject = """
-                function g(p:[([Decimal:@>0.0], Int)]):Int -> match p { [(a, b)] -> b }
-                g((-0.5, 2))
+                function g(p:[{[Decimal:@>0.0], Int}]):Int -> match p { [{a, b}] -> b }
+                g({-0.5, 2})
                 """;
         assertThrows(Exception.class, () -> run(reject));
     }
@@ -182,6 +182,6 @@ class TupleTest {
         // gap is the aggregate-wide "make refinements bite" work (Slice 3), not
         // a tuple concern.
         assertEquals("{3, true}", String.valueOf(run(
-                "function mk():[([Int:@>0], Bool)] -> (3, true)\nmk()")));
+                "function mk():[{[Int:@>0], Bool}] -> {3, true}\nmk()")));
     }
 }

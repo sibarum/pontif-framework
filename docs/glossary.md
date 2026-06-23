@@ -21,20 +21,23 @@ never forgives. Motivated by `t * t.inv() == one` failing under exact equality
 with a 34-nines rounding artifact.
 
 **aggregate** — The single substrate behind structs, tuples, and dictionaries:
-an ordered `name → value` map (`RecordValue` / `IrSort.Structural`). Two
-orthogonal knobs distinguish the surface forms — **bracket = access face**
-(positional `( )` vs by-name `{ }`) and **type-name = nominal toggle**:
+an ordered `name → value` map (`RecordValue` / `IrSort.Structural`). Aggregate
+literals are written with **braces `{ }`** (the BRACE-AGGREGATES war, 2026-06-22 —
+`docs/brace-aggregates.md`); the `=` knob picks positional vs by-name, and the
+**type-name** is the nominal toggle:
 
-|            | positional `( )`   | by-name `{ }`        |
+|            | positional `{ }`   | by-name `{ }`        |
 | ---------- | ------------------ | -------------------- |
-| anonymous  | tuple `(1, 2)`     | dictionary `{a=1}`   |
-| named      | `Point(1, 2)`      | `Point{x=1}`         |
+| anonymous  | tuple `{1, 2}`     | dictionary `{a=1}`   |
+| named      | `Point{1, 2}`*     | `Point{x=1}`         |
 
 A named sort claims "this **is** a `Point`"; an anonymous sort claims only its
 shape. Tuples/dictionaries are the anonymous cells; structs are the same cells
 with the name (and behavior) turned on. Tuples are stored with positional keys
 `_0 .. _n` under the reserved `_tuple` sentinel (the positional sibling of the
-`_record` sentinel).
+`_record` sentinel). (*`Point(1, 2)` is the struct **constructor** — an
+application, parens — not an aggregate literal.) Parentheses `( )` are **never**
+an aggregate face: they are grouping / call arguments / parameter lists only.
 
 **back-reference** — In a receipt-graph, a recursive call points back to the
 same node rather than re-expanding. The no-duplicate-edges rule turns
@@ -265,8 +268,9 @@ narrowly enough to use safely. Function references don't exist in Pontif —
 set; invocation is application (`ref(2)`, per the bracket/paren law: `[]`
 for types, `()` for values) and reruns runtime dispatch, narrowings intact —
 it resolves exactly how `inc(2)` resolves. The `$` sigil marks a NAME —
-quoted, not evaluated — the third element of the notation law (`[]` types,
-`()` values, `$` names); the general production is the $fqn literal
+quoted, not evaluated — the fourth element of the notation law (`[]` types,
+`{}` aggregates, `()` grouping/application, `$` names — amended by the
+BRACE-AGGREGATES war); the general production is the $fqn literal
 (`$com.ns.fn[Int]` parses unambiguously), with bare `$Type` reserved for the
 type-reference slice. `[Dispatch(...)]` and `[Method(...)]`
 mirror the two dispatch mechanisms and never cross-assign: a Method is one
@@ -397,10 +401,12 @@ collapse into ordinary mechanism-2 receiver-sort resolution under **dispatch
 unification**, Phase 3.) See
 `docs/traits.md` for the full design.
 
-**tuple** — The anonymous positional **aggregate**: value `(1, true)`, sort
-`[(Int, Bool)]`, destructure `[(a, b)]` / `[(a, _, c)]`. A struct with the type
-name (and behavior) turned off; stored with positional keys `_0 .. _n` under the
-`_tuple` sentinel, so it rides the record substrate with no dedicated node.
+**tuple** — The anonymous positional **aggregate**: value `{1, true}`, sort
+`[{Int, Bool}]`, destructure `[{a, b}]` / `[{a, _, c}]` (braces, per the
+BRACE-AGGREGATES war). A struct with the type name (and behavior) turned off;
+stored with positional keys `_0 .. _n` under the `_tuple` sentinel, so it rides
+the record substrate with no dedicated node. `{}` is the empty tuple, `{x}` a
+singleton, `{{a, b}}` a one-element tuple holding the pair.
 Components are **destructure-only** — there is no value-level `t._0` (only `@._0`
 inside a sort refinement). Arity ≥ 2. Positional patterns obey **positional
 totality**. A tuple carries only *independent* per-component constraints

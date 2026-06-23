@@ -18,7 +18,7 @@ class StreamTraitTest {
     void streamTrait_importable_andLiteralTypes() {
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream}
-                let s:Stream[Int] = (1,2,3,4)
+                let s:Stream[Int] = {1,2,3,4}
                 0""", "s.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "import + matching Stream literal should compile; got " + r);
@@ -29,7 +29,7 @@ class StreamTraitTest {
         // 1,2,3 are Int, not Bool — the autobox element gate must reject.
         CompileResult r = compiler.compileAlt("""
                 requires pontif.core.{Stream}
-                let s:Stream[Bool] = (1,2,3)
+                let s:Stream[Bool] = {1,2,3}
                 0""", "s.ptf");
         assertInstanceOf(CompileResult.Failed.class, r,
                 () -> "a Bool stream can't box Int elements; got " + r);
