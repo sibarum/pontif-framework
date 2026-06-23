@@ -5277,21 +5277,37 @@ public final class AltParser {
                 yield inner;
             }
             case LBRACE -> {
-                // Dictionary literal `{a = 1, b = 2}` vs block `{ EXPR }`: an
-                // `IDENT =` head can't start a block expression (`=` isn't an
-                // expression operator), so one token of lookahead disambiguates.
+                // Dictionary literal `{a = 1, b = 2}` vs positional aggregate
+                // `{e0, e1, …}` vs block `{ EXPR }`: an `IDENT =` head can't start
+                // a block or positional aggregate (`=` isn't an expression
+                // operator), so one token of lookahead picks the dict.
                 if (peek(1).kind() == AltToken.Kind.IDENT
                         && peek(2).kind() == AltToken.Kind.EQUALS) {
                     yield parseDictLiteral();
                 }
+                // BRACE-AGGREGATES WAR (docs/brace-aggregates.md): braces are the
+                // aggregate delimiter; parens are reserved for grouping / calls /
+                // param lists. A comma-bearing brace body is a positional aggregate
+                // `{e0, e1, …}` — the brace-delimited sibling of the paren tuple,
+                // lowering to the SAME `_tuple` Record (no new IR node, identical
+                // downstream). Arity >= 2 here; the singleton `{x}` and empty `{}`
+                // collide with the block form below and land with its retirement
+                // (slice 2). Mirrors the LPAREN tuple branch exactly.
+                AltToken open = consume();
+                IrExpr inner = parseExpr();
+                if (peek().kind() == AltToken.Kind.COMMA) {
+                    List<IrExpr> elems = new ArrayList<>();
+                    elems.add(inner);
+                    while (peek().kind() == AltToken.Kind.COMMA) {
+                        consume();
+                        elems.add(parseExpr());
+                    }
+                    expect(AltToken.Kind.RBRACE);
+                    yield buildTupleLiteral(elems, open.origin());
+                }
                 // Block expression: `{ EXPR }`. A pure delimiter — the block
                 // evaluates to its inner expression with no new semantics.
-                // Useful for giving multi-let chains an explicit closing
-                // boundary so greedy Pratt parsing of `let X = value BODY`
-                // terminates at the `}` instead of wandering into whatever
-                // follows in the enclosing context.
-                consume();
-                IrExpr inner = parseExpr();
+                // (WAR slice 2 retires this so `{x}` can be a 1-element aggregate.)
                 expect(AltToken.Kind.RBRACE);
                 yield inner;
             }
