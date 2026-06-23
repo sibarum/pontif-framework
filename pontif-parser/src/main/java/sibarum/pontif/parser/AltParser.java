@@ -2232,7 +2232,7 @@ public final class AltParser {
         // tuple body after a `[`, so accept the bare form here for parity. The
         // body grammar (type elements vs positional binders) is governed by
         // parsingTuplePattern, exactly as in the bracketed path.
-        if (t.kind() == AltToken.Kind.LPAREN) {
+        if (t.kind() == AltToken.Kind.LPAREN || t.kind() == AltToken.Kind.LBRACE) {
             return parseTupleSortBody(t);
         }
         if (t.kind() == AltToken.Kind.LBRACKET) {
@@ -2598,11 +2598,11 @@ public final class AltParser {
         AltToken open = expect(AltToken.Kind.LBRACKET);
         AltToken first = peek();
 
-        // Tuple sort: `[(S0, S1, ...)]` — an anonymous positional aggregate.
-        // A leading `(` here is unambiguous (the contextual `[pred]` form below
-        // never starts with `(`). Lowers onto the record substrate as a
-        // structural sort named "_tuple" with positional keys _0.._n.
-        if (first.kind() == AltToken.Kind.LPAREN) {
+        // Tuple sort: `[{S0, S1, ...}]` — an anonymous positional aggregate.
+        // A leading `{` (or `(` during migration) is unambiguous (the contextual
+        // `[pred]` form below never starts with either). Lowers onto the record
+        // substrate as a structural sort named "_tuple" with positional keys _0.._n.
+        if (first.kind() == AltToken.Kind.LPAREN || first.kind() == AltToken.Kind.LBRACE) {
             IrSort tuple = parseTupleSortBody(open);
             expect(AltToken.Kind.RBRACKET);
             return tuple;
@@ -2777,13 +2777,21 @@ public final class AltParser {
     }
 
     private IrSort parseTupleSortBody(AltToken open) throws ParseException {
-        expect(AltToken.Kind.LPAREN);
+        // BRACE-AGGREGATES WAR: a tuple sort/pattern is delimited by braces
+        // (`{Int, Int}`, `{a, b}`) — the paren form (`(Int, Int)`) is still
+        // accepted during migration. The delimiter is read from the actual open
+        // token (the `open` param is the enclosing `[` at the bracket-sort call
+        // site, so it can't be used here — peek() is the real `(`/`{`).
+        AltToken.Kind openKind = peek().kind();
+        AltToken.Kind closeKind = openKind == AltToken.Kind.LBRACE
+                ? AltToken.Kind.RBRACE : AltToken.Kind.RPAREN;
+        expect(openKind);
         Map<String, IrSort> members = new LinkedHashMap<>();
         java.util.Set<String> discards = new java.util.LinkedHashSet<>();
         Map<String, String> renames = new LinkedHashMap<>();
         int index = 0;
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RPAREN) {
+        while (peek().kind() != closeKind) {
             if (!first) expect(AltToken.Kind.COMMA);
             String key = "_" + index;
             if (parsingTuplePattern) {
@@ -2844,8 +2852,8 @@ public final class AltParser {
                     // [Int:@>0]) — occupies the slot, binds nothing.
                     members.put(key, parseSort());
                     discards.add(key);
-                } else if (t.kind() == AltToken.Kind.LPAREN) {
-                    // A nested tuple ([((a, b), c)]) — binds its components via
+                } else if (t.kind() == AltToken.Kind.LPAREN || t.kind() == AltToken.Kind.LBRACE) {
+                    // A nested tuple ([{{a, b}, c}]) — binds its components via
                     // the recursive destructure desugar; NOT a discard.
                     members.put(key, parseTupleSortBody(t));
                 } else {
@@ -2857,9 +2865,9 @@ public final class AltParser {
                         renames.put(key, binder.text());
                     }
                 }
-            } else if (peek().kind() == AltToken.Kind.LPAREN) {
-                // A nested tuple TYPE ([((Int, Int), Int)]) — parseSort can't
-                // start at '(', so recurse here (parity with the pattern path).
+            } else if (peek().kind() == AltToken.Kind.LPAREN || peek().kind() == AltToken.Kind.LBRACE) {
+                // A nested tuple TYPE ([{{Int, Int}, Int}]) — parseSort routes a
+                // leading '('/'{' here too, but recurse directly for parity.
                 members.put(key, parseTupleSortBody(peek()));
             } else {
                 members.put(key, parseSort());        // type position: a real sort
@@ -2867,7 +2875,7 @@ public final class AltParser {
             index++;
             first = false;
         }
-        expect(AltToken.Kind.RPAREN);
+        expect(closeKind);
         if (peek().kind() == AltToken.Kind.COLON) {
             // A tuple takes no whole-aggregate predicate — by design, not by
             // omission. An independent per-component constraint belongs in

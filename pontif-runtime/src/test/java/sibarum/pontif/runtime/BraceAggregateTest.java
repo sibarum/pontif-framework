@@ -80,4 +80,42 @@ class BraceAggregateTest {
         // S2: the grouping / let-chain block role lives in parens.
         assertEquals("6", run("module m\n( let y = 5  y + 1 )"));
     }
+
+    // --- S3: tuple SORTS and destructure/match PATTERNS in braces -----------
+
+    @Test
+    void tupleSort_paramAndReturn() {
+        assertEquals("(true, 3)", run(
+                "module m\nfunction swap(p:[{Int, Bool}]):[{Bool, Int}] ->\n"
+                        + "  let [{i, b}] = p\n  {b, i}\nswap({3, true})"));
+    }
+
+    @Test
+    void bareTupleSort_param() {
+        assertEquals("8", run(
+                "module m\nfunction f(p:{Int, Int}):Int -> let [{a, b}] = p  a + b\nf({3, 5})"));
+    }
+
+    @Test
+    void destructure_bracePattern() {
+        assertEquals("3", run("module m\nlet [{a, b}] = {1, 2}\na + b"));
+    }
+
+    @Test
+    void nestedTupleSort_andPattern() {
+        assertEquals("6", run(
+                "module m\nfunction g(p:[{{Int, Int}, Int}]):Int -> let [{{a, b}, c}] = p  a + b + c\n"
+                        + "g({{1, 2}, 3})"));
+    }
+
+    @Test
+    void match_bracePattern() {
+        assertEquals("3", run("module m\nlet t = {1, 2}\nmatch t\n  [{a, b}] -> a + b"));
+    }
+
+    @Test
+    void parenSort_stillWorks_additive() {
+        assertEquals("8", run(
+                "module m\nfunction f(p:[(Int, Int)]):Int -> let [(a, b)] = p  a + b\nf((3, 5))"));
+    }
 }

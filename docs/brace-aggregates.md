@@ -72,9 +72,13 @@ non-brace mechanism.
    `LetClaimGateTest`, the ternion examples in `ApproxEqualityTest`/`DecimalPromotionTest`).
    `match this { … }` is the match parser's own braces — untouched. Empty/1-ary `_tuple`
    Records work downstream unchanged (no arity≥2 assumption). Full reactor green.
-3. **Tuple sort + pattern braces.** `[{Int, Int}]` sorts and `{a, b}` destructure/match
-   patterns. Parameterize `parseTupleSortBody` over the delimiter (LPAREN/RPAREN →
-   accept LBRACE/RBRACE); touches the nested-tuple recursive call sites. Additive.
+3. **Tuple sort + pattern braces — LANDED.** `[{Int, Int}]` sorts, bare `{Int, Int}` param
+   sorts, `{a, b}` destructure/match patterns, and nesting `[{{Int, Int}, Int}]` all parse.
+   `parseTupleSortBody` reads its delimiter from `peek()` (LBRACE→RBRACE else LPAREN→RPAREN),
+   so the same body grammar serves both; the two nested-tuple recursion checks accept `{`
+   too; `parseSort`/`parseBracketSort` trigger on a leading `{`. `parsePattern` routes through
+   `parseSort`, so patterns came along free. Paren forms still parse (additive). Full reactor
+   green.
 4. **Mass migration.** Convert `.ptf` examples, alt-syntax test strings, probe resources,
    and `docs/alternative-syntax.ptf` from parens to braces. The probe harness + suite is the
    regression meter. (Heaviest: `TupleTest`, `NestedDestructureTest`, `ConservationGateTest`,
