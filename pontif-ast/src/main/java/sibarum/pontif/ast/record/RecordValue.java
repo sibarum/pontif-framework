@@ -68,12 +68,13 @@ public final class RecordValue {
     @Override
     public String toString() {
         // Tuples (the "_tuple" sentinel) are anonymous positional aggregates —
-        // render `(1, true)` from their _0.._n members rather than
-        // `_tuple{_0: 1, _1: true}`.
+        // render `{1, true}` from their _0.._n members rather than
+        // `_tuple{_0: 1, _1: true}`. BRACE-AGGREGATES WAR: aggregates print in
+        // braces (positional `{1, true}`, named `{a: 1}`); parens are grouping.
         boolean tuple = "_tuple".equals(typeName);
         StringBuilder sb = new StringBuilder();
         if (typeName != null && !tuple) sb.append(typeName);
-        sb.append(tuple ? "(" : "{");
+        sb.append("{");
         boolean first = true;
         for (Map.Entry<String, Object> e : members.entrySet()) {
             if (!first) sb.append(", ");
@@ -88,6 +89,6 @@ public final class RecordValue {
             }
             first = false;
         }
-        return sb.append(tuple ? ")" : "}").toString();
+        return sb.append("}").toString();
     }
 }

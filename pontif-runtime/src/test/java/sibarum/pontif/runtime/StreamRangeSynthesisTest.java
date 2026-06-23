@@ -46,25 +46,25 @@ class StreamRangeSynthesisTest {
     @Test
     void ascending_halfOpen() {
         // `0 <= @ < 10` — lower bound written first ⇒ ascending; upper exclusive.
-        assertEquals("(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)", synth("Stream[Int:0 <= @ < 10]"));
+        assertEquals("{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}", synth("Stream[Int:0 <= @ < 10]"));
     }
 
     @Test
     void descending_halfOpen() {
         // `10 > @ >= 0` — upper bound written first ⇒ descending. The direction
         // is read from the comparison chain, not hard-wired.
-        assertEquals("(9, 8, 7, 6, 5, 4, 3, 2, 1, 0)", synth("Stream[Int:10 > @ >= 0]"));
+        assertEquals("{9, 8, 7, 6, 5, 4, 3, 2, 1, 0}", synth("Stream[Int:10 > @ >= 0]"));
     }
 
     @Test
     void inclusiveUpper() {
-        assertEquals("(1, 2, 3, 4, 5)", synth("Stream[Int:1 <= @ <= 5]"));
+        assertEquals("{1, 2, 3, 4, 5}", synth("Stream[Int:1 <= @ <= 5]"));
     }
 
     @Test
     void conjunctionForm_equalsChain() {
         // The non-chained spelling `@>=0 & @<5` is the same interval as `0<=@<5`.
-        assertEquals("(0, 1, 2, 3, 4)", synth("Stream[Int:@>=0 & @<5]"));
+        assertEquals("{0, 1, 2, 3, 4}", synth("Stream[Int:@>=0 & @<5]"));
     }
 
     // --- edges -------------------------------------------------------------
@@ -73,12 +73,12 @@ class StreamRangeSynthesisTest {
     void emptyRange_sealsEmpty() {
         // No element satisfies `5 <= @ < 5` — the stream seals empty, no
         // fabrication (the empty tuple).
-        assertEquals("()", synth("Stream[Int:5 <= @ < 5]"));
+        assertEquals("{}", synth("Stream[Int:5 <= @ < 5]"));
     }
 
     @Test
     void singleton() {
-        assertEquals("(3)", synth("Stream[Int:3 <= @ <= 3]"));
+        assertEquals("{3}", synth("Stream[Int:3 <= @ <= 3]"));
     }
 
     @Test
@@ -92,30 +92,30 @@ class StreamRangeSynthesisTest {
 
     @Test
     void filter_inequality() {
-        assertEquals("(0, 1, 2, 3, 4, 6, 7, 8, 9)", synth("Stream[Int:0 <= @ < 10 & @ != 5]"));
+        assertEquals("{0, 1, 2, 3, 4, 6, 7, 8, 9}", synth("Stream[Int:0 <= @ < 10 & @ != 5]"));
     }
 
     @Test
     void filter_multipleExclusions() {
-        assertEquals("(0, 1, 2, 4, 5, 6, 8, 9)",
+        assertEquals("{0, 1, 2, 4, 5, 6, 8, 9}",
                 synth("Stream[Int:0 <= @ < 10 & @ != 3 & @ != 7]"));
     }
 
     @Test
     void filter_disjunction() {
-        assertEquals("(2, 8)", synth("Stream[Int:0 <= @ < 10 & (@ == 2 | @ == 8)]"));
+        assertEquals("{2, 8}", synth("Stream[Int:0 <= @ < 10 & (@ == 2 | @ == 8)]"));
     }
 
     @Test
     void filter_linearArithmetic() {
-        assertEquals("(0, 1, 2, 3)", synth("Stream[Int:0 <= @ < 10 & @ * 2 < 8]"));
+        assertEquals("{0, 1, 2, 3}", synth("Stream[Int:0 <= @ < 10 & @ * 2 < 8]"));
     }
 
     @Test
     void extraOrderComparison_foldsIntoBound() {
         // `@ > 2` is recognized as a bound and tightens the interval (lo→3),
         // rather than running as a per-element filter.
-        assertEquals("(3, 4, 5, 6, 7, 8, 9)", synth("Stream[Int:0 <= @ < 10 & @ > 2]"));
+        assertEquals("{3, 4, 5, 6, 7, 8, 9}", synth("Stream[Int:0 <= @ < 10 & @ > 2]"));
     }
 
     // --- the chained-comparison desugaring this slice also fixes ----------

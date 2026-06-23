@@ -36,7 +36,7 @@ class NestedFragmentTest {
 
     @Test void nestedFragmentLet_spreadMap() throws Exception {
         // James's map shape: a named fragment defined in the body, spread over a stream.
-        assertEquals("(2, 4, 6)", String.valueOf(run("""
+        assertEquals("{2, 4, 6}", String.valueOf(run("""
                 function dbl(s:Stream[Int]):[Stream[Int]] ->
                   let m:[ (el:Int) -> el * 2 ]
                   m(&s)

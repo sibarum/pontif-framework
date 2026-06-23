@@ -34,7 +34,7 @@ class TupleTest {
 
     @Test
     void tupleLiteral_roundtripsAsPositionalRecord() throws Exception {
-        Object r = run("(1, true)");
+        Object r = run("{1, true}");
         RecordValue rv = assertInstanceOf(RecordValue.class, r);
         assertEquals("_tuple", rv.typeName());
         assertEquals(1L, rv.members().get("_0"));
@@ -43,12 +43,12 @@ class TupleTest {
 
     @Test
     void tupleLiteral_displaysPositionally() throws Exception {
-        assertEquals("(1, true)", String.valueOf(run("(1, true)")));
+        assertEquals("{1, true}", String.valueOf(run("{1, true}")));
     }
 
     @Test
     void tupleLiteral_arityThree() throws Exception {
-        assertEquals("(1, 2, 3)", String.valueOf(run("(1, 2, 3)")));
+        assertEquals("{1, 2, 3}", String.valueOf(run("{1, 2, 3}")));
     }
 
     @Test
@@ -181,7 +181,7 @@ class TupleTest {
         // pins the parity so tuples aren't "fixed" in isolation — closing this
         // gap is the aggregate-wide "make refinements bite" work (Slice 3), not
         // a tuple concern.
-        assertEquals("(3, true)", String.valueOf(run(
+        assertEquals("{3, true}", String.valueOf(run(
                 "function mk():[([Int:@>0], Bool)] -> (3, true)\nmk()")));
     }
 }

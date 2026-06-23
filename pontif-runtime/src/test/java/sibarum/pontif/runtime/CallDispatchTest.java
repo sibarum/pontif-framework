@@ -40,7 +40,7 @@ class CallDispatchTest {
 
     @Test void concreteMap_runsEndToEnd() {
         // The payoff: a stream-mapping function called with a tuple literal + a metaref.
-        assertEquals("(2, 4, 6)", String.valueOf(run("""
+        assertEquals("{2, 4, 6}", String.valueOf(run("""
                 requires pontif.core.{Stream}
                 function double(x:Int):Int -> x * 2
                 function map(s:Stream[Int], d:[Dispatch(Int):Int]):Stream[Int] ->

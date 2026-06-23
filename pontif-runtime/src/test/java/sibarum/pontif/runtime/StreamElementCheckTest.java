@@ -30,7 +30,7 @@ class StreamElementCheckTest {
                 let double:[ (el:Int) -> el * 2 ]
                 let z:Stream[Int] = double(&s)
                 z""", "m.ptf"));
-        assertEquals("(2, 4, 6, 8)", String.valueOf(val));
+        assertEquals("{2, 4, 6, 8}", String.valueOf(val));
     }
 
     @Test void computedStream_wrongElementType_isRejected() {

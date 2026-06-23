@@ -35,7 +35,7 @@ class StreamMapTest {
     @Test
     void spreadOverTuple_mapsPerElement() throws Exception {
         // double(&s) maps the function over every element, sealing to a new stream.
-        assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
+        assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 function double(x:Int):Int -> x * 2
                 let s = (1, 2, 3, 4)
                 double(&s)""")));
@@ -71,14 +71,14 @@ class StreamMapTest {
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "a lossy filter should compile; got " + r);
         Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
-        assertEquals("(3, 4)", String.valueOf(val));
+        assertEquals("{3, 4}", String.valueOf(val));
     }
 
     @Test
     void multipleSpreads_zip() throws Exception {
         // Two `&` args zip element-wise (slice 2d-3) — works on any function, not
         // just fragments: add(&s, &t) is vector-add.
-        assertEquals("(5, 7, 9)", String.valueOf(run("""
+        assertEquals("{5, 7, 9}", String.valueOf(run("""
                 function add(a:Int, b:Int):Int -> a + b
                 let s = (1, 2, 3)
                 let t = (4, 5, 6)

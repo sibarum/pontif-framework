@@ -24,7 +24,7 @@ class BraceAggregateTest {
 
     @Test
     void bracePositionalTuple_builds() {
-        assertEquals("(1, 2, 3)", run("module m\n{1, 2, 3}"));
+        assertEquals("{1, 2, 3}", run("module m\n{1, 2, 3}"));
     }
 
     @Test
@@ -35,19 +35,19 @@ class BraceAggregateTest {
 
     @Test
     void braceTuple_autoboxesToStream() {
-        assertEquals("(1, 2, 3, 4)",
+        assertEquals("{1, 2, 3, 4}",
                 run("module m\nrequires pontif.core.{Stream}\nlet s:Stream[Int] = {1, 2, 3, 4}\ns"));
     }
 
     @Test
     void braceTuple_concatenates() {
-        assertEquals("(1, 2, 3, 4)",
+        assertEquals("{1, 2, 3, 4}",
                 run("module m\nrequires pontif.core.{Stream}\n{1, 2} + {3, 4}"));
     }
 
     @Test
     void parenTuple_stillWorks_additive() {
-        assertEquals("(1, 2, 3)", run("module m\n(1, 2, 3)"));
+        assertEquals("{1, 2, 3}", run("module m\n(1, 2, 3)"));
     }
 
     @Test
@@ -58,21 +58,21 @@ class BraceAggregateTest {
     @Test
     void singleton_isOneElementAggregate() {
         // S2: `{x}` is a 1-element aggregate (the block role moved to parens).
-        assertEquals("(5)", run("module m\n{5}"));
+        assertEquals("{5}", run("module m\n{5}"));
         assertEquals("5", run("module m\nlet t = {5}\nt._0"));
     }
 
     @Test
     void empty_isEmptyAggregate() {
         // S2: `{}` is the empty aggregate — autoboxes to an empty Stream.
-        assertEquals("()", run("module m\nrequires pontif.core.{Stream}\nlet e:Stream[Int] = {}\ne"));
+        assertEquals("{}", run("module m\nrequires pontif.core.{Stream}\nlet e:Stream[Int] = {}\ne"));
     }
 
     @Test
     void nestedSingleton_wrapsAComposite() {
         // The case bare parens can't spell: `{{4,5}}` is ONE element that is the
         // aggregate {4,5} — no grouping collapse, no trailing comma.
-        assertEquals("((4, 5))", run("module m\n{{4, 5}}"));
+        assertEquals("{{4, 5}}", run("module m\n{{4, 5}}"));
     }
 
     @Test
@@ -85,7 +85,7 @@ class BraceAggregateTest {
 
     @Test
     void tupleSort_paramAndReturn() {
-        assertEquals("(true, 3)", run(
+        assertEquals("{true, 3}", run(
                 "module m\nfunction swap(p:[{Int, Bool}]):[{Bool, Int}] ->\n"
                         + "  let [{i, b}] = p\n  {b, i}\nswap({3, true})"));
     }

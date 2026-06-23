@@ -46,7 +46,7 @@ class StreamGeneratorTest {
     void count_emitsRangeUntilDomainRefinementFails() throws Exception {
         // The canonical §7.9 generator: `to:[Int:@>=from]` is the base case — the
         // unfold halts when `from` overruns `to`. count(0,5) emits 0..5 then stops.
-        assertEquals("(0, 1, 2, 3, 4, 5)", String.valueOf(run("""
+        assertEquals("{0, 1, 2, 3, 4, 5}", String.valueOf(run("""
                 let count:[
                   (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
                   (from, from+1, to)
@@ -70,7 +70,7 @@ class StreamGeneratorTest {
     void count_emptyWhenGuardFailsImmediately() throws Exception {
         // If the seed state already violates the domain refinement, zero steps run —
         // the stream channel seals empty (no loss, no fabrication).
-        assertEquals("()", String.valueOf(run("""
+        assertEquals("{}", String.valueOf(run("""
                 let count:[
                   (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
                   (from, from+1, to)
@@ -94,7 +94,7 @@ class StreamGeneratorTest {
                   (from, from+1, to)
                 ]
                 count(0, 10)._0""");
-        assertEquals("(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)", String.valueOf(val));
+        assertEquals("{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}", String.valueOf(val));
     }
 
     @Test
@@ -102,7 +102,7 @@ class StreamGeneratorTest {
         // A descending generator: the guard `from:[Int:@>=0]` is the base case, so it
         // halts when `from` would go negative. Proves the driver isn't hard-wired to
         // increment — any state transition halting on a refinement works.
-        assertEquals("(5, 4, 3, 2, 1, 0)", String.valueOf(run("""
+        assertEquals("{5, 4, 3, 2, 1, 0}", String.valueOf(run("""
                 let countDown:[
                   (from:[Int:@>=0]):(Stream[Int], Int) ->
                   (from, from - 1)

@@ -43,7 +43,7 @@ class StreamFragmentTest {
     @Test
     void fragment_spreadIsMap() throws Exception {
         // `&` spreads the fragment over a stream — map, no ceremony.
-        assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
+        assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 let double:[ (el:Int) -> el * 2 ]
                 let s = (1, 2, 3, 4)
                 double(&s)""")));
@@ -53,7 +53,7 @@ class StreamFragmentTest {
     void spreadAscription_inlineMap() throws Exception {
         // The inline/anonymous face: `&s:[ (el)-> … ]` ≡ applying the transform per
         // element. No name needed.
-        assertEquals("(2, 4, 6, 8)", String.valueOf(run("""
+        assertEquals("{2, 4, 6, 8}", String.valueOf(run("""
                 let s = (1, 2, 3, 4)
                 &s:[ (el:Int) -> el * 2 ]""")));
     }
@@ -74,7 +74,7 @@ class StreamFragmentTest {
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "the inline ascription filter should compile; got " + r);
         Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
-        assertEquals("(3, 4)", String.valueOf(val));
+        assertEquals("{3, 4}", String.valueOf(val));
     }
 
     @Test
@@ -99,7 +99,7 @@ class StreamFragmentTest {
     void scan_emitsRunningTotalAndThreads() throws Exception {
         // scan emits the running accumulator at the stream channel AND threads it:
         // the stream position is the running totals, the accumulator the final.
-        assertEquals("(1, 3, 6, 10)", String.valueOf(run("""
+        assertEquals("{1, 3, 6, 10}", String.valueOf(run("""
                 let scan:[ (el:Int, total:Int) -> (el + total, el + total) ]
                 let s = (1, 2, 3, 4)
                 let [(running, final)] = scan(&s, 0)
@@ -130,14 +130,14 @@ class StreamFragmentTest {
                 () -> "fork should compile; got " + r);
         Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
         // _0 collects the >2 elements, _1 the rest — no loss, no duplication.
-        assertEquals("((3, 4), (1, 2))", String.valueOf(val));
+        assertEquals("{{3, 4}, {1, 2}}", String.valueOf(val));
     }
 
     @Test
     void mapReturningTuple_isStreamOfTuples_notFork() throws Exception {
         // The dual: a tuple body with NO codomain is a plain map producing a stream
         // of pairs — proving the codomain is what selects fan-out.
-        assertEquals("((1, 2), (2, 4), (3, 6))", String.valueOf(run("""
+        assertEquals("{{1, 2}, {2, 4}, {3, 6}}", String.valueOf(run("""
                 let s = (1, 2, 3)
                 &s:[ (el:Int) -> (el, el * 2) ]""")));
     }
@@ -147,7 +147,7 @@ class StreamFragmentTest {
         // `&square(&s)` spreads over the result of another spread — operations
         // compose because a spread source is just an expression (here an Iterate).
         // s=(1,2,3); square→(1,4,9); zip(&s, &…)→(1+1, 2+4, 3+9).
-        assertEquals("(2, 6, 12)", String.valueOf(run("""
+        assertEquals("{2, 6, 12}", String.valueOf(run("""
                 let square:[ (item:Int):Stream[Int] -> item * item ]
                 let zip:[ (left:Int, right:Int):Stream[Int] -> left + right ]
                 let s = (1, 2, 3)
@@ -158,7 +158,7 @@ class StreamFragmentTest {
     void zip_walksTwoStreamsInLockstep() throws Exception {
         // (&a, &b) walks both in lockstep; the element binds to the pair, which the
         // fragment destructures into (x, y). Vector-add: x + y per position.
-        assertEquals("(11, 22, 33)", String.valueOf(run("""
+        assertEquals("{11, 22, 33}", String.valueOf(run("""
                 let a = (1, 2, 3)
                 let b = (10, 20, 30)
                 (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
@@ -167,7 +167,7 @@ class StreamFragmentTest {
     @Test
     void zip_callForm_namedFragment() throws Exception {
         // The named-reuse face: a bound zip fragment applied with two spreads.
-        assertEquals("(2, 4, 6)", String.valueOf(run("""
+        assertEquals("{2, 4, 6}", String.valueOf(run("""
                 let zip:[ (left:Int, right:Int) -> left + right ]
                 let s = (1, 2, 3)
                 zip(&s, &s)""")));
@@ -176,7 +176,7 @@ class StreamFragmentTest {
     @Test
     void zip_raggedStopsAtShortest() throws Exception {
         // Unequal lengths stop at the shortest stream (standard zip).
-        assertEquals("(11, 22)", String.valueOf(run("""
+        assertEquals("{11, 22}", String.valueOf(run("""
                 let a = (1, 2, 3, 4)
                 let b = (10, 20)
                 (&a, &b):[ (x:Int, y:Int) -> x + y ]""")));
@@ -200,6 +200,6 @@ class StreamFragmentTest {
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "the fragment filter should compile; got " + r);
         Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
-        assertEquals("(3, 4)", String.valueOf(val));
+        assertEquals("{3, 4}", String.valueOf(val));
     }
 }
