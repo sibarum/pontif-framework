@@ -329,6 +329,50 @@ forcing function).
 
 ## Boolean / predicates
 
+- **Finite-range filters (`@%2==0`) — LOW PRIORITY (consumer).** Finite generator
+  synthesis (`let evens:Stream[Int:0<=@<10 & @%2==0];`) parses and the synthesizer
+  *can* evaluate `%` filters at materialization time, but the refinement is rejected
+  earlier: `%`/`/`/`^` are rejected in **any** refinement predicate language-wide
+  (`IrCompiler.compileBinOp`, "the discharge kernel is linear"). So a filtered range
+  can't be written today. Range + direction (no filter) shipped on
+  `war/finite-range-synthesis`; filters deferred (James, 2026-06-22). The enabling
+  requirement is the next item.
+- **REQUIREMENT — full modular arithmetic in the proof/discharge system.** `%` (and
+  the divisibility it encodes) must become a first-class, sound citizen of the kernel,
+  not a rejected operator. Two layers, both required:
+  - **Constant modulus `@ % k` (k literal) — decidable, complete.** This is *not* a
+    nonlinear theory: it's the **divisibility-by-constant** extension Presburger
+    arithmetic already needs for quantifier-elimination closure (Cooper / the Omega
+    test manufacture these atoms during projection). Add **congruence atoms**
+    `x ≡ r (mod k)`; realize as **Granger's `aℤ+b` congruence domain** in a *reduced
+    product* with the existing interval engine (matches the AI shape of `BoundAnalysis`,
+    not a new SMT solver). New algebra is elementary number theory: **meet = CRT**
+    (`x≡r₁(mod k₁) ∧ x≡r₂(mod k₂)` solvable iff `r₁≡r₂ (mod gcd(k₁,k₂))`, modulus
+    `lcm`; failure of the gcd condition IS the disjointness/unsat proof), **join = gcd**,
+    **× interval** = "does the residue class hit `[lo,hi]`" (one ceil/floor check;
+    narrowing snaps endpoints to the nearest class member). Bridge from the `MOD` term:
+    pattern-recognize `MOD(x,k) ⋈ r` → congruence atom; general position introduces
+    `x = k·q + r ∧ 0 ≤ r < k` (k constant ⇒ stays linear).
+  - **Variable modulus `@ % n` (n a variable) — piecewise-linear case-split driver,
+    NOT a second theory.** Reduces to finitely many *constant*-modulus subgoals when the
+    partition is finite + polyhedral. Three handles: **(1)** divisor pinned to a finite
+    range (`n:[Int:1<=@<=4]`) → disjoin over each concrete `n`, each slice constant-modulus
+    (complete; cost = range cardinality, so a count cap must fail *honestly* to residual,
+    never silently truncate); **(2)** quotient bounded — esp. the cheap, high-value
+    `x < n ⟹ x%n == x` (`q=0`) slice, detectable straight from `BoundAnalysis` intervals,
+    probably the first thing to wire; **(3)** divisor-agnostic definitional facts
+    (`0 ≤ x%n < n`) provable with `n·q` left opaque, no split. **The no-lie fence:**
+    unbounded divisor AND unbounded quotient AND a divisibility goal = genuinely
+    nonlinear (Diophantine, undecidable) → stays `[!!]`, never discharged.
+  - **Placement:** integer-only (discreteness license — `Frac`/`Decimal` have no
+    congruences); routes through `IntegerDischarge`/`BoundAnalysis`, NOT the rational
+    `Sign` lattice. **Decide `%`'s sign convention first** (Euclidean `0≤r<k` vs C-style
+    truncated) — the congruence reasoning assumes a canonical residue in `[0,k)`, so the
+    lowering must agree on negatives or it's silently wrong. **Structural note:**
+    `x = k·q + r ∧ 0≤r<k` is a bijection `x ↔ (q,r)` — the division algorithm is
+    information-preserving (residue = lossy `ℤ→ℤ/kℤ` projection, quotient = conserved
+    complement), so the congruence domain may be the integer instance of the COTT
+    conservation split (`splitOn`) rather than a bolt-on. (Theory discussion 2026-06-22.)
 - **Short-circuit `&&`/`||`** — currently strict; critical once actions exist.
 - **No `Not` operator** — `[!=0]` works via `NE`, but real Boolean negation isn't expressible.
   Needs `SymExpr.Not` + a unary-op shape in IR (only `BinOp` exists).
