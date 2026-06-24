@@ -22,7 +22,7 @@ struct AddOp(left:Expr, right:Expr)
 
 assign trait AddOp:Expr{
   simplify():Expr -> match this {
-    [AddOp(l:IntLit, r:IntLit)] -> IntLit(l.value + r.value)
+    [AddOp(l, r)] -> IntLit(l.value + r.value)
     [_]                         -> this
   }
   evaluate():Expr -> this

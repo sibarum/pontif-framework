@@ -1,0 +1,24 @@
+struct OutOfRange(at:Int)
+
+trait Stream[type T]{
+  next:[Method():[T]]
+}
+
+let Indexed[type T]:Stream[T]{
+  count:[Int:@>=0],
+  at:[Method(i:Int):[T|OutOfRange(i)]]
+}
+
+struct Singleton[type T](member:T)
+
+assign trait Singleton:Stream[T] {
+  next():[T] -> this.member
+}
+
+assign trait Singleton:Indexed[T] {
+  count:Int -> 1,
+  at(i:Int):[T|OutOfRange(i)] -> match i {
+	    [Int:0] -> this.member
+    [_] -> OutOfRange(i)
+  }
+}

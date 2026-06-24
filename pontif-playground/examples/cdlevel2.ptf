@@ -8,6 +8,9 @@ struct TractionL2CD(n:TractionCD, d:TractionCD)
 function TractionL2CD.of(n:Decimal, d:Decimal):TractionL2CD ->
   TractionL2CD(TractionCD(Traction(n,0), Traction(1,0)), TractionCD(Traction(d,0), Traction(1,0)))
 
+function TractionL2CD.of(n1:Decimal, d1:Decimal, n2:Decimal, d2:Decimal):TractionL2CD ->
+  TractionL2CD(TractionCD(Traction(n1,0), Traction(d1,0)), TractionCD(Traction(n2,0), Traction(d2,0)))
+
 method TractionL2CD.toString():String ->
   "L2cd["+this.n.toString()+"/"+this.d.toString()+"]"
 
@@ -30,4 +33,4 @@ function -(
 )
 
 
-(TractionL2CD.of(5,12) + TractionL2CD.of(-2,5)).toString()
+(TractionL2CD.of(5,12,-5,-7) - TractionL2CD.of(-2,5,1,-5)).toString()

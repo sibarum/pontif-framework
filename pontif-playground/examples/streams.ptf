@@ -1,2 +1,51 @@
-let test:Stream[Int] = (1,2,3,4)
+module examples.stream
 
+requires pontif.core.{Stream, Nothing}
+
+let s:Stream[Int] = {1,2,3,4}
+
+let null:Nothing = Nothing()
+
+let x = {1,2,3}
+
+
+function map[type A, type R]( inputStream:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] ->
+  &inputStream:[ (elment:A) -> mapper(elment) ]
+
+function map[type A, type R]( inputStream:Stream[A], mapper:[Method(A):R] ):[Stream[R]] ->
+  &inputStream:[ (elment:A) -> mapper(elment) ]
+
+# function countUp(from:Int, to:Int):[(from+1) -> Stream[Int:@>=from&@<to]];
+
+# Simple ranges
+let specificRange:Stream[Int:0 <= @ < 10];
+let backwardsRange:Stream[Int:10 > @ >= 0];
+
+function plusOne(i:Int):Int -> i*2
+let evenNumbersRange = map[Int, Int](specificRange, $plusOne[Int])
+#let evenNumbersRange = Stream[Int:0<=@<10 & @%2==0];
+
+# Range defined by infinite recursion
+function fibonacci(stream:Stream[Int], previous:{Int,Int}):Stream[Int] ->
+  let [{pp,p}] = previous
+	  let next = pp+p
+  let nextStream = stream + {next}
+  fibonacci(nextStream, {p, next})
+
+#let fibonacciStream = Stream[fibonacci(@, (1,1))];
+
+
+#let countUp:[(from:Int, to:Int):Stream[Int:from <= @ < to]];
+#let specificRange2 = countUp(0,10)
+
+#function countDown(from:Int, to:[Int:@<=from]):(Stream[Int], Int, Int) ->
+#  (from, from-1, to)
+  
+
+
+struct IntegerRatio(numerator:Int, denominator:Int)
+
+struct Note(fundamental:Decimal, ratio:IntgerRatio)
+
+function generateHarmonics(fundamental:Decimal, denominator:Int):Note ->
+  Note(fundamental, IntegerRatio(1, denominator))
