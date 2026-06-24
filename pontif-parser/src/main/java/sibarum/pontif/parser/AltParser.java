@@ -1551,14 +1551,17 @@ public final class AltParser {
             // the body is synthesized verbatim from the pin (`let
             // zero:[Decimal:@==0.0];` means zero = 0.0; the claim wrapper below
             // still notarizes the synthesis at force).
-            value = pinnedWitness(declaredSort);
-            // Finite generator synthesis (docs/stream-war.md §7): a
-            // `Stream[Int:LO <= @ < HI]` sort materializes its bounded discrete
-            // range — the membership refinement IS the definition.
-            if (value == null) value = synthesizeFiniteRange(declaredSort, start.origin());
+            value = syntacticPin(declaredSort);
+            // Everything else is the prover's job: a value-pinning or finite-range
+            // refinement is synthesized by ENUMERATING its integer extension and
+            // filtering each candidate through the same membership engine that
+            // guards parameters (see synthesizeFromSort / SynthesisBridge / the
+            // prover's Synthesis). `Stream[Int:P]` → the whole extension; a scalar
+            // `[Int:P]` → its unique witness.
+            if (value == null) value = synthesizeFromSort(declaredSort, start.origin());
             if (value == null) {
-                // `;` given, but the sort pins no unique witness
-                // (e.g. [Int:@>0]) — honest error, not a silent NoOp.
+                // `;` given, but the sort pins no synthesizable value
+                // (e.g. [Int:@>0], unbounded) — honest error, not a silent NoOp.
                 throw new ParseException(
                         "let '" + name + "': declared sort " + declaredSort
                                 + " does not pin a synthesizable value — `;` needs a "
@@ -1679,47 +1682,44 @@ public final class AltParser {
      * witness against the full predicate (compile-time FITS or a notarized
      * runtime check), so a wrong witness can never bind silently.
      */
-    private IrExpr pinnedWitness(IrSort sort) {
+    private IrExpr syntacticPin(IrSort sort) {
         if (!(sort instanceof IrSort.Refined r)) return null;
+        // The one purely-syntactic pin: `@ == EXPR` reads its witness straight off
+        // the predicate (the RHS expression IS the value — no proving involved, so
+        // it legitimately stays here). Any base; EXPR must be closed over `@`.
         if (r.predicate() instanceof IrExpr.BinOp op
                 && op.op() == IrExpr.Op.EQ
                 && op.left() instanceof IrExpr.SelfRef
                 && !containsSelfRef(op.right())) {
             return op.right();
         }
-        if ("Int".equals(r.name())) {
-            try {
-                sibarum.pontif.core.symbolic.SymExpr pred =
-                        sibarum.pontif.ir.IrCompiler.compileSymExpr(
-                                substituteSelfWithVar(r.predicate(), "@spec"));
-                sibarum.pontif.predicates.Interval range =
-                        sibarum.pontif.predicates.BoundAnalysis.bound(
-                                sibarum.pontif.core.symbolic.SymExpr.var("@spec"),
-                                List.of(pred));
-                if (!range.isEmpty()
-                        && range.lo() == range.hi()
-                        && range.lo() != sibarum.pontif.predicates.Interval.NEG_INF
-                        && range.lo() != sibarum.pontif.predicates.Interval.POS_INF) {
-                    return new IrExpr.Lit(range.lo(), r.origin());
-                }
-            } catch (sibarum.pontif.ir.CompileException outsideFragment) {
-                // predicate outside the symbolic fragment — no witness derivable
-            }
-        }
         return null;
     }
 
-    /** {@code @} → a named var, so the bound engine sees an ordinary subject. */
-    private static IrExpr substituteSelfWithVar(IrExpr e, String varName) {
-        return switch (e) {
-            case IrExpr.SelfRef s -> new IrExpr.Var(varName, s.origin());
-            case IrExpr.BinOp op -> new IrExpr.BinOp(
-                    op.op(),
-                    substituteSelfWithVar(op.left(), varName),
-                    substituteSelfWithVar(op.right(), varName),
-                    op.origin());
-            default -> e;  // predicates are comparison trees; leaves pass through
-        };
+    /**
+     * Value synthesis delegated to the prover ({@link sibarum.pontif.ir.SynthesisBridge}
+     * → {@code Synthesis}): the refinement's integer extension, enumerated and filtered
+     * by the SAME membership engine a parameter guard runs. For a {@code Stream[Int:P]}
+     * sort the whole extension is the value (a tuple → autoboxed to a stream); for a
+     * scalar {@code [Int:P]} a UNIQUE survivor is the pinned witness. Returns null when
+     * nothing finite is pinned (the caller raises the honest not-synthesizable error).
+     * No synthesis logic lives here — only the integers-to-IR plumbing.
+     */
+    private IrExpr synthesizeFromSort(IrSort sort, Origin origin) {
+        IrSort elem = streamElementSort(sort);
+        boolean stream = elem != null;
+        IrSort refinement = stream ? elem : sort;
+        java.util.Optional<java.util.List<Long>> extension =
+                sibarum.pontif.ir.SynthesisBridge.enumerateInt(refinement);
+        if (extension.isEmpty()) return null;
+        java.util.List<Long> values = extension.get();
+        if (stream) {
+            List<IrExpr> elems = new ArrayList<>(values.size());
+            for (long v : values) elems.add(new IrExpr.Lit(v, origin));
+            return buildTupleLiteral(elems, origin);
+        }
+        // A scalar refinement pins a value only when exactly one integer satisfies it.
+        return values.size() == 1 ? new IrExpr.Lit(values.get(0), origin) : null;
     }
 
     /**
@@ -2667,14 +2667,18 @@ public final class AltParser {
         // Optional parametric application on the base — `Literal[Int]` inside a
         // bracket sort (docs/type-parameters.md §2.3): an is-a base
         // `[Literal[Int]]` (bare) or `[Literal[Int]:@.value==value]` (with the
-        // demotion morphism). The args are sorts.
+        // demotion morphism). The args are sorts, parsed with `parseTypeArg` so
+        // the bare-refined shorthand (`Stream[Int:0<=@<10]`) composes here too —
+        // matching the top-level parametric path (parseSort, `Name[arg, …]`).
+        // Without it, a refined Stream type-arg only parsed at the top level, so
+        // wrapping it in any bracket sort (`[Stream[Int:pred]|Nothing]`) failed.
         List<IrSort> typeArgs = new ArrayList<>();
         if (peek().kind() == AltToken.Kind.LBRACKET) {
             expect(AltToken.Kind.LBRACKET);
             boolean firstArg = true;
             while (peek().kind() != AltToken.Kind.RBRACKET) {
                 if (!firstArg) expect(AltToken.Kind.COMMA);
-                typeArgs.add(parseSort());
+                typeArgs.add(parseTypeArg());
                 firstArg = false;
             }
             expect(AltToken.Kind.RBRACKET);
@@ -5040,50 +5044,6 @@ public final class AltParser {
         return new IrExpr.Record(TUPLE_SENTINEL, members, origin);
     }
 
-    // --- Finite generator synthesis (docs/stream-war.md §7) ---------------
-    // A `Stream[Int:LO <= @ < HI]` sort, requested with the `;` directive,
-    // materializes its bounded discrete range. The element refinement's order
-    // bounds give a contiguous integer interval [lo, hi]; the traversal
-    // direction is read from which bound is written FIRST (the chain reading,
-    // `0 <= @ < 10` ascending vs `10 > @ >= 0` descending); any non-bound
-    // conjunct (e.g. `@%2==0`) is a per-element filter, evaluated at synthesis
-    // time. Static integer bounds only (this slice) — a symbolic bound, an
-    // unbounded side, or a filter the constant evaluator can't reduce returns
-    // null (the caller raises an honest not-synthesizable error).
-
-    /** An order bound on `@`: a {@code lower} or upper bound at an inclusive value. */
-    private record RangeBound(boolean lower, long inclusiveValue) {}
-
-    private IrExpr synthesizeFiniteRange(IrSort sort, Origin origin) {
-        IrSort elem = streamElementSort(sort);
-        if (!(elem instanceof IrSort.Refined r) || !"Int".equals(r.name())) return null;
-        List<IrExpr> atoms = new ArrayList<>();
-        flattenConjuncts(r.predicate(), atoms);
-        Long lo = null, hi = null;           // inclusive bounds
-        Boolean descending = null;           // fixed by the first bound atom seen
-        List<IrExpr> filters = new ArrayList<>();
-        for (IrExpr atom : atoms) {
-            RangeBound b = asBound(atom);
-            if (b == null) { filters.add(atom); continue; }
-            if (b.lower()) {
-                lo = lo == null ? b.inclusiveValue() : Math.max(lo, b.inclusiveValue());
-                if (descending == null) descending = false;
-            } else {
-                hi = hi == null ? b.inclusiveValue() : Math.min(hi, b.inclusiveValue());
-                if (descending == null) descending = true;
-            }
-        }
-        if (lo == null || hi == null) return null;   // not bounded on both sides
-        boolean desc = Boolean.TRUE.equals(descending);
-        List<IrExpr> elems = new ArrayList<>();
-        for (long v = desc ? hi : lo; desc ? v >= lo : v <= hi; v += desc ? -1 : 1) {
-            Boolean keep = filtersHold(filters, v);
-            if (keep == null) return null;           // a filter we can't reduce
-            if (keep) elems.add(new IrExpr.Lit(v, origin));
-        }
-        return buildTupleLiteral(elems, origin);
-    }
-
     /** The single element sort of a bare {@code Stream[E]} sort, else null. */
     private static IrSort streamElementSort(IrSort sort) {
         if (sort instanceof IrSort.Named n && "Stream".equals(n.name())
@@ -5091,110 +5051,6 @@ public final class AltParser {
             return n.typeArgs().get(0);
         }
         return null;
-    }
-
-    /** Splits an AND tree into its conjuncts (source order); a leaf is itself one. */
-    private static void flattenConjuncts(IrExpr pred, List<IrExpr> out) {
-        if (pred instanceof IrExpr.BinOp b && b.op() == IrExpr.Op.AND) {
-            flattenConjuncts(b.left(), out);
-            flattenConjuncts(b.right(), out);
-        } else {
-            out.add(pred);
-        }
-    }
-
-    /**
-     * Reads an order comparison between {@code @} and an integer literal as an
-     * inclusive lower/upper bound, normalizing the literal-on-either-side and
-     * strict/non-strict cases. Returns null for anything else (a filter).
-     */
-    private static RangeBound asBound(IrExpr atom) {
-        if (!(atom instanceof IrExpr.BinOp b) || !isOrderComparison(b.op())) return null;
-        boolean leftSelf = b.left() instanceof IrExpr.SelfRef;
-        boolean rightSelf = b.right() instanceof IrExpr.SelfRef;
-        if (leftSelf == rightSelf) return null;                 // need exactly one `@`
-        IrExpr other = leftSelf ? b.right() : b.left();
-        if (!(other instanceof IrExpr.Lit lit)) return null;    // static bound only
-        long k = lit.value();
-        // Normalize to `@ <op> k`: flip the op when `@` is on the right.
-        IrExpr.Op op = leftSelf ? b.op() : flipOrder(b.op());
-        return switch (op) {
-            case GE -> new RangeBound(true, k);       // @ >= k
-            case GT -> new RangeBound(true, k + 1);   // @ >  k
-            case LE -> new RangeBound(false, k);      // @ <= k
-            case LT -> new RangeBound(false, k - 1);  // @ <  k
-            default -> null;
-        };
-    }
-
-    /** {@code k <op> @} ⟺ {@code @ <flip> k}. */
-    private static IrExpr.Op flipOrder(IrExpr.Op op) {
-        return switch (op) {
-            case LT -> IrExpr.Op.GT;
-            case LE -> IrExpr.Op.GE;
-            case GT -> IrExpr.Op.LT;
-            case GE -> IrExpr.Op.LE;
-            default -> op;
-        };
-    }
-
-    /** All filters hold at {@code self}; false if any fails; null if any can't reduce. */
-    private static Boolean filtersHold(List<IrExpr> filters, long self) {
-        for (IrExpr f : filters) {
-            Boolean held = evalBool(f, self);
-            if (held == null) return null;
-            if (!held) return false;
-        }
-        return true;
-    }
-
-    /** Constant-folds a boolean predicate over {@code @ = self}, or null. */
-    private static Boolean evalBool(IrExpr e, long self) {
-        if (!(e instanceof IrExpr.BinOp b)) return null;
-        switch (b.op()) {
-            case AND -> {
-                Boolean l = evalBool(b.left(), self), r = evalBool(b.right(), self);
-                return (l == null || r == null) ? null : (l && r);
-            }
-            case OR -> {
-                Boolean l = evalBool(b.left(), self), r = evalBool(b.right(), self);
-                return (l == null || r == null) ? null : (l || r);
-            }
-            default -> { }
-        }
-        if (!isComparison(b.op())) return null;
-        Long l = evalNum(b.left(), self), r = evalNum(b.right(), self);
-        if (l == null || r == null) return null;
-        return switch (b.op()) {
-            case LT -> l < r;
-            case LE -> l <= r;
-            case GT -> l > r;
-            case GE -> l >= r;
-            case EQ -> l.longValue() == r.longValue();
-            case NE -> l.longValue() != r.longValue();
-            default -> null;
-        };
-    }
-
-    /** Constant-folds an integer expression over {@code @ = self}, or null. */
-    private static Long evalNum(IrExpr e, long self) {
-        return switch (e) {
-            case IrExpr.Lit lit -> lit.value();
-            case IrExpr.SelfRef ignored -> self;
-            case IrExpr.BinOp b -> {
-                Long l = evalNum(b.left(), self), r = evalNum(b.right(), self);
-                if (l == null || r == null) yield null;
-                yield switch (b.op()) {
-                    case ADD -> l + r;
-                    case SUB -> l - r;
-                    case MUL -> l * r;
-                    case DIV -> r == 0 ? null : l / r;
-                    case MOD -> r == 0 ? null : l % r;
-                    default -> null;
-                };
-            }
-            default -> null;
-        };
     }
 
     private IrExpr parsePrimary() throws ParseException {

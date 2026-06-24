@@ -528,6 +528,56 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 
 ---
 
+## 7.11 Synthesis/membership UNIFIED — the prover does the synthesis (LANDED 2026-06-24)
+
+**Ruling (James):** stream synthesis (`let s:[Stream[Int:0<=@<10 & @!=5]];`) and
+ordinary refinement guards (`function inc(x:[Int:@>=1]):[Int:@>1]`) are **one feature**.
+A refinement `[Int:P]` denotes a **set**; a scalar guard *tests membership* in it, a
+`Stream` over it *enumerates* it. Same predicate, two consumers — and **the prover does
+the synthesis; no synthesis logic lives in the parser**.
+
+**Before:** `AltParser` carried a whole mini constraint-solver for the range case
+(`synthesizeFiniteRange` + `asBound`/`flipOrder`/`filtersHold`/`evalBool`/`evalNum` +
+`flattenConjuncts`/`RangeBound`) — a **second, weaker predicate evaluator** parallel to
+`Refinements.satisfies` (it couldn't reuse `IntegerDischarge`, etc.). The Int point-pin
+already called `BoundAnalysis` from the parser; the range path did not. Two
+implementations of one concept.
+
+**Now — one routine, two packagings:**
+- **`Synthesis.enumerateIntExtension(Sort)`** (`pontif-predicates`) is the prover routine:
+  `BoundAnalysis` gives the finite candidate domain `[lo,hi]` (the *only* special role the
+  order-bounds play — making it iterable), then **each candidate is kept iff
+  `Refinements.satisfies(lit(n), sort)` proves** — the EXACT engine a parameter guard runs.
+  Direction (ascending/descending) is read from the predicate (first `@`-vs-literal bound:
+  upper ⇒ descending). It builds its own membership simplifier from the core
+  `RefinementRules + ArithmeticRules + BooleanRules` (enough to fold a *ground* predicate;
+  bound/hypothesis rules are unneeded once `@` is a concrete literal). One subtlety it
+  handles that the parser used to: `BoundAnalysis` only reads `@ op k`, so the routine
+  canonicalizes `k op @` → `@ flip(op) k` (`selfLeft`) before bounding — else a lower bound
+  written `0 <= @` is silently lost.
+- **`SynthesisBridge.enumerateInt(IrSort)`** (`pontif-ir`) compiles the refinement
+  `IrSort → Sort` and calls the prover; a predicate outside the linear fragment (`%`/`/`/`^`)
+  fails `compileSort` and is honestly **not synthesizable** — the *same* gate that bounds
+  guards now bounds synthesis (no separate de-scoping).
+- **The parser** (`AltParser.synthesizeFromSort`) only turns the returned `List<Long>` into
+  IR: a `Stream[Int:P]` → the whole extension (tuple → autobox); a scalar `[Int:P]` → its
+  **unique** survivor (the pinned witness = the size-1 case). The lone purely-syntactic pin
+  `@ == EXPR` (witness *is* the RHS expression, no proving) legitimately stays as
+  `syntacticPin`. All downstream machinery (construction gate, §8.6 element check, runtime
+  autobox) is untouched — synthesis still produces the same IR shapes at the same point, so
+  reuse is maximal.
+
+`StreamRangeSynthesisTest` (13), `SynthesisUnificationTest` (5, incl. James's exact
+ascending/descending examples + the same predicate guarding *and* synthesizing). Full
+runtime suite green. Branch `war/unify-synthesis-prover`.
+
+*Architecture note:* synthesis still runs at **parse time** (the parser delegates to the
+prover). A further refinement could defer it to an `IrCompiler` pass so the trigger is the
+sort itself rather than a parse-time directive — but that buys nothing the unification
+needs today and costs a new IR node + pass threading, so it's left as a possible future.
+
+---
+
 ## 8. Open decisions
 
 1. **Single-pass vs re-observable spine** (§2) — the base `Stream` contract.
