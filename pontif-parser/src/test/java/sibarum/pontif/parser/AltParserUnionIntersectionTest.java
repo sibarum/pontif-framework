@@ -3,7 +3,6 @@ package sibarum.pontif.parser;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
 
@@ -29,6 +28,25 @@ class AltParserUnionIntersectionTest {
     }
 
     // --- Cross-base unions stay as IrSort.Union -----------------------------
+
+    @Test
+    void refinedParametricArg_composesInsideUnion() throws Exception {
+        // REGRESSION: the bare-refined type-arg shorthand (`Stream[Int:pred]`)
+        // only parsed at the top-level parametric path; wrapped in any bracket
+        // sort the type-arg loop used `parseSort`, which stopped at `Int` and
+        // demanded a comma at the `:` ("Expected COMMA but got COLON"). Now the
+        // branch path parses args with `parseTypeArg`, so a refined Stream
+        // composes in a union (and any nested sort).
+        IrSort sort = paramSort("[Stream[Int:0 <= @ < 10] | Nothing]");
+        IrSort.Union u = assertInstanceOf(IrSort.Union.class, sort);
+        assertEquals(2, u.branches().size());
+        IrSort.Named stream = assertInstanceOf(IrSort.Named.class, u.branches().get(0));
+        assertEquals("Stream", stream.name());
+        assertEquals(1, stream.typeArgs().size());
+        IrSort.Refined elem = assertInstanceOf(IrSort.Refined.class, stream.typeArgs().get(0));
+        assertEquals("Int", elem.name());
+        assertEquals("Nothing", ((IrSort.Named) u.branches().get(1)).name());
+    }
 
     @Test
     void crossBaseUnion_bareBareBare_yieldsUnion() throws Exception {
