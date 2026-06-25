@@ -283,7 +283,7 @@ public final class AliasResolver {
                 // Preserve any applied typeArgs (§8.6 carrier).
                 yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
                         t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(),
-                        t.methodDefaults(), t.returnShells(), t.origin());
+                        t.methodDefaults(), t.returnShells(), t.argShells(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -473,7 +473,7 @@ public final class AliasResolver {
                 }
                 yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
                         t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(),
-                        t.methodDefaults(), t.returnShells(), t.origin());
+                        t.methodDefaults(), t.returnShells(), t.argShells(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());
@@ -520,7 +520,7 @@ public final class AliasResolver {
         return new IrSort.Trait(body.name(), body.methods(), body.attributes(),
                 body.associatedTypes(), body.typeParams(), body.operators(),
                 body.baseTrait(), args, body.methodDefaults(), body.returnShells(),
-                body.origin());
+                body.argShells(), body.origin());
     }
 
     /**
@@ -548,6 +548,6 @@ public final class AliasResolver {
         // trait's [type T] params, so type-var substitution leaves them unchanged.
         return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.operators(),
                 tr.baseTrait(), List.of(), tr.methodDefaults(), tr.returnShells(),
-                tr.origin());
+                tr.argShells(), tr.origin());
     }
 }

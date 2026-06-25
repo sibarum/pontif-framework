@@ -2238,8 +2238,9 @@ public final class AltParser {
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         if (!drainParamConversions().isEmpty()) {
-            throw new ParseException("a conversion-clause param `[A -> B]` is not supported on a "
-                    + "trait-impl method yet — use a free function/method", nameTok.origin());
+            throw new ParseException("an argument shell `[A -> B]` belongs on the TRAIT method, "
+                    + "not the impl — the impl writes only the kernel parameter (its codomain "
+                    + "type); the trait owns the shell", nameTok.origin());
         }
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
@@ -2615,7 +2616,7 @@ public final class AltParser {
         IrSort.Trait named = new IrSort.Trait(
                 name, body.methods(), body.attributes(), body.associatedTypes(),
                 typeParams, body.operators(), baseTrait, List.of(),
-                body.methodDefaults(), body.returnShells(), body.origin());
+                body.methodDefaults(), body.returnShells(), body.argShells(), body.origin());
         for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }
@@ -2650,6 +2651,10 @@ public final class AltParser {
         // Return shells — member name → its trait-owned output transform `[C->D]`
         // (docs/sort-transforms.md); present when a method's return is a clause-chain.
         Map<String, IrExpr.Lambda> returnShells = new LinkedHashMap<>();
+        // Argument shells — member name → user-param POSITION → its trait-owned input
+        // transform `[A->B]` (docs/sort-transforms.md, slice 2); present when a method
+        // parameter is a conversion clause.
+        Map<String, Map<Integer, IrExpr.Lambda>> argShells = new LinkedHashMap<>();
         // Associated types — member name → bound (null = unbounded `type X`; a
         // sort = the bound `type X:R`). LinkedHashMap permits the null value.
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
@@ -2728,7 +2733,7 @@ public final class AltParser {
             // attribute uses `:` instead). The return may be a clause-chain SHELL, the
             // body is optional (its presence = a default kernel; absence = abstract).
             if (peek().kind() == AltToken.Kind.LPAREN) {
-                parseTraitMethodMember(memberName, methods, methodDefaults, returnShells);
+                parseTraitMethodMember(memberName, methods, methodDefaults, returnShells, argShells);
                 first = false;
                 continue;
             }
@@ -2748,7 +2753,7 @@ public final class AltParser {
         // Placeholder name; parseTrait patches it with the declared name.
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
-                null, List.of(), methodDefaults, returnShells, headTok.spanTo(close));
+                null, List.of(), methodDefaults, returnShells, argShells, headTok.spanTo(close));
     }
 
     /**
@@ -2765,15 +2770,19 @@ public final class AltParser {
      *       (stored in {@code methodDefaults}); its absence leaves the method abstract
      *       (the impl supplies the kernel).</li>
      * </ul>
+     *   <li><b>Argument shell</b> — a conversion-clause param {@code p:[A -> … -> B]}: the
+     *       caller passes the domain {@code A} (the contract param sort), the kernel sees the
+     *       codomain {@code B}; stored by user-param POSITION in {@code argShells}, applied at
+     *       expansion (the impl may rename the param, so position not name).</li>
      * The injected {@code this} param is typed to {@link IrSort#SELF_TYPE}; expansion
      * substitutes it to each satisfier's concrete type and qualifies the name.
-     * Argument-side shells on trait methods are a later slice (rejected here for now).
      */
     private void parseTraitMethodMember(
             AltToken nameTok,
             Map<String, IrSort.Method> methods,
             Map<String, IrStmt.FunctionDecl> methodDefaults,
-            Map<String, IrExpr.Lambda> returnShells) throws ParseException {
+            Map<String, IrExpr.Lambda> returnShells,
+            Map<String, Map<Integer, IrExpr.Lambda>> argShells) throws ParseException {
         if (KEYWORDS.contains(nameTok.text())) {
             throw new ParseException(
                     "Cannot use keyword '" + nameTok.text() + "' as a method name",
@@ -2783,11 +2792,24 @@ public final class AltParser {
         List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
-        if (!drainParamConversions().isEmpty()) {
-            throw new ParseException(
-                    "Argument-shell conversions (`x:[A -> B]`) on trait methods are not "
-                            + "supported yet (a later sort-transforms slice); only the "
-                            + "return shell is.", nameTok.origin());
+        // Argument shells: a conversion-clause param `p:[A -> B]` keeps the contract sort
+        // at the DOMAIN A (parseParamList already set it) — the trait owns the transform.
+        // Capture each by user-param POSITION (the impl may rename the param) for expansion
+        // to wrap; the kernel sees the CODOMAIN B.
+        List<ParamConversion> convs = drainParamConversions();
+        Map<Integer, IrExpr.Lambda> shellsByPos = new LinkedHashMap<>();
+        Map<String, IrSort> codomainByName = new LinkedHashMap<>();
+        for (ParamConversion c : convs) {
+            for (int i = 0; i < userParams.size(); i++) {
+                if (userParams.get(i).name().equals(c.paramName())) {
+                    shellsByPos.put(i, c.clause());
+                    codomainByName.put(c.paramName(), paramConversionCodomain(c));
+                    break;
+                }
+            }
+        }
+        if (!shellsByPos.isEmpty()) {
+            argShells.put(nameTok.text(), shellsByPos);
         }
         expect(AltToken.Kind.COLON);
         // The return may be a clause-chain SHELL `[C -> … -> D]`: the contract return
@@ -2820,10 +2842,17 @@ public final class AltParser {
         }
         expect(AltToken.Kind.ARROW);
 
+        // The default kernel sees the INNER faces: shelled params at their codomain B
+        // (not the domain A the contract carries), the return at the shell's domain C.
+        // Expansion wraps it (params B→A + `let p = shell(p)`, plus the return shell)
+        // uniformly with impl-provided kernels.
         IrSort selfSort = IrSort.named(IrSort.SELF_TYPE);
         List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
         allParams.add(new IrParam("this", selfSort));
-        allParams.addAll(userParams);
+        for (IrParam p : userParams) {
+            IrSort codomain = codomainByName.get(p.name());
+            allParams.add(codomain == null ? p : new IrParam(p.name(), codomain));
+        }
 
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();

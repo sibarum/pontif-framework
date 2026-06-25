@@ -22,8 +22,17 @@ eventual spelling — are provisional until ratified into `glossary.md`.
   can't change it). Composes with default bodies. Parser stores the shell in
   `IrSort.Trait.returnShells`; the wrap is `Apply(shell, [kernel])` applied at the
   expansion pre-pass; the kernel-returns-`C` obligation is checked there (option a).
-- **Deferred (named, not built):** arg-shells on trait methods (slice 2, symmetric,
-  reuses `wrapParamConversions`); let-tunneling / fan-in scope; `emit`;
+- **Slice 2 — trait-owned ARGUMENT shells — LANDED 2026-06-25** (`TraitArgShellTest`):
+  a trait method parameter may be a clause-chain shell `[A -> … -> B]`; the caller
+  passes the domain `A` (what dispatch keys on), the impl's kernel sees the codomain
+  `B`. `TraitDefaultExpansion.applyArgShells` rewrites the registered param to `A` and
+  prefixes `let p = shell(p)` (the IR form of `wrapParamConversions`); the
+  kernel-takes-`B` obligation is checked there. Stored by user-param **position** in
+  `IrSort.Trait.argShells` (the impl may rename the param). Composes with the return
+  shell (args inner, return outer) and with default bodies. The two faces are now
+  complete: caller sees the outer ends, the kernel the inner ends, the trait owns both
+  shells.
+- **Deferred (named, not built):** let-tunneling / fan-in scope; `emit`;
   carrier-returning kernels (→ inverse-synthesis).
 
 # Why

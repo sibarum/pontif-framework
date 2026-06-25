@@ -237,12 +237,18 @@ class ReadmeSnippetTest {
     }
 
     @Test
-    void readmeFunctionArgAndReturnShellSnippet_evaluatesTo105() throws Exception {
-        String src = """
-                function scale(x:[Int -> @ + 1 -> Int]):[Int -> @ + 100 -> Int] -> x
-                scale(4)
-                """;
-        assertEquals(105L, run(src));
+    void readmeTraitArgAndReturnShellSnippet_evaluatesTo150() {
+        assertEquals("150", runGated("""
+                trait Both{ go(n:[Int -> @ + 1 -> Int]):[Int -> @ * 10 -> Int] }
+
+                struct Base(b:Int)
+
+                assign trait Base:Both {
+                  go(n:Int):Int -> this.b + n
+                }
+
+                Base(10).go(4)
+                """));
     }
 
     // --- Type extension (the univocal construct) -----------------------------

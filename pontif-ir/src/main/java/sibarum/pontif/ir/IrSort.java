@@ -207,7 +207,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                  Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
                  String baseTrait, List<IrSort> typeArgs,
                  Map<String, IrStmt.FunctionDecl> methodDefaults,
-                 Map<String, IrExpr.Lambda> returnShells, Origin origin)
+                 Map<String, IrExpr.Lambda> returnShells,
+                 Map<String, Map<Integer, IrExpr.Lambda>> argShells, Origin origin)
             implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
@@ -283,6 +284,27 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                     ? java.util.Map.of()
                     : java.util.Collections.unmodifiableMap(
                             new java.util.LinkedHashMap<>(returnShells));
+            // argShells: method name → user-param POSITION → its trait-owned ARGUMENT
+            // shell `[A->B]` (docs/sort-transforms.md, slice 2). The caller passes the
+            // domain A (the contract param sort, what dispatch keys on); the impl's
+            // kernel sees the codomain B; TraitDefaultExpansion rewrites the registered
+            // param to A and rebinds `let p = shell(p)` before the body. Position-keyed
+            // because the impl may rename the parameter.
+            argShells = argShells == null
+                    ? java.util.Map.of()
+                    : java.util.Collections.unmodifiableMap(
+                            new java.util.LinkedHashMap<>(argShells));
+        }
+
+        /** Back-compat: the pre-argShells canonical — return shells present, no arg shells. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     String baseTrait, List<IrSort> typeArgs,
+                     Map<String, IrStmt.FunctionDecl> methodDefaults,
+                     Map<String, IrExpr.Lambda> returnShells, Origin origin) {
+            this(name, methods, attributes, associatedTypes, typeParams, operators,
+                    baseTrait, typeArgs, methodDefaults, returnShells, java.util.Map.of(), origin);
         }
 
         /** Back-compat: the pre-returnShells canonical — defaults present, no return shells. */
@@ -292,7 +314,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                      String baseTrait, List<IrSort> typeArgs,
                      Map<String, IrStmt.FunctionDecl> methodDefaults, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
-                    baseTrait, typeArgs, methodDefaults, java.util.Map.of(), origin);
+                    baseTrait, typeArgs, methodDefaults, java.util.Map.of(), java.util.Map.of(), origin);
         }
 
         /** Back-compat: the pre-methodDefaults canonical signature — no default method bodies. */

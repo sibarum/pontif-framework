@@ -74,7 +74,8 @@ public final class TraitDefaultExpansion {
         List<IrSort.Trait> chain = traitChain(trait, traits);
         Map<String, IrStmt.FunctionDecl> defaults = flatten(chain, IrSort.Trait::methodDefaults);
         Map<String, IrExpr.Lambda> shells = flatten(chain, IrSort.Trait::returnShells);
-        if (defaults.isEmpty() && shells.isEmpty()) return ti;
+        Map<String, Map<Integer, IrExpr.Lambda>> argShells = flatten(chain, IrSort.Trait::argShells);
+        if (defaults.isEmpty() && shells.isEmpty() && argShells.isEmpty()) return ti;
 
         // Short names the impl already provides (overrides) — never synthesize those.
         String prefix = ti.typeName() + ".";
@@ -91,16 +92,21 @@ public final class TraitDefaultExpansion {
             methods.add(specialize(e.getKey(), e.getValue(), ti, selfSort, subst));
         }
 
-        // 2. Wrap every shelled method's kernel with the trait's RETURN shell: the
-        //    kernel returns the shell's domain C; `Apply(shell, [kernel])` yields the
-        //    terminus D, which becomes the registered method's return. The shell is the
-        //    trait's, applied to impl-provided AND synthesized-default kernels alike —
-        //    behavior the impl cannot change (docs/sort-transforms.md).
-        if (!shells.isEmpty()) {
+        // 2. Wrap each method's kernel with the trait's shells — behaviour the impl can't
+        //    change, applied to impl-provided AND synthesized-default kernels alike
+        //    (docs/sort-transforms.md). Argument shells adapt the INPUTS first (registered
+        //    param = domain A, kernel sees codomain B); the return shell then shapes the
+        //    OUTPUT (kernel produces C, callers see terminus D) — args inner, return outer.
+        if (!shells.isEmpty() || !argShells.isEmpty()) {
             List<IrStmt.FunctionDecl> wrapped = new ArrayList<>(methods.size());
             for (IrStmt.FunctionDecl m : methods) {
-                IrExpr.Lambda shell = shells.get(shortName(m, prefix));
-                wrapped.add(shell == null ? m : applyReturnShell(ti, m, shell, subst));
+                String sn = shortName(m, prefix);
+                IrStmt.FunctionDecl k = m;
+                Map<Integer, IrExpr.Lambda> as = argShells.get(sn);
+                if (as != null) k = applyArgShells(ti, k, as, subst);
+                IrExpr.Lambda rs = shells.get(sn);
+                if (rs != null) k = applyReturnShell(ti, k, rs, subst);
+                wrapped.add(k);
             }
             methods = wrapped;
         }
@@ -155,6 +161,49 @@ public final class TraitDefaultExpansion {
         IrExpr wrappedBody = new IrExpr.Apply(shell, List.of(kernel.body()), kernel.origin());
         return new IrStmt.FunctionDecl(
                 kernel.name(), kernel.params(), terminusD, wrappedBody, kernel.origin());
+    }
+
+    /**
+     * Wrap a kernel's INPUTS with the trait's argument shells `[A -> B]` (keyed by user-param
+     * position). For each shelled param the registered param is rewritten to the domain
+     * {@code A} (what callers/dispatch see) and the body is prefixed with
+     * {@code let p = shell(p)} (the IR form of {@code wrapParamConversions}), so the kernel
+     * sees the codomain {@code B}. The kernel's declared param must be {@code B} (option (a),
+     * mirroring the return-shell's {@code C} check). User-param position {@code i} is kernel
+     * param {@code i+1} (after the injected {@code this}).
+     */
+    private static IrStmt.FunctionDecl applyArgShells(
+            IrStmt.TraitImpl ti, IrStmt.FunctionDecl kernel,
+            Map<Integer, IrExpr.Lambda> shellsByPos, Map<String, IrSort> subst) throws CompileException {
+        List<IrParam> params = new ArrayList<>(kernel.params());
+        IrExpr body = kernel.body();
+        for (Map.Entry<Integer, IrExpr.Lambda> e : shellsByPos.entrySet()) {
+            int kernelIdx = e.getKey() + 1;  // +1 for the injected `this`
+            if (kernelIdx >= params.size()) continue;  // arity mismatch — SortChecker reports
+            IrParam kp = params.get(kernelIdx);
+            IrExpr.Lambda shell = e.getValue();
+            IrSort domainA = SortChecker.substituteTypeVars(shell.params().get(0).sort(), subst);
+            IrSort codomainB = SortChecker.substituteTypeVars(shell.returnSort(), subst);
+            String want = baseName(codomainB);
+            String got = baseName(kp.sort());
+            if (want != null && got != null && !want.equals(got)) {
+                throw new CompileException(
+                        "Trait impl '" + ti.typeName() + " : " + ti.traitName() + "' method '"
+                                + kernel.name() + "' parameter '" + kp.name() + "' is " + got
+                                + " but the trait's argument shell delivers " + want
+                                + " to the kernel (the caller passes " + baseName(domainA)
+                                + "; the shell converts it).",
+                        kernel.origin());
+            }
+            // Registered param takes the domain A (for dispatch); the body rebinds it to B.
+            params.set(kernelIdx, new IrParam(kp.name(), domainA));
+            body = new IrExpr.LetIn(kp.name(), codomainB,
+                    new IrExpr.Apply(shell, List.of(new IrExpr.Var(kp.name(), kernel.origin())),
+                            kernel.origin()),
+                    body, kernel.origin());
+        }
+        return new IrStmt.FunctionDecl(
+                kernel.name(), params, kernel.returnSort(), body, kernel.origin());
     }
 
     private static String shortName(IrStmt.FunctionDecl m, String prefix) {

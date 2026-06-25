@@ -207,6 +207,7 @@ public final class SortChecker {
         Map<String, IrSort.Dispatch> operators = new LinkedHashMap<>();
         Map<String, IrStmt.FunctionDecl> methodDefaults = new LinkedHashMap<>();
         Map<String, IrExpr.Lambda> returnShells = new LinkedHashMap<>();
+        Map<String, Map<Integer, IrExpr.Lambda>> argShells = new LinkedHashMap<>();
         for (int i = chain.size() - 1; i >= 0; i--) {  // root-first → derived overrides base
             IrSort.Trait c = chain.get(i);
             methods.putAll(c.methods());
@@ -216,10 +217,11 @@ public final class SortChecker {
             operators.putAll(c.operators());
             methodDefaults.putAll(c.methodDefaults());  // a derived default overrides a base one
             returnShells.putAll(c.returnShells());      // …likewise its return shell
+            argShells.putAll(c.argShells());            // …and its argument shells
         }
         return new IrSort.Trait(trait.name(), methods, attributes, associatedTypes,
                 typeParams, operators, trait.baseTrait(), List.of(), methodDefaults,
-                returnShells, trait.origin());
+                returnShells, argShells, trait.origin());
     }
 
     private static void validateTraitImpl(

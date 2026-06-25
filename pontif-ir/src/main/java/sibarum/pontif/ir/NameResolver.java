@@ -223,7 +223,7 @@ public final class NameResolver {
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
                         t.typeParams(), t.operators(), t.baseTrait(), resolvedArgs,
-                        t.methodDefaults(), t.returnShells(), t.origin());
+                        t.methodDefaults(), t.returnShells(), t.argShells(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

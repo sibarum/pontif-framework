@@ -295,16 +295,27 @@ return shell maps it to the *terminus* the caller sees — so the `×10` belongs
 contract, not to `Cents`. This is how a trait injects behaviour through a *sort*
 rather than a body: the satisfier supplies the core, the trait wraps the edges.
 
-The same dial works on an ordinary function, and on the **argument** side too — the
-caller passes the domain, the body sees the codomain the chain produced:
+The **argument** side is symmetric, and a trait can own **both** shells at once — so
+the caller faces the outer ends of a method while the impl's kernel faces the inner
+ends, and the trait owns the conversion between:
 
 ```pontif
-function scale(x:[Int -> @ + 1 -> Int]):[Int -> @ + 100 -> Int] -> x
-scale(4)   # arg shell: 4 + 1 = 5; body x = 5; return shell: 5 + 100 → 105
+trait Both{ go(n:[Int -> @ + 1 -> Int]):[Int -> @ * 10 -> Int] }
+
+struct Base(b:Int)
+
+assign trait Base:Both {
+  go(n:Int):Int -> this.b + n
+}
+
+Base(10).go(4)   # arg shell 4+1=5; kernel 10+5=15; return shell ×10 → 150
 ```
 
-(Argument shells on *trait* methods are the symmetric next step; today a trait owns
-the return shell while a function carries both. See `docs/sort-transforms.md`.)
+The impl writes only `this.b + n` over the inner faces (`n:Int` in, `Int` out); the
+trait owns the `+1` on the way in and the `×10` on the way out, and no satisfier can
+opt out. (The same `[A -> B]` shells work on an ordinary function's parameters and
+return — there they are the author's own, not a contract's. See
+`docs/sort-transforms.md`.)
 
 Two receivers to keep distinct: **`this`** is a method's injected instance
 (`this.weight`); **`@`** is the value in flight inside a `[...]` — the one under a
@@ -892,11 +903,11 @@ threads remain (see `docs/stream-war.md` and `docs/TODO.md`):
    `@%2==0` can't yet be written. Unblocking them adds constant-modulus congruences
    (the divisibility extension Presburger already needs) plus a piecewise-linear
    case-split for the variable-divisor case.
-3. **Sort-transforms & effects** — argument-side shells on *trait* methods (the
-   symmetric next slice to the return shell that landed), and the `emit` primitive they
-   scaffold (`docs/sort-transforms.md`, `docs/events.md`): a side-effect injected by a
-   method's *shape* — declared in the shell, adjacent to the function it belongs to,
-   folded away by partial evaluation everywhere it does nothing.
+3. **Sort-transforms → effects** — both shells (argument and return) on trait methods
+   now land (`docs/sort-transforms.md`); the frontier is the `emit` primitive they
+   scaffold (`docs/events.md`): a side-effect injected by a method's *shape* — declared
+   in the shell, adjacent to the function it belongs to, folded away by partial
+   evaluation everywhere it does nothing.
 
 See `docs/TODO.md` for the active work list and parked design sketches.
 
