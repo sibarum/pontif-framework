@@ -71,7 +71,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type",
-            "match", "proof",
+            "match", "proof", "main",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -321,7 +321,9 @@ public final class AltParser {
             moduleName = parseDottedName();
         }
         List<IrStmt> stmts = new ArrayList<>();
-        while (peek().kind() != AltToken.Kind.EOF && !isMainExpressionStart()) {
+        while (peek().kind() != AltToken.Kind.EOF
+                && !checkKeyword("main")
+                && !isMainExpressionStart()) {
             stmts.add(parseTopLevelDecl());
             // A top-level destructuring let emits one decl per bound field on
             // top of the decl returned above — drain them in order.
@@ -330,20 +332,43 @@ public final class AltParser {
                 pendingTopLevelDecls.clear();
             }
         }
+        // Executable logic belongs in an explicit `main ( … )` block
+        // (docs/events.md Slice 0). During the migration window a bare trailing
+        // expression is still accepted as the LEGACY entry form — to be retired
+        // to a hard error (declarative-only top level) once the corpus moves to
+        // `main { }`. Neither present ⇒ declarative-only, a dormant placeholder
+        // main; only the entrypoint file's main is driven by the runtime.
+        boolean hadMain = checkKeyword("main");
         IrExpr main;
-        if (peek().kind() == AltToken.Kind.EOF) {
-            // No explicit main — use a benign placeholder.
-            main = new IrExpr.Lit(0, Origin.NONE);
+        if (hadMain) {
+            main = parseMainStatement();
+        } else if (peek().kind() != AltToken.Kind.EOF) {
+            main = parseExpr();  // legacy trailing-expression main (migration window)
         } else {
-            main = parseExpr();
-            if (peek().kind() != AltToken.Kind.EOF) {
-                throw new ParseException(
-                        "Trailing tokens after main expression; got " + peek().kind() + " '" + peek().text() + "'",
-                        peek().origin());
-            }
+            main = new IrExpr.Lit(0, Origin.NONE);
+        }
+        if (peek().kind() != AltToken.Kind.EOF) {
+            throw new ParseException(
+                    "Trailing tokens after " + (hadMain ? "main statement" : "main expression")
+                            + "; got " + peek().kind() + " '" + peek().text() + "'",
+                    peek().origin());
         }
         stmts.addAll(generateInstantiations(stmts));
         return new IrModule(moduleName, stmts, main);
+    }
+
+    /**
+     * The entry point: {@code main STATEMENT}. {@code main} is followed by a
+     * single statement (an expression); the user MAY group it with parens like
+     * any statement ({@code main ( let …; expr )}), but parens are not required
+     * by the construct — {@code ()} is user-owned, not a language-reserved block
+     * delimiter (unlike {@code []}/{@code {}}). Sequencing is via let-in chains
+     * (a {@code let x = …} continues into its body). Only the entrypoint file's
+     * main is driven — a required module's main stays dormant (docs/events.md S0).
+     */
+    private IrExpr parseMainStatement() throws ParseException {
+        expectKeyword("main");
+        return parseExpr();
     }
 
     /**
@@ -583,7 +608,10 @@ public final class AltParser {
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
             default -> throw new ParseException(
-                    "Unknown top-level keyword '" + head.text() + "'",
+                    "'" + head.text() + "' is not a top-level declaration. The top level is "
+                            + "declarative only (module / requires / exports / function / method / "
+                            + "struct / let / cast / trait / assign / proof); executable logic must "
+                            + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
     }
@@ -860,7 +888,8 @@ public final class AltParser {
                     start.origin());
         }
         expect(AltToken.Kind.COLON);
-        IrSort returnSort = parseSort();
+        ReturnClause rc = parseReturnClause();
+        IrSort returnSort = rc.sort();
 
         if (peek().kind() == AltToken.Kind.ARROW) {
             consume();
@@ -871,7 +900,8 @@ public final class AltParser {
             for (IrParam p : params) currentScope.put(p.name(), p.sort());
             bindParamDestructures(destrs);
             try {
-                IrExpr body = wrapParamDestructures(parseExpr(), destrs);
+                IrExpr body = applyReturnClause(
+                        wrapParamDestructures(parseExpr(), destrs), rc.transform());
                 declaredFunctionReturns.put(name, returnSort);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
                 if (!typeParams.isEmpty()) {
@@ -932,19 +962,64 @@ public final class AltParser {
         }
         expect(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.ARROW);
-        // Push the binder into scope so the body resolves it (and match-arm
-        // contextual base works), like a function body sees its params.
+        // The source binder scopes the body — a closed clause, like a fragment.
+        IrExpr body = parseClauseBody(
+                List.of(new IrParam(paramName.text(), sourceSort)), null, true);
+        return new IrStmt.Coercion(
+                sourceSort, targetSort, paramName.text(), body, start.origin());
+    }
+
+    /**
+     * Parse a clause's PRODUCTION — the body expression after {@code ->} — with the
+     * clause's binders installed in scope, restoring scope afterward (docs/arrows.md).
+     * The shared core every value-producing arrow clause performs identically today:
+     * fragment, instance cast, and (eligible to follow) function/method bodies.
+     * {@code freshScope == true} is a CLOSED clause — scope becomes just the binders
+     * (fragment, cast); {@code false} is an OPEN clause — the binders augment the
+     * enclosing scope (a match arm sees its function's params). {@code destrs} may be
+     * null/empty.
+     */
+    private IrExpr parseClauseBody(
+            List<IrParam> binders, List<ParamDestructure> destrs, boolean freshScope)
+            throws ParseException {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
-        currentScope.clear();
-        currentScope.put(paramName.text(), sourceSort);
+        if (freshScope) currentScope.clear();
+        for (IrParam p : binders) currentScope.put(p.name(), p.sort());
+        boolean hasDestrs = destrs != null && !destrs.isEmpty();
+        if (hasDestrs) bindParamDestructures(destrs);
         try {
             IrExpr body = parseExpr();
-            return new IrStmt.Coercion(
-                    sourceSort, targetSort, paramName.text(), body, start.origin());
+            return hasDestrs ? wrapParamDestructures(body, destrs) : body;
         } finally {
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
+    }
+
+    /**
+     * A return-position sort, plus an optional <em>return-type-as-transform</em>
+     * (docs/arrows.md "The unified clause-chain", S2). When the return sort is a
+     * clause-chain {@code :[A -> @… -> B]}, the chain is parsed as a one-input
+     * Lambda ({@code transform}) and the gate-visible return sort is its terminus
+     * type ({@code B}); {@link #applyReturnClause} wraps the body so the chain
+     * CONVERTS the body's result. Otherwise {@code transform} is null and the sort
+     * is parsed normally.
+     */
+    private record ReturnClause(IrSort sort, IrExpr.Lambda transform) {}
+
+    private ReturnClause parseReturnClause() throws ParseException {
+        if (looksLikeClauseChain()) {
+            IrExpr.Lambda chain = parseClauseChain();
+            return new ReturnClause(chain.returnSort(), chain);
+        }
+        return new ReturnClause(parseSort(), null);
+    }
+
+    /** Apply a return-clause transform to a body result (no-op when absent). */
+    private static IrExpr applyReturnClause(IrExpr body, IrExpr.Lambda transform) {
+        return transform == null
+                ? body
+                : new IrExpr.Apply(transform, List.of(body), body.origin());
     }
 
     /**
@@ -1007,7 +1082,8 @@ public final class AltParser {
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         expect(AltToken.Kind.COLON);
-        IrSort returnSort = parseSort();
+        ReturnClause rc = parseReturnClause();
+        IrSort returnSort = rc.sort();
 
         // Reject a user-declared `this` — would collide with the injected one.
         for (IrParam p : params) {
@@ -1051,7 +1127,8 @@ public final class AltParser {
         for (IrParam p : desugaredParams) currentScope.put(p.name(), p.sort());
         bindParamDestructures(destrs);
         try {
-            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
+            IrExpr body = applyReturnClause(
+                    wrapParamDestructures(parseExpr(), destrs), rc.transform());
             declaredFunctionReturns.put(name, returnSort);
             return new IrStmt.FunctionDecl(
                     name, desugaredParams, returnSort, body, start.origin());
@@ -1411,6 +1488,63 @@ public final class AltParser {
         };
     }
 
+    /**
+     * Rewrite every {@link IrExpr.SelfRef} in {@code expr} to {@code with} — the
+     * {@code @}→value substitution that lowers a clause-chain conversion stage
+     * (docs/arrows.md "The unified clause-chain"). A chain {@code [A -> @e -> B]}
+     * is a one-input Lambda whose anonymous input is {@code @}; threading the value
+     * through a stage is just replacing {@code @} with the running expression. The
+     * interpreter therefore never meets a chain {@code SelfRef} (its no-runtime-value
+     * invariant holds). Mirrors {@link #containsSelfRef}'s structural walk.
+     */
+    private static IrExpr substituteSelf(IrExpr expr, IrExpr with) {
+        return switch (expr) {
+            case IrExpr.SelfRef s -> with;
+            case IrExpr.Lit l -> l;
+            case IrExpr.Dec d -> d;
+            case IrExpr.Chr c -> c;
+            case IrExpr.Str s -> s;
+            case IrExpr.Bool b -> b;
+            case IrExpr.Var v -> v;
+            case IrExpr.DispatchRef d -> d;
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    substituteSelf(op.left(), with), substituteSelf(op.right(), with), op.origin());
+            case IrExpr.LetIn l -> new IrExpr.LetIn(l.name(), l.declaredSort(),
+                    substituteSelf(l.value(), with), substituteSelf(l.body(), with), l.origin(), l.claim());
+            case IrExpr.Call c -> new IrExpr.Call(c.functionName(),
+                    c.args().stream().map(a -> substituteSelf(a, with)).toList(), c.origin());
+            case IrExpr.Lambda lam -> new IrExpr.Lambda(lam.params(), lam.returnSort(),
+                    substituteSelf(lam.body(), with), lam.origin());
+            case IrExpr.Apply app -> new IrExpr.Apply(substituteSelf(app.fn(), with),
+                    app.args().stream().map(a -> substituteSelf(a, with)).toList(), app.origin());
+            case IrExpr.Match m -> new IrExpr.Match(substituteSelf(m.scrutinee(), with),
+                    m.branches().stream().map(b -> new IrExpr.MatchBranch(
+                            b.pattern(), substituteSelf(b.result(), with))).toList(), m.origin());
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> mm = new LinkedHashMap<>();
+                r.members().forEach((k, v) -> mm.put(k, substituteSelf(v, with)));
+                yield new IrExpr.Record(r.typeName(), mm, r.runtimeChecks(), r.origin());
+            }
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    substituteSelf(fa.base(), with), fa.fieldName(), fa.origin());
+            case IrExpr.MethodCall mc -> new IrExpr.MethodCall(substituteSelf(mc.receiver(), with),
+                    mc.methodName(), mc.args().stream().map(a -> substituteSelf(a, with)).toList(), mc.origin());
+            case IrExpr.Iterate it -> new IrExpr.Iterate(
+                    substituteSelf(it.source(), with),
+                    it.coSources().stream().map(s -> substituteSelf(s, with)).toList(),
+                    it.element(),
+                    it.outputs().stream().map(o -> new IrExpr.OutputSpec(o.name(), o.kind(),
+                            o.init() == null ? null : substituteSelf(o.init(), with))).toList(),
+                    it.arms().stream().map(a -> new IrExpr.Arm(a.pattern(),
+                            a.writes().stream().map(w -> new IrExpr.Write(w.output(),
+                                    w.key() == null ? null : substituteSelf(w.key(), with),
+                                    substituteSelf(w.value(), with))).toList())).toList(),
+                    it.origin());
+            case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
+                    substituteSelf(cast.value(), with), cast.origin());
+        };
+    }
+
     // --- Top-level let ---
     // Form: `let qualified.name (:Sort)? (= value)?`
     //
@@ -1456,8 +1590,8 @@ public final class AltParser {
             // returning the lambda, sorted as the Method contract. Distinguished
             // from an ordinary `[…]` sort by a NAMED param head (`( IDENT :`), which
             // no tuple/Method sort begins with.
-            if (looksLikeFragmentLiteral()) {
-                IrExpr.Lambda frag = parseFragmentLiteral();
+            if (looksLikeClause()) {
+                IrExpr.Lambda frag = parseClause();
                 List<IrSort> paramSorts = new ArrayList<>();
                 List<String> paramNames = new ArrayList<>();
                 for (IrParam p : frag.params()) {
@@ -2237,9 +2371,17 @@ public final class AltParser {
             return parseTupleSortBody(t);
         }
         if (t.kind() == AltToken.Kind.LBRACKET) {
-            // In-type pipeline (S8): `[let x:S = E -> … -> Base:@==witness]` — a
-            // staged synthesis directive. The leading `let` is unambiguous (no
-            // sort starts with the `let` keyword).
+            // Unified clause-chain (docs/arrows.md): a bracketed `[ stage -> … ]`
+            // threads `@`. Output kind is read from the FIRST stage, and the split
+            // is by POSITION (a sort method can only return a sort, never a value):
+            //   • SORT-producing faces are dispatched HERE — the in-type pipeline
+            //     `[let x:S = E -> … -> Base:@==witness]` (parsePipelineSort), whose
+            //     `@==witness` terminus is the value↔sort-witness bridge.
+            //   • VALUE-producing faces (the named-binder fragment and the
+            //     anonymous-`@` conversion chain, both → an IrExpr.Lambda) are
+            //     dispatched from VALUE positions via parseClause — they are not
+            //     sorts, so they cannot be hosted by parseSort.
+            // The leading `let` is unambiguous (no sort starts with that keyword).
             if (peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("let")) {
                 return parsePipelineSort();
             }
@@ -3962,15 +4104,22 @@ public final class AltParser {
      * {@code let binder = scrutinee.field} and {@code MethodResolver}. A non-
      * structural pattern (a refinement, {@code [_]}) binds nothing.
      */
-    private void seedPatternBinders(IrSort pattern) {
+    /**
+     * The leaf binders a match pattern introduces — the destructure (left) side of a
+     * match-arm clause, fed to {@link #parseClauseBody} as an OPEN clause (the arm body
+     * also sees the enclosing scope). docs/arrows.md.
+     */
+    private List<IrParam> patternBinders(IrSort pattern) {
         if (!(pattern instanceof IrSort.Structural sp)) {
-            return;
+            return List.of();
         }
         List<Map.Entry<String, IrSort>> binders = new ArrayList<>();
         collectPatternBinders(sp, binders);
+        List<IrParam> out = new ArrayList<>(binders.size());
         for (Map.Entry<String, IrSort> b : binders) {
-            currentScope.put(b.getKey(), b.getValue() == null ? IrSort.named("_") : b.getValue());
+            out.add(new IrParam(b.getKey(), b.getValue() == null ? IrSort.named("_") : b.getValue()));
         }
+        return out;
     }
 
     private void collectPatternBinders(
@@ -4016,8 +4165,8 @@ public final class AltParser {
             // permitted, so the same branch parseLet has at top level lives here too; the
             // `[…]` IS the value (no `= EXPR`), and the rest of the block is the let-in
             // body. Bound as a Method-sorted closure value.
-            if (looksLikeFragmentLiteral()) {
-                IrExpr.Lambda frag = parseFragmentLiteral();
+            if (looksLikeClause()) {
+                IrExpr.Lambda frag = parseClause();
                 List<IrSort> paramSorts = new ArrayList<>();
                 List<String> paramNames = new ArrayList<>();
                 for (IrParam p : frag.params()) {
@@ -4140,20 +4289,11 @@ public final class AltParser {
                 } else {
                     IrSort pattern = parsePattern();
                     expect(AltToken.Kind.ARROW);
-                    // The pattern's leaf binders are in scope for the arm body —
-                    // seed them so a binder used as a method receiver reads as a
-                    // value (`n.toString()` is a call on `n`, not the qualified
-                    // name `n.toString`; see isValueReceiver). Saved/restored per
-                    // arm so binders don't leak across arms or past the match.
-                    Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
-                    seedPatternBinders(pattern);
-                    IrExpr result;
-                    try {
-                        result = parseExpr();
-                    } finally {
-                        currentScope.clear();
-                        currentScope.putAll(savedScope);
-                    }
+                    // The arm body is a clause: the pattern's leaf binders (the
+                    // destructure) scope the result (the production). Open clause —
+                    // the body also sees the enclosing scope; binders are saved/
+                    // restored per arm so they don't leak across arms (docs/arrows.md).
+                    IrExpr result = parseClauseBody(patternBinders(pattern), null, false);
                     // `[_]` parses as the universal Named("_") — the bracketed
                     // spelling of the default arm. Treat it exactly like bare `_`
                     // so its region becomes the computed complement of the other
@@ -4235,17 +4375,7 @@ public final class AltParser {
             declaredCodomain = parseSort();
         }
         expect(AltToken.Kind.ARROW);
-        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
-        currentScope.clear();
-        for (IrParam p : params) currentScope.put(p.name(), p.sort());
-        bindParamDestructures(destrs);
-        IrExpr body;
-        try {
-            body = wrapParamDestructures(parseExpr(), destrs);
-        } finally {
-            currentScope.clear();
-            currentScope.putAll(savedScope);
-        }
+        IrExpr body = parseClauseBody(params, destrs, true);
         AltToken close = expect(AltToken.Kind.RBRACKET);
         // The codomain is the declared output shape when written; otherwise inferred
         // from the body (the construction gate judges it where it matters).
@@ -4288,14 +4418,14 @@ public final class AltParser {
             sources.add(parseExpr());  // stops at the COLON (not an OP)
         }
         expect(AltToken.Kind.COLON);
-        if (!looksLikeFragmentLiteral()) {
+        if (!looksLikeClause()) {
             throw new ParseException(
-                    "`&s:[…]` expects an inline fragment transform here, e.g. "
-                            + "`[ (el:Int) -> … ]` — coercion transforms `[A -> B]` are "
-                            + "slice 2d-3; docs/stream-war.md §3",
+                    "`&s:[…]` expects an inline transform here — a fragment "
+                            + "`[ (el:Int) -> … ]` or a conversion chain `[Int -> @… -> R]` "
+                            + "(docs/arrows.md, docs/stream-war.md §3)",
                     peek().origin());
         }
-        IrExpr.Lambda frag = parseFragmentLiteral();
+        IrExpr.Lambda frag = parseClause();
 
         // Multiple sources → zip (fan-in): route through lowerSpreadCall (the same
         // path the call form `zip(&a, &b)` takes), wrapping each source as a spread.
@@ -4358,6 +4488,178 @@ public final class AltParser {
                 && peek(1).kind() == AltToken.Kind.LPAREN
                 && peek(2).kind() == AltToken.Kind.IDENT
                 && peek(3).kind() == AltToken.Kind.COLON;
+    }
+
+    /**
+     * Whether {@code peek()} opens an <em>anonymous-{@code @} clause-chain</em>
+     * {@code [ A -> @… -> B ]} (docs/arrows.md "The unified clause-chain") — the
+     * conversion-sequence face: a one-input Lambda whose input is the anonymous
+     * {@code @}. It is the bracketed forms with a TOP-LEVEL arrow that are NOT the
+     * named-binder fragment {@code [ (x:T) -> … ]} nor the {@code [let …]} in-type
+     * pipeline nor a {@code [{…}]} tuple. A leading type checkpoint (bare ident or
+     * {@code [T]}) starts the chain (leading-{@code @} / literal forms deferred).
+     * The discriminator is the top-level {@code ->}: today no Method-sort /
+     * refinement / type-application carries one, so this never shadows an existing
+     * sort or fragment (minimal blast radius — slice S1).
+     */
+    private boolean looksLikeClauseChain() {
+        if (peek().kind() != AltToken.Kind.LBRACKET) return false;
+        if (looksLikeFragmentLiteral()) return false;                 // [ (x:T) -> …
+        if (peek(1).kind() == AltToken.Kind.LBRACE) return false;     // [{…}] tuple
+        if (peek(1).kind() == AltToken.Kind.IDENT
+                && peek(1).text().equals("let")) return false;        // [let …] pipeline
+        // Leading stage must look like a type checkpoint (bare ident or `[T]`).
+        if (peek(1).kind() != AltToken.Kind.IDENT
+                && peek(1).kind() != AltToken.Kind.LBRACKET) return false;
+        return chainHasTopLevelArrow();
+    }
+
+    /**
+     * True iff an {@code ->} occurs directly inside the {@code [ … ]} at
+     * {@code peek()} (bracket-depth 1, not nested in {@code (…)}/{@code {…}}/inner
+     * {@code […]}) — the clause-chain discriminator. Scans from the opening
+     * bracket to its match without consuming.
+     */
+    private boolean chainHasTopLevelArrow() {
+        int bracket = 0, paren = 0, brace = 0;
+        for (int i = 0; ; i++) {
+            AltToken.Kind k = peek(i).kind();
+            switch (k) {
+                case EOF -> { return false; }
+                case LBRACKET -> bracket++;
+                case RBRACKET -> { bracket--; if (bracket == 0) return false; }
+                case LPAREN -> paren++;
+                case RPAREN -> paren--;
+                case LBRACE -> brace++;
+                case RBRACE -> brace--;
+                case ARROW -> { if (bracket == 1 && paren == 0 && brace == 0) return true; }
+                default -> { }
+            }
+        }
+    }
+
+    /**
+     * Whether {@code peek()} opens a <em>value-producing clause</em> — the unified
+     * value-position entry (docs/arrows.md "The unified clause-chain", S3). Both
+     * faces lower to one {@link IrExpr.Lambda}: the named-binder fragment
+     * {@code [ (x:A) -> … ]} and the anonymous-{@code @} chain {@code [ A -> @… -> B ]}
+     * ("a named binder is just a named {@code @}"). Output kind is inferred from the
+     * FIRST stage: a leading param-list → the fragment branch; a leading type
+     * checkpoint → the chain branch. The two predicates are disjoint by construction.
+     */
+    private boolean looksLikeClause() {
+        return looksLikeFragmentLiteral() || looksLikeClauseChain();
+    }
+
+    /**
+     * Parse a value-producing clause (the unified value-position entry, S3) to its
+     * {@link IrExpr.Lambda}. Dispatches on the first stage: a named param-list head
+     * → {@link #parseFragmentLiteral}; a type-checkpoint head → {@link #parseClauseChain}.
+     * Precondition: {@link #looksLikeClause()} holds.
+     */
+    private IrExpr.Lambda parseClause() throws ParseException {
+        return looksLikeClauseChain() ? parseClauseChain() : parseFragmentLiteral();
+    }
+
+    /**
+     * An anonymous-{@code @} clause-chain {@code [ A -> @… -> B ]} lowered to an
+     * {@link IrExpr.Lambda} over one synthetic param (docs/arrows.md — "a named
+     * binder is just a named {@code @}"). The leading stage is the input type
+     * checkpoint; each {@code ->}-stage either re-types {@code @} (a checkpoint) or
+     * transforms it (an {@code @}-expr whose {@code @} is rewritten to the running
+     * value via {@link #substituteSelf}). The terminus type is the return sort.
+     *
+     * <p><b>Stage type-flow (S4):</b> {@code @}'s type flows {@code A -> … -> B}. The
+     * synthetic param is bound in scope at its running type so a conversion's output
+     * type can be inferred ({@link #inferMaximalSort}), and a checkpoint stage
+     * <em>re-types</em> {@code @} (so the terminus checkpoint pins the return sort,
+     * overriding any imprecise inference). A checkpoint also <em>asserts</em> the
+     * running type — but only when that type is RELIABLY known (the input or a prior
+     * checkpoint, i.e. an explicit user-declared type), erroring on a provable
+     * disjointness ({@link #checkChainStage}). After a conversion the running type is
+     * INFERRED, and the inference substrate can mis-type a conversion (e.g. it pins
+     * {@code @+""} as {@code Int}, not {@code String}); a false rejection of a valid
+     * program is the worse lie, so the assertion abstains there (no-lie law). Reuses
+     * the fragment's Lambda/Closure machinery wholesale.
+     */
+    private IrExpr.Lambda parseClauseChain() throws ParseException {
+        AltToken open = expect(AltToken.Kind.LBRACKET);
+        String param = "$at" + (syntheticCounter++);
+        IrSort inputSort = parseSort();                 // leading type checkpoint A
+        IrExpr threaded = new IrExpr.Var(param, open.origin());
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        IrSort currentType = inputSort;                 // the type of @ entering the next stage
+        boolean reliable = true;                        // is currentType explicitly declared?
+        currentScope.put(param, currentType);
+        try {
+            while (peek().kind() == AltToken.Kind.ARROW) {
+                consume();  // ->
+                if (chainStageIsCheckpoint()) {
+                    IrSort checkpoint = parseSort();
+                    if (reliable) checkChainStage(currentType, checkpoint, open.origin());
+                    currentType = checkpoint;           // the checkpoint re-types @
+                    reliable = true;
+                } else {
+                    // A conversion: an @-expr (stops at the next `->` or `]`). Type
+                    // it with @ standing for the running value (a single $at leaf),
+                    // then thread it into the accumulated body.
+                    currentScope.put(param, currentType);
+                    IrExpr stageExpr = parseExpr();
+                    currentType = inferMaximalSort(substituteSelf(stageExpr, new IrExpr.Var(param, open.origin())));
+                    threaded = substituteSelf(stageExpr, threaded);
+                    reliable = false;
+                }
+                currentScope.put(param, currentType);
+            }
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+        AltToken close = expect(AltToken.Kind.RBRACKET);
+        return new IrExpr.Lambda(
+                List.of(new IrParam(param, inputSort)), currentType, threaded, open.spanTo(close));
+    }
+
+    /**
+     * Assert a clause-chain checkpoint against a RELIABLY-known running type of
+     * {@code @} (S4): a compile error only when the two are PROVABLY disjoint bases
+     * with no conversion between them. Abstains on any unknown floor ({@code _} /
+     * {@code _record} / null) and on a same-base refinement, per the no-lie law
+     * (only error when the leniency would assert something false). The single
+     * sanctioned cross-base is the lossless {@code Int}→{@code Decimal} embedding,
+     * mirroring the let-binding gate.
+     */
+    private void checkChainStage(IrSort current, IrSort checkpoint, sibarum.pontif.core.Origin o)
+            throws ParseException {
+        String cur = baseSortName(current);
+        String chk = baseSortName(checkpoint);
+        if (cur == null || chk == null) return;
+        if (cur.equals("_") || chk.equals("_") || cur.equals("_record")) return;
+        if (cur.equals(chk)) return;
+        if (chk.equals("Decimal") && cur.equals("Int")) return;   // lossless embedding
+        throw new ParseException(
+                "clause-chain stage expects [" + chk + "] but @ is [" + cur + "] here — "
+                        + "no conversion bridges them (docs/arrows.md)", o);
+    }
+
+    /**
+     * Whether the chain stage at {@code peek()} is a type checkpoint rather than a
+     * conversion: a bracketed {@code [T]}, or a standalone capitalized type name
+     * ({@code Int}/{@code String}) that is the whole stage (next token ends it).
+     * Capitalization is the non-load-bearing hint; {@code [T]} is the unambiguous
+     * form (docs/arrows.md). Everything else (notably an {@code @}-expr) is a
+     * conversion.
+     */
+    private boolean chainStageIsCheckpoint() {
+        if (peek().kind() == AltToken.Kind.LBRACKET) return true;
+        if (peek().kind() == AltToken.Kind.IDENT) {
+            String txt = peek().text();
+            boolean capitalized = !txt.isEmpty() && Character.isUpperCase(txt.charAt(0));
+            boolean standalone = peek(1).kind() == AltToken.Kind.ARROW
+                    || peek(1).kind() == AltToken.Kind.RBRACKET;
+            return capitalized && standalone;
+        }
+        return false;
     }
 
     private IrExpr parseIter() throws ParseException {

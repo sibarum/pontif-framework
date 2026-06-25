@@ -11,6 +11,18 @@ Regression meter: `mvn install -Dmaven.test.skip=true -q` then
 
 ---
 
+## Bracket/paren law: migrate `match` from `{ }` to `( )` — pre-launch requirement (low priority)
+
+RULED 2026-06-24 (with the main-block design, docs/events.md): under the bracket/paren law
+the *block* role is parens (`( let …; expr )`) and `{ }` is aggregates only. `main` landed
+as `main ( … )`. `match SCRUTINEE { arms }` is the same category — grouped branches whose
+arms bind with `->`, not the aggregate `=` — so its `{ }` is a grandfathered exception.
+Migrate to `match SCRUTINEE ( arms )` for consistency (eased by match arms already being
+optionally brace-less). Corpus-wide: parser + examples + test corpus. **Low priority, but
+required before public launch.**
+
+---
+
 ## ⭐ Type-system convergence — one scoped type-level binding substrate (4 facets)
 
 *Discovered 2026-06-20 (design dialogue): structural traits, named Type fragments,
