@@ -38,7 +38,7 @@ public final class TraitDefaultExpansion {
 
     private TraitDefaultExpansion() {}
 
-    public static IrModule expand(IrModule module) {
+    public static IrModule expand(IrModule module) throws CompileException {
         // Index trait declarations by name — and by base name (after the last '/')
         // so a linked impl whose trait reference is FQN still matches a trait whose
         // declaration carries a different qualification.
@@ -66,34 +66,46 @@ public final class TraitDefaultExpansion {
     }
 
     private static IrStmt.TraitImpl expandImpl(
-            IrStmt.TraitImpl ti, Map<String, IrSort.Trait> traits) {
+            IrStmt.TraitImpl ti, Map<String, IrSort.Trait> traits) throws CompileException {
         IrSort.Trait trait = traits.get(ti.traitName());
         if (trait == null) trait = traits.get(baseName(ti.traitName()));
         if (trait == null) return ti;  // unknown trait — leave for SortChecker to report
 
-        Map<String, IrStmt.FunctionDecl> defaults = flattenDefaults(trait, traits);
-        if (defaults.isEmpty()) return ti;
+        List<IrSort.Trait> chain = traitChain(trait, traits);
+        Map<String, IrStmt.FunctionDecl> defaults = flatten(chain, IrSort.Trait::methodDefaults);
+        Map<String, IrExpr.Lambda> shells = flatten(chain, IrSort.Trait::returnShells);
+        if (defaults.isEmpty() && shells.isEmpty()) return ti;
 
         // Short names the impl already provides (overrides) — never synthesize those.
-        Set<String> provided = new HashSet<>();
         String prefix = ti.typeName() + ".";
-        for (IrStmt.FunctionDecl m : ti.methods()) {
-            provided.add(m.name().startsWith(prefix)
-                    ? m.name().substring(prefix.length()) : m.name());
-        }
+        Set<String> provided = new HashSet<>();
+        for (IrStmt.FunctionDecl m : ti.methods()) provided.add(shortName(m, prefix));
 
         Map<String, IrSort> subst = buildSubst(ti, trait);
         IrSort selfSort = selfSort(ti);
 
-        List<IrStmt.FunctionDecl> synthesized = new ArrayList<>();
+        // 1. Synthesize the defaults the impl omits.
+        List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods());
         for (Map.Entry<String, IrStmt.FunctionDecl> e : defaults.entrySet()) {
             if (provided.contains(e.getKey())) continue;  // overridden by the impl
-            synthesized.add(specialize(e.getKey(), e.getValue(), ti, selfSort, subst));
+            methods.add(specialize(e.getKey(), e.getValue(), ti, selfSort, subst));
         }
-        if (synthesized.isEmpty()) return ti;
 
-        List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods());
-        methods.addAll(synthesized);
+        // 2. Wrap every shelled method's kernel with the trait's RETURN shell: the
+        //    kernel returns the shell's domain C; `Apply(shell, [kernel])` yields the
+        //    terminus D, which becomes the registered method's return. The shell is the
+        //    trait's, applied to impl-provided AND synthesized-default kernels alike —
+        //    behavior the impl cannot change (docs/sort-transforms.md).
+        if (!shells.isEmpty()) {
+            List<IrStmt.FunctionDecl> wrapped = new ArrayList<>(methods.size());
+            for (IrStmt.FunctionDecl m : methods) {
+                IrExpr.Lambda shell = shells.get(shortName(m, prefix));
+                wrapped.add(shell == null ? m : applyReturnShell(ti, m, shell, subst));
+            }
+            methods = wrapped;
+        }
+
+        if (methods.equals(ti.methods())) return ti;  // nothing synthesized or wrapped
         return new IrStmt.TraitImpl(
                 ti.typeName(), ti.traitName(), methods, ti.attributeProducers(),
                 ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
@@ -118,10 +130,50 @@ public final class TraitDefaultExpansion {
                 ti.typeName() + "." + shortName, params, returnSort, def.body(), def.origin());
     }
 
-    /** Trait's own defaults, plus every base trait's, root-first (a derived default wins). */
-    private static Map<String, IrStmt.FunctionDecl> flattenDefaults(
+    /**
+     * Wrap a kernel with its trait's return shell `[C -> D]`: the method's result
+     * becomes {@code Apply(shell, [kernel-result])} and its declared return becomes the
+     * terminus {@code D}. The kernel's own declared return must be the shell's domain
+     * {@code C} (option (a) — the obligation is checked here, where contract and impl
+     * are both in hand, before the body is rewritten and the kernel sort is lost).
+     */
+    private static IrStmt.FunctionDecl applyReturnShell(
+            IrStmt.TraitImpl ti, IrStmt.FunctionDecl kernel,
+            IrExpr.Lambda shell, Map<String, IrSort> subst) throws CompileException {
+        IrSort domainC = SortChecker.substituteTypeVars(shell.params().get(0).sort(), subst);
+        String want = baseName(domainC);
+        String got = baseName(kernel.returnSort());
+        if (want != null && got != null && !want.equals(got)) {
+            throw new CompileException(
+                    "Trait impl '" + ti.typeName() + " : " + ti.traitName() + "' method '"
+                            + kernel.name() + "' returns " + got + " but the trait's return "
+                            + "shell expects the kernel to produce " + want
+                            + " (the shell then transforms it to the contract return).",
+                    kernel.origin());
+        }
+        IrSort terminusD = SortChecker.substituteTypeVars(shell.returnSort(), subst);
+        IrExpr wrappedBody = new IrExpr.Apply(shell, List.of(kernel.body()), kernel.origin());
+        return new IrStmt.FunctionDecl(
+                kernel.name(), kernel.params(), terminusD, wrappedBody, kernel.origin());
+    }
+
+    private static String shortName(IrStmt.FunctionDecl m, String prefix) {
+        return m.name().startsWith(prefix) ? m.name().substring(prefix.length()) : m.name();
+    }
+
+    /** The base/head type name of a sort, or null when it has no nominal head. */
+    private static String baseName(IrSort sort) {
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            default -> null;
+        };
+    }
+
+    /** The trait + every transitive base, root-first (a derived member overrides a base one). */
+    private static List<IrSort.Trait> traitChain(
             IrSort.Trait trait, Map<String, IrSort.Trait> traits) {
-        if (trait.baseTrait() == null) return trait.methodDefaults();
         List<IrSort.Trait> chain = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         IrSort.Trait cur = trait;
@@ -130,8 +182,14 @@ public final class TraitDefaultExpansion {
             String base = cur.baseTrait();
             cur = base == null ? null : traits.getOrDefault(base, traits.get(baseName(base)));
         }
-        Map<String, IrStmt.FunctionDecl> out = new LinkedHashMap<>();
-        for (int i = chain.size() - 1; i >= 0; i--) out.putAll(chain.get(i).methodDefaults());
+        return chain;
+    }
+
+    /** Merge a per-trait map across the chain, root-first so a derived entry wins. */
+    private static <V> Map<String, V> flatten(
+            List<IrSort.Trait> chain, java.util.function.Function<IrSort.Trait, Map<String, V>> sel) {
+        Map<String, V> out = new LinkedHashMap<>();
+        for (int i = chain.size() - 1; i >= 0; i--) out.putAll(sel.apply(chain.get(i)));
         return out;
     }
 

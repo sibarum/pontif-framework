@@ -2607,7 +2607,7 @@ public final class AltParser {
         IrSort.Trait named = new IrSort.Trait(
                 name, body.methods(), body.attributes(), body.associatedTypes(),
                 typeParams, body.operators(), baseTrait, List.of(),
-                body.methodDefaults(), body.origin());
+                body.methodDefaults(), body.returnShells(), body.origin());
         for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }
@@ -2639,6 +2639,9 @@ public final class AltParser {
         // only for a DEFAULTED method (`quack():Int -> this.x`). The same method also
         // lands in `methods` as its IrSort.Method signature.
         Map<String, IrStmt.FunctionDecl> methodDefaults = new LinkedHashMap<>();
+        // Return shells — member name → its trait-owned output transform `[C->D]`
+        // (docs/sort-transforms.md); present when a method's return is a clause-chain.
+        Map<String, IrExpr.Lambda> returnShells = new LinkedHashMap<>();
         // Associated types — member name → bound (null = unbounded `type X`; a
         // sort = the bound `type X:R`). LinkedHashMap permits the null value.
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
@@ -2712,12 +2715,12 @@ public final class AltParser {
                         "Duplicate member '" + memberName.text() + "' in trait body",
                         memberName.origin());
             }
-            // A DEFAULTED method — the impl-method form written directly in the trait
-            // body: `quack():Int -> this.x`. A `(` after the name marks it (an
-            // abstract method or a data attribute uses `:` instead). The body is kept
-            // for TraitDefaultExpansion to clone into any impl that omits the method.
+            // A method member written in impl-method form: `quack(params):Ret [-> body]`.
+            // A `(` after the name marks it (an abstract `:[Method…]` member or a data
+            // attribute uses `:` instead). The return may be a clause-chain SHELL, the
+            // body is optional (its presence = a default kernel; absence = abstract).
             if (peek().kind() == AltToken.Kind.LPAREN) {
-                parseTraitDefaultMethod(memberName, methods, methodDefaults);
+                parseTraitMethodMember(memberName, methods, methodDefaults, returnShells);
                 first = false;
                 continue;
             }
@@ -2737,24 +2740,32 @@ public final class AltParser {
         // Placeholder name; parseTrait patches it with the declared name.
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
-                null, List.of(), methodDefaults, headTok.spanTo(close));
+                null, List.of(), methodDefaults, returnShells, headTok.spanTo(close));
     }
 
     /**
-     * Parses a DEFAULTED trait method — the impl-method form written directly in
-     * the trait body: {@code methodName(params):Ret -> body} (decided by the {@code (}
-     * after the name; an abstract method or data attribute uses {@code :} instead).
-     * Records the contract {@link IrSort.Method} signature in {@code methods} (so every
-     * existing contract/dispatch path treats it as an ordinary member) and a
-     * body-bearing {@link IrStmt.FunctionDecl} in {@code methodDefaults}. The injected
-     * {@code this} param is typed to {@link IrSort#SELF_TYPE}; TraitDefaultExpansion
-     * substitutes it to each satisfier's concrete type and qualifies the name to
-     * {@code Type.method}. Body parses with {@code this} + user params in scope.
+     * Parses a trait method member in impl-method form: {@code name(params):Ret [-> body]}
+     * (decided by the {@code (} after the name; an abstract {@code :[Method…]} member or a
+     * data attribute uses {@code :} instead). Three independent dials:
+     * <ul>
+     *   <li><b>Return shell</b> — when the return is a clause-chain {@code [C -> … -> D]}
+     *       (docs/sort-transforms.md), callers see the terminus {@code D} (the contract
+     *       {@link IrSort.Method} returnSort), the kernel returns the domain {@code C}, and
+     *       the chain is stored in {@code returnShells} for TraitDefaultExpansion to wrap
+     *       the kernel with. A plain sort = no shell (kernel return == contract return).</li>
+     *   <li><b>Default body</b> — a trailing {@code -> body} makes it a DEFAULT kernel
+     *       (stored in {@code methodDefaults}); its absence leaves the method abstract
+     *       (the impl supplies the kernel).</li>
+     * </ul>
+     * The injected {@code this} param is typed to {@link IrSort#SELF_TYPE}; expansion
+     * substitutes it to each satisfier's concrete type and qualifies the name.
+     * Argument-side shells on trait methods are a later slice (rejected here for now).
      */
-    private void parseTraitDefaultMethod(
+    private void parseTraitMethodMember(
             AltToken nameTok,
             Map<String, IrSort.Method> methods,
-            Map<String, IrStmt.FunctionDecl> methodDefaults) throws ParseException {
+            Map<String, IrStmt.FunctionDecl> methodDefaults,
+            Map<String, IrExpr.Lambda> returnShells) throws ParseException {
         if (KEYWORDS.contains(nameTok.text())) {
             throw new ParseException(
                     "Cannot use keyword '" + nameTok.text() + "' as a method name",
@@ -2764,8 +2775,41 @@ public final class AltParser {
         List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        if (!drainParamConversions().isEmpty()) {
+            throw new ParseException(
+                    "Argument-shell conversions (`x:[A -> B]`) on trait methods are not "
+                            + "supported yet (a later sort-transforms slice); only the "
+                            + "return shell is.", nameTok.origin());
+        }
         expect(AltToken.Kind.COLON);
-        IrSort returnSort = parseSort();
+        // The return may be a clause-chain SHELL `[C -> … -> D]`: the contract return
+        // (what callers/dispatch see) is the terminus D; the kernel returns the domain C.
+        ReturnClause rc = parseReturnClause();
+        IrSort contractReturn = rc.sort();
+        IrSort kernelReturn = rc.transform() != null
+                ? rc.transform().params().get(0).sort()
+                : rc.sort();
+        if (rc.transform() != null) {
+            returnShells.put(nameTok.text(), rc.transform());
+        }
+
+        // Contract signature EXCLUDES `this` (SortChecker prepends it) — same shape an
+        // abstract `:[Method(...)]` member yields.
+        List<IrSort> paramSorts = new ArrayList<>(userParams.size());
+        List<String> paramNames = new ArrayList<>(userParams.size());
+        for (IrParam p : userParams) {
+            paramSorts.add(p.sort());
+            paramNames.add(p.name());
+        }
+        methods.put(nameTok.text(),
+                new IrSort.Method(paramSorts, paramNames, contractReturn, nameTok.origin()));
+        declaredFunctionReturns.put(nameTok.text(), contractReturn);
+
+        // Body OPTIONAL: `-> expr` is a default kernel (returning the inner face C);
+        // its absence leaves the method abstract (the impl supplies the kernel).
+        if (peek().kind() != AltToken.Kind.ARROW) {
+            return;
+        }
         expect(AltToken.Kind.ARROW);
 
         IrSort selfSort = IrSort.named(IrSort.SELF_TYPE);
@@ -2779,20 +2823,11 @@ public final class AltParser {
         bindParamDestructures(destrs);
         try {
             IrExpr body = wrapParamDestructures(parseExpr(), destrs);
-            // Contract signature EXCLUDES `this` (SortChecker prepends it) — same
-            // shape an abstract `:[Method(...)]` member yields.
-            List<IrSort> paramSorts = new ArrayList<>(userParams.size());
-            List<String> paramNames = new ArrayList<>(userParams.size());
-            for (IrParam p : userParams) {
-                paramSorts.add(p.sort());
-                paramNames.add(p.name());
-            }
-            methods.put(nameTok.text(),
-                    new IrSort.Method(paramSorts, paramNames, returnSort, nameTok.origin()));
-            // Body-bearing decl — name is the SHORT method name; expansion qualifies it.
+            // Body-bearing decl — name is the SHORT method name, return is the kernel
+            // inner face C (the shell, if any, wraps it at expansion); expansion
+            // qualifies the name and re-types `this`.
             methodDefaults.put(nameTok.text(), new IrStmt.FunctionDecl(
-                    nameTok.text(), allParams, returnSort, body, nameTok.origin()));
-            declaredFunctionReturns.put(nameTok.text(), returnSort);
+                    nameTok.text(), allParams, kernelReturn, body, nameTok.origin()));
         } finally {
             currentScope.clear();
             currentScope.putAll(savedScope);

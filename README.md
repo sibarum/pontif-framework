@@ -195,8 +195,9 @@ struct is fitted to it with `assign trait`. Those members are **methods** — na
 contracts a type promises to satisfy — and typed **data attributes**.
 
 The method form is the heart of it: a trait names method signatures, each concrete
-type supplies its own implementation, and a function written against the trait
-dispatches to whichever implementation the runtime value carries:
+type supplies its own implementation (or inherits a **default** the trait writes),
+and a function written against the trait dispatches to whichever implementation the
+runtime value carries:
 
 ```pontif
 trait Greeter{ greet:[Method():Int] }
@@ -268,9 +269,47 @@ alternative interface *with a guaranteed return path* to the original. (A downca
 to the *wrong* concrete type — one that merely also satisfies the trait — is
 rejected: the value cannot masquerade as something it isn't.)
 
+### Logic in the sorts — a shell the trait owns
+
+A method's argument and return *sorts* need not be mere membership predicates —
+they may be **transform-chains**. `[A -> … -> B]` takes an `A`, threads it through
+each `->` stage (`@` is the value in flight), and yields a `B`. Placed in a trait
+method's **return**, such a chain is a *shell* the trait owns: every satisfier's
+implementation is wrapped by it and **cannot opt out** — the impl writes only the
+inner kernel.
+
+```pontif
+trait Scaled{ compute(n:Int):[Int -> @ * 10 -> Int] }
+
+struct Cents(base:Int)
+
+assign trait Cents:Scaled {
+  compute(n:Int):Int -> this.base + n
+}
+
+Cents(2).compute(3)   # kernel: this.base + n = 5; the trait's return shell ×10 → 50
+```
+
+The kernel `Cents` writes returns the shell's *domain* (`Int`, here `5`); the trait's
+return shell maps it to the *terminus* the caller sees — so the `×10` belongs to the
+contract, not to `Cents`. This is how a trait injects behaviour through a *sort*
+rather than a body: the satisfier supplies the core, the trait wraps the edges.
+
+The same dial works on an ordinary function, and on the **argument** side too — the
+caller passes the domain, the body sees the codomain the chain produced:
+
+```pontif
+function scale(x:[Int -> @ + 1 -> Int]):[Int -> @ + 100 -> Int] -> x
+scale(4)   # arg shell: 4 + 1 = 5; body x = 5; return shell: 5 + 100 → 105
+```
+
+(Argument shells on *trait* methods are the symmetric next step; today a trait owns
+the return shell while a function carries both. See `docs/sort-transforms.md`.)
+
 Two receivers to keep distinct: **`this`** is a method's injected instance
-(`this.weight`); **`@`** is the value under refinement in a `[...]` predicate.
-They are orthogonal. (Looking ahead: a future `action` construct will be where
+(`this.weight`); **`@`** is the value in flight inside a `[...]` — the one under a
+refinement predicate, or the one a transform-chain is mid-converting. They are
+orthogonal. (Looking ahead: a future `action` construct will be where
 *mutation* lives — observed, ledgered, and proof-licensed; it is drafted in
 `docs/actions.md`, not yet implemented.)
 
@@ -383,32 +422,29 @@ IntLit(9).value                          # → 9
 
 A `Stream[T]` is the pure, conservation-checked membrane over a sequence (and,
 ultimately, over messy stateful sources). It is a **trait** in `pontif.core` — a tuple
-literal autoboxes into one, element-checked:
+literal autoboxes into one, element-checked. Omission during iteration is signalled with
+the **`Nothing`** value (imported alongside `Stream`); there is **no built-in `null`
+keyword** — `null` is just a conventional name bound to `Nothing`'s sole value, for
+readability. The setup the rest of this section builds on:
 
 ```pontif
 requires pontif.core.{Stream, Nothing}
 let s:Stream[Int] = {1, 2, 3, 4}
-```
-
-Omission during iteration is signalled with the **`Nothing`** value (that is why it is
-imported alongside `Stream`). There is **no built-in `null` keyword** — `null` is just a
-conventional name bound to `Nothing`'s sole value, for readability:
-
-```pontif
-let null:Nothing = Nothing()                  # `Nothing()` constructs the imported type's value
+let null:Nothing = Nothing()                  # `null` is a name for Nothing's only value
 ```
 
 There is **no `map`/`filter`/`fold` primitive**. There is one construct — the **synthesis
 fragment**, a per-element transform applied to a stream by **spread** (`&`). A fragment
-that returns `null` for an element **drops** it (that is all `filter` is):
+that returns `null` for an element **drops** it (that is all `filter` is) — with `s` and
+`null` bound as above:
 
 ```pontif
-&s:[ (el:Int) -> el * 2 ]                     # map  → (2, 4, 6, 8)
+&s:[ (el:Int) -> el * 2 ]                     # map  → {2, 4, 6, 8}
 
 &s:[ (el:Int) ->                              # filter — `null` drops the element
        match el
          [@>2] -> el
-         [_]   -> null ]                      # → (3, 4)
+         [_]   -> null ]                      # → {3, 4}
 ```
 
 Every classic combinator is a configuration of this one idea — the *positional channel*
@@ -420,7 +456,7 @@ model, where each tuple position is a channel and `&` distributes a transform ov
 | **filter** | one stream channel, `null` drops (lossy) |
 | **fold / scan** | a stream channel + an accumulator seed (`fold(&s, 0)`) |
 | **fork** | one stream in, a *tuple of stream channels* out (conservative split) |
-| **zip** | several `&` streams walked in lockstep (`(&a, &b):[ (x,y) -> x+y ]`) |
+| **zip** | several `&` streams walked in lockstep (`(&a, &b):[ (x:Int, y:Int) -> x+y ]`) |
 | **takeWhile** | a *domain-refined* binder is the guard; off-domain **stops** the stream |
 
 A **generator** is the dual of fold — a stream *source* with no `&` input, where **the
@@ -428,9 +464,9 @@ domain refinement is the base case** (it halts exactly when the next state would
 ill-typed):
 
 ```pontif
-let count:[ (from:[Int:@>=0], to:[Int:@>=from]):(Stream[Int], Int, Int) ->
-            (from, from+1, to) ]
-count(0, 5)._0                                # → (0, 1, 2, 3, 4, 5)
+let count:[ (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+            {from, from+1, to} ]
+count(0, 5)._0                                # → {0, 1, 2, 3, 4, 5}
 ```
 
 A finite **range** needs no hand-written step at all: a membership refinement on the
@@ -439,9 +475,9 @@ traversal **direction is read from the comparison chain**, and any non-bound con
 filters per element:
 
 ```pontif
-let ascending :Stream[Int:0 <= @ < 10];            # → (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
-let descending:Stream[Int:10 > @ >= 0];            # → (9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
-let trimmed   :Stream[Int:0 <= @ < 10 & @ != 5];   # → (0, 1, 2, 3, 4, 6, 7, 8, 9)
+let ascending :Stream[Int:0 <= @ < 10];            # → {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+let descending:Stream[Int:10 > @ >= 0];            # → {9, 8, 7, 6, 5, 4, 3, 2, 1, 0}
+let trimmed   :Stream[Int:0 <= @ < 10 & @ != 5];   # → {0, 1, 2, 3, 4, 6, 7, 8, 9}
 ```
 
 (Integer bounds, materialized statically; arithmetic-divisibility filters like `@%2==0`
@@ -461,7 +497,7 @@ function map[type A, type R]( s:Stream[A], mapper:[Dispatch(A):R] ):[Stream[R]] 
   &s:[ (el:A) -> mapper(el) ]
 function toString(i:Int):String -> ""+i
 
-map[Int,String](s, $toString[Int])            # explicit  → ("1", "2", "3", "4")
+map[Int,String](s, $toString[Int])            # explicit  → {"1", "2", "3", "4"}
 map(s, $toString[Int])                         # inferred  (A, R recovered from the args)
 ```
 
@@ -753,8 +789,11 @@ parse → link modules → resolve aliases → promote literals → construction
   be a contained addition rather than a rewrite. That's a direction, not a
   shipped feature.
 
-Every ` ```pontif ` snippet above is pinned by `ReadmeSnippetTest` — the README
-compiles, or the build fails. See `docs/alternative-syntax.ptf` for the canonical
+Every ` ```pontif ` snippet above — except the illustrative fragments in the
+[Streams](#streams) section — is pinned by `ReadmeSnippetTest`: the README compiles,
+or the build fails. (The stream operations carry their own dedicated tests —
+`StreamMapTest`, `StreamGeneratorTest`, `StreamTakeWhileTest`, and siblings.) See
+`docs/alternative-syntax.ptf` for the canonical
 reference, `docs/glossary.md` for terms, and `docs/backward-language-design.md`
 for the method that produced all of this (the theory is layer zero; the whole
 language is one big syntactic sugar for it).
@@ -797,10 +836,11 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   fields, `_` slot discards (positional patterns are arity-total)
 - **The aggregate grid** — tuples, dictionaries, and `.{}` named decomposition
   unifying `requires` / `exports` / by-name `let`
-- **Three polymorphism models** — traits with **DATA attributes** and free
-  bidirectional struct↔trait coercion; module-coherent multi-dispatch;
-  `struct Name:[Base:rel](fields)` type extension (demote freely, promote by
-  synthesis — *lose freely, fabricate never*)
+- **Three polymorphism models** — traits with **DATA attributes**, **default method
+  implementations**, **return-sort transform shells** (logic the trait owns, injected
+  around every impl's kernel), and free bidirectional struct↔trait coercion;
+  module-coherent multi-dispatch; `struct Name:[Base:rel](fields)` type extension
+  (demote freely, promote by synthesis — *lose freely, fabricate never*)
 - **Synthesis from the spec** — the trailing `;` directive (value pins,
   construction pins, in-type `let`-pipelines)
 - **Metareferences** — `$f[Sorts]` first-class dispatch references
@@ -852,6 +892,11 @@ threads remain (see `docs/stream-war.md` and `docs/TODO.md`):
    `@%2==0` can't yet be written. Unblocking them adds constant-modulus congruences
    (the divisibility extension Presburger already needs) plus a piecewise-linear
    case-split for the variable-divisor case.
+3. **Sort-transforms & effects** — argument-side shells on *trait* methods (the
+   symmetric next slice to the return shell that landed), and the `emit` primitive they
+   scaffold (`docs/sort-transforms.md`, `docs/events.md`): a side-effect injected by a
+   method's *shape* — declared in the shell, adjacent to the function it belongs to,
+   folded away by partial evaluation everywhere it does nothing.
 
 See `docs/TODO.md` for the active work list and parked design sketches.
 

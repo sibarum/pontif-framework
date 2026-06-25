@@ -219,6 +219,32 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    // --- Traits: logic in the sorts (return shell + function arg/return) ------
+
+    @Test
+    void readmeTraitReturnShellSnippet_evaluatesTo50() {
+        assertEquals("50", runGated("""
+                trait Scaled{ compute(n:Int):[Int -> @ * 10 -> Int] }
+
+                struct Cents(base:Int)
+
+                assign trait Cents:Scaled {
+                  compute(n:Int):Int -> this.base + n
+                }
+
+                Cents(2).compute(3)
+                """));
+    }
+
+    @Test
+    void readmeFunctionArgAndReturnShellSnippet_evaluatesTo105() throws Exception {
+        String src = """
+                function scale(x:[Int -> @ + 1 -> Int]):[Int -> @ + 100 -> Int] -> x
+                scale(4)
+                """;
+        assertEquals(105L, run(src));
+    }
+
     // --- Type extension (the univocal construct) -----------------------------
 
     @Test

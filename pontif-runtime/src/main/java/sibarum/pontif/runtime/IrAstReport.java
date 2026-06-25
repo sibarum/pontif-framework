@@ -94,7 +94,8 @@ public final class IrAstReport {
         try {
             Simplifier simplifier = new Simplifier(List.copyOf(PontifCompiler.defaultRules()));
             compiler = new IrCompiler(simplifier);
-            compiled = compiler.compile(linked);
+            // Trait method expansion is a caller-owned pre-pass (see IrCompiler.compile).
+            compiled = compiler.compile(sibarum.pontif.ir.TraitDefaultExpansion.expand(linked));
         } catch (CompileException ce) {
             out.append("(not generated — compile failed").append(located(ce.origin())).append(")\n  ")
                     .append(ce.getMessage()).append('\n');

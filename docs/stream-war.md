@@ -587,8 +587,10 @@ needs today and costs a new IR node + pass threading, so it's left as a possible
 3. **Conservation ledger treatment of lossy** (§5).
 4. **`pontif.core` contents + `std.stream` retirement** — repurpose `std.stream` or
    stand up `pontif.core` and retire it.
-5. **The combinator sugar surface** (`map`/`filter`/`fold`) — deferred, but its shape
-   should fit the query-DSL grain (`project_query_dsl`).
+5. **The combinator sugar surface** (`map`/`filter`/`fold`) — defined as plain functions
+   over the `&stream:[ (e:A) -> … ]` spread (`streams.ptf`); composed by nesting and `+`.
+   (The query-DSL "pipeline literal" grain is **design-rejected** — see `sort-transforms.md`,
+   `events.md`; transforms are the `[A->R]` fragment, not a query bracket.)
 6. **`Stream[T]` element-type checking for computed streams — NO-LIE HOLE CLOSED
    (2026-06-22, Approach 1 — the full parametric-trait carrier, James's call).**
    `let z:Stream[String] = double(&s)` (an `Int` stream) is now **rejected**; a matching
