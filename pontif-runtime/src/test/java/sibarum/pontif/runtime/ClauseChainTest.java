@@ -73,14 +73,22 @@ class ClauseChainTest {
                 f(5)"""));
     }
 
-    @Test void stageTypeMismatch_isCompileError() {
-        // docs/arrows.md S4: the running @ type is RELIABLY Int (the input), and the
-        // String checkpoint follows with no conversion bridging them — a provable lie,
-        // rejected at parse. (After a conversion the type is inferred and the check
-        // abstains, per the no-lie law — see multiStageTypeFlow.)
-        assertThrows(sibarum.pontif.parser.ParseException.class, () -> run("""
-                let bad:[Int -> String]
-                bad(1)"""));
+    @Test void typeStageIsACoercion_intToString() throws Exception {
+        // James's model: [Type] is the coercion case of a production — @ := (Type:@).
+        // [Int -> String] renders the Int via the built-in String coercion (a Cast),
+        // not a type error.
+        assertEquals("\"5\"", String.valueOf(run("""
+                let show:[Int -> String]
+                show(5)""")));
+    }
+
+    @Test void interleavedLet_inValueChain() throws Exception {
+        // Free interleaving (the generalized model): a `let` mid-chain names the
+        // current @; later productions read it while @ keeps advancing.
+        //   @=5 -> base=5 -> @=5+5=10 -> @=10*2=20
+        assertEquals(20L, run("""
+                let f:[Int -> let base=@ -> @ + base -> @ * 2 -> Int]
+                f(5)"""));
     }
 
     @Test void multiStageTypeFlow_intToStringThenString() throws Exception {
@@ -88,6 +96,16 @@ class ClauseChainTest {
         assertEquals("\"7!\"", String.valueOf(run("""
                 let f:[Int -> @ + "" -> String -> @ + "!" -> String]
                 f(7)""")));
+    }
+
+    @Test void closedPipeline_productionTerminus_synthesizesBody() throws Exception {
+        // Full unification (James's model): the closed `let`-led clause no longer
+        // needs an explicit `@==r` pin — the final production `r` IS the witness, so
+        // the return sort `[let r = n*2 -> r]` synthesizes the body. Same fold as a
+        // value chain; only the position projection (sort vs lambda) differs.
+        assertEquals(14L, run("""
+                function dbl(n:[Int]):[let r:Int = n * 2 -> r];
+                dbl(7)"""));
     }
 
     @Test void spreadAscriptionChain_mapsElements() throws Exception {

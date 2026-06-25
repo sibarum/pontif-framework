@@ -87,9 +87,26 @@ and optional `transformState(state:R):S` are written as clauses on `parseClauseB
 
 ## The unified clause-chain (RATIFIED 2026-06-25 — IN PROGRESS)
 
-**Build status:** S1 + S2 + S3 + S4 LANDED — the unified clause-chain is built (front-end +
-production unification + the new runtime semantics). The deeper IR-level merge (a single
-`Clause` IR node spanning all five faces) remains deliberately deferred (lens-not-cage).
+**Build status:** S1–S5 LANDED — the unified clause-chain is built. **S5 is the single parser**
+(`parseClauseStages`): one running `@` threaded through a `[ stage -> … ]` sequence, with TWO
+stage kinds freely interleaved — a **binding** `let a (:S)? = b` (names only, `@` unchanged) and
+a **production** that sets `@ := expr`. A `[Type]` is *not* a separate kind: it is the coercion
+case of a production, `@ := (Type : @)`, lowering to an `IrExpr.Cast` (identity when `@` already
+has that type; validity — String render, `Int→Decimal`, user `cast` — is the existing cast
+machinery's job, fail-closed otherwise). So a chain is `[ in → let… → expr → Type → … ]` in any
+order, not the rigid `[let… let… expr]` shape. **There is no two-kinds-of-`@`:** `@` is always
+the running value; a fragment's `@` starts at the named input, a chain's at the anonymous input,
+a closed clause's is established by its stages — same `@`. The old pipeline's `Base:@==witness`
+terminus is just the **sort projection's spelling** of "the final `@` is that value", so it is
+no longer required — `[let r = n*2 -> r]` synthesizes via the production terminus. `parseClauseStages`
+is ONE fold over stages producing a final `@`-expression, then ONE position projection:
+`asLambda` for input-led value faces (fragment / `@`-chain → `IrExpr.Lambda`), `asRefinedSort`
+for the closed clause (→ `IrSort.Refined(base, @==finalAt & constraints)`; a sort method cannot
+return a value). It retired `parseFragmentLiteral` / `parseClauseChain` / `parsePipelineSort`.
+The deeper IR-level merge (one `Clause` IR node) stays deferred (lens-not-cage).
+
+The doc below describes the S1–S4 shape; S5 generalized the stage model (every production sets
+`@`; `[Type]` = coercion) and unified the parsers — see `project_arrow_unification` memory.
 
 - **S1** — the anonymous-`@` conversion chain `[ A -> @… -> B ]` runs as a one-input transform
   (`AltParser.parseClauseChain` lowers it to an `IrExpr.Lambda` over a synthetic `$at` param;

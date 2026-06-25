@@ -1009,7 +1009,7 @@ public final class AltParser {
 
     private ReturnClause parseReturnClause() throws ParseException {
         if (looksLikeClauseChain()) {
-            IrExpr.Lambda chain = parseClauseChain();
+            IrExpr.Lambda chain = asLambda(parseClauseStages());
             return new ReturnClause(chain.returnSort(), chain);
         }
         return new ReturnClause(parseSort(), null);
@@ -2375,15 +2375,15 @@ public final class AltParser {
             // threads `@`. Output kind is read from the FIRST stage, and the split
             // is by POSITION (a sort method can only return a sort, never a value):
             //   • SORT-producing faces are dispatched HERE — the in-type pipeline
-            //     `[let x:S = E -> … -> Base:@==witness]` (parsePipelineSort), whose
-            //     `@==witness` terminus is the value↔sort-witness bridge.
+            //     `[let x:S = E -> … -> Base:@==witness]`, via the unified
+            //     parseClauseStages projected to a sort (asRefinedSort).
             //   • VALUE-producing faces (the named-binder fragment and the
             //     anonymous-`@` conversion chain, both → an IrExpr.Lambda) are
             //     dispatched from VALUE positions via parseClause — they are not
             //     sorts, so they cannot be hosted by parseSort.
             // The leading `let` is unambiguous (no sort starts with that keyword).
             if (peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("let")) {
-                return parsePipelineSort();
+                return asRefinedSort(parseClauseStages());
             }
             return parseBracketSort();
         }
@@ -2474,58 +2474,6 @@ public final class AltParser {
      * derives the body {@code Name(e1, …)} through the existing {@code @==EXPR}
      * path — how {@code function promote(…):Point3D{x,y,z};} gets its body.
      */
-    /**
-     * In-type pipeline (S8): {@code [let x:S = E -> … -> Base:@==witness]} — a
-     * staged synthesis directive, the type-position equivalent of writing the
-     * body with {@code ->}. Desugars to {@code [Base:@ == (let x = E in … in
-     * witness)]}, riding the existing {@code @==EXPR} synthesis path; the
-     * let-stages' expressions resolve names normally (params, global functions),
-     * so no {@code requires} import is needed.
-     */
-    private IrSort parsePipelineSort() throws ParseException {
-        AltToken open = expect(AltToken.Kind.LBRACKET);
-        List<String> names = new ArrayList<>();
-        List<IrSort> sorts = new ArrayList<>();
-        List<IrExpr> exprs = new ArrayList<>();
-        while (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
-            consume();  // let
-            AltToken n = expect(AltToken.Kind.IDENT);
-            expect(AltToken.Kind.COLON);
-            IrSort s = parseSort();
-            expect(AltToken.Kind.EQUALS);
-            IrExpr e = parseExpr();
-            expect(AltToken.Kind.ARROW);
-            names.add(n.text());
-            sorts.add(s);
-            exprs.add(e);
-        }
-        IrSort finalSort = parseBracketBranch();
-        AltToken close = expect(AltToken.Kind.RBRACKET);
-        IrExpr witness = tryDeriveBodyFromReturnSort(finalSort);
-        if (witness == null) {
-            throw new ParseException(
-                    "in-type pipeline's final stage must be a value pin "
-                            + "('Base:@==EXPR') — got " + finalSort, close.origin());
-        }
-        IrExpr chain = witness;
-        for (int i = names.size() - 1; i >= 0; i--) {
-            chain = new IrExpr.LetIn(names.get(i), sorts.get(i), exprs.get(i), chain, open.origin());
-        }
-        String base = baseSortName(finalSort);
-        // `@ == let-chain` is the definition; any non-`@==` conjuncts of the final
-        // pin (e.g. `@>0` in `[Int:@==r & @>0]`) ride along as the postcondition
-        // the gate proves — define and verify in one pin.
-        IrExpr defPred = new IrExpr.BinOp(
-                IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), chain, open.origin());
-        IrExpr postcond = finalSort instanceof IrSort.Refined fr
-                ? removeDefinitionConjunct(fr.predicate())
-                : null;
-        IrExpr fullPred = postcond == null
-                ? defPred
-                : new IrExpr.BinOp(IrExpr.Op.AND, defPred, postcond, open.origin());
-        return new IrSort.Refined(base, fullPred, open.spanTo(close));
-    }
-
     private IrSort parseConstructionPinSort() throws ParseException {
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         IrSort.Structural struct = declaredStructs.get(nameTok.text());
@@ -4352,38 +4300,6 @@ public final class AltParser {
      * conservation checks are not in this slice.
      */
     /**
-     * A <em>fragment literal</em>: {@code [ (el:Int) -> body ]} — the synthesis
-     * fragment as a first-class value (docs/stream-war.md §3, slice 2c). Parses to
-     * an {@link IrExpr.Lambda} (a {@code Closure} at runtime), the lambda
-     * replacement: a value you can bind, pass, and apply (notably by {@code &}
-     * spread). The opening {@code [} is at {@code peek()}. Params scope the body,
-     * mirroring {@link #parseFunction}.
-     */
-    private IrExpr.Lambda parseFragmentLiteral() throws ParseException {
-        AltToken open = expect(AltToken.Kind.LBRACKET);
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
-        List<ParamDestructure> destrs = drainParamDestructures();
-        // Optional codomain `(params):Codomain -> body`, mirroring a function decl.
-        // It is the output channel shape (docs/stream-war.md §3): a tuple codomain of
-        // `Stream[T]` positions is the fan-out (fork) signal that distinguishes a
-        // tuple-of-streams from a stream-of-tuples (a plain map).
-        IrSort declaredCodomain = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
-            consume();
-            declaredCodomain = parseSort();
-        }
-        expect(AltToken.Kind.ARROW);
-        IrExpr body = parseClauseBody(params, destrs, true);
-        AltToken close = expect(AltToken.Kind.RBRACKET);
-        // The codomain is the declared output shape when written; otherwise inferred
-        // from the body (the construction gate judges it where it matters).
-        IrSort returnSort = declaredCodomain != null ? declaredCodomain : inferMaximalSort(body);
-        return new IrExpr.Lambda(params, returnSort, body, open.spanTo(close));
-    }
-
-    /**
      * Spread-ascription `&source:[transform]` (docs/stream-war.md §3, slice 2d-1):
      * applies a per-element transform over a stream — the inline/anonymous face of
      * {@code transform(&source)}. The leading {@code &} is already at {@code peek()}.
@@ -4552,112 +4468,212 @@ public final class AltParser {
     }
 
     /**
-     * Parse a value-producing clause (the unified value-position entry, S3) to its
-     * {@link IrExpr.Lambda}. Dispatches on the first stage: a named param-list head
-     * → {@link #parseFragmentLiteral}; a type-checkpoint head → {@link #parseClauseChain}.
-     * Precondition: {@link #looksLikeClause()} holds.
+     * Parse a value-producing clause (the unified value-position entry) to its
+     * {@link IrExpr.Lambda}: routes through the single {@link #parseClauseStages}
+     * parser and projects with {@link #asLambda}. Precondition:
+     * {@link #looksLikeClause()} holds (a named-binder fragment or an
+     * input-checkpoint-led chain — both yield a Value clause).
      */
     private IrExpr.Lambda parseClause() throws ParseException {
-        return looksLikeClauseChain() ? parseClauseChain() : parseFragmentLiteral();
+        return asLambda(parseClauseStages());
     }
 
     /**
-     * An anonymous-{@code @} clause-chain {@code [ A -> @… -> B ]} lowered to an
-     * {@link IrExpr.Lambda} over one synthetic param (docs/arrows.md — "a named
-     * binder is just a named {@code @}"). The leading stage is the input type
-     * checkpoint; each {@code ->}-stage either re-types {@code @} (a checkpoint) or
-     * transforms it (an {@code @}-expr whose {@code @} is rewritten to the running
-     * value via {@link #substituteSelf}). The terminus type is the return sort.
-     *
-     * <p><b>Stage type-flow (S4):</b> {@code @}'s type flows {@code A -> … -> B}. The
-     * synthetic param is bound in scope at its running type so a conversion's output
-     * type can be inferred ({@link #inferMaximalSort}), and a checkpoint stage
-     * <em>re-types</em> {@code @} (so the terminus checkpoint pins the return sort,
-     * overriding any imprecise inference). A checkpoint also <em>asserts</em> the
-     * running type — but only when that type is RELIABLY known (the input or a prior
-     * checkpoint, i.e. an explicit user-declared type), erroring on a provable
-     * disjointness ({@link #checkChainStage}). After a conversion the running type is
-     * INFERRED, and the inference substrate can mis-type a conversion (e.g. it pins
-     * {@code @+""} as {@code Int}, not {@code String}); a false rejection of a valid
-     * program is the worse lie, so the assertion abstains there (no-lie law). Reuses
-     * the fragment's Lambda/Closure machinery wholesale.
+     * The result of {@link #parseClauseStages} — the ONE clause grammar projected by
+     * POSITION (docs/arrows.md "The unified clause-chain"). An input-led clause
+     * (named-binder fragment or anonymous-{@code @} chain) is a {@code Value} (an
+     * {@link IrExpr.Lambda}); a closed clause (the {@code let …}-led in-type pipeline)
+     * is a {@code Sort} (an {@link IrSort.Refined}). A sort method cannot return a
+     * value, so the projection a caller asks for ({@link #asLambda}/{@link
+     * #asRefinedSort}) is its position's expectation; the mismatch is a clean error.
      */
-    private IrExpr.Lambda parseClauseChain() throws ParseException {
+    private sealed interface ParsedClause {
+        record Value(IrExpr.Lambda lambda) implements ParsedClause {}
+        record Sort(IrSort sort) implements ParsedClause {}
+    }
+
+    private IrExpr.Lambda asLambda(ParsedClause pc) throws ParseException {
+        if (pc instanceof ParsedClause.Value v) return v.lambda();
+        throw new ParseException("expected a value-producing clause (a fragment or "
+                + "conversion chain), not a sort-producing one", peek().origin());
+    }
+
+    private IrSort asRefinedSort(ParsedClause pc) throws ParseException {
+        if (pc instanceof ParsedClause.Sort s) return s.sort();
+        throw new ParseException("expected a sort-producing clause (the in-type "
+                + "pipeline), not a value-producing one", peek().origin());
+    }
+
+    /**
+     * THE unified clause parser (docs/arrows.md "The unified clause-chain") — ONE
+     * fold over a {@code [ stage -> … -> stage ]} sequence, threading the always-present
+     * running value {@code @}. Subsumes the named-binder fragment, the anonymous-{@code @}
+     * conversion chain, AND the in-type synthesis pipeline (it retired
+     * {@code parseFragmentLiteral}/{@code parseClauseChain}/{@code parsePipelineSort}).
+     *
+     * <p><b>{@code @} always has a value</b> (James 2026-06-25); stages MUTATE it, none
+     * "sets it from nothing". Two stage kinds, freely interleaved:
+     * <ul>
+     *   <li><b>binding</b> {@code let a (:S)? = b} — introduces a name, {@code @} unchanged;</li>
+     *   <li><b>production</b> {@code expr} — {@code @ := expr} (reads the prior {@code @}).
+     *       A {@code [Type]} is the <em>coercion</em> case of a production
+     *       ({@code @ := (Type : @)}, lowered to an {@link IrExpr.Cast}; identity when the
+     *       type already matches). A {@code [Base:pred]} refinement constrains {@code @} —
+     *       and its {@code @==w} conjunct, if any, <em>defines</em> {@code @} (the
+     *       value↔sort-witness bridge).</li>
+     * </ul>
+     *
+     * <p>The fold yields a final {@code @}-expression; the <b>projection is by POSITION</b>
+     * (one fold, two wrappers — there is no two-kinds-of-{@code @} duality):
+     * <ul>
+     *   <li><b>input-led</b> (named-binder {@code (x:A)} or anonymous checkpoint {@code [A]}
+     *       head) ⇒ a {@code Value}: {@code Lambda(input, finalAt)} — {@link #asLambda};</li>
+     *   <li><b>closed</b> ({@code let}- or production-led, no input) ⇒ a {@code Sort}:
+     *       {@code Refined(base, @==finalAt & constraints)} — {@link #asRefinedSort}.</li>
+     * </ul>
+     */
+    private ParsedClause parseClauseStages() throws ParseException {
         AltToken open = expect(AltToken.Kind.LBRACKET);
-        String param = "$at" + (syntheticCounter++);
-        IrSort inputSort = parseSort();                 // leading type checkpoint A
-        IrExpr threaded = new IrExpr.Var(param, open.origin());
+
+        // ---- HEAD: establish the input (if any). @ is the running value. ----
+        List<IrParam> params = new ArrayList<>();   // input params; empty ⇒ closed
+        List<ParamDestructure> destrs = null;
+        IrSort declaredCodomain = null;
+        String atVar = null;                        // the running-@ var (one input)
+        IrExpr cur = null;                          // the running @ value
+        IrSort currentType = null;
+        boolean freshScope = false;
+        if (peek().kind() == AltToken.Kind.LPAREN) {
+            // Named-binder fragment head `(x:A, …) (:Codomain)? -> …`.
+            expect(AltToken.Kind.LPAREN);
+            params = parseParamList(AltToken.Kind.RPAREN);
+            expect(AltToken.Kind.RPAREN);
+            destrs = drainParamDestructures();
+            if (peek().kind() == AltToken.Kind.COLON) { consume(); declaredCodomain = parseSort(); }
+            expect(AltToken.Kind.ARROW);
+            freshScope = true;                       // a fragment is a closed clause over its binders
+            if (params.size() == 1) {                // a single binder IS the named @
+                atVar = params.get(0).name();
+                cur = new IrExpr.Var(atVar, open.origin());
+                currentType = params.get(0).sort();
+            }
+        } else if (chainStageIsSort()) {
+            // Anonymous checkpoint head `[A] -> …`.
+            IrSort inputSort = parseSort();
+            atVar = "$at" + (syntheticCounter++);
+            params = List.of(new IrParam(atVar, inputSort));
+            cur = new IrExpr.Var(atVar, open.origin());
+            currentType = inputSort;
+            expect(AltToken.Kind.ARROW);
+        }
+        // else: closed (let- or production-led) — no input; @ established by the stages.
+        boolean hasInput = !params.isEmpty();
+
+        // ---- FOLD: stages mutate @ (cur) and accumulate lets / a sort pin. ----
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
-        IrSort currentType = inputSort;                 // the type of @ entering the next stage
-        boolean reliable = true;                        // is currentType explicitly declared?
-        currentScope.put(param, currentType);
+        List<String> bn = new ArrayList<>();        // interleaved let bindings
+        List<IrSort> bs = new ArrayList<>();
+        List<IrExpr> bv = new ArrayList<>();
+        String pinBase = null;                      // sort projection: Base of a refinement stage
+        IrExpr constraints = null;                  // sort projection: non-@== refinement conjuncts
         try {
-            while (peek().kind() == AltToken.Kind.ARROW) {
-                consume();  // ->
-                if (chainStageIsCheckpoint()) {
-                    IrSort checkpoint = parseSort();
-                    if (reliable) checkChainStage(currentType, checkpoint, open.origin());
-                    currentType = checkpoint;           // the checkpoint re-types @
-                    reliable = true;
+            if (freshScope) currentScope.clear();
+            for (IrParam p : params) currentScope.put(p.name(), p.sort());
+            if (destrs != null && !destrs.isEmpty()) bindParamDestructures(destrs);
+            boolean done = false;
+            while (!done) {
+                if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+                    // binding stage: names only, @ unchanged.
+                    consume();
+                    AltToken n = expect(AltToken.Kind.IDENT);
+                    IrSort s = null;
+                    if (peek().kind() == AltToken.Kind.COLON) { consume(); s = parseSort(); }
+                    expect(AltToken.Kind.EQUALS);
+                    IrExpr e = cur != null ? substituteSelf(parseExpr(), cur) : parseExpr();
+                    IrSort bindSort = s != null ? s : inferMaximalSort(e);
+                    bn.add(n.text());
+                    bs.add(bindSort);
+                    bv.add(e);
+                    currentScope.put(n.text(), bindSort);
+                } else if (chainStageIsSort()) {
+                    // a sort stage: a coercion (Named) or a refinement/pin (Refined).
+                    IrSort stageSort = parseBracketBranch();
+                    if (stageSort instanceof IrSort.Refined r) {
+                        IrExpr witness = definitionWitness(r.predicate());
+                        if (witness != null) cur = witness;          // @==w DEFINES @
+                        IrExpr rest = removeDefinitionConjunct(r.predicate());
+                        if (rest != null) {
+                            constraints = constraints == null ? rest
+                                    : new IrExpr.BinOp(IrExpr.Op.AND, constraints, rest, open.origin());
+                        }
+                        pinBase = baseSortName(r);
+                        currentType = r;
+                    } else {                                         // a `[Type]` coercion of @
+                        if (cur != null && !sameBase(currentType, stageSort)) {
+                            cur = new IrExpr.Cast(stageSort, cur, open.origin());
+                        }
+                        currentType = stageSort;
+                    }
                 } else {
-                    // A conversion: an @-expr (stops at the next `->` or `]`). Type
-                    // it with @ standing for the running value (a single $at leaf),
-                    // then thread it into the accumulated body.
-                    currentScope.put(param, currentType);
-                    IrExpr stageExpr = parseExpr();
-                    currentType = inferMaximalSort(substituteSelf(stageExpr, new IrExpr.Var(param, open.origin())));
-                    threaded = substituteSelf(stageExpr, threaded);
-                    reliable = false;
+                    // production stage: @ := expr.
+                    IrExpr e = parseExpr();
+                    cur = cur != null ? substituteSelf(e, cur) : e;
+                    currentType = inferMaximalSort(cur);
                 }
-                currentScope.put(param, currentType);
+                if (atVar != null) currentScope.put(atVar, currentType);
+                if (peek().kind() == AltToken.Kind.ARROW) consume();
+                else done = true;
             }
         } finally {
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
         AltToken close = expect(AltToken.Kind.RBRACKET);
-        return new IrExpr.Lambda(
-                List.of(new IrParam(param, inputSort)), currentType, threaded, open.spanTo(close));
+
+        // Wrap the interleaved lets around the running value (first outermost), then the
+        // fragment's param-destructure locals around that.
+        IrExpr body = cur;
+        for (int i = bn.size() - 1; i >= 0; i--) {
+            body = new IrExpr.LetIn(bn.get(i), bs.get(i), bv.get(i), body, open.origin());
+        }
+        if (destrs != null && !destrs.isEmpty()) body = wrapParamDestructures(body, destrs);
+
+        if (hasInput) {
+            IrSort returnSort = declaredCodomain != null ? declaredCodomain
+                    : currentType != null ? currentType : inferMaximalSort(body);
+            return new ParsedClause.Value(
+                    new IrExpr.Lambda(params, returnSort, body, open.spanTo(close)));
+        }
+        // Closed → a sort: `[Base: @==finalAt (& constraints)]` (the in-type pipeline).
+        String base = pinBase != null ? pinBase : baseSortName(inferMaximalSort(body));
+        IrExpr defPred = new IrExpr.BinOp(
+                IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), body, open.origin());
+        IrExpr fullPred = constraints == null
+                ? defPred
+                : new IrExpr.BinOp(IrExpr.Op.AND, defPred, constraints, open.origin());
+        return new ParsedClause.Sort(new IrSort.Refined(base, fullPred, open.spanTo(close)));
+    }
+
+    /** Whether two sorts share a base name (both known). */
+    private boolean sameBase(IrSort a, IrSort b) {
+        String ba = baseSortName(a);
+        String bb = baseSortName(b);
+        return ba != null && ba.equals(bb);
     }
 
     /**
-     * Assert a clause-chain checkpoint against a RELIABLY-known running type of
-     * {@code @} (S4): a compile error only when the two are PROVABLY disjoint bases
-     * with no conversion between them. Abstains on any unknown floor ({@code _} /
-     * {@code _record} / null) and on a same-base refinement, per the no-lie law
-     * (only error when the leniency would assert something false). The single
-     * sanctioned cross-base is the lossless {@code Int}→{@code Decimal} embedding,
-     * mirroring the let-binding gate.
+     * Whether the stage at {@code peek()} is a sort (a coercion {@code [Type]}/{@code Type}
+     * or a refinement {@code [Base:pred]}/{@code Base:pred}) rather than a value production:
+     * a leading {@code [}, or a capitalized name that is NOT a constructor call
+     * ({@code Name(…)} — that is a production). Capitalization is the non-load-bearing hint;
+     * the bracket is the unambiguous form (docs/arrows.md).
      */
-    private void checkChainStage(IrSort current, IrSort checkpoint, sibarum.pontif.core.Origin o)
-            throws ParseException {
-        String cur = baseSortName(current);
-        String chk = baseSortName(checkpoint);
-        if (cur == null || chk == null) return;
-        if (cur.equals("_") || chk.equals("_") || cur.equals("_record")) return;
-        if (cur.equals(chk)) return;
-        if (chk.equals("Decimal") && cur.equals("Int")) return;   // lossless embedding
-        throw new ParseException(
-                "clause-chain stage expects [" + chk + "] but @ is [" + cur + "] here — "
-                        + "no conversion bridges them (docs/arrows.md)", o);
-    }
-
-    /**
-     * Whether the chain stage at {@code peek()} is a type checkpoint rather than a
-     * conversion: a bracketed {@code [T]}, or a standalone capitalized type name
-     * ({@code Int}/{@code String}) that is the whole stage (next token ends it).
-     * Capitalization is the non-load-bearing hint; {@code [T]} is the unambiguous
-     * form (docs/arrows.md). Everything else (notably an {@code @}-expr) is a
-     * conversion.
-     */
-    private boolean chainStageIsCheckpoint() {
+    private boolean chainStageIsSort() {
         if (peek().kind() == AltToken.Kind.LBRACKET) return true;
         if (peek().kind() == AltToken.Kind.IDENT) {
-            String txt = peek().text();
-            boolean capitalized = !txt.isEmpty() && Character.isUpperCase(txt.charAt(0));
-            boolean standalone = peek(1).kind() == AltToken.Kind.ARROW
-                    || peek(1).kind() == AltToken.Kind.RBRACKET;
-            return capitalized && standalone;
+            String t = peek().text();
+            return !t.isEmpty() && Character.isUpperCase(t.charAt(0))
+                    && peek(1).kind() != AltToken.Kind.LPAREN;
         }
         return false;
     }
