@@ -229,6 +229,12 @@ public final class PontifCompiler {
         // table), so a LINKED module arrives already resolved and this call is an
         // unrestricted no-op re-run. A bare single-file module (no requires, never
         // linked) is resolved here — it has nothing cross-module to gate.
+        // Expand DEFAULT trait methods before method/operator resolution — so a
+        // `t.method()` call on an impl that omits a defaulted contract method finds
+        // the synthesized `Type.method` (cloned from the trait's default body). The
+        // linked module carries every trait declaration, so cross-module defaults
+        // resolve here too. Idempotent (re-run inside IrCompiler is a no-op).
+        rawModule = sibarum.pontif.ir.TraitDefaultExpansion.expand(rawModule);
         IrModule module;
         try {
             module = sibarum.pontif.ir.MethodOperatorResolver.resolve(rawModule);

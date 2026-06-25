@@ -117,12 +117,37 @@ binding receives the clause itself (a transform with nothing to apply to IS the 
 `parseLetExpr` route a clause-typed `= rhs` binding through `applyReturnClause`, exactly as
 `parseFunction`/`parseMethod` do for the body.
 
-This completes the symmetry — there is **no** further "param-side mirror". Return and let are
-*production* sites (they yield a value a clause can post-process); a **param is a membership
-sort** — a value the function *receives*, producing nothing to apply a clause to. A function-typed
-param is already `[Method(A):B]`; writing `[A->B]` there would collide with it and lie (the caller
-passes an `A`). Input-boundary adjustment (e.g. `Int→Decimal`) is the construction gate coercing to
-fit the membership sort — not a transform clause.
+**Param-side conversion (S7) — the input mirror, after all.** A param clause `bar:[A -> B]` is
+NOT the function-type `[Method(A):B]` (a function-valued param); it is the *transform*: the caller
+passes the **domain** `A` (the contract sort, what dispatch keys on), and inside the function `bar`
+is the **codomain** `B` the clause produces. The function prologue rebinds `bar = clause(bar)` — the
+same `applyReturnClause` apply-to-subject primitive, on the way IN. Symmetric to the return:
+
+- **return** `[A -> B]`: internal body = domain, external result = codomain (convert on the way out).
+- **param** `[A -> B]`: external arg = domain, internal binding = codomain (convert on the way in).
+
+The destructure/conversion duality made first-class at the param:
+`function foo(bar:[MyStruct.{a,b} -> ProprietaryType{z=a+b}]):[Decimal:bar.z]` — the caller passes a
+`MyStruct`, it is destructured to `a,b`, converted to a `ProprietaryType`, and `bar` in the body is
+that `ProprietaryType` (`bar.z` resolves). It is honest, not a lie: the signature shows *both* ends,
+and dispatch keys on the domain `MyStruct`. Callee-local (no call-site changes). Mechanism:
+`parseParamList` detects a clause-sort param (top-level `->`), takes the clause's domain as the
+param's contract sort, and records a `ParamConversion`; `parseFunction`/`parseMethod` scope the
+codomain in the body and wrap it with `let bar = clause(bar)`. A `[Base.{…} -> …]` destructuring
+input is a new `parseClauseStages` head that seeds `let a = @.a` field-extractions. Backward
+compatible — a param with no top-level `->` (a plain sort, `.{}` destructure, or `[Method(A):B]`) is
+unchanged. Input-boundary *coercion-to-fit* (`Int→Decimal`) remains the construction gate; the
+param clause is for explicit, programmer-authored conversion.
+
+**Sort-vs-production is POSITIONAL, not brace-content (S8).** A clause **head** is always a
+*sort / destructure / let* — never a construction. So a `Name{…}` / `Type{…}` at the head reads as
+the construction-pin / trait *sort*, while a `Name{…}` in a **middle** stage is a value *production*
+(it changes `@`). The parser splits accordingly: head detection parses its leading stage as a sort
+unconditionally (only `let` diverts to the closed pipeline), and the `Name{…}`⇒production rule
+(`chainStageIsSort` excluding `Name{`) applies *only* to the middle fold. This replaced an earlier
+coarse rule that excluded `Name{` everywhere (which mis-routed a construction-headed clause). In the
+middle, a sort/destructure stage only follows a subject-changing production — never a stage that
+leaves `@` unchanged.
 
 The doc below describes the S1–S4 shape; S5 generalized the stage model (every production sets
 `@`; `[Type]` = coercion) and unified the parsers — see `project_arrow_unification` memory.

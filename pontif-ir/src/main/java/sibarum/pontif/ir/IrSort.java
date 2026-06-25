@@ -205,7 +205,9 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     record Trait(String name, Map<String, IrSort.Method> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                  Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
-                 String baseTrait, List<IrSort> typeArgs, Origin origin) implements IrSort {
+                 String baseTrait, List<IrSort> typeArgs,
+                 Map<String, IrStmt.FunctionDecl> methodDefaults, Origin origin)
+            implements IrSort {
         public Trait {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Trait name must be non-empty");
@@ -260,6 +262,26 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // instantiated. WAR(stream) §8.6: carrying these closes the no-lie hole where
             // the element type of a computed Stream was dropped at resolution.
             typeArgs = typeArgs == null ? List.of() : List.copyOf(typeArgs);
+            // methodDefaults: method name → a body-bearing FunctionDecl, present only
+            // for a DEFAULTED contract method (`quack():Int -> this.x` in the trait
+            // body). A defaulted method also appears in `methods` (its signature), so
+            // every existing contract/dispatch path still sees it; the body here is
+            // cloned per-impl by TraitDefaultExpansion when the impl omits the method.
+            // The stored FunctionDecl's `this` param is typed to SELF_TYPE — the
+            // expansion substitutes it to the satisfier's concrete type.
+            methodDefaults = methodDefaults == null
+                    ? java.util.Map.of()
+                    : java.util.Collections.unmodifiableMap(
+                            new java.util.LinkedHashMap<>(methodDefaults));
+        }
+
+        /** Back-compat: the pre-methodDefaults canonical signature — no default method bodies. */
+        public Trait(String name, Map<String, IrSort.Method> methods,
+                     Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     String baseTrait, List<IrSort> typeArgs, Origin origin) {
+            this(name, methods, attributes, associatedTypes, typeParams, operators,
+                    baseTrait, typeArgs, java.util.Map.of(), origin);
         }
 
         /** Back-compat: the pre-typeArgs canonical signature — no applied type arguments. */
@@ -268,7 +290,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                      Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
                      String baseTrait, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
-                    baseTrait, List.of(), origin);
+                    baseTrait, List.of(), java.util.Map.of(), origin);
         }
 
         /** Back-compat: a trait with no base trait (a root trait). */

@@ -133,6 +133,24 @@ class ClauseChainTest {
                 g(5)"""));
     }
 
+    @Test void paramConversionClause_convertsArgumentOnEntry() throws Exception {
+        // S7 — input mirror of return-as-transform: the caller passes the DOMAIN (Int);
+        // inside the function `bar` is the codomain (the clause applied to the arg).
+        assertEquals(6L, run("""
+                function f(bar:[Int -> @ + 1 -> Int]):Int -> bar
+                f(5)"""));
+    }
+
+    @Test void paramConversionClause_destructureAndConstruct() throws Exception {
+        // James's example: caller passes a MyStruct; it is destructured to a,b and
+        // converted to a ProprietaryType; `bar` in the body is that ProprietaryType.
+        assertEquals(7L, run("""
+                struct MyStruct(a:Int, b:Int)
+                struct ProprietaryType(z:Int)
+                function g(bar:[MyStruct.{a,b} -> ProprietaryType{z=a+b}]):Int -> bar.z
+                g(MyStruct(3, 4))"""));
+    }
+
     @Test void spreadAscriptionChain_mapsElements() throws Exception {
         // `&s:[Int -> @*2 -> Int]` is the inline map face — the conversion-chain
         // spelling of `&s:[ (el:Int) -> el*2 ]`.

@@ -479,7 +479,8 @@ forcing function).
 
 ## Traits — follow-on
 
-- **Default method impls in trait bodies** (adds self-reference resolution); **multi-trait
+- ~~**Default method impls in trait bodies**~~ — LANDED 2026-06-25 (`TraitDefaultExpansion`,
+  full self-reference; see docs/traits.md "Default method implementations"). **multi-trait
   constraints** in params (`a:Duck & Audible` — partially achievable via intersection sorts,
   needs a small parser extension); **trait inheritance** (sugar over multi-trait; defer);
   **primitives as trait implementors** (may `assign trait Int:Foo` register a built-in in a

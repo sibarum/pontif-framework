@@ -24,6 +24,14 @@ public final class IrCompiler {
     }
 
     public CompiledModule compile(IrModule module) throws CompileException {
+        // Expand DEFAULT trait methods into per-impl FunctionDecls FIRST — before
+        // any other pass. A `assign trait Type:Trait` block that omits a defaulted
+        // contract method gets the trait's default body cloned in as `Type.method`,
+        // so the rest of the pipeline (alias resolution, method/operator resolution,
+        // the sort checker, dispatch registration) treats it exactly like a
+        // hand-written impl method. An impl that provides the method overrides it.
+        module = TraitDefaultExpansion.expand(module);
+
         // Lower user coercions (`cast Target:(p:Source) -> body`) to 1-param
         // dispatch functions under the reserved coercion key (Coercions.coerceKey
         // on the target's base), BEFORE the transform passes — so AliasResolver,

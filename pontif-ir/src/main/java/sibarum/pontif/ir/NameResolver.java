@@ -217,9 +217,13 @@ public final class NameResolver {
                 // be a user type needing FQN-qualification — and preserved.
                 List<IrSort> resolvedArgs = new ArrayList<>(t.typeArgs().size());
                 for (IrSort a : t.typeArgs()) resolvedArgs.add(rewriteSort(a, m, table));
+                // methodDefaults bodies live inside the sort (not walked as
+                // statements), so they are carried through verbatim here — they are
+                // cloned into the impl and resolved in-context by TraitDefaultExpansion.
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), resolvedArgs, t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), resolvedArgs,
+                        t.methodDefaults(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

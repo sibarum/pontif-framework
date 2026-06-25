@@ -267,11 +267,47 @@ Bottom-up, each slice testable end-to-end via the layer below.
    existing S-expr test infrastructure.
 4. **Alt syntax.** `trait X{...}` and `assign trait X:Y {...}`.
 
+## Default method implementations (landed 2026-06-25)
+
+A trait may give a method a body directly, written in the impl-method form
+(the same `name(params):Ret -> body` shape used inside `assign trait`):
+
+```
+trait Doubler{
+  base:[Method():Int],                          # abstract — every impl must supply it
+  doubled():Int -> this.base() + this.base()    # DEFAULT — impls inherit unless they override
+}
+struct T(x:Int)
+assign trait T:Doubler {
+  base():Int -> 21          # `doubled` omitted → inherits the default
+}
+T(0).doubled()              # 42
+```
+
+A trait member is a default iff a `(` follows its name (vs `:` for an abstract
+method `quack:[Method():Int]` or a data attribute). The default body has **full
+self-reference**: it may read `this`, call sibling methods (abstract or
+defaulted), etc. An `assign trait` block that **provides** the method overrides
+the default; one that **omits** it inherits. Defaults flow through base traits
+(`trait Derived : Base` inherits `Base`'s defaults; a derived default wins).
+
+Mechanism — `TraitDefaultExpansion` (a pre-pass before method/operator
+resolution): for each impl that omits a defaulted method, the trait's body is
+cloned into a per-impl `Type.method(this:Type, …)` FunctionDecl (the injected
+`this` re-typed from the `this.type` placeholder to the concrete subject; the
+trait's associated types / `[type E]` params substituted). The clone then rides
+the ordinary pipeline — alias/method resolution, the sort checker, dispatch
+registration — so nothing else needed special-casing, and the impl is *complete*
+by the time `SortChecker` runs. (Slice-1 limit: a default body that names an
+imported type in a linked program isn't re-run through `NameResolver`; bodies
+over `this`/fields/siblings/primitives — the common case — are fully supported.)
+
+Not (yet) defaulted: **operator** contract members (mechanism-1 free overloads,
+not methods) and **attribute** producers on the trait itself (impl-side
+producers already exist).
+
 ## Open follow-ups
 
-- **Default method impls** in the trait body. Trait body provides a
-  default; impl blocks override or inherit. Useful but adds
-  self-reference resolution. Defer to a later slice.
 - **Multi-trait constraints** in param positions (`x:Duck & Audible`).
   Defer to the in-progress union/intersection sort work.
 - **Primitives as trait implementors** (built-in type satisfies a trait, e.g.

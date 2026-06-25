@@ -872,6 +872,7 @@ public final class AltParser {
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        List<ParamConversion> convs = drainParamConversions();
         // Inline destructuring (docs/type-parameters.md §2.4): a bare unknown name
         // appearing as a TYPE ARGUMENT in a param sort (`b:Box[T]`) introduces a
         // type variable, merged into the slot params so it scopes identically.
@@ -898,10 +899,13 @@ public final class AltParser {
             Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
             currentScope.clear();
             for (IrParam p : params) currentScope.put(p.name(), p.sort());
+            // A conversion param's name is its CODOMAIN inside the body (not the
+            // domain contract sort), so the body resolves `bar.<field>` etc.
+            for (ParamConversion c : convs) currentScope.put(c.paramName(), paramConversionCodomain(c));
             bindParamDestructures(destrs);
             try {
-                IrExpr body = applyReturnClause(
-                        wrapParamDestructures(parseExpr(), destrs), rc.transform());
+                IrExpr body = wrapParamConversions(applyReturnClause(
+                        wrapParamDestructures(parseExpr(), destrs), rc.transform()), convs);
                 declaredFunctionReturns.put(name, returnSort);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
                 if (!typeParams.isEmpty()) {
@@ -920,9 +924,9 @@ public final class AltParser {
             consume();
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
-                // The synthesized body references destructured params (S4), so
-                // wrap it in their `let local = param.field` bindings.
-                IrExpr body = wrapParamDestructures(derived, destrs);
+                // The synthesized body references destructured params (S4) and
+                // conversion params, so wrap it in both bindings.
+                IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
                 IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
                 declaredFunctionReturns.put(name, effReturn);
                 if (params.isEmpty()) declaredZeroArgFunctions.add(name);
@@ -1081,6 +1085,7 @@ public final class AltParser {
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        List<ParamConversion> convs = drainParamConversions();
         expect(AltToken.Kind.COLON);
         ReturnClause rc = parseReturnClause();
         IrSort returnSort = rc.sort();
@@ -1111,7 +1116,7 @@ public final class AltParser {
             consume();  // SEMICOLON
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
-                IrExpr body = wrapParamDestructures(derived, destrs);
+                IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
                 IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
                 declaredFunctionReturns.put(name, effReturn);
                 return new IrStmt.FunctionDecl(
@@ -1125,10 +1130,12 @@ public final class AltParser {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         for (IrParam p : desugaredParams) currentScope.put(p.name(), p.sort());
+        // A conversion param's name is its CODOMAIN inside the body (not the contract domain).
+        for (ParamConversion c : convs) currentScope.put(c.paramName(), paramConversionCodomain(c));
         bindParamDestructures(destrs);
         try {
-            IrExpr body = applyReturnClause(
-                    wrapParamDestructures(parseExpr(), destrs), rc.transform());
+            IrExpr body = wrapParamConversions(applyReturnClause(
+                    wrapParamDestructures(parseExpr(), destrs), rc.transform()), convs);
             declaredFunctionReturns.put(name, returnSort);
             return new IrStmt.FunctionDecl(
                     name, desugaredParams, returnSort, body, start.origin());
@@ -1153,6 +1160,44 @@ public final class AltParser {
         List<ParamDestructure> d = new ArrayList<>(pendingParamDestructures);
         pendingParamDestructures.clear();
         return d;
+    }
+
+    /**
+     * A param-side conversion clause (docs/arrows.md — the input mirror of
+     * return-type-as-transform): {@code bar:[A -> B]} means the caller passes an
+     * {@code A} and the binding {@code bar} inside the function is the {@code B} the
+     * clause produces. The argument's CONTRACT sort is the clause's domain (what the
+     * caller passes / dispatch keys on); {@code bar} in the body is the codomain. The
+     * prologue rebinds {@code bar = clause(bar)} — the same apply-to-subject primitive
+     * as a return clause, on the way in. (The destructure/conversion duality made
+     * first-class at the param.)
+     */
+    private record ParamConversion(String paramName, IrExpr.Lambda clause) {}
+
+    private final List<ParamConversion> pendingParamConversions = new ArrayList<>();
+
+    private List<ParamConversion> drainParamConversions() {
+        List<ParamConversion> c = new ArrayList<>(pendingParamConversions);
+        pendingParamConversions.clear();
+        return c;
+    }
+
+    /** The codomain (internal) sort a conversion param's name has in the body. */
+    private static IrSort paramConversionCodomain(ParamConversion c) {
+        return c.clause().returnSort();
+    }
+
+    /** Wraps {@code body} in `let bar = clause(bar)` for each conversion param. */
+    private IrExpr wrapParamConversions(IrExpr body, List<ParamConversion> convs) {
+        IrExpr out = body;
+        for (int i = convs.size() - 1; i >= 0; i--) {
+            ParamConversion c = convs.get(i);
+            out = new IrExpr.LetIn(c.paramName(), c.clause().returnSort(),
+                    new IrExpr.Apply(c.clause(),
+                            List.of(new IrExpr.Var(c.paramName(), body.origin())), body.origin()),
+                    out, body.origin());
+        }
+        return out;
     }
 
     /** Binds the destructured locals into the body's scope for parsing. */
@@ -1185,6 +1230,26 @@ public final class AltParser {
             AltToken name = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
             IrSort sort;
+            // Param-side conversion clause: `bar:[A -> B]` (or `[A.{a,b} -> B]`) — the
+            // caller passes the DOMAIN A (the contract sort, what dispatch keys on);
+            // inside the function `bar` is the codomain B (the prologue rebinds
+            // `bar = clause(bar)`). The input mirror of return-type-as-transform
+            // (docs/arrows.md). Requires a top-level `->`, so a plain `.{}` destructure
+            // or a Method sort (no arrow) falls through to the branches below.
+            if (looksLikeClause()) {
+                IrExpr.Lambda clause = parseClause();
+                if (clause.params().size() != 1) {
+                    throw new ParseException(
+                            "a conversion-clause param takes exactly one input "
+                                    + "(the value the caller passes); got "
+                                    + clause.params().size(), name.origin());
+                }
+                sort = clause.params().get(0).sort();           // contract = domain
+                pendingParamConversions.add(new ParamConversion(name.text(), clause));
+                params.add(new IrParam(name.text(), sort));
+                first = false;
+                continue;
+            }
             // Param-sort `.{}` destructure: `point:[Point.{x, y}]` — the param
             // keeps base sort [Point]; x, y bind to point.x, point.y in the body.
             if (peek().kind() == AltToken.Kind.LBRACKET
@@ -2541,7 +2606,8 @@ public final class AltParser {
         declaredTraits.add(name);
         IrSort.Trait named = new IrSort.Trait(
                 name, body.methods(), body.attributes(), body.associatedTypes(),
-                typeParams, body.operators(), baseTrait, body.origin());
+                typeParams, body.operators(), baseTrait, List.of(),
+                body.methodDefaults(), body.origin());
         for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }
@@ -2569,6 +2635,10 @@ public final class AltParser {
         expect(AltToken.Kind.LBRACE);
         Map<String, IrSort.Method> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
+        // Default method bodies — member name → a body-bearing FunctionDecl, present
+        // only for a DEFAULTED method (`quack():Int -> this.x`). The same method also
+        // lands in `methods` as its IrSort.Method signature.
+        Map<String, IrStmt.FunctionDecl> methodDefaults = new LinkedHashMap<>();
         // Associated types — member name → bound (null = unbounded `type X`; a
         // sort = the bound `type X:R`). LinkedHashMap permits the null value.
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
@@ -2634,8 +2704,6 @@ public final class AltParser {
                 continue;
             }
             AltToken memberName = expect(AltToken.Kind.IDENT);
-            expect(AltToken.Kind.COLON);
-            IrSort memberSort = parseSort();
             if (methods.containsKey(memberName.text())
                     || attributes.containsKey(memberName.text())
                     || associatedTypes.containsKey(memberName.text())
@@ -2644,6 +2712,17 @@ public final class AltParser {
                         "Duplicate member '" + memberName.text() + "' in trait body",
                         memberName.origin());
             }
+            // A DEFAULTED method — the impl-method form written directly in the trait
+            // body: `quack():Int -> this.x`. A `(` after the name marks it (an
+            // abstract method or a data attribute uses `:` instead). The body is kept
+            // for TraitDefaultExpansion to clone into any impl that omits the method.
+            if (peek().kind() == AltToken.Kind.LPAREN) {
+                parseTraitDefaultMethod(memberName, methods, methodDefaults);
+                first = false;
+                continue;
+            }
+            expect(AltToken.Kind.COLON);
+            IrSort memberSort = parseSort();
             // A member is a METHOD if its sort is [Method(...):Ret]; otherwise
             // it is a typed data ATTRIBUTE — a value sort the satisfier must
             // supply (a field or a computed producer). Both live in `Type{…}`.
@@ -2658,7 +2737,66 @@ public final class AltParser {
         // Placeholder name; parseTrait patches it with the declared name.
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
-                headTok.spanTo(close));
+                null, List.of(), methodDefaults, headTok.spanTo(close));
+    }
+
+    /**
+     * Parses a DEFAULTED trait method — the impl-method form written directly in
+     * the trait body: {@code methodName(params):Ret -> body} (decided by the {@code (}
+     * after the name; an abstract method or data attribute uses {@code :} instead).
+     * Records the contract {@link IrSort.Method} signature in {@code methods} (so every
+     * existing contract/dispatch path treats it as an ordinary member) and a
+     * body-bearing {@link IrStmt.FunctionDecl} in {@code methodDefaults}. The injected
+     * {@code this} param is typed to {@link IrSort#SELF_TYPE}; TraitDefaultExpansion
+     * substitutes it to each satisfier's concrete type and qualifies the name to
+     * {@code Type.method}. Body parses with {@code this} + user params in scope.
+     */
+    private void parseTraitDefaultMethod(
+            AltToken nameTok,
+            Map<String, IrSort.Method> methods,
+            Map<String, IrStmt.FunctionDecl> methodDefaults) throws ParseException {
+        if (KEYWORDS.contains(nameTok.text())) {
+            throw new ParseException(
+                    "Cannot use keyword '" + nameTok.text() + "' as a method name",
+                    nameTok.origin());
+        }
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
+        expect(AltToken.Kind.COLON);
+        IrSort returnSort = parseSort();
+        expect(AltToken.Kind.ARROW);
+
+        IrSort selfSort = IrSort.named(IrSort.SELF_TYPE);
+        List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
+        allParams.add(new IrParam("this", selfSort));
+        allParams.addAll(userParams);
+
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : allParams) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
+        try {
+            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
+            // Contract signature EXCLUDES `this` (SortChecker prepends it) — same
+            // shape an abstract `:[Method(...)]` member yields.
+            List<IrSort> paramSorts = new ArrayList<>(userParams.size());
+            List<String> paramNames = new ArrayList<>(userParams.size());
+            for (IrParam p : userParams) {
+                paramSorts.add(p.sort());
+                paramNames.add(p.name());
+            }
+            methods.put(nameTok.text(),
+                    new IrSort.Method(paramSorts, paramNames, returnSort, nameTok.origin()));
+            // Body-bearing decl — name is the SHORT method name; expansion qualifies it.
+            methodDefaults.put(nameTok.text(), new IrStmt.FunctionDecl(
+                    nameTok.text(), allParams, returnSort, body, nameTok.origin()));
+            declaredFunctionReturns.put(nameTok.text(), returnSort);
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
     }
 
     /**
@@ -4555,12 +4693,19 @@ public final class AltParser {
         IrExpr cur = null;                          // the running @ value
         IrSort currentType = null;
         boolean freshScope = false;
+        List<IrStmt.RequireEntry> headDestr = null; // anonymous destructuring input
+        IrSort.Structural headDestrBase = null;
         if (peek().kind() == AltToken.Kind.LPAREN) {
             // Named-binder fragment head `(x:A, …) (:Codomain)? -> …`.
             expect(AltToken.Kind.LPAREN);
             params = parseParamList(AltToken.Kind.RPAREN);
             expect(AltToken.Kind.RPAREN);
             destrs = drainParamDestructures();
+            if (!drainParamConversions().isEmpty()) {
+                throw new ParseException("a conversion-clause param `(x:[A -> B])` inside a "
+                        + "fragment binder is not supported yet — use it on a function/method "
+                        + "param", open.origin());
+            }
             if (peek().kind() == AltToken.Kind.COLON) { consume(); declaredCodomain = parseSort(); }
             expect(AltToken.Kind.ARROW);
             freshScope = true;                       // a fragment is a closed clause over its binders
@@ -4569,8 +4714,31 @@ public final class AltParser {
                 cur = new IrExpr.Var(atVar, open.origin());
                 currentType = params.get(0).sort();
             }
-        } else if (chainStageIsSort()) {
-            // Anonymous checkpoint head `[A] -> …`.
+        } else if (peek().kind() == AltToken.Kind.IDENT
+                && peek(1).kind() == AltToken.Kind.DOT
+                && peek(2).kind() == AltToken.Kind.LBRACE) {
+            // Destructuring anonymous input `[Base.{a, b} -> conv]`: @ is a Base whose
+            // fields are extracted into scope for the conversion body (the param-
+            // destructure shape, made a clause input — destructure/conversion duality).
+            AltToken baseTok = expect(AltToken.Kind.IDENT);
+            headDestr = parseDotBraceEntryList();
+            IrSort inputSort = new IrSort.Named(baseTok.text(), baseTok.origin());
+            headDestrBase = declaredStructs.get(baseTok.text());
+            atVar = "$at" + (syntheticCounter++);
+            params = List.of(new IrParam(atVar, inputSort));
+            cur = new IrExpr.Var(atVar, open.origin());
+            currentType = inputSort;
+            expect(AltToken.Kind.ARROW);
+        } else if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+            // Closed `let`-led pipeline — no input head; the fold consumes the lets and
+            // the sort projection pins @. (`let` is the one head that is neither a sort
+            // nor a destructure.)
+        } else {
+            // The head is a SORT. A clause head is always a sort / destructure / let,
+            // NEVER a construction — so `Name{…}` / `Type{…}` here read as the
+            // construction-pin / trait SORT, not a value. (The `Name{…}`⇒production rule
+            // is a MIDDLE-stage rule only, applied by chainStageIsSort in the fold — the
+            // distinction is positional, not by brace content.)
             IrSort inputSort = parseSort();
             atVar = "$at" + (syntheticCounter++);
             params = List.of(new IrParam(atVar, inputSort));
@@ -4578,7 +4746,6 @@ public final class AltParser {
             currentType = inputSort;
             expect(AltToken.Kind.ARROW);
         }
-        // else: closed (let- or production-led) — no input; @ established by the stages.
         boolean hasInput = !params.isEmpty();
 
         // ---- FOLD: stages mutate @ (cur) and accumulate lets / a sort pin. ----
@@ -4592,6 +4759,21 @@ public final class AltParser {
             if (freshScope) currentScope.clear();
             for (IrParam p : params) currentScope.put(p.name(), p.sort());
             if (destrs != null && !destrs.isEmpty()) bindParamDestructures(destrs);
+            // Seed the destructuring-input fields as `let <local> = @.<field>` bindings
+            // so the conversion body resolves them (a = @.a, b = @.b).
+            if (headDestr != null) {
+                for (IrStmt.RequireEntry e : headDestr) {
+                    IrSort fieldSort = headDestrBase != null
+                            && headDestrBase.members().get(e.remoteName()) != null
+                            ? headDestrBase.members().get(e.remoteName())
+                            : IrSort.named("_");
+                    bn.add(e.localName());
+                    bs.add(fieldSort);
+                    bv.add(new IrExpr.FieldAccess(
+                            new IrExpr.Var(atVar, open.origin()), e.remoteName(), open.origin()));
+                    currentScope.put(e.localName(), fieldSort);
+                }
+            }
             boolean done = false;
             while (!done) {
                 if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
@@ -4684,8 +4866,11 @@ public final class AltParser {
         if (peek().kind() == AltToken.Kind.LBRACKET) return true;
         if (peek().kind() == AltToken.Kind.IDENT) {
             String t = peek().text();
+            // A capitalized name that is NOT a constructor call `Name(…)` nor a
+            // construction literal `Name{…}` (both are value productions).
             return !t.isEmpty() && Character.isUpperCase(t.charAt(0))
-                    && peek(1).kind() != AltToken.Kind.LPAREN;
+                    && peek(1).kind() != AltToken.Kind.LPAREN
+                    && peek(1).kind() != AltToken.Kind.LBRACE;
         }
         return false;
     }

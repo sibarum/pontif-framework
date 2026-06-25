@@ -282,7 +282,8 @@ public final class AliasResolver {
                 // (this.type only) — no aliases to resolve — so pass through verbatim.
                 // Preserve any applied typeArgs (§8.6 carrier).
                 yield new IrSort.Trait(t.name(), resolvedMethods, resolvedAttrs, resolvedAssoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(),
+                        t.methodDefaults(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> resolved = new ArrayList<>(u.branches().size());
@@ -471,7 +472,8 @@ public final class AliasResolver {
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolved));
                 }
                 yield new IrSort.Trait(t.name(), newMethods, newAttrs, newAssoc,
-                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(), t.origin());
+                        t.typeParams(), t.operators(), t.baseTrait(), t.typeArgs(),
+                        t.methodDefaults(), t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> newBranches = new ArrayList<>(u.branches().size());
@@ -517,7 +519,7 @@ public final class AliasResolver {
         // so the element type survives to the gate/runtime — WAR(stream) §8.6.
         return new IrSort.Trait(body.name(), body.methods(), body.attributes(),
                 body.associatedTypes(), body.typeParams(), body.operators(),
-                body.baseTrait(), args, body.origin());
+                body.baseTrait(), args, body.methodDefaults(), body.origin());
     }
 
     /**
@@ -544,6 +546,6 @@ public final class AliasResolver {
         // Operator contract members are self-typed (this.type), not over the
         // trait's [type T] params, so type-var substitution leaves them unchanged.
         return new IrSort.Trait(tr.name(), methods, attrs, assoc, Map.of(), tr.operators(),
-                tr.baseTrait(), tr.origin());
+                tr.baseTrait(), List.of(), tr.methodDefaults(), tr.origin());
     }
 }
