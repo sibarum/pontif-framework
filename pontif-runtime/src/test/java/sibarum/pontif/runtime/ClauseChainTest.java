@@ -151,6 +151,13 @@ class ClauseChainTest {
                 g(MyStruct(3, 4))"""));
     }
 
+    @Test void closedClauseWithNoTerminus_isCleanError() {
+        // A clause that only binds and never produces @ is a clean parse error, not a crash.
+        assertThrows(sibarum.pontif.parser.ParseException.class, () -> run("""
+                let x:[let r:Int = 5];
+                x"""));
+    }
+
     @Test void spreadAscriptionChain_mapsElements() throws Exception {
         // `&s:[Int -> @*2 -> Int]` is the inline map face — the conversion-chain
         // spelling of `&s:[ (el:Int) -> el*2 ]`.

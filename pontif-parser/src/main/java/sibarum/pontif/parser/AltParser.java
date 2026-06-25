@@ -2062,6 +2062,10 @@ public final class AltParser {
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         drainParamDestructures();  // proof params don't use `.{}`; keep the buffer clean
+        if (!drainParamConversions().isEmpty()) {
+            throw new ParseException("a conversion-clause param `[A -> B]` is not supported on a "
+                    + "proof — proof params are inert", start.origin());
+        }
         expect(AltToken.Kind.COLON);
 
         // Push proof params into scope so the case-function's `[@…]` arms infer
@@ -2233,6 +2237,10 @@ public final class AltParser {
         List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
+        if (!drainParamConversions().isEmpty()) {
+            throw new ParseException("a conversion-clause param `[A -> B]` is not supported on a "
+                    + "trait-impl method yet — use a free function/method", nameTok.origin());
+        }
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
         expect(AltToken.Kind.ARROW);
@@ -4858,6 +4866,15 @@ public final class AltParser {
             currentScope.putAll(savedScope);
         }
         AltToken close = expect(AltToken.Kind.RBRACKET);
+
+        // A clause must establish @ — an input head, a production, or a pin. Only
+        // bindings (`[let r = 5]`, no terminus) leaves it unset: a clean error, not an
+        // NPE in the body construction below.
+        if (cur == null) {
+            throw new ParseException(
+                    "a clause must produce a value — this one has only bindings and no "
+                            + "terminus production or pin", close.origin());
+        }
 
         // Wrap the interleaved lets around the running value (first outermost), then the
         // fragment's param-destructure locals around that.
