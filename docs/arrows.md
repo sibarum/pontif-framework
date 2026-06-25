@@ -105,6 +105,25 @@ for the closed clause (→ `IrSort.Refined(base, @==finalAt & constraints)`; a s
 return a value). It retired `parseFragmentLiteral` / `parseClauseChain` / `parsePipelineSort`.
 The deeper IR-level merge (one `Clause` IR node) stays deferred (lens-not-cage).
 
+**Unified ascription (S6).** Applying an ascribed clause to its subject is now ONE primitive
+(`applyReturnClause`) shared by every ascription site, not a function-return-only feature:
+- `function foo(bar):[Int -> @+"" -> String] -> bar*2` — applied to the body ⟹ `"24"`.
+- `let x:[Int -> @+"" -> String] = 12` — applied to the `= rhs` subject ⟹ `"12"`.
+- `let f:[(el) -> el*2]` / `let f:[Int -> @+3 -> Int]` (NO `= rhs`) — no subject, so the clause
+  binds AS A VALUE (the fragment), unchanged.
+The rule: an ascription applies its clause to the subject being ascribed; with no subject, the
+binding receives the clause itself (a transform with nothing to apply to IS the function value).
+`=`-presence isn't a separate rule — it just decides whether a subject exists. `parseLet` /
+`parseLetExpr` route a clause-typed `= rhs` binding through `applyReturnClause`, exactly as
+`parseFunction`/`parseMethod` do for the body.
+
+This completes the symmetry — there is **no** further "param-side mirror". Return and let are
+*production* sites (they yield a value a clause can post-process); a **param is a membership
+sort** — a value the function *receives*, producing nothing to apply a clause to. A function-typed
+param is already `[Method(A):B]`; writing `[A->B]` there would collide with it and lie (the caller
+passes an `A`). Input-boundary adjustment (e.g. `Int→Decimal`) is the construction gate coercing to
+fit the membership sort — not a transform clause.
+
 The doc below describes the S1–S4 shape; S5 generalized the stage model (every production sets
 `@`; `[Type]` = coercion) and unified the parsers — see `project_arrow_unification` memory.
 

@@ -1582,34 +1582,40 @@ public final class AltParser {
             return parseDictDecompositionLetTop(start, name);
         }
         IrSort declaredSort = null;
+        IrExpr value = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
-            // Fragment literal: `let f:[ (el:Int) -> body ]` — a first-class
-            // synthesis-fragment value (docs/stream-war.md §3). The `[…]` carries
-            // params + body (no `= value`); the binding lowers to a 0-arg let
-            // returning the lambda, sorted as the Method contract. Distinguished
-            // from an ordinary `[…]` sort by a NAMED param head (`( IDENT :`), which
-            // no tuple/Method sort begins with.
+            // A clause after `:` — a fragment / conversion chain (docs/arrows.md).
+            // Unified ascription: with a `= rhs` SUBJECT the clause is APPLIED to it
+            // (the same apply-to-subject primitive as a function return-clause —
+            // `let x:[Int -> @+"" -> String] = 12` ⟹ "12"); with NO subject it binds
+            // the clause itself as a first-class fragment value (a 0-arg let returning
+            // the lambda, sorted as the Method contract). Distinguished from an
+            // ordinary `[…]` sort by a top-level `->` or a named-param head.
             if (looksLikeClause()) {
                 IrExpr.Lambda frag = parseClause();
-                List<IrSort> paramSorts = new ArrayList<>();
-                List<String> paramNames = new ArrayList<>();
-                for (IrParam p : frag.params()) {
-                    paramSorts.add(p.sort());
-                    paramNames.add(p.name());
+                if (peek().kind() == AltToken.Kind.EQUALS) {
+                    consume();
+                    value = applyReturnClause(parseExpr(), frag);
+                    declaredSort = frag.returnSort();
+                } else {
+                    List<IrSort> paramSorts = new ArrayList<>();
+                    List<String> paramNames = new ArrayList<>();
+                    for (IrParam p : frag.params()) {
+                        paramSorts.add(p.sort());
+                        paramNames.add(p.name());
+                    }
+                    IrSort methodSort = new IrSort.Method(
+                            paramSorts, paramNames, frag.returnSort(), start.origin());
+                    declaredTopLevelLets.put(name, methodSort);
+                    if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+                    return new IrStmt.FunctionDecl(
+                            name, List.of(), methodSort, frag, start.origin(), true);
                 }
-                IrSort methodSort = new IrSort.Method(
-                        paramSorts, paramNames, frag.returnSort(), start.origin());
-                declaredTopLevelLets.put(name, methodSort);
-                if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
-                return new IrStmt.FunctionDecl(
-                        name, List.of(), methodSort, frag, start.origin(), true);
-            }
-            // `let NAME:Type[sortExpr]` — a reusable sort alias (refinements, unions
-            // of refined bases, named sorts). It's a type-level declaration with no
-            // value, lowered to a TypeAlias the AliasResolver inlines — the bracketed
-            // sibling of the `Type{...}` trait form below.
-            if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACKET) {
+            } else if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACKET) {
+                // `let NAME:Type[sortExpr]` — a reusable sort alias (refinements,
+                // unions of refined bases, named sorts): a type-level declaration with
+                // no value, lowered to a TypeAlias the AliasResolver inlines.
                 consume();  // `Type`
                 IrSort aliased = parseBracketSort();  // the `[...]` (unions/refinements)
                 if (peek().kind() == AltToken.Kind.SEMICOLON) {
@@ -1623,21 +1629,17 @@ public final class AltParser {
                 }
                 declaredSortAliases.add(name);
                 return new IrStmt.TypeAlias(name, aliased, start.origin());
-            }
-            // A NAMED trait uses the `trait` declarator, not `let` (a body-binding
-            // form). Note the anonymous `Type{…}` sort itself stays usable in any
-            // sort position (parseSort) — part of the unified type-spec system;
-            // only naming one via `let` is redirected to `trait`.
-            if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+            } else if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+                // A NAMED trait uses the `trait` declarator, not `let`.
                 throw new ParseException(
                         "Declare a named trait with `trait " + name + "{ … }` — `let` is a "
                                 + "binding form, not the declarator for traits.",
                         peek().origin());
+            } else {
+                declaredSort = parseSort();
             }
-            declaredSort = parseSort();
         }
-        IrExpr value = null;
-        if (peek().kind() == AltToken.Kind.EQUALS) {
+        if (value == null && peek().kind() == AltToken.Kind.EQUALS) {
             consume();
             value = parseExpr();
         }
@@ -4106,38 +4108,48 @@ public final class AltParser {
             return parseDictDecompositionLetExpr(start, nameTok);
         }
         IrSort declaredSort = null;
+        IrExpr value = null;
         if (peek().kind() == AltToken.Kind.COLON) {
             consume();
-            // Fragment literal in a NESTED let — `let m:[ (el:A) -> … ]` inside a function
-            // body (docs/stream-war.md §8b, gap B). `let` works anywhere a let is
-            // permitted, so the same branch parseLet has at top level lives here too; the
-            // `[…]` IS the value (no `= EXPR`), and the rest of the block is the let-in
-            // body. Bound as a Method-sorted closure value.
+            // A clause after `:` in a nested let — the same unified ascription rule as
+            // top level (docs/arrows.md): with a `= rhs` SUBJECT the clause is APPLIED
+            // to it (`let x:[Int -> @+"" -> String] = 12` ⟹ "12"); with NO subject it
+            // binds the clause as a first-class fragment value and the rest of the
+            // block is the let-in body.
             if (looksLikeClause()) {
                 IrExpr.Lambda frag = parseClause();
-                List<IrSort> paramSorts = new ArrayList<>();
-                List<String> paramNames = new ArrayList<>();
-                for (IrParam p : frag.params()) {
-                    paramSorts.add(p.sort());
-                    paramNames.add(p.name());
+                if (peek().kind() == AltToken.Kind.EQUALS) {
+                    consume();
+                    value = applyReturnClause(parseExpr(), frag);
+                    declaredSort = frag.returnSort();
+                } else {
+                    List<IrSort> paramSorts = new ArrayList<>();
+                    List<String> paramNames = new ArrayList<>();
+                    for (IrParam p : frag.params()) {
+                        paramSorts.add(p.sort());
+                        paramNames.add(p.name());
+                    }
+                    IrSort methodSort = new IrSort.Method(
+                            paramSorts, paramNames, frag.returnSort(), start.origin());
+                    IrSort prev = currentScope.get(name);
+                    boolean had = currentScope.containsKey(name);
+                    currentScope.put(name, methodSort);
+                    IrExpr fragBody;
+                    try {
+                        fragBody = parseExpr();
+                    } finally {
+                        if (had) currentScope.put(name, prev); else currentScope.remove(name);
+                    }
+                    return new IrExpr.LetIn(name, methodSort, frag, fragBody, start.origin());
                 }
-                IrSort methodSort = new IrSort.Method(
-                        paramSorts, paramNames, frag.returnSort(), start.origin());
-                IrSort prev = currentScope.get(name);
-                boolean had = currentScope.containsKey(name);
-                currentScope.put(name, methodSort);
-                IrExpr fragBody;
-                try {
-                    fragBody = parseExpr();
-                } finally {
-                    if (had) currentScope.put(name, prev); else currentScope.remove(name);
-                }
-                return new IrExpr.LetIn(name, methodSort, frag, fragBody, start.origin());
+            } else {
+                declaredSort = parseSort();
             }
-            declaredSort = parseSort();
         }
-        expect(AltToken.Kind.EQUALS);
-        IrExpr value = parseExpr();
+        if (value == null) {
+            expect(AltToken.Kind.EQUALS);
+            value = parseExpr();
+        }
         IrSort inferred = inferMaximalSort(value);
         boolean intToDecimal = false;
         boolean streamAutobox = false;

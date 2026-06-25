@@ -108,6 +108,31 @@ class ClauseChainTest {
                 dbl(7)"""));
     }
 
+    @Test void letAscriptionAppliesClause_topLevel() throws Exception {
+        // Unified ascription: a clause-typed let WITH a `= rhs` subject applies the
+        // clause to the subject — the same apply-to-subject primitive as a function
+        // return-clause. `12` enters as Int, the chain converts it to "12".
+        assertEquals("\"12\"", String.valueOf(run("""
+                let x:[Int -> @ + "" -> String] = 12
+                x""")));
+    }
+
+    @Test void letAscriptionAppliesClause_nested() throws Exception {
+        // Same rule inside a function body (nested let).
+        assertEquals(50L, run("""
+                function f(n:[Int]):Int ->
+                  let y:[Int -> @ * 10 -> Int] = n
+                  y
+                f(5)"""));
+    }
+
+    @Test void letBindsClauseValue_whenNoSubject() throws Exception {
+        // No `= rhs` subject → the clause binds AS A VALUE (the fragment), unchanged.
+        assertEquals(8L, run("""
+                let g:[Int -> @ + 3 -> Int]
+                g(5)"""));
+    }
+
     @Test void spreadAscriptionChain_mapsElements() throws Exception {
         // `&s:[Int -> @*2 -> Int]` is the inline map face — the conversion-chain
         // spelling of `&s:[ (el:Int) -> el*2 ]`.
