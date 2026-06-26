@@ -39,9 +39,6 @@ public final class BuiltinModules {
     /** The conservation-property builtin module's name. */
     public static final String STD_CONSERVATION = "std.conservation";
 
-    /** The sequence-substrate builtin module's name (docs/streams.md). */
-    public static final String STD_STREAM = "std.stream";
-
     /** The language-core builtin module's name (docs/stream-war.md): the {@code Stream} trait. */
     public static final String PONTIF_CORE = "pontif.core";
 
@@ -56,7 +53,6 @@ public final class BuiltinModules {
         mods.put(STD_COMMON, stdCommon());
         mods.put(STD_PROOF, stdProof());
         mods.put(STD_CONSERVATION, stdConservation());
-        mods.put(STD_STREAM, stdStream());
         mods.put(PONTIF_CORE, pontifCore());
         mods.put(PONTIF_EVENTS, pontifEvents());
         return mods;
@@ -140,76 +136,12 @@ public final class BuiltinModules {
         }
     }
 
-    /**
-     * The Queue and its combinators — the sequence substrate's inductive view
-     * ({@code docs/streams.md}, ratified): {@code Element(head,
-     * rest:[Element|Leaf])} with terminal {@code Leaf()} re-exported from
-     * {@code std.common}, plus the basis written <b>in Pontif source</b> —
-     * the first builtin that is itself Pontif, parsed at registration. The
-     * combinators are recursive match functions; function-valued parameters
-     * are metareferences invoked by application.
-     *
-     * <p>Interim leniencies, both flagged in the doc: {@code head} and the
-     * function params are loose ({@code "_"}) until the {@code [Stream(T)]}
-     * sort form and Dispatch-key subsumption land (a Dispatch param sort
-     * requires EXACT key match today, which would pin each combinator to one
-     * key sort). Combinator bodies call through bindings, which the
-     * conservation drafter treats as residual — combinator pipelines are
-     * fail-closed in the ledger until the drafter learns to resolve
-     * metareference arguments (a named follow-up).
-     */
-    private static final String STD_STREAM_SOURCE = """
-            requires std.common.{Leaf}
-            exports @.{Element, Leaf, singleton, concat, append, map, exchange, partition}
-
-            struct Element(head:_, rest:[Element|Leaf])
-
-            function singleton(x:_):Element -> Element(x, Leaf())
-
-            function concat(a:[Element|Leaf], b:[Element|Leaf]):[Element|Leaf] -> match a {
-              [Element] -> Element(a.head, concat(a.rest, b))
-              [Leaf]    -> b
-            }
-
-            function append(q:[Element|Leaf], x:_):[Element|Leaf] -> concat(q, singleton(x))
-
-            function map(f:_, q:[Element|Leaf]):[Element|Leaf] -> match q {
-              [Element] -> Element(f(q.head), map(f, q.rest))
-              [Leaf]    -> Leaf()
-            }
-
-            function exchange(p:_, f:_, q:[Element|Leaf]):[Element|Leaf] -> match q {
-              [Element] -> match p(q.head) {
-                [Bool:@==true] -> Element(f(q.head), exchange(p, f, q.rest))
-                _              -> Element(q.head, exchange(p, f, q.rest))
-              }
-              [Leaf] -> Leaf()
-            }
-
-            function partition(p:_, q:[Element|Leaf]):[{[Element|Leaf], [Element|Leaf]}] -> match q {
-              [Element] -> match partition(p, q.rest) {
-                [{yes, no}] -> match p(q.head) {
-                  [Bool:@==true] -> {Element(q.head, yes), no}
-                  _              -> {yes, Element(q.head, no)}
-                }
-              }
-              [Leaf] -> {Leaf(), Leaf()}
-            }
-
-            0
-            """;
-
-    private static IrModule stdStream() {
-        try {
-            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(
-                    STD_STREAM_SOURCE, STD_STREAM);
-            // Force the registry name regardless of header conventions.
-            return new IrModule(STD_STREAM, parsed.statements(), parsed.main());
-        } catch (sibarum.pontif.parser.ParseException pe) {
-            throw new IllegalStateException(
-                    "std.stream's builtin source failed to parse: " + pe.getMessage(), pe);
-        }
-    }
+    // The Queue and its cons-cell combinators (the retired `std.stream`:
+    // `Element(head, rest:[Element|Leaf])` + singleton/concat/append/map/
+    // exchange/partition) were demolished in the stream-trait war (§7 step 5,
+    // docs/stream-war.md): the `&s:[…]` synthesis-fragment primitive subsumes
+    // the whole basis, so the cons-cell carried no remaining weight. `Leaf`
+    // still lives in `std.common` (shared with the proof system).
 
     /**
      * Structs with cross-domain reuse value (ruled 2026-06-06). Founding

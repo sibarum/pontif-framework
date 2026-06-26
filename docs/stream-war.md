@@ -461,7 +461,17 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 3. **Multi-channel** — accumulators (fold/scan), fan-out (fork), fan-in/zip.
 4. **`IndexedStream : Stream`** — `count` + `at`, rungs 1–2 (`indexed-streams.md`);
    the discharge foundation already exists.
-5. **Demolition** — remove `Element|Leaf`; migrate or retire the combinator tests.
+5. **Demolition — LANDED (2026-06-26).** Removed `struct Element` + the cons-cell
+   combinators (`singleton`/`concat`/`append`/`map`/`exchange`/`partition`) and the whole
+   `std.stream` builtin module from `BuiltinModules` (the `&s:[…]` synthesis-fragment
+   primitive subsumes the basis — witnessed by `StreamFragmentTest`/`StreamMapTest`/
+   `StreamConcatTest`/`StreamRangeSynthesisTest`). `Leaf` stays in `std.common` (shared
+   with the proof system). Retired the two cons-cell tests (`StreamCombinatorTest`,
+   `StreamQueueTest`) — they tested the deleted structure; no coverage lost. Full reactor
+   green. **Deferred (named):** `SortChecker.validateSortNames` is still not trait-aware —
+   the `BUILTIN_PARAMETRIC_TYPES = {"Stream"}` whitelist remains (an incompleteness, not a
+   lie); making it general (any imported parametric trait is a valid sort name) is a
+   separate refactor across its ~25 call sites.
 6. **Builtin API impls** — file / GPU first (unblock supirvast vector-add).
 7. **`zip`** (the rest of 2d-3) — multi-`&` fan-in: `(&a, &b):[ (x, y) -> … ]` walks
    N sources in lockstep. Needs a **multi-source `Iterate`** (`source` becomes plural;

@@ -60,10 +60,19 @@ public final class SortChecker {
             "_", "_record", "_tuple");
 
     /**
-     * Compiler-known parametric types that are valid in a sort position even
-     * though they are not declared structs. {@code Stream[T]} is the homogeneous
-     * sequence a tuple autoboxes into (docs/iteration.md §8.6); figurative for now
-     * (no member contract checked here — the autobox's element gate is the check).
+     * Parametric trait names valid in a sort position even though they are not
+     * declared structs (so {@link TypeRegistry#collect} — structs only — does not
+     * carry them). {@code Stream[T]} is the genuine {@code pontif.core} trait now
+     * that the {@code Element|Leaf} cons-cell is retired (stream-trait war,
+     * docs/stream-war.md §7); a tuple autoboxes into it and the autobox's element
+     * gate is the membership check.
+     *
+     * <p>This is hardcoded rather than read off the module's traits because
+     * {@link #validateSortNames} is not yet trait-aware — threading the trait
+     * registry through its ~25 call sites is a separate refactor (the general
+     * "any imported parametric trait is a valid sort name" gap). Until then this
+     * is an <em>incompleteness</em>, not a lie: it correctly admits {@code Stream},
+     * it just won't yet admit a user's own parametric trait in a let/param sort.
      */
     private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
 
