@@ -1156,6 +1156,8 @@ public final class SortChecker {
             }
             // An iteration construct never appears inside a refinement predicate.
             case IrExpr.Iterate ignored -> {}
+            // Nor does an emit statement.
+            case IrExpr.Emit ignored -> {}
             case IrExpr.Cast cast -> validateSelfFieldAccesses(cast.value(), baseStruct, refOrigin);
         }
     }
@@ -1360,6 +1362,13 @@ public final class SortChecker {
                 // agreement and no-silent-erase. (home-vs-observe ownership and
                 // fold-carry content accounting stay deferred — docs/iteration.md §10.)
                 checkIterationConservation(it);
+            }
+            case IrExpr.Emit em -> {
+                // emit EVENT  BODY: both are ordinary sub-expressions; the event is
+                // checked (e.g. StdOut("..") is a valid construction) and the body
+                // continues the scope. emit binds nothing.
+                checkExpr(em.event(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(em.body(), typeEnv, functionReturns, structDefs, typeVars);
             }
             case IrExpr.Cast cast -> {
                 // The target names a sort (validate it like any reference); the

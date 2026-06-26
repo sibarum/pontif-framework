@@ -160,6 +160,7 @@ public final class IrSourceReflector {
             case IrExpr.FieldAccess fa -> List.of(fa.base());
             case IrExpr.MethodCall mc -> concat(mc.receiver(), mc.args());
             case IrExpr.Cast cast -> List.of(cast.value());
+            case IrExpr.Emit em -> List.of(em.event(), em.body());
             case IrExpr.Iterate it -> {
                 List<IrExpr> xs = new ArrayList<>();
                 xs.add(it.source());
@@ -269,6 +270,8 @@ public final class IrSourceReflector {
             case IrExpr.Record r -> renderRecord(r, indent, ctx);
             case IrExpr.Cast cast -> "(" + IrPrinter.sort(cast.targetSort()) + ":"
                     + renderExpr(cast.value(), indent, ctx) + ")";
+            case IrExpr.Emit em -> "emit " + renderExpr(em.event(), indent, ctx)
+                    + "  " + renderExpr(em.body(), indent, ctx);
             case IrExpr.LetIn l -> renderLet(l, indent, ctx);
             case IrExpr.Match m -> renderMatch(m, indent, ctx);
             case IrExpr.Apply a -> renderExpr(a.fn(), indent, ctx)

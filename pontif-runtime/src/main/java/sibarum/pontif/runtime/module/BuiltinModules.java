@@ -96,26 +96,28 @@ public final class BuiltinModules {
 
     /**
      * The event substrate (docs/events.md): Pontif's IO + concurrency model.
-     * Slice 1a lands the trait <b>vocabulary</b> as markers — no callable
-     * contract yet, exactly how {@code Stream} began:
      * <ul>
      *   <li>{@code Event} — the marker for an emittable payload (the type
      *       {@code emit} routes on);</li>
      *   <li>{@code EventConduit[E, S, R]} — the synchronous, single-threaded
      *       reduction point; a non-associative fold ({@code S} = managed state,
      *       collapsing to a single {@code R} when {@code S = R}). Its
-     *       {@code triggered} contract arrives in slice 1b with the fold +
-     *       routing machinery;</li>
+     *       {@code triggered} contract arrives with the stateful-fold slice;</li>
      *   <li>{@code EventStream[R]} — the receiver, a pull-stream; its demand-
      *       driven {@code next} contract arrives with delivery + two-way sort
      *       selection.</li>
      * </ul>
-     * Written in Pontif source, like {@code pontif.core}.
+     * Slice 1b (output IO) adds the first concrete conduits: the write-only
+     * {@code StdOut} / {@code StdErr} events. An {@code emit StdOut(…)} statement
+     * ({@link sibarum.pontif.ir.IrExpr.Emit}) routes by event type to a
+     * {@link sibarum.pontif.ir.NativeFunctions} effect that writes the {@code text}
+     * field to the process streams. ({@code emit} is a statement keyword now, not an
+     * exported function.) Written in Pontif source, like {@code pontif.core}.
      */
     private static IrModule pontifEvents() {
         String source = """
                 requires pontif.core.{Nothing}
-                exports @.{Event, EventConduit, EventStream, emit}
+                exports @.{Event, EventConduit, EventStream, StdOut, StdErr}
 
                 trait Event{}
 
@@ -123,7 +125,10 @@ public final class BuiltinModules {
 
                 trait EventStream[type R]{}
 
-                function emit(e:Event):Nothing -> Nothing()
+                struct StdOut(text:String)
+                struct StdErr(text:String)
+                assign trait StdOut:Event{}
+                assign trait StdErr:Event{}
 
                 0
                 """;

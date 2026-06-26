@@ -224,6 +224,10 @@ public final class ConservationDrafter {
                 }
             }
             case IrExpr.Cast cast -> collectCallNames(cast.value(), out);
+            case IrExpr.Emit em -> {
+                collectCallNames(em.event(), out);
+                collectCallNames(em.body(), out);
+            }
         };
     }
 
@@ -358,6 +362,7 @@ public final class ConservationDrafter {
             case IrExpr.MethodCall ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Iterate ignored -> wrapReturn(draftValue(expr, ctx), ctx);
             case IrExpr.Cast ignored -> wrapReturn(draftValue(expr, ctx), ctx);
+            case IrExpr.Emit ignored -> wrapReturn(draftValue(expr, ctx), ctx);
         };
     }
 
@@ -637,6 +642,10 @@ public final class ConservationDrafter {
                         OpClass.ARITHMETIC, Recoverability.DEGRADED, List.of(value)));
                 yield new Flow.FromNode(id);
             }
+            // emit EVENT  BODY: the statement's VALUE is the body's flow. The event's
+            // emission is an external output effect — modeling its conduit flow in the
+            // conservation ledger is a later event-substrate slice (docs/events.md).
+            case IrExpr.Emit em -> draftValue(em.body(), ctx);
         };
     }
 

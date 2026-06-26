@@ -321,6 +321,10 @@ public final class IrCompiler {
                 registerSort(cast.targetSort(), map);
                 registerSortsInExpr(cast.value(), map);
             }
+            case IrExpr.Emit em -> {
+                registerSortsInExpr(em.event(), map);
+                registerSortsInExpr(em.body(), map);
+            }
         }
     }
 
@@ -439,6 +443,9 @@ public final class IrCompiler {
             // linear refinement kernel has no encoding for it.
             case IrExpr.Cast cast -> throw new CompileException(
                     "Casts inside refinement predicates are not supported", cast.origin());
+            // An emit is a write-only statement, never a predicate term.
+            case IrExpr.Emit em -> throw new CompileException(
+                    "emit inside refinement predicates is not supported", em.origin());
         };
     }
 

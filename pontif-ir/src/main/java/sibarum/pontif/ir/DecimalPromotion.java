@@ -125,6 +125,8 @@ final class DecimalPromotion {
             // REVISIT (docs/iteration.md §10): no Int→Decimal promotion inside
             // the source / arm writes yet (slice 1 builds those explicitly).
             case IrExpr.Iterate it -> it;
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewriteExpr(em.event(), structs), rewriteExpr(em.body(), structs), em.origin());
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     rewriteExpr(cast.value(), structs), cast.origin());
         };

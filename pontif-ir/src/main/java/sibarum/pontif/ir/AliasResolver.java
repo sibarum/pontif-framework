@@ -409,6 +409,8 @@ public final class AliasResolver {
                         rewriteExpr(it.source(), resolved), coSources, it.element(),
                         outs, arms, it.origin());
             }
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewriteExpr(em.event(), resolved), rewriteExpr(em.body(), resolved), em.origin());
             // A cast's target sort is a sort reference — resolve aliases in it too.
             case IrExpr.Cast cast -> new IrExpr.Cast(
                     substituteResolved(cast.targetSort(), resolved),

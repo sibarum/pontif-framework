@@ -13,7 +13,7 @@ public sealed interface IrExpr
                 IrExpr.BinOp, IrExpr.LetIn, IrExpr.Call, IrExpr.DispatchRef,
                 IrExpr.Lambda, IrExpr.Apply, IrExpr.Match,
                 IrExpr.Record, IrExpr.FieldAccess, IrExpr.MethodCall,
-                IrExpr.Iterate, IrExpr.Cast {
+                IrExpr.Iterate, IrExpr.Emit, IrExpr.Cast {
 
     Origin origin();
 
@@ -315,6 +315,37 @@ public sealed interface IrExpr
         public Iterate(IrExpr source, String element, List<OutputSpec> outputs,
                        List<Arm> arms, Origin origin) {
             this(source, List.of(), element, outputs, arms, origin);
+        }
+    }
+
+    /**
+     * The event-emission statement (docs/events.md): {@code emit EVENT  BODY}.
+     * Statement-shaped (like {@code let}): evaluate {@code event} for its routing
+     * side-effect — the runtime routes it <b>by event type</b> to its conduit —
+     * discard the (Nothing) result, then continue with {@code body} (the rest of the
+     * enclosing expression). <b>Write-only / uninspectable:</b> the routing result is
+     * never bound, so emission is observationally invisible to the emitting code (the
+     * purity membrane); the whole node's value is {@code body}'s.
+     *
+     * <p>A dedicated node — not a {@code Call} — precisely so it bypasses
+     * function-name resolution: {@code emit} is a reserved statement keyword, not an
+     * imported symbol, so a routing {@code Call} would be an "unknown function" to the
+     * sort checker and unresolvable under module scoping. Passes recurse into
+     * {@code event} and {@code body}.
+     *
+     * <p>Slice 1b (output IO, docs/events.md §Slices): the only conduits are the
+     * builtin {@code StdOut}/{@code StdErr} events, routed via {@link NativeFunctions}
+     * by the event's type name; the stateful conduit fold, the {@code triggered}/
+     * {@code next} contracts, and the mailbox boundary land in later slices.
+     */
+    record Emit(IrExpr event, IrExpr body, Origin origin) implements IrExpr {
+        public Emit {
+            if (event == null) {
+                throw new IllegalArgumentException("Emit event must be non-null");
+            }
+            if (body == null) {
+                throw new IllegalArgumentException("Emit body must be non-null");
+            }
         }
     }
 

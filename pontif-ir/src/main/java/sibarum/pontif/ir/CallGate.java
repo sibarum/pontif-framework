@@ -263,6 +263,10 @@ public final class CallGate {
                 }
             }
             case IrExpr.Cast cast -> walkExpr(cast.value(), ctx, sink);
+            case IrExpr.Emit em -> {
+                walkExpr(em.event(), ctx, sink);
+                walkExpr(em.body(), ctx, sink);
+            }
             // Leaves: nothing to walk.
             case IrExpr.Lit ignored -> { }
             case IrExpr.Dec ignored -> { }

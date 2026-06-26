@@ -90,6 +90,22 @@ serializes.)
   two-way selection; `!!` on failure. stdin/stderr/stdout as the first conduits via a new
   `NativeFunctions` registry (OS holds the far end; EOF seals the stream ⇒ the loop
   terminates by construction). `main` wires the conduits and the runtime drives the loop.
+  - **1b — output IO LANDED (2026-06-26).** `emit StdOut(…)` / `emit StdErr(…)` print to
+    the process streams — Pontif's first side effect beyond the `Decimal` constructor.
+    `emit EVENT  BODY` is a statement keyword that lowers to a dedicated **`IrExpr.Emit`**
+    node (every IR pass recurses into event + body); the interpreter routes the event
+    **by its type name** to a `NativeFunctions` effect (the registry's first tenant), then
+    yields the body. The builtin `StdOut`/`StdErr` events (with a `text:String` field) are
+    the first write-only conduits. `EventEmitTest` (print / route-by-type / sequence /
+    write-only). **Two deferral decisions** (the thin vertical, ruled with James):
+    (1) routing reuses dispatch-by-the-event-type rather than the multi-param
+    `EventConduit[E,S,R]` trait dispatch; (2) `emit` is a dedicated IR node, **not** a
+    routing `Call` — a keyword can't be imported, so a routing call would be an "unknown
+    function" to the sort checker and unresolvable under module scoping.
+    **Deferred to later 1x slices:** the stateful conduit fold + `triggered(E):R` contract
+    + `S`-threading; `EventStream`/`next` + backpressure; user-defined `EventConduit`
+    impls; the stdin / input + EOF pull-loop (reuses `driveGenerator`); two-way sort
+    selection; `!!` recovery; the monotonic emission index.
 - **Slice 2 — real threads.** Worker pool, thread-pinned conduits, the OpenGL root-thread
   case; concurrent mailbox + optional global index. Executor swap by invariants 1–4.
 - **Slice 3+ — hardening.** Explicit `Fail` recovery surface; backpressure policies on

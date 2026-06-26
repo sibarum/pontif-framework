@@ -71,7 +71,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type",
-            "match", "proof", "main",
+            "match", "proof", "main", "emit",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -369,6 +369,22 @@ public final class AltParser {
     private IrExpr parseMainStatement() throws ParseException {
         expectKeyword("main");
         return parseExpr();
+    }
+
+    /**
+     * The event-emission statement (docs/events.md, slice 1b): {@code emit EVENT BODY}
+     * — statement-shaped like {@code let}. The {@code EVENT} is an event construction
+     * (e.g. {@code StdOut("hi")}); the rest of the enclosing expression is the
+     * continuation {@code BODY}, sequenced exactly as a {@code let} threads into its
+     * body. Lowers to {@link IrExpr.Emit}, a dedicated node (not a {@code Call}): the
+     * runtime routes the event by its type, discards the write-only result, and yields
+     * the body. {@code emit} is a reserved keyword, so it never collides with a name.
+     */
+    private IrExpr parseEmitStatement() throws ParseException {
+        AltToken start = expectKeyword("emit");
+        IrExpr event = parseExpr();
+        IrExpr body = parseExpr();
+        return new IrExpr.Emit(event, body, start.origin());
     }
 
     /**
@@ -1550,6 +1566,7 @@ public final class AltParser {
                     || it.arms().stream().anyMatch(a -> a.writes().stream().anyMatch(
                             w -> containsSelfRef(w.value()) || (w.key() != null && containsSelfRef(w.key()))));
             case IrExpr.Cast cast -> containsSelfRef(cast.value());
+            case IrExpr.Emit em -> containsSelfRef(em.event()) || containsSelfRef(em.body());
         };
     }
 
@@ -1607,6 +1624,8 @@ public final class AltParser {
                     it.origin());
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     substituteSelf(cast.value(), with), cast.origin());
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    substituteSelf(em.event(), with), substituteSelf(em.body(), with), em.origin());
         };
     }
 
@@ -5682,6 +5701,9 @@ public final class AltParser {
                 }
                 if (t.text().equals("let")) {
                     yield parseLetExpr();
+                }
+                if (t.text().equals("emit")) {
+                    yield parseEmitStatement();
                 }
                 if (t.text().equals("iter")) {
                     yield parseIter();

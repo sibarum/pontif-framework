@@ -169,6 +169,9 @@ final class ConstructionGate {
             // REVISIT (docs/iteration.md §10): no construction-claim gating inside
             // the source / arm writes yet (slice 1 builds those explicitly).
             case IrExpr.Iterate it -> it;
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewriteExpr(em.event(), ctx, structs),
+                    rewriteExpr(em.body(), ctx, structs), em.origin());
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     rewriteExpr(cast.value(), ctx, structs), cast.origin());
         };

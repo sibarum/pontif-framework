@@ -27,16 +27,17 @@ class PontifEventsModuleTest {
     }
 
     @Test
-    void emit_isCallable_onAnEvent() {
-        // `emit` is an exported builtin function emit(e:Event):Nothing. A struct
-        // that assigns Event can be emitted; routing is wired in 1b-ii.
+    void emit_isAStatement_overAnEvent() {
+        // `emit` is a statement keyword (slice 1b), not an imported function — an
+        // event struct can be emitted. Routing to a conduit is a runtime concern
+        // (this only compiles; the builtin StdOut/StdErr conduits run in EventEmitTest).
         CompileResult r = compiler.compileAlt("""
-                requires pontif.events.{Event, emit}
+                requires pontif.events.{Event}
                 struct Ping(n:Int)
                 assign trait Ping:Event{}
-                main emit(Ping(1))""", "e.ptf");
+                main ( emit Ping(1)  0 )""", "e.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
-                () -> "emit(event) should resolve against builtin emit(e:Event); got " + r);
+                () -> "emit should parse as a statement over an event; got " + r);
     }
 
     @Test

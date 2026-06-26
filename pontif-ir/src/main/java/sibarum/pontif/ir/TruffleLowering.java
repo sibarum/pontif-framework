@@ -164,6 +164,10 @@ public final class TruffleLowering {
             case IrExpr.Cast cast -> throw new UnsupportedOperationException(
                     "Cast (Type:value): Truffle lowering not yet implemented — "
                             + "the interpreter path is slice 1");
+            // The event substrate (emit) runs on the interpreter path (docs/events.md);
+            // the Truffle backend does not lower it yet.
+            case IrExpr.Emit em -> throw new UnsupportedOperationException(
+                    "emit: Truffle lowering not yet implemented — the interpreter path is slice 1b");
         };
         node.withOrigin(expr.origin());
         return node;

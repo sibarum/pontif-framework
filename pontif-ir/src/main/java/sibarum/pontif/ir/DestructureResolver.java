@@ -181,6 +181,8 @@ public final class DestructureResolver {
                         rewriteExpr(mc.receiver(), structs), mc.methodName(), args, mc.origin());
             }
             case IrExpr.Iterate it -> it;
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewriteExpr(em.event(), structs), rewriteExpr(em.body(), structs), em.origin());
             case IrExpr.Cast cast -> new IrExpr.Cast(
                     cast.targetSort(), rewriteExpr(cast.value(), structs), cast.origin());
         };

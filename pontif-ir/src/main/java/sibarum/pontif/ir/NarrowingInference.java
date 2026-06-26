@@ -105,6 +105,8 @@ public final class NarrowingInference {
             // Unresolved until MethodResolver; can't narrow its result here.
             case IrExpr.MethodCall ignored -> null;
             case IrExpr.Iterate it -> inferIterate(it, ctx);
+            // emit is write-only; the statement's value (and narrowing) is its body's.
+            case IrExpr.Emit em -> infer(em.body(), ctx);
             // A cast's narrowing is its declared target sort — the coercion's result.
             case IrExpr.Cast cast -> cast.targetSort();
         };
@@ -722,6 +724,8 @@ public final class NarrowingInference {
             // (IrCompiler.compileSymExpr rejects one inside a refinement), so
             // this @-walk never reaches it; disqualify conservatively.
             case IrExpr.Iterate ignored -> false;
+            // Unreachable inside a predicate (emit can't appear there); disqualify.
+            case IrExpr.Emit ignored -> false;
             // Unreachable inside a predicate (casts are forbidden there), but
             // the cast value can only qualify if it does — recurse.
             case IrExpr.Cast cast -> selfAccessesAreOnlyField(cast.value(), targetField);
@@ -814,6 +818,7 @@ public final class NarrowingInference {
             // refinement predicate (IrCompiler.compileSymExpr forbids it), and
             // these helpers only ever walk predicates — nothing to substitute.
             case IrExpr.Iterate it -> it;
+            case IrExpr.Emit em -> em;
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     substituteFieldAccessWithSelf(cast.value(), targetField), cast.origin());
         };
@@ -902,6 +907,7 @@ public final class NarrowingInference {
             // refinement predicate (IrCompiler.compileSymExpr forbids it), and
             // these helpers only ever walk predicates — nothing to substitute.
             case IrExpr.Iterate it -> it;
+            case IrExpr.Emit em -> em;
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     substituteSelfWithFieldAccess(cast.value(), fieldName), cast.origin());
         };

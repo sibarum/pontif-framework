@@ -393,6 +393,8 @@ public final class NameResolver {
                         rewrite(it.source(), m, table), coSources, it.element(),
                         outs, arms, it.origin());
             }
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewrite(em.event(), m, table), rewrite(em.body(), m, table), em.origin());
             // The cast's target sort names a type — FQN-resolve it like any sort.
             case IrExpr.Cast cast -> new IrExpr.Cast(
                     rewriteSort(cast.targetSort(), m, table),

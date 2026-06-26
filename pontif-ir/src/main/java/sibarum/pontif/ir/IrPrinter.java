@@ -137,6 +137,11 @@ public final class IrPrinter {
                 line(sb, d, "Cast (" + sort(cast.targetSort()) + ":…)" + at(cast.origin()));
                 printExpr(sb, cast.value(), d + 1);
             }
+            case IrExpr.Emit em -> {
+                line(sb, d, "Emit" + at(em.origin()));
+                printExpr(sb, em.event(), d + 1);
+                printExpr(sb, em.body(), d + 1);
+            }
             case IrExpr.MethodCall mc -> {
                 line(sb, d, "MethodCall ." + mc.methodName() + " (unresolved)" + at(mc.origin()));
                 printExpr(sb, mc.receiver(), d + 1);

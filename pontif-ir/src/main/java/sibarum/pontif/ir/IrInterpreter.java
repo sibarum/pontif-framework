@@ -165,8 +165,36 @@ public final class IrInterpreter {
             }
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "IrInterpreter");
             case IrExpr.Iterate it -> evalIterate(it, env, module);
+            case IrExpr.Emit emit -> evalEmit(emit, env, module);
             case IrExpr.Cast cast -> evalCast(cast, env, module);
         };
+    }
+
+    /**
+     * Evaluates an {@code emit EVENT  BODY} statement (docs/events.md, slice 1b):
+     * evaluate the event, route it <b>by its type name</b> to the matching native
+     * conduit ({@link NativeFunctions} — the builtin {@code StdOut}/{@code StdErr}
+     * output streams), discard the (write-only) result, then continue with the body.
+     * An event with no registered conduit fails closed (stateful/user conduits are
+     * later slices).
+     */
+    private Object evalEmit(IrExpr.Emit emit, Environment env, CompiledModule module) {
+        Object event = eval(emit.event(), env, module);
+        if (!(event instanceof RecordValue rec)) {
+            throw new RuntimeCheckException(
+                    "emit expects an event value (a struct), got "
+                            + (event == null ? "null" : event.getClass().getSimpleName()),
+                    emit.origin());
+        }
+        NativeFunctions.Effect conduit = NativeFunctions.get(rec.typeName());
+        if (conduit == null) {
+            throw new RuntimeCheckException(
+                    "No conduit for event type '" + rec.typeName() + "' — slice 1b routes only "
+                            + "the builtin StdOut/StdErr output conduits (docs/events.md)",
+                    emit.origin());
+        }
+        conduit.apply(rec, emit.origin());
+        return eval(emit.body(), env, module);
     }
 
     /**

@@ -171,6 +171,11 @@ final class AggregatePromotion {
             // REVISIT (docs/iteration.md §10): pass-through — no aggregate stamping
             // into the source / arm writes yet (slice 1 builds those explicitly).
             case IrExpr.Iterate it -> it;
+            // emit's event is a question position; the body is the tail, so the
+            // enclosing assertion flows through (docs/events.md).
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    rewriteExpr(em.event(), null, structs, fns),
+                    rewriteExpr(em.body(), expected, structs, fns), em.origin());
             // The cast's value is a question position — no assertion flows in.
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     rewriteExpr(cast.value(), null, structs, fns), cast.origin());
