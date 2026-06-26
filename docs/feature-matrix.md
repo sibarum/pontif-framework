@@ -50,9 +50,11 @@ receipt graph · **Nominal** = by-name typing · **Struct** = shape-based typing
 | function       | ^    | ^^^    | /      | ^^^     | ^^^    | ^^       |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^     |
 | method         | ^^^  | ^^^    | !!     | ^^      | ^^^    | ^^       |      | ^^^   | ^^    | ^^     | ^^^     | ^^     |
 | ; (synthesize) | ^    | ^^^    | /      | ^^      |        | /        |      | ^^    | ^^^   | ^^^    |         |        |
-| Stream         |      | ^^     |        | *       | !      |          | ^^   | ^^    |       |        | ^^      | ^^^    |
+| Stream         |      | ^^     |        | /       | ^^     |          | ^^   | /     | ^^    | /      | ^^      | ^^^    |
 | Indexed        | !    | !      | !!     | !       | !      |          | !    |       |       |        | !       | !      |
 | iter           |      | ^^     |        | *       |        |          | /    | ^^    |       |        |         | ^^     |
+| emit           | ^    | /      |        |         | /      |          |      | ^^    |       | /      | ^^      | ^      |
+| sort-transform |      | ^^^    |        | /       | ^^^    | /        |      |       | ^^    | ^^     | ^^      | ^^     |
 | op overloading |      |        |        |         |        |          |      |       |       |        |         |        |
 | multi-dispatch |      |        |        |         |        |          |      |       |       |        |         |        |
 | module         |      |        |        |         |        |          |      |       |       |        |         |        |
@@ -140,11 +142,44 @@ Synth: `SpecOnlySynthesisTest` · Proofs: `ReturnGateTest`,
 (N3): `ReusableSortTest` · Infer: `SpecOnlyLetTest` (singleton-interval synthesis).
 
 **Stream** — Refine/Nominal/Struct: `StreamQueueTest` (Element/Leaf, structural
-recursion, shared Leaf) · Iter: `StreamCombinatorTest` (map/partition/concat/exchange).
-Traits: see N6.
+recursion, shared Leaf) · Iter: `StreamCombinatorTest` (map/partition/concat/exchange),
+plus generator/unfold/takeWhile/concat-`+` (stream war 2e–2f, see `docs/stream-war.md`)
+· Generic (partial, N6): `CallDispatchTest` (tuple arg → `Stream[T]` param, element-checked),
+`GenericInstantiationTest` (turbofish `map[Int,String]` + bare-call inference) — the §8.6
+parametric-trait carrier (`Stream[T]` element check) · Infer (partial, N12):
+`GenericInstantiationTest` (bare-call element inference) — combinator **element-refinement**
+flow is OPEN · Synth: `StreamRangeSynthesisTest` (finite range `Stream[Int:0<=@<10]` →
+`{0..9}`, direction/bounds/edges/filters) · Proofs (partial, N11): `StreamRangeSynthesisTest`
+(range membership discharged via `SynthesisBridge`→`Refinements`, same gate as param guards;
+`unbounded_isHonestlyRejected`) · Traits: `StreamTraitTest` (`trait Stream[type E]` in
+`pontif.core`, importable, tuple autoboxes with element check). See N6.
 
-**iter** — Iter/Struct/Infer/Refine: `IterationConstructTest`, `IterationParseTest`
-(hand-built `IrExpr.Iterate` + alt-syntax `iter(src).{…}` parse). See N7.
+**iter** — Iter/Struct/Refine: `IterationConstructTest`, `IterationParseTest`
+(hand-built `IrExpr.Iterate` + alt-syntax `iter(src).{…}` parse) · Infer:
+`NarrowingInferenceTest.iterate_map_narrowsToStreamOfTransformedElement`,
+`iterate_filter_narrowsToRecordOfRefinedStreams`, `iterate_unknownElement_narrowsToBareStream`.
+See N7.
+
+**emit** — this: `^` (statement, no receiver, see N9) · Refine (partial, N9):
+`EventEmitCheck` rejects a provable non-Event (`EventEmitTest.emit_rejectsANonEvent_atCompileTime`)
+— payload two-way sort selection is deferred · Traits (partial, N9): Event marker recognized
+(`EventEmitTest.userStructNamedStdOut_doesNotHijackTheBuiltinConduit`) — conduit-fold trait
+deferred · Infer: `EventEmitTest.emit_isWriteOnly_mainValueIsTheTrailingExpr` (narrowing =
+body's; `NarrowingInference:109`) · Proofs (partial, N9): fail-closed routing
+(`EventEmitTest.emit_routesByEventType_toStderr`) — `!!`-hazard/deterministic-index discharge
+deferred · Nominal: `EventEmitTest.emit_routesByEventType_toStderr` (routes by event type) ·
+Struct: `^` (events are nominal constructions, N9).
+
+**sort-transform** — Refine: `TraitReturnShellTest.shellChangesReturnType`,
+`TraitArgShellTest.shellChangesArgumentType` (the shell clause is checked as an ordinary
+sort) · Generic (partial, N10): shells compose with trait `[type T]` (no dedicated witness) ·
+Traits: `TraitReturnShellTest.shellThroughTraitTypedParam`,
+`TraitArgShellTest.shellThroughTraitTypedParam` (trait-owned, composes with default bodies) ·
+TypeFrag (partial, N10): the clause-chain `[A->…->B]` fragment · Synth:
+`TraitReturnShellTest` (return shell wraps the kernel), `TraitArgShellTest` (arg shell wraps
+the param) · Proofs: `TraitReturnShellTest.kernelMustReturnShellDomain`,
+`TraitArgShellTest.kernelMustDeclareShellCodomain` (kernel-returns-C / kernel-takes-B
+obligations) · Nominal/Struct: `shellChangesReturnType` (`Int → String`). See N10.
 
 **Indexed** — none. See N4.
 
@@ -191,11 +226,21 @@ attribute) is the first real consumer of the war.
 **N5 — `function`/`;` × `this` = `^` (intentional N/A).** A free function has no
 receiver; `this`/`this.type` are meaningful only with one (methods, trait contracts).
 
-**N6 — `Stream` × `Traits` = `!`: the `Stream` trait is unbuilt.** `std.stream` is
-today a flat module of `Element`/`Leaf` structs + combinator *functions*, not a trait
-(witnessed structurally by `StreamQueueTest`/`StreamCombinatorTest`). The trait
-abstraction (streams slice 2b, `docs/streams.md`) is the prerequisite for `Indexed`
-(N4) and for parametric streams (`Stream × Generic` = `*`, aspirational).
+**N6 — `Stream` × `Traits` = `^^`: the `Stream` trait is now the sole abstraction.**
+`trait Stream[type E]{}` lives in `pontif.core` (importable, tuple-literal autobox with
+element check, `StreamTraitTest`); trait-extends machinery landed (`TraitExtendsTest`).
+The **contract is deliberately empty** — James ruled (i) *internal iteration, no external
+`next()`* (`docs/stream-war.md` §7): the `&s:[…]` synthesis-fragment primitive drives a
+source, so there is no eliminator method to expose. The old flat `std.stream` module of
+`Element`/`Leaf` structs + cons-cell combinators was **retired** in the stream-trait war
+(§7 step 5): the fragment primitive subsumes the whole basis (map/filter/fold/scan/fork/
+zip/concat — `StreamFragmentTest`, `StreamMapTest`, `StreamConcatTest`), so the cons-cell
+carried no remaining weight (`Element` deleted, `Leaf` stays in `std.common` for proofs).
+**Deferred (named, not built):** `validateSortNames` is not yet trait-aware — a
+hardcoded `BUILTIN_PARAMETRIC_TYPES = {"Stream"}` still admits `Stream[T]` as a sort name
+(a user's own parametric trait in a let/param sort position would not yet validate); an
+*incompleteness*, not a lie. Still upstream of `Indexed` (N4) and parametric streams
+(`Stream × Generic` = `/`).
 
 **N7 — `iter` is partial (`/`).** The `Iterate` IR node and alt-syntax parse are
 tested (`IterationConstructTest`, `IterationParseTest`), but the surface design is a
@@ -204,10 +249,64 @@ complete. `struct × Iter = ^` (structs are intentionally not iterable — itera
 the Stream substrate's jurisdiction, `docs/streams.md`).
 
 **N8 — Deliberate absences elsewhere.** `^` cells record *design choices*, not gaps
-(Pontif discharges obligations by non-existence). Examples already in force: no
-arithmetic on `Char`/`String`/`Bool` (`OperatorCompletenessTest` rejects them); no
-value-level positional access on tuples (`p._0` rejected at parse). These belong in
-the relevant cells as the corresponding rows/capabilities are filled out.
+(Pontif discharges obligations by non-existence). Example in force: no arithmetic on
+`Char`/`String`/`Bool` (`OperatorCompletenessTest` rejects them). (Previously this note
+also claimed positional tuple access `p._0` is "rejected at parse" — that is now stale:
+after the brace-aggregates war, `{10,20,30}._0` projects, witnessed by
+`BraceAggregateTest.bracePositionalTuple_projects`. The retired form is the *paren*-tuple
+`(10,20)`, now a parse error — `BraceAggregateTest.parenTuple_isRetired`,
+`parenSort_isRetired`.)
+
+**N9 — `emit` (event substrate slice 1b) is landed but partial.** `emit EVENT BODY` is a
+write-only statement (`docs/events.md`): its narrowing/value is the body's
+(`NarrowingInference:109`), so the enclosing function's return gate still sees the body —
+no escape. The only compile-time obligation today is the **honesty guard**
+(`EventEmitCheck`): reject a *provable* non-Event (nominal struct that doesn't
+`assign trait Event`), lenient otherwise, fail-closed at runtime with a "no conduit"
+message. The `Refine`/`Traits`/`Proofs` cells are `/` because the rest of the design is
+**deferred to later event slices**: the receiver/conduit machinery (`EventConduit[E,S,R]`,
+`EventStream[R]`), the **two-way payload-sort selection** (receiver payload-sort AND
+conduit receiver-metadata-sort via `Refinements.satisfies`), and the `!!`-hazard failure
+model + per-conduit monotonic emission index. Slice 1b is `emit → stdout/stderr` only.
+`this`/`Struct` are `^` (a statement has no receiver; events are nominal constructions).
+
+**N10 — `sort-transform` shells (sort-transforms.md, slices 1+2) are landed.** A trait
+method may own a **return** clause-chain shell `[C -> … -> D]` (callers see `D`, the kernel
+returns `C`) and/or **argument** shells `[A -> … -> B]` (caller passes `A` — what dispatch
+keys on — kernel sees `B`). `TraitDefaultExpansion` wraps every impl/default kernel and
+checks the kernel-returns-`C` / kernel-takes-`B` obligations; the two compose (args inner,
+return outer). `Generic`/`TypeFrag` are `/`: the shell clause can reference the trait's
+`[type T]` and the `[A->…->B]` form is the conversion-sequence fragment (see
+[[principle_destructure_conversion_duality]]), but neither has a *dedicated* witness yet.
+
+**N11 — Infinite streams / productivity is the open critical gap (`Stream × Proofs = /`).**
+Finite range synthesis and bounded folds discharge soundly (`StreamRangeSynthesisTest`,
+`SynthesisBridge`). But infinite/lazy streams — RULED **essential** (the event system /
+concurrency model, `docs/infinite-streams`, built via guarded infinite recursion) — have
+**no productivity gate**: the coinductive dual of termination ("does it keep emitting?"
+vs "does it stop?"). There is no compile-time check that a generator emits in finite time
+between pulls, no IR for guarded corecursion, and the discharge kernel assumes finite
+descent. This is *not currently a lie* (infinite generators aren't expressible yet — finite
+generators carry a base case via domain refinement, stream war 2f), so it is an honest
+**unbuilt** gap, not a false claim. It is its own future war (`docs/stream-war.md` §8c).
+
+**N12 — Stream combinator element-refinement flow is OPEN (`Stream × Infer = /`).** Bare-call
+and turbofish generic combinators infer/thread the element *base* type (`GenericInstantiationTest`),
+and `Iterate`-construct narrowing flows element sorts (the `iter` row). What is **not** wired:
+propagating an element **refinement** (`Stream[Int:@>0]`) through a combinator's dispatch as a
+key-sort coherence check — `map($f[Int], s:Stream[Int:@>0])` loses `@>0` at the call boundary.
+`docs/streams.md` (§"element-sort flow") marks this OPEN; zero tests witness refinement
+preservation across combinators.
+
+**N13 — Conservation has no column (deliberate, for now).** The conservation ledger
+(`pontif-conservation`) underpins `Proofs`/`Synth`/`destructuring` rather than standing as a
+separate capability, and brace-aggregate construction/destructuring is traced correctly
+(`ConservationReportTest`, `ConservationGateTest` — all on `{…}`). One real gap was found:
+`SortChecker.checkIterationConservation` (`SortChecker.java:1408+`) enforces the no-bare-drop /
+one-placement laws **procedurally** rather than by querying the ledger that
+`ConservationDrafter.draftIterate` builds — a divergence risk (`docs/iteration.md` §10 marks
+SortChecker [REVISIT]). Adding a Conservation column is a candidate but not taken unilaterally
+(it would require a cell on every row); flagged for James.
 
 ---
 
