@@ -78,6 +78,13 @@ public final class IrCompiler {
         // validates fields it couldn't resolve here.
         SortChecker.check(resolved);
 
+        // Event guard (docs/events.md): an `emit EVENT` may only emit an Event. The
+        // retired `emit(e:Event)` function enforced this via its parameter sort; with
+        // `emit` a statement keyword this dedicated walk re-establishes it (reject a
+        // provable non-Event; lenient on unknowns). Post-SortChecker so the event's
+        // construction is already well-formed.
+        EventEmitCheck.check(resolved);
+
         // Overload-overlap check: pairwise per function name, reject provable
         // ambiguity at compile time. Unknown cases (kernel can't decide) pass
         // through; runtime dispatch ambiguity remains the safety net for those.

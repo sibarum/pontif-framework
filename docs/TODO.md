@@ -23,6 +23,24 @@ required before public launch.**
 
 ---
 
+## Audit type-inference / sort-checking / proof subsystems for completeness post-`Emit` (HIGH PRIORITY)
+
+The event substrate's `IrExpr.Emit` node (slice 1b, branch war/event-substrate) added a new
+sealed-`IrExpr` case, forcing a mechanical arm into ~17 switches across the inference,
+sort-checking, construction-gate, conservation, receipt-drafter, and Truffle passes. Those
+arms were added compiler-driven (exhaustiveness errors) + light reasoning, NOT a deep
+correctness review. **Sweep every IrExpr switch and the proof/receipt + conservation drafters
+for whether the new `Emit` handling — and, more broadly, recently-added nodes (`Iterate`,
+`Cast`) — is COMPLETE and SOUND, not merely compiling.** Watch for: passes with a `default ->`
+that silently skip a node's subtree (no exhaustiveness error to catch them); inference/
+narrowing arms returning a coarse sort; conservation/receipt drafters treating new nodes as
+opaque residual when they shouldn't. Prompted by James after the 1b code review surfaced that
+`SortChecker` has no trait access and `ConstructionGate.gated()` deliberately skips marker
+traits — the refactoring's blast radius across the checking subsystems is wider than the green
+build implies. Pair with [[project_inference_unification]] (one-engine invariant) + the proof revamp.
+
+---
+
 ## ⭐ Type-system convergence — one scoped type-level binding substrate (4 facets)
 
 *Discovered 2026-06-20 (design dialogue): structural traits, named Type fragments,

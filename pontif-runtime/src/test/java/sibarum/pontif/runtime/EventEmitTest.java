@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Event substrate slice 1b — output IO (docs/events.md). {@code emit StdOut(...)}
@@ -70,6 +71,34 @@ class EventEmitTest {
                 main ( emit StdOut("a")  emit StdOut("b")  0 )""");
         assertFalse(o.result().isError(), () -> "program errored: " + o.result().text());
         assertEquals("ab", o.out());
+    }
+
+    @Test
+    void userStructNamedStdOut_doesNotHijackTheBuiltinConduit() {
+        // Routing keys on the EXACT qualified type. A user's own `struct StdOut` —
+        // even one that IS an Event — is a different type (not pontif.events/StdOut),
+        // so it must NOT route to the process stdout: it fails closed, printing nothing.
+        Output o = run("""
+                requires pontif.events.{Event}
+                struct StdOut(text:String)
+                assign trait StdOut:Event{}
+                main ( emit StdOut("leak?")  0 )""");
+        assertTrue(o.result().isError(),
+                () -> "a non-conduit event must fail closed, not print; got " + o.result().text());
+        assertEquals("", o.out(), "the builtin stdout conduit must not be hijacked");
+    }
+
+    @Test
+    void emit_rejectsANonEvent_atCompileTime() {
+        // The Event guard: emitting a struct that does not assign trait Event is a
+        // compile error (the master-era `emit(e:Event)` contract, restored).
+        Output o = run("""
+                struct Ping(n:Int)
+                main ( emit Ping(1)  0 )""");
+        assertTrue(o.result().isError(), "emitting a non-Event must be rejected");
+        assertTrue(o.result().text().contains("Event"),
+                () -> "error should mention the Event requirement; got " + o.result().text());
+        assertEquals("", o.out());
     }
 
     @Test

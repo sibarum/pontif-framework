@@ -186,6 +186,10 @@ public final class IrInterpreter {
                             + (event == null ? "null" : event.getClass().getSimpleName()),
                     emit.origin());
         }
+        if (rec.typeName() == null) {
+            throw new RuntimeCheckException(
+                    "emit expects a named event struct, got an anonymous aggregate", emit.origin());
+        }
         NativeFunctions.Effect conduit = NativeFunctions.get(rec.typeName());
         if (conduit == null) {
             throw new RuntimeCheckException(

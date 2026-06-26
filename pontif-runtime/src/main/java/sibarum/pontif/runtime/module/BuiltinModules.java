@@ -116,7 +116,6 @@ public final class BuiltinModules {
      */
     private static IrModule pontifEvents() {
         String source = """
-                requires pontif.core.{Nothing}
                 exports @.{Event, EventConduit, EventStream, StdOut, StdErr}
 
                 trait Event{}
