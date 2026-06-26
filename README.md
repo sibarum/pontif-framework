@@ -518,9 +518,22 @@ event system; see *What's next* under [Status](#status) and `docs/stream-war.md`
 
 ## Braces, Brackets, Parenthesis
 
-The brackets are not ad-hoc punctuation. The subject `@` combines with three
-brackets across two arenas (a value vs. a type), and every cell is a distinct,
-namable operation:
+The brackets are not ad-hoc punctuation — each has one home, by who owns the
+structure:
+
+- **`()` — what the programmer composes.** Grouping, application, parameter lists,
+  block-scope. The only bracket you compose freely.
+- **`[]` — the type & metaprogramming level.** Sorts, refinements (`[Int:@>0]`),
+  metareferences (`$f[T]`), type-application (`map[Int,String]`).
+- **`{}` — the language's builtin structures.** Aggregates (the native record
+  substrate), the `.{}` decomposition, and member blocks (`trait{…}`, `match{…}`,
+  `assign trait …{…}`). The client never mints a *new* kind of `{}` form.
+
+They compose by level rather than collide: `[Point{1,2}]` is the type level pinning
+a builtin aggregate; `match x { [pat] -> … }` is a builtin block wrapping
+type-patterns. (`$` is the fourth mark — names, quoted not evaluated.) Within that,
+the subject `@` combines with the three brackets across two arenas (a value vs. a
+type), and every cell is a distinct, namable operation:
 
 | | on a **value** | on a **type** |
 | --- | --- | --- |

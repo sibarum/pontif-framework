@@ -143,8 +143,9 @@ Synth: `SpecOnlySynthesisTest` · Proofs: `ReturnGateTest`,
 recursion, shared Leaf) · Iter: `StreamCombinatorTest` (map/partition/concat/exchange).
 Traits: see N6.
 
-**iter** — Iter/Struct/Infer/Refine: `IterationConstructTest`, `IterationParseTest`
-(hand-built `IrExpr.Iterate` + alt-syntax `iter(src).{…}` parse). See N7.
+**iter** — Iter/Struct/Infer/Refine: `IterationConstructTest` (hand-built
+`IrExpr.Iterate`) + `StreamMapTest`/`StreamCombinatorTest` (the live `&s:[…]`
+spread-ascription surface that lowers to `Iterate`). See N7.
 
 **Indexed** — none. See N4.
 
@@ -197,9 +198,11 @@ today a flat module of `Element`/`Leaf` structs + combinator *functions*, not a 
 abstraction (streams slice 2b, `docs/streams.md`) is the prerequisite for `Indexed`
 (N4) and for parametric streams (`Stream × Generic` = `*`, aspirational).
 
-**N7 — `iter` is partial (`/`).** The `Iterate` IR node and alt-syntax parse are
-tested (`IterationConstructTest`, `IterationParseTest`), but the surface design is a
-DRAFT (`docs/iteration.md`) and the full foreach/conservation-ledger semantics are not
+**N7 — `iter` is partial (`/`).** The `Iterate` IR node is tested
+(`IterationConstructTest`) and its live surface is the `&s:[…]` spread-ascription
+over the Stream trait (`StreamMapTest`/`StreamCombinatorTest`, `docs/streams.md`).
+The old `iter(src).{…}` construct (`docs/iteration.md`, SUPERSEDED) has been
+retired from the parser. The full foreach/conservation-ledger semantics are not yet
 complete. `struct × Iter = ^` (structs are intentionally not iterable — iteration is
 the Stream substrate's jurisdiction, `docs/streams.md`).
 

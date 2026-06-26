@@ -1,5 +1,13 @@
 # Iteration
 
+> **SUPERSEDED (2026-06-25).** The concrete `iter(src).{value, accept, reject}`
+> surface this doc strawmanned was retired from the parser — linear iteration is
+> now the `&s:[transform]` spread-ascription over the `Stream` trait
+> (`docs/streams.md`, `docs/stream-war.md`: map/filter/fold/scan/takeWhile/zip
+> landed). The `IrExpr.Iterate` IR node lives on as that path's synthesis target.
+> This file is kept as the historical design record of *why* iteration moved off
+> forced recursion (§0); for the live surface and semantics see `docs/streams.md`.
+
 Status: DRAFT (2026-06-14). A semantic proposal for replacing forced
 structural-recursion-over-cons-cells with a single iteration construct.
 **Surface syntax is deliberately unfilled** — every concrete spelling below is a

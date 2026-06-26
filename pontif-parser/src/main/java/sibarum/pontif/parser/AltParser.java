@@ -4512,16 +4512,6 @@ public final class AltParser {
     }
 
     /**
-     * The iteration construct (docs/iteration.md §8), slice 1 — map + filter only.
-     * {@code iter(src).{value, accept, reject} { match value <arms> }} lowers to
-     * {@link IrExpr.Iterate}: destructured members pick outputs (accept/reject →
-     * streams; a bare-value arm → the default stream), and each arm's
-     * <em>disposition</em> ({@code accept(e)} / {@code reject(e)} / a bool /
-     * a bare value) becomes a write. REVISIT (docs/iteration.md §10): index,
-     * fold (current/next), group-by (put), the completed-iterator result, and the
-     * conservation checks are not in this slice.
-     */
-    /**
      * Spread-ascription `&source:[transform]` (docs/stream-war.md §3, slice 2d-1):
      * applies a per-element transform over a stream — the inline/anonymous face of
      * {@code transform(&source)}. The leading {@code &} is already at {@code peek()}.
@@ -4954,116 +4944,6 @@ public final class AltParser {
                     && peek(1).kind() != AltToken.Kind.LBRACE;
         }
         return false;
-    }
-
-    private IrExpr parseIter() throws ParseException {
-        AltToken start = consume();  // `iter`
-        expect(AltToken.Kind.LPAREN);
-        IrExpr source = parseExpr();
-        expect(AltToken.Kind.RPAREN);
-        // `.{ members }` — the capability set (slice 1: value / accept / reject).
-        expect(AltToken.Kind.DOT);
-        expect(AltToken.Kind.LBRACE);
-        java.util.LinkedHashSet<String> members = new java.util.LinkedHashSet<>();
-        boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken m = expect(AltToken.Kind.IDENT);
-            if (!java.util.Set.of("value", "accept", "reject").contains(m.text())) {
-                throw new ParseException(
-                        "Iterator member '" + m.text() + "' is not supported yet — slice 1 "
-                                + "is map+filter (value, accept, reject); docs/iteration.md §10",
-                        m.origin());
-            }
-            members.add(m.text());
-            first = false;
-        }
-        expect(AltToken.Kind.RBRACE);
-        if (!members.contains("value")) {
-            throw new ParseException(
-                    "Iterator block must destructure `value` (the current element)", start.origin());
-        }
-        // Element-sort inference (so refinement-pattern shorthands like `[0]` /
-        // `[@>1]` get a base): a stream is a positional record (a tuple literal
-        // `(1,2,3)`), so the element sort is its first member's. REVISIT
-        // (docs/iteration.md §10): real element-type inference from the Source
-        // contract (heterogeneous streams, non-literal sources).
-        IrSort valueSort = null;
-        if (inferMaximalSort(source) instanceof IrSort.Structural st && !st.members().isEmpty()) {
-            // The element's BASE sort, not the first member's value-singleton:
-            // `value` ranges over every element, so it must not inherit the first
-            // literal's refinement (e.g. [Int:@==1]) — that would over-narrow the
-            // scrutinee and, now that `[_]` is the complement within the
-            // scrutinee's sort, make a `[_]` arm match only the first element.
-            String base = baseSortName(st.members().values().iterator().next());
-            if (base != null) valueSort = IrSort.named(base);
-        }
-        // `{ match value <arms> }` — `value` scoped so the match infers its base.
-        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
-        if (valueSort != null) currentScope.put("value", valueSort);
-        IrExpr body;
-        AltToken end;
-        try {
-            expect(AltToken.Kind.LBRACE);
-            body = parseMatch();
-            end = expect(AltToken.Kind.RBRACE);
-        } finally {
-            currentScope.clear();
-            currentScope.putAll(savedScope);
-        }
-        if (!(body instanceof IrExpr.Match matchExpr)) {
-            throw new ParseException("Iterator block body must be a `match`", start.origin());
-        }
-        String element = matchExpr.scrutinee() instanceof IrExpr.Var v ? v.name() : "value";
-
-        boolean usesAccept = false, usesReject = false, usesDefault = false;
-        List<IrExpr.Arm> arms = new ArrayList<>(matchExpr.branches().size());
-        for (IrExpr.MatchBranch b : matchExpr.branches()) {
-            IrExpr.Write w = lowerDisposition(b.result(), element, members, start.origin());
-            switch (w.output()) {
-                case "accept" -> usesAccept = true;
-                case "reject" -> usesReject = true;
-                default -> usesDefault = true;
-            }
-            arms.add(new IrExpr.Arm(b.pattern(), List.of(w)));
-        }
-        List<IrExpr.OutputSpec> outputs = new ArrayList<>();
-        if (usesDefault) outputs.add(new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null));
-        if (usesAccept) outputs.add(new IrExpr.OutputSpec("accept", IrExpr.OutputKind.STREAM, null));
-        if (usesReject) outputs.add(new IrExpr.OutputSpec("reject", IrExpr.OutputKind.STREAM, null));
-        return new IrExpr.Iterate(source, element, outputs, arms, start.spanTo(end));
-    }
-
-    /**
-     * Lowers one arm's <em>disposition</em> expression to a write. {@code accept(e)}
-     * / {@code reject(e)} (or no-arg, routing the current element) → a write to
-     * that stream; a bool routes the current element (skip — legal because filter
-     * is in scope); anything else is a bare value → the default (map) stream.
-     */
-    private IrExpr.Write lowerDisposition(
-            IrExpr r, String element, java.util.Set<String> members, Origin o) throws ParseException {
-        String verb = null;
-        IrExpr arg = null;
-        if (r instanceof IrExpr.Apply ap && ap.fn() instanceof IrExpr.Var fv
-                && (fv.name().equals("accept") || fv.name().equals("reject"))) {
-            verb = fv.name();
-            arg = ap.args().isEmpty() ? new IrExpr.Var(element, o) : ap.args().get(0);
-        } else if (r instanceof IrExpr.Call c
-                && (c.functionName().equals("accept") || c.functionName().equals("reject"))) {
-            verb = c.functionName();
-            arg = c.args().isEmpty() ? new IrExpr.Var(element, o) : c.args().get(0);
-        } else if (r instanceof IrExpr.Bool bl) {
-            verb = bl.value() ? "accept" : "reject";  // bool = skip disposition
-            arg = new IrExpr.Var(element, o);
-        }
-        if (verb != null) {
-            if (!members.contains(verb)) {
-                throw new ParseException(
-                        "Arm uses `" + verb + "` but it is not destructured in `.{…}`", o);
-            }
-            return new IrExpr.Write(verb, null, arg);
-        }
-        return new IrExpr.Write("default", null, r);  // bare value → default (map) stream
     }
 
     /** True if the next token starts a match arm — either `[` or the `_` default. */
@@ -5682,9 +5562,6 @@ public final class AltParser {
                 }
                 if (t.text().equals("let")) {
                     yield parseLetExpr();
-                }
-                if (t.text().equals("iter")) {
-                    yield parseIter();
                 }
                 if (KEYWORDS.contains(t.text())) {
                     throw new ParseException(
