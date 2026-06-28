@@ -23,6 +23,20 @@ public final class IrInterpreter {
 
     private final Simplifier simplifier;
 
+    /**
+     * The result of a <b>for-effect drive</b> — a {@code LiveSource} iterate that ran for
+     * its side effects (the {@code emit}s woven through its arms) and discarded its output
+     * rather than sealing a tuple (docs/events.md). It is the <b>seam for the future
+     * payload-free completion handle</b>: {@code main} is a special {@code emit}, and both
+     * are ruled to return such a handle (identity + liveness, never the result — the purity
+     * membrane forbids a result-bearing Promise). That handle type is its own design pass
+     * (the real slice 2); for now this is a deliberately inert placeholder, carrying nothing
+     * inspectable, which the runner renders as no output.
+     */
+    public record DriveResult() {}
+
+    private static final DriveResult DRIVE_RAN = new DriveResult();
+
     public IrInterpreter(Simplifier simplifier) {
         this.simplifier = simplifier;
     }
@@ -239,14 +253,23 @@ public final class IrInterpreter {
         // Each pulled element runs the arms (which may `emit`) before the next is pulled,
         // so effects are interactive, and the source's seal (EOF) ends the loop by
         // construction. The eager path below pre-materialises a finite tuple instead.
+        //
+        // FOR-EFFECT: a live source is potentially unbounded, so collecting its output
+        // would grow without limit — collecting it is the unsafe operation we decline to
+        // support (productivity, project_infinite_streams). So this drive runs each arm for
+        // its writes (the `emit`s still fire — the write value is evaluated either way) but
+        // DISCARDS rather than accumulating (forEffect=true skips the stream append), and
+        // returns the inert DriveResult instead of a sealed tuple. (A bounded prefix —
+        // takeWhile over a live source, collected to a value — is not yet supported; it
+        // would materialise a finite tuple and ride the eager path below.)
         if (it.coSources().isEmpty() && eval(it.source(), env, module) instanceof LiveSource live) {
             java.util.Optional<Object> next;
             while ((next = live.pull()).isPresent()) {
-                if (iterateStep(it, next.get(), env, module, kinds, streams, accumulators)) {
+                if (iterateStep(it, next.get(), env, module, kinds, streams, accumulators, true)) {
                     break;  // STOP disposition
                 }
             }
-            return sealIterate(it, streams, accumulators);
+            return DRIVE_RAN;  // for-effect: discard, never seal
         }
 
         List<IrExpr> sourceExprs = new ArrayList<>();
@@ -276,7 +299,7 @@ public final class IrInterpreter {
             } else {
                 element = columns.get(0).get(idx);
             }
-            if (iterateStep(it, element, env, module, kinds, streams, accumulators)) {
+            if (iterateStep(it, element, env, module, kinds, streams, accumulators, false)) {
                 break;  // stop disposition — seal what's emitted, end the iteration
             }
         }
@@ -290,10 +313,17 @@ public final class IrInterpreter {
      * and routes the matched arm's writes. Returns {@code true} for the STOP disposition
      * (docs/stream-war.md §3, takeWhile) — the triggering element is not emitted and the
      * caller seals what's accumulated so far. Throws if no arm matches.
+     *
+     * <p>{@code forEffect} (the demand-driven live-source drive) evaluates each write's
+     * value — so the {@code emit}s woven through it still fire — but {@link #routeWrite}
+     * then DISCARDS a STREAM write rather than accumulating it, so an unbounded source does
+     * not grow without limit (docs/events.md). Bounded ACCUMULATOR / STOP / FAN dispositions
+     * are unaffected (an accumulator is a single threaded value, not a growing list).
      */
     private boolean iterateStep(IrExpr.Iterate it, Object element, Environment env,
             CompiledModule module, Map<String, IrExpr.OutputKind> kinds,
-            Map<String, List<Object>> streams, Map<String, Object> accumulators) {
+            Map<String, List<Object>> streams, Map<String, Object> accumulators,
+            boolean forEffect) {
         Environment frame = env.extend(it.element(), element);
         for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
             frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)
@@ -316,7 +346,7 @@ public final class IrInterpreter {
                         }
                         for (IrExpr.OutputSpec os : it.outputs()) {
                             routeWrite(os.name(), rv.members().get(os.name()), kinds,
-                                    streams, accumulators, it.origin());
+                                    streams, accumulators, it.origin(), forEffect);
                         }
                         continue;
                     }
@@ -324,7 +354,7 @@ public final class IrInterpreter {
                     if (k == null) throw new RuntimeCheckException(
                             "Iterate: write to unknown output '" + w.output() + "'", it.origin());
                     routeWrite(w.output(), eval(w.value(), frame, module), kinds,
-                            streams, accumulators, it.origin());
+                            streams, accumulators, it.origin(), forEffect);
                 }
                 return false;
             }
@@ -377,17 +407,20 @@ public final class IrInterpreter {
     /**
      * Routes one written value to its output by kind: a STREAM appends (dropping the
      * {@code Nothing} omission value — the lossy filter shape, docs/stream-war.md §3);
-     * an ACCUMULATOR threads the next revision (the prior was read via the frame).
+     * an ACCUMULATOR threads the next revision (the prior was read via the frame). Under
+     * {@code forEffect} a STREAM write is discarded (the value was already evaluated by the
+     * caller, so its {@code emit}s fired) — the unbounded-source guard, docs/events.md.
      */
     private void routeWrite(
             String output, Object v, java.util.Map<String, IrExpr.OutputKind> kinds,
             java.util.Map<String, java.util.List<Object>> streams,
-            java.util.Map<String, Object> accumulators, sibarum.pontif.core.Origin origin) {
+            java.util.Map<String, Object> accumulators, sibarum.pontif.core.Origin origin,
+            boolean forEffect) {
         IrExpr.OutputKind k = kinds.get(output);
         if (k == null) throw new RuntimeCheckException(
                 "Iterate: write to unknown output '" + output + "'", origin);
         switch (k) {
-            case STREAM -> { if (!isNothing(v)) streams.get(output).add(v); }
+            case STREAM -> { if (!forEffect && !isNothing(v)) streams.get(output).add(v); }
             case ACCUMULATOR -> accumulators.put(output, v);
             default -> throw new RuntimeCheckException(
                     "Iterate: write to " + k + " not yet implemented", origin);

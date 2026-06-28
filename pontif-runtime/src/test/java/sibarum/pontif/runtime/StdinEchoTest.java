@@ -1,6 +1,7 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
+import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 
@@ -11,6 +12,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 /**
@@ -66,5 +68,37 @@ class StdinEchoTest {
     void emptyInput_emitsNothing_andTerminates() {
         // EOF immediately ⇒ the pull-loop runs zero iterations and the program ends.
         assertEquals("", runCapturingStdout(ECHO, ""));
+    }
+
+    /**
+     * The for-effect witness (docs/events.md): a live-source drive must DISCARD its output
+     * rather than collect it, so an unbounded source runs in bounded memory. The direct
+     * proof is the return value — {@code main} yields the inert {@link IrInterpreter.DriveResult}
+     * placeholder, NOT a collected {@code {"a","b","c"}} tuple ({@link RecordValue}).
+     */
+    @Test
+    void liveDrive_discardsOutput_returningDriveResult_notATuple() {
+        Object result = evalReturning(ECHO, "a\nb\nc\n");
+        assertInstanceOf(IrInterpreter.DriveResult.class, result,
+                () -> "for-effect drive should return the DriveResult placeholder, got " + result);
+        assertFalse(result instanceof RecordValue,
+                "the drive must not accumulate its elements into a tuple");
+    }
+
+    /** Evaluates {@code src} with {@code input} on stdin, returning {@code main}'s value. */
+    private Object evalReturning(String src, String input) {
+        InputStream oldIn = System.in;
+        PrintStream oldOut = System.out;
+        try {
+            System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
+            System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+            CompileResult r = compiler.compileAlt(src, "echo.ptf");
+            CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                    () -> "should compile; got " + (r instanceof CompileResult.Failed f ? f.error().text() : r));
+            return new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        } finally {
+            System.setIn(oldIn);
+            System.setOut(oldOut);
+        }
     }
 }

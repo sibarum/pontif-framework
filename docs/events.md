@@ -46,10 +46,11 @@ ruled essential. The result is not "an IO library" — it is the event/concurren
   membership. (The Action filters on payload content; the conduit routes on receiver
   identity — orthogonal, and the OpenGL case needs both.)
 
-- **Failure is the existing `!!` runtime hazard.** The happy path returns unit (keeping
-  `emit`/`next` uninspectable). A delivery failure *fires* the hazard — which crashes by
-  default, the safety net against corruption. Recovery is the explicit `match [!!]`
-  discharge. (No parallel `Success|Fail` union.)
+- **Failure is the existing `!!` runtime hazard.** The happy path is **uninspectable** —
+  it yields a payload-free completion handle, not a result (see "`emit` and `main` both
+  return a completion handle" below; this supersedes the earlier "returns unit"). A delivery
+  failure *fires* the hazard — which crashes by default, the safety net against corruption.
+  Recovery is the explicit `match [!!]` discharge. (No parallel `Success|Fail` union.)
 
 - **Monotonic emission index** stamps each `emit` so the non-associative fold is
   **deterministic and replayable** under concurrent emit (arrival order is otherwise
@@ -94,6 +95,22 @@ its conduit, so input and output are the *same* Emit→Conduit→Action shape, d
 in who emits (the world vs the program). **EOF = the internals stop emitting** ⇒ the loop
 terminates by construction. (Output, slice 1b: the program emits `StdOut`, a native sink
 conduit with no Action.)
+
+**`main` is a special `emit`, and both return a completion handle (RULED 2026-06-28, NOT
+yet built).** Since `emit` is "the only producer mechanism," `main echo(&stdin())` is
+simply emit-ing the **root drive** into the scheduler. So `emit` and `main` return the
+*same thing* — and it is **neither `unit` nor a `Promise`**. A result-bearing `Promise<T>`
+would let the emitter observe its own downstream effect, piercing the purity membrane
+(a lie). What survives the membrane is a **payload-free completion handle**: an *identity*
+for the spawned work plus a *liveness/completion* token — you can join/await *that it
+completes*, never *what it produced*. The same handle is **inert inside pure code**
+(`emit` in a pure function stays pure — the handle carries nothing inspectable there) and
+**live only in the scheduler/`main` domain** (where awaiting completion is legitimate);
+*where* you hold it decides whether it is usable (observation-relative, COTT). Designing
+the handle type in full — `emit`'s return changing from body-passthrough, the two
+observability regimes, the scheduler join, concurrent `main(a, b)` — is **its own design
+pass (the real slice 2)**. Today's placeholder is the interpreter's inert
+`IrInterpreter.DriveResult` (returned by a for-effect drive; see slice 1d).
 
 ## Design invariants (hold across all slices — they protect the thread story)
 
@@ -159,15 +176,28 @@ serializes.)
     it's read and **terminates on EOF** by construction (`StdinEchoTest`). Realizes the
     crystallized model: laziness is in the *iterator* (the pull-loop / `main`), not the
     stream value; `emit` is the effect side-channel woven through an ordinary `String →
-    String` map. **Honest deferrals:** (a) a `LiveSource` `Iterate` still *seals/collects*
-    its output stream, so a never-EOF source grows unbounded — the for-effect drive that
-    discards (and `main` returning unit instead of the collected tuple) is the next step
-    toward genuinely-unbounded sources; works now because stdin is EOF-bounded. (b) Source
-    spelling is `&stdin()` (a live-source value, spread by the existing `&`), not yet the
+    String` map. **Honest deferrals:** (a) **RESOLVED in slice 1d** (was: a `LiveSource`
+    `Iterate` seals/collects, so a never-EOF source grows unbounded). (b) Source spelling is
+    `&stdin()` (a live-source value, spread by the existing `&`), not yet the
     `&(StdIn.nextLine())` repeatable-call form. (c) A top-level `let echoStream = …; main
     echoStream` would force `echoStream` at the Inquisition (eager) — fine for EOF stdin,
     but the Inquisition-inversion for stream lets is deferred. (d) single source; concurrent
     `main(a, b)` / threads is slice 2.
+  - **1d — for-effect / unbounded sources LANDED (2026-06-28).** A `LiveSource` drive is
+    **for-effect**: a live source is potentially unbounded, so collecting its output is the
+    unsafe operation we decline to support ([[project_infinite_streams]], productivity). The
+    drive still evaluates each arm's write — so the woven `emit`s fire — but **discards**
+    instead of accumulating (`IrInterpreter` threads a `forEffect` flag into
+    `iterateStep`/`routeWrite`; the STREAM append is skipped), so `main echo(&stdin())` runs
+    in **O(1) output memory** regardless of input length. It returns the inert
+    `IrInterpreter.DriveResult` placeholder (the runner renders it as no output) — **not**
+    `unit`, not the collected tuple. `DriveResult` is the **seam for the future payload-free
+    completion handle** (`main` = special `emit`; see "both return a completion handle"
+    above). Witnessed by `StdinEchoTest.liveDrive_discardsOutput_returningDriveResult_notATuple`.
+    The eager (finite-tuple) path is untouched — it still collects and seals
+    (`map((1,2,3),…)` → `{2,4,6}`). **Remaining deferral:** bounded collection of a live
+    *prefix* (`takeWhile(&stdin())` → a value) is unsupported; it would materialise a finite
+    tuple and ride the eager path.
 - **Slice 2 — real threads.** Worker pool, thread-pinned conduits, the OpenGL root-thread
   case; concurrent mailbox + optional global index. Executor swap by invariants 1–4.
 - **Slice 3+ — hardening.** Explicit `Fail` recovery surface; backpressure policies on

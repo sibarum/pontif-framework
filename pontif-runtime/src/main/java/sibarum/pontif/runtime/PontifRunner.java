@@ -92,6 +92,9 @@ public final class PontifRunner {
 
     private static String formatValue(Object value) {
         if (value == null) return "null";
+        // A for-effect drive (a live source run for its emits, e.g. `main echo(&stdin())`)
+        // produces no inspectable result — render it as no output (docs/events.md).
+        if (value instanceof IrInterpreter.DriveResult) return "";
         if (value instanceof java.math.BigDecimal d) {
             return sibarum.pontif.core.Decimals.display(d);
         }
