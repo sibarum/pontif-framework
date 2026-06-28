@@ -112,7 +112,8 @@ public final class BuiltinModules {
      */
     private static IrModule pontifEvents() {
         String source = """
-                exports @.{Event, EventConduit, EventStream, StdOut, StdErr}
+                requires pontif.core.{Stream}
+                exports @.{Event, EventConduit, EventStream, StdOut, StdErr, stdin}
 
                 trait Event{}
 
@@ -124,6 +125,12 @@ public final class BuiltinModules {
                 struct StdErr(text:String)
                 assign trait StdOut:Event{}
                 assign trait StdErr:Event{}
+
+                # The first inbound source (docs/events.md, "Input is an inbound emit"):
+                # the Pontif internals produce stdin's lines. The body is a placeholder —
+                # a resolved `stdin()` call is intercepted by the interpreter and yields a
+                # live, demand-driven source (NativeSources), pulled lazily by the iterator.
+                function stdin():Stream[String] -> {}
 
                 0
                 """;

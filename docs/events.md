@@ -1,8 +1,10 @@
 # The Event substrate — IO & concurrency
 
-Status: **WAR DECLARED 2026-06-24.** Design ratified with James; Slice 0 in progress.
-Supersedes `actions.md`'s global-event-queue framing with a localized Event model.
-Realizes `infinite-streams` (the event system / stateful sources) as concrete machinery.
+Status: **WAR DECLARED 2026-06-24.** Slice 0 + slice 1b (output IO) LANDED; model refined
+2026-06-26 (see "The three stages"). Supersedes `actions.md`'s global-event-queue framing
+with a localized Event model. Realizes `infinite-streams` (the event system / stateful
+sources) as concrete machinery — laziness lives in the iterator (the conduit + scheduler),
+not the stream value.
 
 ## Why
 
@@ -32,15 +34,17 @@ ruled essential. The result is not "an IO library" — it is the event/concurren
   emission** (each `emit` supplies all positions at once) — zipping two *independent*
   emission sources is impossible (no reliable cross-emission join).
 
-- **`EventStream[type R]`** — the receiver: a genuine **pull**-stream. Delivery is
-  demand-driven — the receiver signals readiness, the conduit then calls
-  `next(payload:R)`. This handshake is where **backpressure** lives.
+- **`Action`** — the *reaction* (the consumer; the role events.md first sketched as the
+  pull `EventStream[type R]` receiver — **reframed 2026-06-26, see "The three stages"**).
+  An Action carries a **match** (a filter/sort over the conduit's output) and a reaction
+  body; it **fires on every matching instance**. It has **no control over delivery** — it
+  does not pull `next` on its own initiative; *when* it runs is the scheduler's call.
 
-- **Two-way sort selection** governs delivery: the `AND` of (a) the *receiver's*
-  payload-content sort and (b) the *conduit's* per-message receiver-metadata sort, each
-  defaulting to the universal sort. Both reuse `Refinements.satisfies` — delivery is
-  membership. (Receiver filters on payload content; conduit routes on receiver identity —
-  orthogonal, and the OpenGL case needs both.)
+- **Two-way sort selection** governs delivery: the `AND` of (a) the *Action's* match —
+  its payload-content sort — and (b) the *conduit's* per-message receiver-metadata sort,
+  each defaulting to the universal sort. Both reuse `Refinements.satisfies` — delivery is
+  membership. (The Action filters on payload content; the conduit routes on receiver
+  identity — orthogonal, and the OpenGL case needs both.)
 
 - **Failure is the existing `!!` runtime hazard.** The happy path returns unit (keeping
   `emit`/`next` uninspectable). A delivery failure *fires* the hazard — which crashes by
@@ -51,6 +55,45 @@ ruled essential. The result is not "an IO library" — it is the event/concurren
   **deterministic and replayable** under concurrent emit (arrival order is otherwise
   scheduler-dependent, and the fold's order is semantic). Default **per-conduit**; a
   single **global** atomic only if whole-program deterministic replay is wanted.
+
+## The three stages (RULED 2026-06-26, James)
+
+The substrate is a three-stage pipeline; this sharpens the bullets above and is the
+canonical statement.
+
+1. **Emit an Event.** `emit MyEvent(...)` — anywhere, *even inside a pure function*. The
+   conduit is the membrane that quarantines the effect, so the emitting code stays
+   honestly pure (write-only, observationally invisible to its own control flow). There is
+   **no first-class "emitter" type** — `emit` is the only producer mechanism.
+2. **Process the Event via its Conduit.** Exactly **one conduit per Event type**; it sees
+   **all** instances. It may reject, modify the data, or change the payload type (`E→R`),
+   and what it passes through is **multiplexed** to the Actions. Because it threads state
+   `S`, the natural jobs are **stateful folds** over the instance stream: enrich with
+   context, group similar events, de-bounce.
+3. **React with an Action.** An Action declares a **match** (filter/sort) and a reaction
+   body, and runs on every matching instance. One conduit fans out to **many** Actions.
+
+**Delivery is push *AND* pull, with both endpoints decoupled (RULED).** Neither the
+emitter nor the Action controls delivery: the emitter fires and forgets; the Action runs
+when it is run. Delivery — timing, rate, **backpressure** — lives entirely in the
+**Conduit + the action scheduling** (configured in `main`). So backpressure is *not* a
+receiver demanding `next` (the earlier framing); it is the conduit + scheduler arbitrating
+between the push side (`emit`→conduit) and the pull side (conduit/scheduler→Action).
+
+**The Conduit + scheduler is *the iterator* (RULED).** "All instances of an Event type,
+over time" *is* a stream — a temporal sequence, not a value — and the conduit (plus the
+scheduler) is the iterator over it. This is the home of the **infinite-stream** machinery:
+laziness is a property of the **iterator**, never of the stream value
+([[project_infinite_streams]], 2026-06-26). The eager `Iterate` construct is the *other*
+iterator (materialize a finite source); the conduit pull-loop is the lazy one. (A
+2026-06-26 misstep that baked laziness into a `LazyStream` *value* was reverted — wrong
+locus.)
+
+**Input is an inbound `emit` (RULED).** `stdin` is emitted by the Pontif internals into
+its conduit, so input and output are the *same* Emit→Conduit→Action shape, differing only
+in who emits (the world vs the program). **EOF = the internals stop emitting** ⇒ the loop
+terminates by construction. (Output, slice 1b: the program emits `StdOut`, a native sink
+conduit with no Action.)
 
 ## Design invariants (hold across all slices — they protect the thread story)
 
@@ -103,9 +146,28 @@ serializes.)
     routing `Call` — a keyword can't be imported, so a routing call would be an "unknown
     function" to the sort checker and unresolvable under module scoping.
     **Deferred to later 1x slices:** the stateful conduit fold + `triggered(E):R` contract
-    + `S`-threading; `EventStream`/`next` + backpressure; user-defined `EventConduit`
-    impls; the stdin / input + EOF pull-loop (reuses `driveGenerator`); two-way sort
-    selection; `!!` recovery; the monotonic emission index.
+    + `S`-threading; user-defined `EventConduit` impls; two-way sort selection; `!!`
+    recovery; the monotonic emission index.
+  - **1c — input IO LANDED (2026-06-27).** `stdin` as the first inbound source — the
+    counterpart to 1b's output. `stdin()` is a declared `pontif.events` function (so it's
+    import-gated, `requires pontif.events.{stdin}`) whose resolved call is intercepted by
+    the interpreter to yield a fresh **`LiveSource`** (the new `NativeSources` registry,
+    the read counterpart to `NativeFunctions`) reading `System.in` line by line. The
+    `Iterate` engine recognises a `LiveSource` source and drives it with a **demand-driven
+    pull-loop** — one line pulled → arms run (`echo` side-`emit`s `StdOut`) → next pulled —
+    rather than pre-materialising a tuple. **`main echo(&stdin())`** echoes each line as
+    it's read and **terminates on EOF** by construction (`StdinEchoTest`). Realizes the
+    crystallized model: laziness is in the *iterator* (the pull-loop / `main`), not the
+    stream value; `emit` is the effect side-channel woven through an ordinary `String →
+    String` map. **Honest deferrals:** (a) a `LiveSource` `Iterate` still *seals/collects*
+    its output stream, so a never-EOF source grows unbounded — the for-effect drive that
+    discards (and `main` returning unit instead of the collected tuple) is the next step
+    toward genuinely-unbounded sources; works now because stdin is EOF-bounded. (b) Source
+    spelling is `&stdin()` (a live-source value, spread by the existing `&`), not yet the
+    `&(StdIn.nextLine())` repeatable-call form. (c) A top-level `let echoStream = …; main
+    echoStream` would force `echoStream` at the Inquisition (eager) — fine for EOF stdin,
+    but the Inquisition-inversion for stream lets is deferred. (d) single source; concurrent
+    `main(a, b)` / threads is slice 2.
 - **Slice 2 — real threads.** Worker pool, thread-pinned conduits, the OpenGL root-thread
   case; concurrent mailbox + optional global index. Executor swap by invariants 1–4.
 - **Slice 3+ — hardening.** Explicit `Fail` recovery surface; backpressure policies on
@@ -114,4 +176,9 @@ serializes.)
 ## Naming
 
 "Sink" was rejected (reads as /dev/null). The vocabulary is `emit` / `EventConduit` /
-`EventStream` / `triggered` / `next`.
+`Action` (the reaction; match-sort + body) / `triggered`. **Reframed 2026-06-26:** the
+consumer is an **`Action`**, not a pull `EventStream[R]` receiver calling `next` — the
+Action has no delivery control (see "The three stages"), so `next`/demand-pull drops out of
+the consumer vocabulary. Whether the `pontif.events` trait keeps the name `EventStream[R]`
+(as the typed channel a conduit multiplexes onto) or is renamed `Action` is an open naming
+call.

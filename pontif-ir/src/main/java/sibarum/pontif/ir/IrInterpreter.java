@@ -227,12 +227,28 @@ public final class IrInterpreter {
             }
         }
 
-        // A stream is a positional record (a tuple literal `(1,2,3)`); iterate its
+        // A stream is a positional record (a tuple literal `{1,2,3}`); iterate its
         // members in order. (Element/Leaf cons-chains are retired here — trees use
         // recursion, streams are native; docs/iteration.md §7.1, James 2026-06-15.)
         // With co-sources (zip / fan-in, docs/stream-war.md §3) the sources are walked
         // in lockstep, stopping at the shortest, and `element` binds to a tuple of the
         // i-th value from each.
+        //
+        // DEMAND-DRIVEN path (docs/events.md, "The three stages"): a single source that
+        // evaluates to a LiveSource is pulled ONE element at a time — the lazy iterator.
+        // Each pulled element runs the arms (which may `emit`) before the next is pulled,
+        // so effects are interactive, and the source's seal (EOF) ends the loop by
+        // construction. The eager path below pre-materialises a finite tuple instead.
+        if (it.coSources().isEmpty() && eval(it.source(), env, module) instanceof LiveSource live) {
+            java.util.Optional<Object> next;
+            while ((next = live.pull()).isPresent()) {
+                if (iterateStep(it, next.get(), env, module, kinds, streams, accumulators)) {
+                    break;  // STOP disposition
+                }
+            }
+            return sealIterate(it, streams, accumulators);
+        }
+
         List<IrExpr> sourceExprs = new ArrayList<>();
         sourceExprs.add(it.source());
         sourceExprs.addAll(it.coSources());
@@ -260,60 +276,70 @@ public final class IrInterpreter {
             } else {
                 element = columns.get(0).get(idx);
             }
-            Environment frame = env.extend(it.element(), element);
-            for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
-                frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)
+            if (iterateStep(it, element, env, module, kinds, streams, accumulators)) {
+                break;  // stop disposition — seal what's emitted, end the iteration
             }
-            SymExpr sym = toSymExpr(element);
-            boolean matched = false;
-            boolean halt = false;
-            for (IrExpr.Arm arm : it.arms()) {
-                Sort pat = module.sortFor(arm.pattern());
-                if (Refinements.satisfies(sym, pat, checker(module)) instanceof ProofResult.Passed) {
-                    for (IrExpr.Write w : arm.writes()) {
-                        // Stop write: the element is out of the guard's domain — halt the
-                        // iteration (the stop disposition, docs/stream-war.md §3, takeWhile).
-                        // The triggering element is NOT emitted; what's sealed so far is the
-                        // result. The source-driven dual of the generator's domain-refinement
-                        // halt (§7.9).
-                        if (w.output().equals(IrExpr.Write.STOP)) {
-                            halt = true;
-                            break;
-                        }
-                        // Fan write: the value is a tuple whose position i routes to
-                        // output i — the multi-channel fragment return, evaluated once
-                        // (docs/stream-war.md §3). Distribute positionally.
-                        if (w.output().equals(IrExpr.Write.FAN)) {
-                            Object tup = eval(w.value(), frame, module);
-                            if (!(tup instanceof RecordValue rv)) {
-                                throw new RuntimeCheckException(
-                                        "Iterate: a multi-channel fragment must return a tuple, got "
-                                                + (tup == null ? "null" : tup.getClass().getSimpleName()),
-                                        it.origin());
-                            }
-                            for (IrExpr.OutputSpec os : it.outputs()) {
-                                routeWrite(os.name(), rv.members().get(os.name()), kinds,
-                                        streams, accumulators, it.origin());
-                            }
-                            continue;
-                        }
-                        IrExpr.OutputKind k = kinds.get(w.output());
-                        if (k == null) throw new RuntimeCheckException(
-                                "Iterate: write to unknown output '" + w.output() + "'", it.origin());
-                        routeWrite(w.output(), eval(w.value(), frame, module), kinds,
-                                streams, accumulators, it.origin());
-                    }
-                    matched = true;
-                    break;
-                }
-            }
-            if (halt) break;  // stop disposition — seal what's emitted, end the iteration
-            if (!matched) throw new RuntimeCheckException(
-                    "Iterate: no arm matched element " + element, it.origin());
         }
+        return sealIterate(it, streams, accumulators);
+    }
 
-        // Seal each output and return: a single output directly, else a record
-        // keyed by output name (the queryable completed result).
+    /**
+     * Processes one element through the iterate arms — the body shared by the eager
+     * (materialised) and demand-driven (LiveSource) drives. Binds {@code element} (and
+     * each accumulator's prior revision, the read side), matches the arms top-to-bottom,
+     * and routes the matched arm's writes. Returns {@code true} for the STOP disposition
+     * (docs/stream-war.md §3, takeWhile) — the triggering element is not emitted and the
+     * caller seals what's accumulated so far. Throws if no arm matches.
+     */
+    private boolean iterateStep(IrExpr.Iterate it, Object element, Environment env,
+            CompiledModule module, Map<String, IrExpr.OutputKind> kinds,
+            Map<String, List<Object>> streams, Map<String, Object> accumulators) {
+        Environment frame = env.extend(it.element(), element);
+        for (java.util.Map.Entry<String, Object> a : accumulators.entrySet()) {
+            frame = frame.extend(a.getKey(), a.getValue());  // prior revision (read side)
+        }
+        SymExpr sym = toSymExpr(element);
+        for (IrExpr.Arm arm : it.arms()) {
+            Sort pat = module.sortFor(arm.pattern());
+            if (Refinements.satisfies(sym, pat, checker(module)) instanceof ProofResult.Passed) {
+                for (IrExpr.Write w : arm.writes()) {
+                    if (w.output().equals(IrExpr.Write.STOP)) {
+                        return true;  // halt: triggering element not emitted
+                    }
+                    if (w.output().equals(IrExpr.Write.FAN)) {
+                        Object tup = eval(w.value(), frame, module);
+                        if (!(tup instanceof RecordValue rv)) {
+                            throw new RuntimeCheckException(
+                                    "Iterate: a multi-channel fragment must return a tuple, got "
+                                            + (tup == null ? "null" : tup.getClass().getSimpleName()),
+                                    it.origin());
+                        }
+                        for (IrExpr.OutputSpec os : it.outputs()) {
+                            routeWrite(os.name(), rv.members().get(os.name()), kinds,
+                                    streams, accumulators, it.origin());
+                        }
+                        continue;
+                    }
+                    IrExpr.OutputKind k = kinds.get(w.output());
+                    if (k == null) throw new RuntimeCheckException(
+                            "Iterate: write to unknown output '" + w.output() + "'", it.origin());
+                    routeWrite(w.output(), eval(w.value(), frame, module), kinds,
+                            streams, accumulators, it.origin());
+                }
+                return false;
+            }
+        }
+        throw new RuntimeCheckException("Iterate: no arm matched element " + element, it.origin());
+    }
+
+    /**
+     * Seals the iterate outputs: a single output directly, else a record keyed by output
+     * name. Positional names ({@code _0.._n} — the multi-channel fragment shape) seal to a
+     * {@code _tuple} so the result destructures with {@code let {a, b} = …}; named outputs
+     * (the {@code iter()} disposition form) stay a plain keyed record.
+     */
+    private static Object sealIterate(IrExpr.Iterate it, Map<String, List<Object>> streams,
+            Map<String, Object> accumulators) {
         java.util.Map<String, Object> result = new LinkedHashMap<>();
         for (IrExpr.OutputSpec os : it.outputs()) {
             result.put(os.name(), os.kind() == IrExpr.OutputKind.STREAM
@@ -321,9 +347,6 @@ public final class IrInterpreter {
                     : accumulators.get(os.name()));
         }
         if (result.size() == 1) return result.values().iterator().next();
-        // Positional output names (_0.._n — the multi-channel fragment shape) seal to
-        // a tuple, so the result destructures with `let [(a, b)] = …`; named outputs
-        // (the iter() disposition form) stay a plain keyed record.
         boolean positional = result.keySet().stream().allMatch(IrInterpreter::isPositionalKey);
         return positional ? new RecordValue("_tuple", result) : new RecordValue(result);
     }
@@ -1114,6 +1137,17 @@ public final class IrInterpreter {
                             + a.candidates().size() + " candidate(s)",
                     call.origin());
             case DispatchResult.Resolved resolved -> {
+                // A native source (docs/events.md): a resolved call to the builtin
+                // `stdin` (and friends) yields a fresh live, demand-driven source rather
+                // than running its placeholder body — the inbound counterpart to the
+                // `emit`→NativeFunctions sink. Import-gated: the decl resolves only when
+                // `pontif.events.{stdin}` was required, so this is no global.
+                if (call.args().isEmpty()) {
+                    LiveSource source = NativeSources.get(resolved.decl().name());
+                    if (source != null) {
+                        return source;
+                    }
+                }
                 try {
                     resolved.call().executeChecks(Map.of(), checker(module));
                 } catch (RuntimeCheckException rce) {
