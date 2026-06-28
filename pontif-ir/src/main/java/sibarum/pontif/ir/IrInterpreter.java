@@ -185,12 +185,14 @@ public final class IrInterpreter {
     }
 
     /**
-     * Evaluates an {@code emit EVENT  BODY} statement (docs/events.md, slice 1b):
-     * evaluate the event, route it <b>by its type name</b> to the matching native
-     * conduit ({@link NativeFunctions} — the builtin {@code StdOut}/{@code StdErr}
-     * output streams), discard the (write-only) result, then continue with the body.
-     * An event with no registered conduit fails closed (stateful/user conduits are
-     * later slices).
+     * Evaluates an {@code emit EVENT  BODY} statement (docs/events.md): evaluate the event,
+     * route it <b>by its type name</b> to its consumers — every declared {@code action}
+     * whose match-filter the event satisfies (the reaction leg, fired in declaration order)
+     * and/or the builtin native sink ({@link NativeFunctions} — {@code StdOut}/{@code StdErr}).
+     * The write-only result is discarded; the body continues. An event type with no consumer
+     * at all (no sink, no registered action) fails closed; a registered action that simply
+     * doesn't match <i>this</i> instance is a legitimate no-op. Dispatch is synchronous in
+     * this slice (the scheduler / mailbox is a later slice).
      */
     private Object evalEmit(IrExpr.Emit emit, Environment env, CompiledModule module) {
         Object event = eval(emit.event(), env, module);
@@ -204,15 +206,47 @@ public final class IrInterpreter {
             throw new RuntimeCheckException(
                     "emit expects a named event struct, got an anonymous aggregate", emit.origin());
         }
-        NativeFunctions.Effect conduit = NativeFunctions.get(rec.typeName());
-        if (conduit == null) {
+        String typeName = rec.typeName();
+        String bare = bareName(typeName);
+
+        // Fire user Actions whose match-filter this event satisfies (the reaction leg), in
+        // declaration order. Each reaction is a 1-param function — the event — run for its
+        // effect (its value discarded), mirroring tryAttributeProducer's invocation.
+        SymExpr sym = toSymExpr(rec);
+        List<CompiledModule.CompiledAction> actions = module.actionsFor(typeName);
+        if (actions.isEmpty()) actions = module.actionsFor(bare);
+        for (CompiledModule.CompiledAction action : actions) {
+            if (Refinements.satisfies(sym, action.matchSort(), checker(module))
+                    instanceof ProofResult.Passed) {
+                CompiledModule.CompiledFunction fn = action.reaction();
+                Environment reactionEnv = Environment.empty()
+                        .extend(fn.params().get(0).name(), rec);
+                eval(fn.body(), reactionEnv, module);
+            }
+        }
+
+        // The native sink (StdOut/StdErr output), kept alongside Actions.
+        NativeFunctions.Effect sink = NativeFunctions.get(typeName);
+        if (sink != null) {
+            sink.apply(rec, emit.origin());
+        }
+
+        // Fail closed only when there is no consumer at all — a likely typo, not a
+        // deliberate fire-and-forget.
+        if (sink == null && !module.hasActionsFor(typeName) && !module.hasActionsFor(bare)) {
             throw new RuntimeCheckException(
-                    "No conduit for event type '" + rec.typeName() + "' — slice 1b routes only "
-                            + "the builtin StdOut/StdErr output conduits (docs/events.md)",
+                    "No consumer for event type '" + typeName + "' — emit routes to the builtin "
+                            + "StdOut/StdErr sinks or to a declared `action` matching this type "
+                            + "(docs/events.md)",
                     emit.origin());
         }
-        conduit.apply(rec, emit.origin());
         return eval(emit.body(), env, module);
+    }
+
+    /** The bare suffix of a possibly module-qualified type name ({@code mod/Tick} → {@code Tick}). */
+    private static String bareName(String typeName) {
+        int slash = typeName.lastIndexOf('/');
+        return slash < 0 ? typeName : typeName.substring(slash + 1);
     }
 
     /**

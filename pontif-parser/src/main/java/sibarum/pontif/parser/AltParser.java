@@ -71,7 +71,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type",
-            "match", "proof", "main", "emit",
+            "match", "proof", "main", "emit", "action",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -558,7 +558,8 @@ public final class AltParser {
         AltToken t = peek();
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let", "trait", "cast", "assign", "proof").contains(t.text());
+                "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
+                "action").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -623,10 +624,11 @@ public final class AltParser {
             case "trait"    -> parseTrait();
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
+            case "action"   -> parseAction();
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
-                            + "struct / let / cast / trait / assign / proof); executable logic must "
+                            + "struct / let / cast / trait / assign / proof / action); executable logic must "
                             + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
@@ -955,6 +957,58 @@ public final class AltParser {
                 "function '" + name + "' needs a body ('-> expr') or a synthesis "
                         + "directive (';')",
                 peek().origin());
+    }
+
+    /** Monotonic counter making each lowered action's synthetic key unique. */
+    private int actionSeq = 0;
+
+    /**
+     * The event-reaction declaration (docs/events.md, the Action leg):
+     * {@code action NAME(e:EventSort) -> BODY}. An Action is a one-parameter function
+     * invoked <b>reactively</b> — the event is the sole parameter, its sort is the
+     * match-filter (tested against each emitted event by {@code Refinements.satisfies}),
+     * and the body is the for-effect reaction (its value discarded, like {@code emit}).
+     * The name is <b>diagnostic-only</b> — an Action is never called by name.
+     *
+     * <p>Lowered, like a {@code cast} (see {@code IrCompiler.lowerCoercions}), to an
+     * ordinary {@link IrStmt.FunctionDecl} under a reserved, non-lexable {@code #action#}
+     * key, so every downstream pass (alias / method-op / promotions / gate / sort check /
+     * event guard) handles it uniformly; the compile loop recognises the prefix and
+     * registers it in the module's action table. The return sort is the universal
+     * {@code _} — the reaction body is unconstrained.
+     */
+    private IrStmt parseAction() throws ParseException {
+        AltToken start = expectKeyword("action");
+        String name = parseDeclarationName();
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
+        List<ParamConversion> convs = drainParamConversions();
+        if (params.size() != 1) {
+            throw new ParseException(
+                    "an action reacts to exactly one event — declare a single parameter "
+                            + "(the event it matches); got " + params.size(),
+                    start.origin());
+        }
+        if (!convs.isEmpty()) {
+            throw new ParseException(
+                    "an action's event parameter cannot be a conversion", start.origin());
+        }
+        expect(AltToken.Kind.ARROW);
+        // Scope the event parameter into the body, mirroring parseFunction.
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
+        try {
+            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
+            String key = "#action#" + (actionSeq++) + "#" + name;
+            return new IrStmt.FunctionDecl(key, params, IrSort.named("_"), body, start.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
     }
 
     /**

@@ -112,6 +112,10 @@ public final class IrCompiler {
         Map<IrSort, Sort> compiledSorts = new IdentityHashMap<>();
         // Declaration-ordered top-level let names — the engines' force list.
         List<String> topLevelLets = new ArrayList<>();
+        // Actions (docs/events.md) by the base name of the event type they match. A
+        // `#action#`-keyed FunctionDecl (the parser's lowering, mirroring a coercion) is
+        // compiled as an ordinary function AND recorded here so `emit` can fire it.
+        Map<String, List<CompiledModule.CompiledAction>> actionsByType = new LinkedHashMap<>();
 
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
@@ -119,8 +123,24 @@ public final class IrCompiler {
                     for (IrParam p : fd.params()) registerSort(p.sort(), compiledSorts);
                     registerSort(fd.returnSort(), compiledSorts);
                     registerSortsInExpr(fd.body(), compiledSorts);
-                    compileFunctionDecl(fd, dispatch, functions, compiledSorts);
+                    CompiledModule.CompiledFunction cf =
+                            compileFunctionDecl(fd, dispatch, functions, compiledSorts);
                     if (fd.topLevelLet()) topLevelLets.add(fd.name());
+                    // An Action: register its (match-sort → reaction) under the event type's
+                    // BARE name. `contains` not `startsWith` — the linker may module-qualify
+                    // the synthetic name ("mod/#action#…"); `#` is non-lexable so this can
+                    // never catch a user function. The bare key matches evalEmit's lookup,
+                    // which normalizes the emitted event's (qualified) type name the same way.
+                    if (fd.name().contains("#action#")) {
+                        IrSort eventSort = fd.params().get(0).sort();
+                        String base = Coercions.baseName(eventSort);
+                        int slash = base == null ? -1 : base.lastIndexOf('/');
+                        String key = slash < 0 ? base : base.substring(slash + 1);
+                        actionsByType
+                                .computeIfAbsent(key, k -> new ArrayList<>())
+                                .add(new CompiledModule.CompiledAction(
+                                        compiledSorts.get(eventSort), cf));
+                    }
                 }
                 case IrStmt.TraitImpl ti -> {
                     // Register methods as regular FunctionDecls in the
@@ -167,7 +187,7 @@ public final class IrCompiler {
 
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
-                structRegistry, topLevelLets);
+                structRegistry, topLevelLets, actionsByType);
     }
 
     /**
@@ -195,7 +215,7 @@ public final class IrCompiler {
         return new IrModule(module.name(), out, module.main());
     }
 
-    private void compileFunctionDecl(
+    private CompiledModule.CompiledFunction compileFunctionDecl(
             IrStmt.FunctionDecl fd,
             DispatchTable dispatch,
             Map<FunctionDecl, CompiledModule.CompiledFunction> functions,
@@ -208,9 +228,10 @@ public final class IrCompiler {
         FunctionDecl decl = FunctionDecl.declaration(fd.name(), params, returnSort);
         dispatch.register(decl);
 
-        functions.put(
-                decl,
-                new CompiledModule.CompiledFunction(decl, fd.body(), fd.params()));
+        CompiledModule.CompiledFunction cf =
+                new CompiledModule.CompiledFunction(decl, fd.body(), fd.params());
+        functions.put(decl, cf);
+        return cf;
     }
 
     /**

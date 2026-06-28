@@ -198,6 +198,26 @@ serializes.)
     (`map((1,2,3),…)` → `{2,4,6}`). **Remaining deferral:** bounded collection of a live
     *prefix* (`takeWhile(&stdin())` → a value) is unsupported; it would materialise a finite
     tuple and ride the eager path.
+  - **1e — the Action reaction leg LANDED (2026-06-28).** The consumer stage (stage 3),
+    previously design-only. Surface: `action NAME(e:EventSort) -> BODY` — a one-parameter
+    function invoked **reactively**. The event is the sole parameter; its **sort is the
+    match-filter** (`e:Tick` matches all `Tick`; `e:[Tick:@.n > 0]` matches a refined subset),
+    tested against each emitted event with `Refinements.satisfies` (the same `Passed`-only
+    test `iterateStep` uses for concrete values); the body is the **for-effect** reaction (its
+    value discarded). The name is diagnostic-only — Actions are never called by name. **No new
+    IR node, zero new passes:** the parser lowers an `action` to an ordinary `FunctionDecl`
+    under a reserved non-lexable `#action#` key (the `lowerCoercions` precedent), so every
+    pass handles it uniformly; the compile loop recognises the key (`contains`, since the
+    linker may module-qualify it) and records a `(matchSort → reaction)` `CompiledAction` in
+    the module, keyed by the event type's **bare** name. `evalEmit` now fires every matching
+    Action for an emitted event's type in **declaration order** (one event fans out to many),
+    then applies the native sink if any. **Dispatch is synchronous** (during the `emit`); the
+    mailbox/scheduler is a later slice. The **fail-closed** rule is tightened: an event with
+    *no* consumer (no sink, no action registered for the type) still errors, but a registered
+    Action that doesn't match *this* instance is a legitimate no-op. `ActionReactionTest`.
+    **Still deferred:** the stateful `EventConduit` fold (`triggered(E):R` + `S`-threading)
+    *between* emit and the Actions; the scheduler / root-thread story (Slice 2); and the GUI
+    consumer (`pontif-builtin-gui`), where an Action's body mutates a dasum `Property`.
 - **Slice 2 — real threads.** Worker pool, thread-pinned conduits, the OpenGL root-thread
   case; concurrent mailbox + optional global index. Executor swap by invariants 1–4.
 - **Slice 3+ — hardening.** Explicit `Fail` recovery surface; backpressure policies on
