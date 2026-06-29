@@ -1,0 +1,18 @@
+requires pontif.gui.{label, button, column, window, ButtonEvent}
+requires pontif.events.{StdOut}
+
+# Declarative UI (docs/extensions.md, G5): build a tree of element VALUES — label/button/column —
+# and hand it to window, which walks the tree into the rendered window. Clicking the button fires
+# a ButtonEvent that this action reacts to (the slice-1e action leg). Construction only for now:
+# the reaction prints to the console (reactively updating a rendered element is the next slice).
+action onButton(e:ButtonEvent) -> emit StdOut("button clicked!")  e
+
+# The let-chain ends in window(...) as the trailing expression — a `let` needs a body, so the
+# window call (the program's result) comes last, not a `let win = …`.
+main (
+  let lbl = label({text = "Press the Button"})
+  let btn = button("Press me")
+  window({title = "Title"}, {
+    column({justify = "center", align = "middle"}, {lbl, btn})
+  })
+)

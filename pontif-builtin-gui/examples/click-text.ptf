@@ -1,8 +1,0 @@
-requires pontif.gui.{window, setText, ClickEvent}
-
-# Text (docs/extensions.md, G3): the window shows a centered label. A click fires a
-# ClickEvent; this action reacts (the slice-1e action leg) and updates the label's text via
-# the reactive setText — the next frame paints it. The label starts "Click anywhere".
-action onClick(e:ClickEvent) -> setText("clicked!")
-
-main window("Text demo")

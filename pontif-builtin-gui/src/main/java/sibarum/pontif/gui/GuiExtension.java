@@ -6,14 +6,26 @@ import sibarum.pontif.runtime.module.Extension;
 import java.util.Map;
 
 /**
- * The GUI extension (docs/extensions.md) — the first external Pontif extension. Its Pontif-side
- * interface declares the {@code window} function (placeholder body); its associated Java object
- * is {@link DasumBridge#openWindow}, bound by name. Install it via
- * {@code Extensions.install(new GuiExtension())} (the {@link GuiLauncher} does this) before
- * compiling a program that {@code requires pontif.gui}.
+ * The GUI extension (docs/extensions.md) — the first external Pontif extension. <b>G5</b> is a
+ * declarative UI: a program builds a tree of element <i>values</i> ({@code label}, {@code button},
+ * {@code column}) and hands it to {@code window}, which the bridge walks into dasum components.
+ * Elements are ordinary Pontif records (not opaque Java handles), so they {@code let}-bind, nest
+ * in {@code {…}}, and pass as args. A button placed in the tree fires a {@code ButtonEvent} that a
+ * slice-1e {@code action} reacts to.
  *
- * <p>G1 exposes one call: {@code window(title)} opens a titled window and blocks until closed.
- * Richer surface (text/widgets) and interactivity (events/actions/Property) are later slices.
+ * <pre>
+ *   requires pontif.gui.{label, button, column, window, ButtonEvent}
+ *   action onButton(e:ButtonEvent) -> emit StdOut("clicked")  e
+ *   main (
+ *     let lbl = label({text = "Press the Button"})
+ *     let btn = button("Press me")
+ *     let win = window({title = "Title"}, { column({justify = "center", align = "middle"}, {lbl, btn}) })
+ *   )
+ * </pre>
+ *
+ * The builders are native calls with permissive params: they build the element record in Java,
+ * sidestepping record-arg and heterogeneous-children typing. Construction only — reactively
+ * updating a rendered element (element identity) is the next slice.
  */
 public final class GuiExtension implements Extension {
 
@@ -27,31 +39,27 @@ public final class GuiExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.events.{Event}
-                exports @.{window, button, setBackground, setText, ClickEvent, ButtonEvent}
+                exports @.{label, button, column, window, Label, Button, Column, ButtonEvent}
 
-                # A click in the window, carrying the cursor position. An `action onClick(e:ClickEvent)`
-                # reacts to it (slice-1e), reading e.x / e.y.
-                struct ClickEvent(x:Int, y:Int)
-                assign trait ClickEvent:Event{}
+                # Element values, built by the functions below. The fields document the shape; the
+                # native builders construct the records directly (so there is no construction-gate
+                # or typing friction), and the bridge switches on the type name to render each.
+                struct Label(text:String)
+                struct Button(text:String)
+                struct Column(justify:String, align:String)
 
-                # A button press, carrying the button's label (so multiple buttons are
-                # distinguishable). An `action onButton(e:ButtonEvent)` reacts to it.
+                # Fired when a button placed in the tree is clicked, carrying its label.
                 struct ButtonEvent(label:String)
                 assign trait ButtonEvent:Event{}
 
-                # Opens a titled window, runs the GUI loop until closed, and fires a ClickEvent on
-                # each left-click. Side-effect backed by DasumBridge.openWindow (bound by name);
-                # the placeholder body is never run.
-                function window(title:String):Stream[String] -> {}
+                # Builders (native-backed; placeholder bodies are never run). `_` params accept
+                # the config record / children aggregate as-is; the bridge reads them in Java.
+                function label(cfg:_):Label -> {}
+                function button(text:String):Button -> {}
+                function column(cfg:_, children:_):Column -> {}
 
-                # Registers a button (call before window); clicking it fires a ButtonEvent(label).
-                function button(label:String):Stream[String] -> {}
-
-                # Sets the window background colour (components mod 256, scaled to [0,1]).
-                function setBackground(r:Int, g:Int, b:Int):Stream[String] -> {}
-
-                # Sets the centered text label's content (the next frame paints it).
-                function setText(s:String):Stream[String] -> {}
+                # Opens a window rendering the given root tree, on the root thread, until closed.
+                function window(cfg:_, children:_):Stream[String] -> {}
 
                 0
                 """;
@@ -60,9 +68,9 @@ public final class GuiExtension implements Extension {
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
         return Map.of(
-                "window", DasumBridge::openWindow,
+                "label", DasumBridge::label,
                 "button", DasumBridge::button,
-                "setBackground", DasumBridge::setBackground,
-                "setText", DasumBridge::setText);
+                "column", DasumBridge::column,
+                "window", DasumBridge::openWindow);
     }
 }

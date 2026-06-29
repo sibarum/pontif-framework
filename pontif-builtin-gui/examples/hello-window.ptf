@@ -1,6 +1,0 @@
-requires pontif.gui.{window}
-
-# The first GUI program: open a titled window from Pontif. `window` is a side-effect
-# supplied by the GUI extension (docs/extensions.md) — its Java object opens the dasum
-# window and runs the loop on the root thread until you close it.
-main window("Hello from Pontif")

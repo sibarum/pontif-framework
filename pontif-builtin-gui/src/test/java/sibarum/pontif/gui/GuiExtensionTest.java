@@ -10,34 +10,35 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Headless-safe check of the GUI extension (docs/extensions.md): installing {@link GuiExtension}
- * makes {@code pontif.gui} linkable and registers {@code window} as a native call. The actual
- * window is verified manually (it needs a display + GLFW): run
- * {@code mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/hello-window.ptf}. This test only
- * compiles a {@code requires pontif.gui} program and confirms the binding — it never opens a
- * window (no {@code window(...)} call is evaluated), so it is safe on a headless CI.
+ * Headless-safe check of the declarative GUI extension (docs/extensions.md, G5): installing
+ * {@link GuiExtension} makes {@code pontif.gui} linkable and registers the element builders
+ * ({@code label}/{@code button}/{@code column}/{@code window}) as native calls, and a declarative
+ * UI program links. The actual window is verified manually (needs a display + GLFW):
+ * {@code mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/ui.ptf}. This test does NOT open a
+ * window — it only compiles, so it is safe on a headless CI.
  */
 class GuiExtensionTest {
 
     @Test
-    void installingGuiExtension_makesPontifGuiLinkable_andBindsWindow() {
+    void installingGuiExtension_linksDeclarativeUi_andBindsBuilders() {
         Extensions.install(new GuiExtension());
 
-        // The interactive + text + button surface links: window + button + setText + actions.
         CompileResult result = new PontifCompiler().compileAlt("""
-                requires pontif.gui.{window, button, setText, ButtonEvent}
-                action onButton(e:ButtonEvent) -> setText("clicked!")
+                requires pontif.gui.{label, button, column, window, ButtonEvent}
+                requires pontif.events.{StdOut}
+                action onButton(e:ButtonEvent) -> emit StdOut("hi")  e
                 main (
-                  let b = button("Press me")
-                  window("headless compile check")
+                  let lbl = label({text = "hi"})
+                  let btn = button("go")
+                  window({title = "t"}, { column({justify = "center", align = "middle"}, {lbl, btn}) })
                 )""", "gui.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
-                () -> "pontif.gui should link; got "
+                () -> "declarative pontif.gui program should link; got "
                         + (result instanceof CompileResult.Failed f ? f.error().text() : result));
 
-        assertNotNull(NativeCalls.get("window"), "window should be a registered native call");
+        assertNotNull(NativeCalls.get("label"), "label should be a registered native call");
         assertNotNull(NativeCalls.get("button"), "button should be registered");
-        assertNotNull(NativeCalls.get("setBackground"), "setBackground should be registered");
-        assertNotNull(NativeCalls.get("setText"), "setText should be registered");
+        assertNotNull(NativeCalls.get("column"), "column should be registered");
+        assertNotNull(NativeCalls.get("window"), "window should be registered");
     }
 }
