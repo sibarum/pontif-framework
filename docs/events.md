@@ -168,8 +168,8 @@ serializes.)
   - **1c — input IO LANDED (2026-06-27).** `stdin` as the first inbound source — the
     counterpart to 1b's output. `stdin()` is a declared `pontif.events` function (so it's
     import-gated, `requires pontif.events.{stdin}`) whose resolved call is intercepted by
-    the interpreter to yield a fresh **`LiveSource`** (the new `NativeSources` registry,
-    the read counterpart to `NativeFunctions`) reading `System.in` line by line. The
+    the interpreter to yield a fresh **`LiveSource`** (a native call, since 2026-06-29 the
+    builtin `IoExtension` — see docs/extensions.md) reading `System.in` line by line. The
     `Iterate` engine recognises a `LiveSource` source and drives it with a **demand-driven
     pull-loop** — one line pulled → arms run (`echo` side-`emit`s `StdOut`) → next pulled —
     rather than pre-materialising a tuple. **`main echo(&stdin())`** echoes each line as
