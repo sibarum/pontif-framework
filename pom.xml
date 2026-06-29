@@ -22,6 +22,7 @@
         <module>pontif-demo</module>
         <module>pontif-playground</module>
         <module>pontif-cli</module>
+        <module>pontif-builtin-gui</module>
     </modules>
 
     <properties>

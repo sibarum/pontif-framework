@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-builtin-gui</artifactId>
+
+    <!--
+      The GUI extension (docs/extensions.md): the first EXTERNAL Pontif extension. It is the
+      only module that depends on the dasum GUI toolkit (GLFW/OpenGL) — core stays dasum-free.
+      G1 opens a titled window from a `.ptf`; richer surface (text/widgets, needing font atlases)
+      and interactivity (click → emit → action → Property) are later slices.
+    -->
+    <properties>
+        <main.class>sibarum.pontif.gui.GuiLauncher</main.class>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-core</artifactId>
+            <version>${dasum.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-glfw</artifactId>
+            <version>${dasum.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Launch a GUI .ptf:
+                 mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/hello-window.ptf
+                 Runs a fresh JVM with native access enabled (GLFW needs it). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <executable>${java.home}/bin/java</executable>
+                    <arguments>
+                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${main.class}</argument>
+                        <argument>${ptf}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
