@@ -1,0 +1,12 @@
+requires pontif.gui.{window, button, setText, ButtonEvent}
+
+# Clickable buttons (docs/extensions.md, G4): button(...) registers a dasum button before the
+# window opens; clicking it fires a ButtonEvent carrying its label, which this action reacts to
+# (the slice-1e action leg) by updating the label text. Hit-tested as a discrete widget, not the
+# whole window.
+action onButton(e:ButtonEvent) -> setText("button clicked!")
+
+main (
+  let b = button("Press me")
+  window("Buttons")
+)
