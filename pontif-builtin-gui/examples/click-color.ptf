@@ -1,0 +1,9 @@
+requires pontif.gui.{window, setBackground, ClickEvent}
+
+# Interactivity (docs/extensions.md): a left-click in the window fires a ClickEvent
+# carrying the cursor position; this action reacts (the slice-1e action leg) and drives
+# the background colour from the click coordinates — computed in Pontif, applied via the
+# reactive Property in the GUI bridge. Click around the window to repaint it.
+action onClick(e:ClickEvent) -> setBackground(e.x, e.y, 128)
+
+main window("Click me — the background follows your clicks")

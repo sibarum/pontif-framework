@@ -56,8 +56,9 @@ public final class IoExtension implements Extension {
 
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
-        // stdin ignores its (empty) arg list and yields a fresh live source per call.
-        return Map.of("stdin", args -> stdinSource());
+        // stdin ignores its (empty) arg list and the re-entry context; yields a fresh live
+        // source per call.
+        return Map.of("stdin", (args, ctx) -> stdinSource());
     }
 
     private static final String SOURCE = """

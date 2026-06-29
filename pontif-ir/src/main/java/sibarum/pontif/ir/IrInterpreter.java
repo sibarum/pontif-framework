@@ -209,12 +209,35 @@ public final class IrInterpreter {
         String typeName = rec.typeName();
         String bare = bareName(typeName);
 
-        // Fire user Actions whose match-filter this event satisfies (the reaction leg), in
-        // declaration order. Each reaction is a 1-param function — the event — run for its
-        // effect (its value discarded), mirroring tryAttributeProducer's invocation.
+        // Fail closed only when there is no consumer at all — a likely typo, not a
+        // deliberate fire-and-forget. (A registered action that doesn't match THIS instance is
+        // a legitimate no-op; that is decided inside fireEvent.)
+        if (NativeFunctions.get(typeName) == null
+                && !module.hasActionsFor(typeName) && !module.hasActionsFor(bare)) {
+            throw new RuntimeCheckException(
+                    "No consumer for event type '" + typeName + "' — emit routes to the builtin "
+                            + "StdOut/StdErr sinks or to a declared `action` matching this type "
+                            + "(docs/events.md)",
+                    emit.origin());
+        }
+        fireEvent(rec, module, emit.origin());
+        return eval(emit.body(), env, module);
+    }
+
+    /**
+     * Fires an event through the substrate (docs/events.md): run every declared {@code action}
+     * whose match-filter {@code rec} satisfies (declaration order; each reaction is a 1-param
+     * function — the event — run for effect, mirroring tryAttributeProducer), then apply the
+     * native {@link NativeFunctions} sink if any. <b>Public</b> so a long-running native call —
+     * the GUI {@code window} loop — can re-enter on a click via {@link NativeCalls.Context}
+     * (the click builds a {@code ClickEvent} and fires it here). No fail-closed: an event with
+     * no consumer is a no-op (the {@code emit} statement does the typo guard upstream).
+     */
+    public void fireEvent(RecordValue rec, CompiledModule module, Origin origin) {
+        String typeName = rec.typeName();
         SymExpr sym = toSymExpr(rec);
         List<CompiledModule.CompiledAction> actions = module.actionsFor(typeName);
-        if (actions.isEmpty()) actions = module.actionsFor(bare);
+        if (actions.isEmpty()) actions = module.actionsFor(bareName(typeName));
         for (CompiledModule.CompiledAction action : actions) {
             if (Refinements.satisfies(sym, action.matchSort(), checker(module))
                     instanceof ProofResult.Passed) {
@@ -224,23 +247,10 @@ public final class IrInterpreter {
                 eval(fn.body(), reactionEnv, module);
             }
         }
-
-        // The native sink (StdOut/StdErr output), kept alongside Actions.
         NativeFunctions.Effect sink = NativeFunctions.get(typeName);
         if (sink != null) {
-            sink.apply(rec, emit.origin());
+            sink.apply(rec, origin);
         }
-
-        // Fail closed only when there is no consumer at all — a likely typo, not a
-        // deliberate fire-and-forget.
-        if (sink == null && !module.hasActionsFor(typeName) && !module.hasActionsFor(bare)) {
-            throw new RuntimeCheckException(
-                    "No consumer for event type '" + typeName + "' — emit routes to the builtin "
-                            + "StdOut/StdErr sinks or to a declared `action` matching this type "
-                            + "(docs/events.md)",
-                    emit.origin());
-        }
-        return eval(emit.body(), env, module);
     }
 
     /** The bare suffix of a possibly module-qualified type name ({@code mod/Tick} → {@code Tick}). */
@@ -1212,7 +1222,8 @@ public final class IrInterpreter {
                 // result (e.g. the window fn blocks, then returns).
                 NativeCalls.NativeCall nativeCall = NativeCalls.get(resolved.decl().name());
                 if (nativeCall != null) {
-                    return nativeCall.call(argValues);
+                    NativeCalls.Context ctx = ev -> fireEvent(ev, module, Origin.NONE);
+                    return nativeCall.call(argValues, ctx);
                 }
                 try {
                     resolved.call().executeChecks(Map.of(), checker(module));

@@ -26,12 +26,21 @@ public final class GuiExtension implements Extension {
     public String pontifSource() {
         return """
                 requires pontif.core.{Stream}
-                exports @.{window}
+                requires pontif.events.{Event}
+                exports @.{window, setBackground, ClickEvent}
 
-                # Opens a titled window and runs the GUI loop until closed (a side-effect backed
-                # by DasumBridge.openWindow, bound by name). The placeholder body is never run —
-                # the resolved call runs the extension's Java object instead.
+                # A click in the window, carrying the cursor position. An `action onClick(e:ClickEvent)`
+                # reacts to it (slice-1e), reading e.x / e.y.
+                struct ClickEvent(x:Int, y:Int)
+                assign trait ClickEvent:Event{}
+
+                # Opens a titled window, runs the GUI loop until closed, and fires a ClickEvent on
+                # each left-click. Side-effect backed by DasumBridge.openWindow (bound by name);
+                # the placeholder body is never run.
                 function window(title:String):Stream[String] -> {}
+
+                # Sets the window background colour (components mod 256, scaled to [0,1]).
+                function setBackground(r:Int, g:Int, b:Int):Stream[String] -> {}
 
                 0
                 """;
@@ -39,6 +48,8 @@ public final class GuiExtension implements Extension {
 
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
-        return Map.of("window", DasumBridge::openWindow);
+        return Map.of(
+                "window", DasumBridge::openWindow,
+                "setBackground", DasumBridge::setBackground);
     }
 }

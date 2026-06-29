@@ -1,5 +1,7 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.ast.record.RecordValue;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,10 +22,24 @@ import java.util.Map;
  */
 public final class NativeCalls {
 
-    /** One native call: run the Java implementation against the evaluated arguments. */
+    /**
+     * One native call: run the Java implementation against the evaluated arguments. The
+     * {@link Context} lets a long-running native (the GUI {@code window} loop) re-enter the
+     * substrate — firing a Pontif event back through its {@code action}s, e.g. on a click.
+     * Most calls ignore it.
+     */
     @FunctionalInterface
     public interface NativeCall {
-        Object call(List<Object> args);
+        Object call(List<Object> args, Context ctx);
+    }
+
+    /**
+     * The interpreter handle a native call may use to fire a Pontif event through the event
+     * substrate (run its matching {@code action}s + native sink) — the re-entry seam for GUI
+     * interactivity (docs/extensions.md). Backed by {@code IrInterpreter.fireEvent}.
+     */
+    public interface Context {
+        void fireEvent(RecordValue event);
     }
 
     private static final Map<String, NativeCall> ENTRIES = new LinkedHashMap<>();
