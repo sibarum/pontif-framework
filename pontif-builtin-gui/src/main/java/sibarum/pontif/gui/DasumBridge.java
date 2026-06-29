@@ -144,6 +144,14 @@ public final class DasumBridge {
         if (!(value instanceof RecordValue rv)) {
             return errorLabel("not a component: " + value);
         }
+        // A user widget: any value whose type satisfies Clickable renders as a button whose click
+        // invokes its own onClick method (which emits). This is how per-element behavior lives —
+        // the user subtypes Button and assigns Clickable with an onClick (docs/extensions.md G6).
+        // The trait registry keys on the fully-qualified trait name (pontif.gui/Clickable).
+        if (ctx.satisfies(rv, "pontif.gui/Clickable")) {
+            return Themed.button(str(rv, "text"), Em.of(10f), Variant.PRIMARY, 0,
+                    () -> ctx.invoke(rv, "onClick"));
+        }
         return switch (bareType(rv.typeName())) {
             case "Label" -> new Component.Text(str(rv, "text"), Em.of(2f), TEXT);
             case "Button" -> {

@@ -1222,7 +1222,17 @@ public final class IrInterpreter {
                 // result (e.g. the window fn blocks, then returns).
                 NativeCalls.NativeCall nativeCall = NativeCalls.get(resolved.decl().name());
                 if (nativeCall != null) {
-                    NativeCalls.Context ctx = ev -> fireEvent(ev, module, Origin.NONE);
+                    NativeCalls.Context ctx = new NativeCalls.Context() {
+                        @Override public void fireEvent(RecordValue ev) {
+                            IrInterpreter.this.fireEvent(ev, module, Origin.NONE);
+                        }
+                        @Override public boolean satisfies(RecordValue value, String traitName) {
+                            return satisfiesTrait(value, traitName, module);
+                        }
+                        @Override public Object invoke(RecordValue value, String methodName) {
+                            return invokeMethod(value, methodName, module);
+                        }
+                    };
                     return nativeCall.call(argValues, ctx);
                 }
                 try {
@@ -1267,6 +1277,49 @@ public final class IrInterpreter {
         if (func == null || func.params().size() != 1) return NO_ATTRIBUTE;
         Environment env = Environment.empty().extend(func.params().get(0).name(), rec);
         return eval(func.body(), env, module);
+    }
+
+    /**
+     * Whether {@code value}'s type satisfies {@code traitName} — the GUI bridge's "is this a
+     * {@code Clickable}?" check ({@link NativeCalls.Context#satisfies}). Robust to bare vs
+     * module-qualified spellings of both the trait and the value's type (the registry and the
+     * runtime value may carry either form), mirroring the action keying.
+     */
+    private boolean satisfiesTrait(RecordValue value, String traitName, CompiledModule module) {
+        if (value == null || value.typeName() == null || traitName == null) return false;
+        sibarum.pontif.core.symbolic.TraitRegistry tr = module.dispatch().traitRegistry();
+        String type = value.typeName();
+        String bareType = bareName(type);
+        String bareTrait = bareName(traitName);
+        return tr.satisfies(traitName, type) || tr.satisfies(bareTrait, type)
+                || tr.satisfies(traitName, bareType) || tr.satisfies(bareTrait, bareType);
+    }
+
+    /**
+     * Invokes a 0-user-arg instance method {@code <type>.<methodName>(this)} on {@code value} and
+     * returns its result — the GUI bridge's "run this widget's {@code onClick}"
+     * ({@link NativeCalls.Context#invoke}). Mirrors {@link #tryAttributeProducer}; tries the
+     * value's qualified type name then its bare suffix as the dispatch key (a trait-impl method is
+     * registered under the bare type). Throws if no such method resolves, so a misconfigured
+     * handler is loud rather than a silent no-op.
+     */
+    private Object invokeMethod(RecordValue value, String methodName, CompiledModule module) {
+        if (value == null || value.typeName() == null) {
+            throw new RuntimeCheckException("invoke on a value with no type name", Origin.NONE);
+        }
+        for (String key : List.of(value.typeName() + "." + methodName,
+                bareName(value.typeName()) + "." + methodName)) {
+            DispatchResult dr = module.dispatch().resolve(key, List.of(toSymExpr(value)), checker(module));
+            if (dr instanceof DispatchResult.Resolved resolved) {
+                CompiledModule.CompiledFunction func = module.functions().get(resolved.decl());
+                if (func != null && !func.params().isEmpty()) {
+                    Environment env = Environment.empty().extend(func.params().get(0).name(), value);
+                    return eval(func.body(), env, module);
+                }
+            }
+        }
+        throw new RuntimeCheckException(
+                "no method '" + methodName + "' on '" + value.typeName() + "'", Origin.NONE);
     }
 
     private static SymExpr toSymExpr(Object value) {

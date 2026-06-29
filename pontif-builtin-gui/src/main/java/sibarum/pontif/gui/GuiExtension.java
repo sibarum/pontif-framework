@@ -39,7 +39,7 @@ public final class GuiExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.events.{Event}
-                exports @.{label, button, column, window, Label, Button, Column, ButtonEvent}
+                exports @.{label, button, column, window, Label, Button, Column, ButtonEvent, Clickable}
 
                 # Element values, built by the functions below. The fields document the shape; the
                 # native builders construct the records directly (so there is no construction-gate
@@ -47,6 +47,12 @@ public final class GuiExtension implements Extension {
                 struct Label(text:String)
                 struct Button(text:String)
                 struct Column(justify:String, align:String)
+
+                # A widget the bridge renders as a clickable button and invokes on click. Make your
+                # own button by subtyping Button and assigning Clickable with an onClick that emits:
+                #   struct PushButton:[Button](text:String)
+                #   assign trait PushButton:Clickable { onClick():_ -> emit StdOut("hi")  this }
+                trait Clickable { onClick():_ }
 
                 # Fired when a button placed in the tree is clicked, carrying its label.
                 struct ButtonEvent(label:String)

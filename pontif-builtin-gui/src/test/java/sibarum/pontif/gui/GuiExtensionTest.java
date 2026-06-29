@@ -23,21 +23,22 @@ class GuiExtensionTest {
     void installingGuiExtension_linksDeclarativeUi_andBindsBuilders() {
         Extensions.install(new GuiExtension());
 
+        // A clickable-widget program: a user subtype of Button + Clickable with an onClick.
         CompileResult result = new PontifCompiler().compileAlt("""
-                requires pontif.gui.{label, button, column, window, ButtonEvent}
+                requires pontif.gui.{label, column, window, Button, Clickable}
                 requires pontif.events.{StdOut}
-                action onButton(e:ButtonEvent) -> emit StdOut("hi")  e
+                struct PushButton:[Button](text:String)
+                assign trait PushButton:Clickable { onClick():_ -> emit StdOut("hi")  this }
                 main (
                   let lbl = label({text = "hi"})
-                  let btn = button("go")
+                  let btn = PushButton("go")
                   window({title = "t"}, { column({justify = "center", align = "middle"}, {lbl, btn}) })
                 )""", "gui.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
-                () -> "declarative pontif.gui program should link; got "
+                () -> "clickable-widget pontif.gui program should link; got "
                         + (result instanceof CompileResult.Failed f ? f.error().text() : result));
 
         assertNotNull(NativeCalls.get("label"), "label should be a registered native call");
-        assertNotNull(NativeCalls.get("button"), "button should be registered");
         assertNotNull(NativeCalls.get("column"), "column should be registered");
         assertNotNull(NativeCalls.get("window"), "window should be registered");
     }

@@ -34,12 +34,25 @@ public final class NativeCalls {
     }
 
     /**
-     * The interpreter handle a native call may use to fire a Pontif event through the event
-     * substrate (run its matching {@code action}s + native sink) — the re-entry seam for GUI
-     * interactivity (docs/extensions.md). Backed by {@code IrInterpreter.fireEvent}.
+     * The interpreter handle a native call may use to re-enter the runtime — the seam for GUI
+     * interactivity (docs/extensions.md). A long-running native (the GUI {@code window} loop) uses
+     * it to drive program logic from outside the normal call flow:
+     * <ul>
+     *   <li>{@link #fireEvent} — fire a Pontif event through the event substrate (run its matching
+     *       {@code action}s + native sink);</li>
+     *   <li>{@link #satisfies} — test whether a value's type satisfies a trait (e.g. is this
+     *       element {@code Clickable}?);</li>
+     *   <li>{@link #invoke} — invoke a 0-user-arg instance method on a value (e.g. a widget's
+     *       {@code onClick}), dispatching {@code <type>.<method>(this)}.</li>
+     * </ul>
+     * Backed by {@code IrInterpreter}.
      */
     public interface Context {
         void fireEvent(RecordValue event);
+
+        boolean satisfies(RecordValue value, String traitName);
+
+        Object invoke(RecordValue value, String methodName);
     }
 
     private static final Map<String, NativeCall> ENTRIES = new LinkedHashMap<>();
