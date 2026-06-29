@@ -1204,16 +1204,15 @@ public final class IrInterpreter {
                             + a.candidates().size() + " candidate(s)",
                     call.origin());
             case DispatchResult.Resolved resolved -> {
-                // A native source (docs/events.md): a resolved call to the builtin
-                // `stdin` (and friends) yields a fresh live, demand-driven source rather
-                // than running its placeholder body — the inbound counterpart to the
-                // `emit`→NativeFunctions sink. Import-gated: the decl resolves only when
-                // `pontif.events.{stdin}` was required, so this is no global.
-                if (call.args().isEmpty()) {
-                    LiveSource source = NativeSources.get(resolved.decl().name());
-                    if (source != null) {
-                        return source;
-                    }
+                // A native call (docs/extensions.md): a resolved call to an extension-backed
+                // function (`stdin`, the GUI `window`, …) runs its Java object against the
+                // evaluated args instead of the placeholder body. Import-gated: the decl
+                // resolves only when its module was required, so this is no global. `stdin`
+                // returns a LiveSource (the demand-driven source); other calls return their
+                // result (e.g. the window fn blocks, then returns).
+                NativeCalls.NativeCall nativeCall = NativeCalls.get(resolved.decl().name());
+                if (nativeCall != null) {
+                    return nativeCall.call(argValues);
                 }
                 try {
                     resolved.call().executeChecks(Map.of(), checker(module));

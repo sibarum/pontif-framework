@@ -45,16 +45,35 @@ public final class BuiltinModules {
     /** The event-substrate builtin module's name (docs/events.md): IO + concurrency. */
     public static final String PONTIF_EVENTS = "pontif.events";
 
+    /**
+     * Modules contributed by installed {@link Extension}s (docs/extensions.md), by name —
+     * the side-effecting builtins ({@code pontif.events} via {@link IoExtension}, the GUI, …).
+     * Distinct from the pure builtins below, which have no Java backing and stay hardcoded.
+     */
+    private static final Map<String, IrModule> EXTENSION_MODULES = new LinkedHashMap<>();
+
+    static {
+        // The builtin IO extension is always present (no external dependency), so every path —
+        // CLI included — keeps StdOut/StdErr/stdin. External extensions (the GUI) are installed
+        // by their launcher before compile.
+        Extensions.install(IoExtension.INSTANCE);
+    }
+
     private BuiltinModules() {}
 
-    /** All builtin modules, by name. */
+    /** Records an installed extension's module so {@link #all()} offers it to the linker. */
+    static void registerExtensionModule(String name, IrModule module) {
+        EXTENSION_MODULES.put(name, module);
+    }
+
+    /** All builtin modules, by name — the pure builtins plus every installed extension module. */
     public static Map<String, IrModule> all() {
         Map<String, IrModule> mods = new LinkedHashMap<>();
         mods.put(STD_COMMON, stdCommon());
         mods.put(STD_PROOF, stdProof());
         mods.put(STD_CONSERVATION, stdConservation());
         mods.put(PONTIF_CORE, pontifCore());
-        mods.put(PONTIF_EVENTS, pontifEvents());
+        mods.putAll(EXTENSION_MODULES);
         return mods;
     }
 
@@ -90,58 +109,11 @@ public final class BuiltinModules {
         }
     }
 
-    /**
-     * The event substrate (docs/events.md): Pontif's IO + concurrency model.
-     * <ul>
-     *   <li>{@code Event} — the marker for an emittable payload (the type
-     *       {@code emit} routes on);</li>
-     *   <li>{@code EventConduit[E, S, R]} — the synchronous, single-threaded
-     *       reduction point; a non-associative fold ({@code S} = managed state,
-     *       collapsing to a single {@code R} when {@code S = R}). Its
-     *       {@code triggered} contract arrives with the stateful-fold slice;</li>
-     *   <li>{@code EventStream[R]} — the receiver, a pull-stream; its demand-
-     *       driven {@code next} contract arrives with delivery + two-way sort
-     *       selection.</li>
-     * </ul>
-     * Slice 1b (output IO) adds the first concrete conduits: the write-only
-     * {@code StdOut} / {@code StdErr} events. An {@code emit StdOut(…)} statement
-     * ({@link sibarum.pontif.ir.IrExpr.Emit}) routes by event type to a
-     * {@link sibarum.pontif.ir.NativeFunctions} effect that writes the {@code text}
-     * field to the process streams. ({@code emit} is a statement keyword now, not an
-     * exported function.) Written in Pontif source, like {@code pontif.core}.
-     */
-    private static IrModule pontifEvents() {
-        String source = """
-                requires pontif.core.{Stream}
-                exports @.{Event, EventConduit, EventStream, StdOut, StdErr, stdin}
-
-                trait Event{}
-
-                trait EventConduit[type E, type S, type R]{}
-
-                trait EventStream[type R]{}
-
-                struct StdOut(text:String)
-                struct StdErr(text:String)
-                assign trait StdOut:Event{}
-                assign trait StdErr:Event{}
-
-                # The first inbound source (docs/events.md, "Input is an inbound emit"):
-                # the Pontif internals produce stdin's lines. The body is a placeholder —
-                # a resolved `stdin()` call is intercepted by the interpreter and yields a
-                # live, demand-driven source (NativeSources), pulled lazily by the iterator.
-                function stdin():Stream[String] -> {}
-
-                0
-                """;
-        try {
-            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(source, PONTIF_EVENTS);
-            return new IrModule(PONTIF_EVENTS, parsed.statements(), parsed.main());
-        } catch (sibarum.pontif.parser.ParseException pe) {
-            throw new IllegalStateException(
-                    "pontif.events's builtin source failed to parse: " + pe.getMessage(), pe);
-        }
-    }
+    // pontif.events (the event substrate's IO: Event/EventConduit/EventStream + the
+    // StdOut/StdErr sinks + stdin) is no longer hardcoded here — it is the builtin
+    // IoExtension (docs/extensions.md), installed by default into EXTENSION_MODULES and
+    // surfaced by all(). Its Pontif-side interface + the by-name binding to the Java
+    // effects/calls live in IoExtension.
 
     // The Queue and its cons-cell combinators (the retired `std.stream`:
     // `Element(head, rest:[Element|Leaf])` + singleton/concat/append/map/
