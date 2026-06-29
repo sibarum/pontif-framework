@@ -23,10 +23,10 @@ class GuiExtensionTest {
     void installingGuiExtension_makesPontifGuiLinkable_andBindsWindow() {
         Extensions.install(new GuiExtension());
 
-        // The interactive surface links: window + setBackground + an action on ClickEvent.
+        // The interactive + text surface links: window + setBackground + setText + an action.
         CompileResult result = new PontifCompiler().compileAlt("""
-                requires pontif.gui.{window, setBackground, ClickEvent}
-                action onClick(e:ClickEvent) -> setBackground(e.x, e.y, 128)
+                requires pontif.gui.{window, setBackground, setText, ClickEvent}
+                action onClick(e:ClickEvent) -> setText("clicked!")
                 main window("headless compile check")""", "gui.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "pontif.gui should link; got "
@@ -34,5 +34,6 @@ class GuiExtensionTest {
 
         assertNotNull(NativeCalls.get("window"), "window should be a registered native call");
         assertNotNull(NativeCalls.get("setBackground"), "setBackground should be registered");
+        assertNotNull(NativeCalls.get("setText"), "setText should be registered");
     }
 }

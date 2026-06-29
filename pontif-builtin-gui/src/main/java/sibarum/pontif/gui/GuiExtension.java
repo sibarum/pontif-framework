@@ -27,7 +27,7 @@ public final class GuiExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.events.{Event}
-                exports @.{window, setBackground, ClickEvent}
+                exports @.{window, setBackground, setText, ClickEvent}
 
                 # A click in the window, carrying the cursor position. An `action onClick(e:ClickEvent)`
                 # reacts to it (slice-1e), reading e.x / e.y.
@@ -42,6 +42,9 @@ public final class GuiExtension implements Extension {
                 # Sets the window background colour (components mod 256, scaled to [0,1]).
                 function setBackground(r:Int, g:Int, b:Int):Stream[String] -> {}
 
+                # Sets the centered text label's content (the next frame paints it).
+                function setText(s:String):Stream[String] -> {}
+
                 0
                 """;
     }
@@ -50,6 +53,7 @@ public final class GuiExtension implements Extension {
     public Map<String, NativeCalls.NativeCall> calls() {
         return Map.of(
                 "window", DasumBridge::openWindow,
-                "setBackground", DasumBridge::setBackground);
+                "setBackground", DasumBridge::setBackground,
+                "setText", DasumBridge::setText);
     }
 }
