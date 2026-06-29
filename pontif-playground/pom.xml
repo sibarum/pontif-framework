@@ -37,6 +37,13 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-parser</artifactId>
         </dependency>
+        <!-- The GUI extension: the editor's "Window" action launches its GuiLauncher in a
+             subprocess, so it must be on the editor's classpath (docs/extensions.md). -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-gui</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-core</artifactId>

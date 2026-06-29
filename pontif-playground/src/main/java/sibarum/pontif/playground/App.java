@@ -279,6 +279,7 @@ public final class App {
 
     private static Component buildUi() {
         Component runBtn    = Themed.iconButton(Icons.PLAY,     "Run",     Em.of(6f),   Variant.PRIMARY, 0, App::onRunClicked);
+        Component guiBtn    = Themed.button("Window", Em.of(7f), Variant.SUCCESS, 0, App::onRunGuiClicked);
         Component newBtn    = Themed.iconButton(Icons.FILE,     Em.of(2f), Variant.DEFAULT, 0, App::onNewClicked);
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
@@ -294,7 +295,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel, systemBtn),
+            List.of(runBtn, guiBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel, systemBtn),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane
@@ -399,6 +400,55 @@ public final class App {
                 Status.success("Ran " + sourceName + " in " + elapsedMs + " ms → " + result.text());
             }
         }, "pontif-runner");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /**
+     * Launches the current buffer as a GUI program in its OWN window — a separate JVM running
+     * the {@code pontif-builtin-gui} {@code GuiLauncher} (docs/extensions.md). The GUI program
+     * owns its own GLFW context + root thread, so it never collides with the editor's window/loop
+     * (which is why this can't just run in-process via the "Run" path). Runs on a worker thread
+     * so the editor stays responsive while the window is open; the subprocess inherits stdio so
+     * its console (link errors, emit output) is visible. Classpath is inherited from the editor,
+     * which depends on pontif-builtin-gui — so {@code GuiLauncher} and dasum resolve.
+     */
+    private static void onRunGuiClicked() {
+        String code = TextStates.contentOf(codeText);
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "editor.ptf";
+        Thread worker = new Thread(() -> {
+            Path tmp = null;
+            try {
+                tmp = Files.createTempFile("pontif-gui-", ".ptf");
+                Files.writeString(tmp, code, StandardCharsets.UTF_8);
+                String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+                ProcessBuilder pb = new ProcessBuilder(
+                        javaBin,
+                        "--enable-native-access=ALL-UNNAMED",
+                        "-cp", System.getProperty("java.class.path"),
+                        "sibarum.pontif.gui.GuiLauncher",
+                        tmp.toString());
+                pb.inheritIO();
+                Process proc = pb.start();
+                int exit = proc.waitFor();
+                if (exit == 0) {
+                    Status.success("GUI window closed (" + sourceName + ")");
+                } else {
+                    Status.error("GUI program exited with code " + exit + " (" + sourceName + ")",
+                            "The GUI program reported a non-zero exit — see the console for details.");
+                }
+            } catch (IOException | InterruptedException e) {
+                Status.error("Could not launch GUI window: " + e.getMessage(), String.valueOf(e));
+            } finally {
+                if (tmp != null) {
+                    try {
+                        Files.deleteIfExists(tmp);
+                    } catch (IOException ignored) {
+                        // best-effort cleanup of the temp .ptf
+                    }
+                }
+            }
+        }, "pontif-gui-runner");
         worker.setDaemon(true);
         worker.start();
     }
