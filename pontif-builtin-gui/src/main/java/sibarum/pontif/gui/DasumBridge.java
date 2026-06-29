@@ -83,12 +83,17 @@ public final class DasumBridge {
         String title = args.isEmpty() || !(args.get(0) instanceof StringValue s) ? "Pontif" : s.content();
         try (GlfwContext glfw = GlfwContext.init();
              Window win = Window.create(WIDTH, HEIGHT, title);
-             Batcher batcher = new Batcher();
-             Texture fontTexture = Texture.fromPngResource("/dasum/atlas/primary.png")) {
+             Batcher batcher = new Batcher()) {
+            // Gl.load() MUST run before any GL call. The font texture therefore loads HERE, in
+            // the body after Gl.load() — not in the try-with-resources header above, which would
+            // upload it before the GL function handles exist (Gl.GL_GEN_TEXTURES null → NPE). It
+            // is a plain local: the texture lives for the whole window and the process exits when
+            // the window closes, so there is nothing to close early.
             Gl.load();
             batcher.init();
             EmContext.setDpiScale(win.contentScaleX());
 
+            Texture fontTexture = Texture.fromPngResource("/dasum/atlas/primary.png");
             AtlasData atlas = AtlasData.loadFromResource("/dasum/atlas/primary.json");
             FontGroups.register(FontGroup.of(FontGroups.DEFAULT, atlas, fontTexture));
 
