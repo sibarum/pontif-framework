@@ -1,0 +1,9 @@
+requires pontif.gui.{LinePlot, window}
+
+main (
+  let xs = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0}
+  let ys = {0.0, 1.0, 4.0, 9.0, 16.0, 25.0}
+  window({title = "y = x^2"}, {
+    LinePlot(xs, ys)
+  })
+)

@@ -34,6 +34,13 @@
             <artifactId>dasum-core</artifactId>
             <version>${dasum.version}</version>
         </dependency>
+        <!-- Optional visualization module: 2D plots / 3D scenes rendered into a
+             Component.SceneView. Compile scope — DasumBridge imports its plot API. -->
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-vis</artifactId>
+            <version>${dasum.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-glfw</artifactId>

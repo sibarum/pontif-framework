@@ -30,11 +30,20 @@ import sibarum.dasum.gui.core.window.Window;
 import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
+import sibarum.dasum.gui.vis.DasumVis;
+import sibarum.dasum.gui.vis.plot.LinePlot;
+import sibarum.dasum.gui.vis.plot.PlotStyle;
+import sibarum.dasum.gui.vis.plot.PlotView;
+import sibarum.dasum.gui.vis.plot.Series;
+import sibarum.dasum.gui.vis.pointcloud.SceneViewController;
+import sibarum.dasum.gui.vis.scene.InteractionSpec;
+import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,6 +65,8 @@ public final class DasumBridge {
     private static final Color TEXT = new Color(0.92f, 0.92f, 0.96f, 1f);
     private static final Color TRANSPARENT = new Color(0f, 0f, 0f, 0f);
     private static final Color BACKGROUND = new Color(0.05f, 0.07f, 0.12f, 1f);
+    private static final Color PLOT_BG = new Color(0.04f, 0.05f, 0.08f, 1f);
+    private static final Color SERIES_COLOR = new Color(0.40f, 0.80f, 1.0f, 1f);
 
     /** The component captured on mouse-down, to confirm the release lands on the same one. */
     private static Component pressTarget;
@@ -88,6 +99,9 @@ public final class DasumBridge {
             // Gl.load() before any GL call (texture upload); see the texture-ordering bugfix.
             Gl.load();
             batcher.init();
+            // Register the dasum-vis renderer for Component.SceneView (plots/scenes). Idempotent;
+            // needs Gl.load() first. After this, Render.render dispatches SceneViews automatically.
+            DasumVis.init();
             EmContext.setDpiScale(win.contentScaleX());
 
             Texture fontTexture = Texture.fromPngResource("/dasum/atlas/primary.png");
@@ -144,6 +158,7 @@ public final class DasumBridge {
                     null, null, Em.of(0.5f), TRANSPARENT,
                     Direction.COLUMN, justify(str(rv, "justify")), align(str(rv, "align")), Em.of(0.8f),
                     childrenOf(rv, ctx), false, 1);
+            case "LinePlot" -> buildLinePlot(rv);
             // A bare children aggregate (window's root arg) → an implicit centered column.
             case "_tuple" -> new Component.Flex(
                     null, null, Em.of(0.5f), TRANSPARENT,
@@ -153,7 +168,12 @@ public final class DasumBridge {
         };
     }
 
-    /** Wires cursor hover + per-component click dispatch (the minimal dasum input pipeline). */
+    /**
+     * Wires cursor hover + per-component click dispatch (the minimal dasum input pipeline), plus
+     * the dasum-vis {@link SceneViewController} so a plot/scene viewport pans on drag and zooms on
+     * scroll. The scene controller is consulted first on press: if it claims the gesture (a drag on
+     * a viewport), no button activation is armed.
+     */
     private static void wireInput() {
         GlfwCallbacks.setCursorPosListener((w, x, y) -> {
             InputState.updateMousePos(x, y);
@@ -162,12 +182,17 @@ public final class DasumBridge {
             if (lr != null && r != null) {
                 HoverState.update(HitTest.test(r, lr, (float) x, (float) y));
             }
+            SceneViewController.onCursorMove(x, y);  // orbit/pan while dragging a viewport
         });
         GlfwCallbacks.setMouseButtonListener((w, button, action, mods) -> {
             if (button != Glfw.GLFW_MOUSE_BUTTON_LEFT) return;
             if (action == Glfw.GLFW_PRESS) {
-                pressTarget = HoverState.hovered();
+                // Let a viewport claim the press first; if it does, don't also arm a button click.
+                boolean scene = SceneViewController.onMouseDown(
+                        HoverState.hovered(), InputState.mouseX(), InputState.mouseY());
+                pressTarget = scene ? null : HoverState.hovered();
             } else if (action == Glfw.GLFW_RELEASE) {
+                SceneViewController.onMouseUp();
                 LayoutResult lr = LatestLayout.result();
                 Component r = LatestLayout.root();
                 Component released = (lr != null && r != null)
@@ -179,6 +204,8 @@ public final class DasumBridge {
                 pressTarget = null;
             }
         });
+        // Scroll zooms the viewport under the cursor; onScroll self-guards to interactive SceneViews.
+        GlfwCallbacks.setScrollListener((w, xo, yo) -> SceneViewController.onScroll(HoverState.hovered(), yo));
     }
 
     // --- helpers ------------------------------------------------------------------------------
@@ -196,6 +223,45 @@ public final class DasumBridge {
 
     private static Component errorLabel(String message) {
         return new Component.Text(message, Em.of(1f), new Color(0.95f, 0.4f, 0.4f, 1f));
+    }
+
+    /**
+     * Builds a 2D line chart (dasum-vis) from a {@code LinePlot(xs, ys)} element: converts the two
+     * numeric aggregates to {@code double[]}, makes a {@link Component.SceneView}, and publishes a
+     * single {@link Series} through a {@link PlotView}. Axes auto-range to the data; drag pans and
+     * scroll zooms (wired in {@link #wireInput}). {@code DasumVis.init()} must have run first
+     * (it has — {@link #openWindow} calls it before walking the tree).
+     */
+    private static Component buildLinePlot(RecordValue rv) {
+        double[] xs = doubles(rv.members().get("xs"));
+        double[] ys = doubles(rv.members().get("ys"));
+        Component.SceneView view =
+                new Component.SceneView(Em.of(22f), Em.of(12f), Em.ZERO, PLOT_BG, true, 1);
+        List<Series> series = List.of(Series.line(xs, ys, SERIES_COLOR));
+        new PlotView(view).showLinePlot(
+                LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series), series, PlotStyle.defaults());
+        SceneStates.setInteraction(view, InteractionSpec.panZoom2d());
+        return view;
+    }
+
+    /**
+     * Converts a Pontif numeric aggregate (a {@code _tuple} RecordValue whose members are Pontif
+     * Int/Decimal scalars) to a {@code double[]} in member order — the data marshalling across the
+     * native boundary (only primitives cross). Non-record or non-numeric members yield 0.0.
+     */
+    static double[] doubles(Object value) {  // package-private: unit-tested in DasumBridgeTest
+        if (!(value instanceof RecordValue rv)) return new double[0];
+        double[] out = new double[rv.members().size()];
+        int i = 0;
+        for (Object member : rv.members().values()) out[i++] = toDouble(member);
+        return out;
+    }
+
+    private static double toDouble(Object o) {
+        if (o instanceof Long l) return l;
+        if (o instanceof Integer n) return n;
+        if (o instanceof BigDecimal d) return d.doubleValue();
+        return 0.0;
     }
 
     /** A config field as a String, or "" — {@code args[i]} is the config record {field = …}. */

@@ -39,7 +39,7 @@ public final class GuiExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.events.{Event}
-                exports @.{Label, Button, Column, window, ButtonEvent, Clickable}
+                exports @.{Label, Button, Column, LinePlot, window, ButtonEvent, Clickable}
 
                 # Elements are ordinary structs you CONSTRUCT directly — Label{text = "hi"},
                 # Button{text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -49,6 +49,11 @@ public final class GuiExtension implements Extension {
                 struct Label(text:String)
                 struct Button(text:String)
                 struct Column(justify:String, align:String, children:_)
+
+                # A 2D line chart over two number aggregates: LinePlot({0.0,1.0,4.0}, {0.0,1.0,2.0}).
+                # The bridge converts xs/ys to double[] and renders them in a Component.SceneView
+                # (dasum-vis), with pan-on-drag / zoom-on-scroll. `_` so any numeric aggregate fits.
+                struct LinePlot(xs:_, ys:_)
 
                 # A widget the bridge renders as a clickable button and invokes on click. Make your
                 # own button by subtyping Button and assigning Clickable with an onClick that emits:

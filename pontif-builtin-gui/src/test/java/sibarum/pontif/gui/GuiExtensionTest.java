@@ -40,4 +40,23 @@ class GuiExtensionTest {
 
         assertNotNull(NativeCalls.get("window"), "window should be the registered native call");
     }
+
+    @Test
+    void linePlotProgram_linksAgainstExtension() {
+        Extensions.install(new GuiExtension());
+
+        // A 2D line chart over two number aggregates (the dasum-vis plotting slice). This only
+        // compiles + links; the chart render itself is verified manually (needs GLFW):
+        // mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/line-plot.ptf
+        CompileResult result = new PontifCompiler().compileAlt("""
+                requires pontif.gui.{LinePlot, window}
+                main (
+                  let xs = {0.0, 1.0, 2.0, 3.0}
+                  let ys = {0.0, 1.0, 4.0, 9.0}
+                  window({title = "y = x^2"}, { LinePlot(xs, ys) })
+                )""", "line-plot.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, result,
+                () -> "LinePlot pontif.gui program should link; got "
+                        + (result instanceof CompileResult.Failed f ? f.error().text() : result));
+    }
 }
