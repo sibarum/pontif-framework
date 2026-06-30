@@ -515,14 +515,21 @@ The receipt-graph format is the contract; none of this is Pontif's to ship.
 - **Decimal constructor arg naming** — `Decimal(unscaled, scale)` shipped with BigDecimal's
   vocabulary (provisional); revisit once Strings are fully implemented.
 
-## Editor — go to definition (landed 2026-06-30, docs/editor-navigation.md)
+## Editor — navigate or import (landed 2026-06-30, docs/editor-navigation.md)
 
-Ctrl+click navigates to a name's definition (read-only Definition tab; builtins
-reflected to Pontif source via `IrSourcePrinter`); Ctrl-hover underlines the word.
+Ctrl+click (mouse) / Ctrl+Enter (caret) run one action: in scope → open the
+definition (read-only Definition tab; builtins reflected to Pontif source via
+`IrSourcePrinter`); not in scope but exported → add/merge its `requires` (chooser
+when ambiguous). Ctrl-hover underlines the word. A **Modules** toolbar button opens a
+module explorer (browse importable modules + their exports — the discovery surface).
 Forward-looking:
+- **As-you-type `requires` autocomplete** — caret-anchored completion popup (module
+  names, then exported symbols inside `.{ }`). Needs completion-popup infra the editor
+  lacks; the Ctrl navigate-or-import covers the common case meanwhile.
+- **Multi-line `requires`** — `insertRequires` is line-based (single-line form); a
+  `requires` split across lines isn't merged.
 - **Editor-side usage highlighting** — highlight a symbol's references in the editor
   itself when the caret rests on it, not only in the opened Definition view.
 - **Body-div parity in the Definition view** — the read-only view applies foreground
   syntax coloring but omits the editor's parser-backed function-body background tint
-  (it carries cross-keystroke state and contends with the reference highlights). Add
-  if full visual parity is wanted.
+  (it carries cross-keystroke state and contends with the reference highlights).

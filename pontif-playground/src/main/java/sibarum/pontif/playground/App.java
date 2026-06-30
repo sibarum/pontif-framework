@@ -320,6 +320,7 @@ public final class App {
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
         Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, "Save As", Em.of(7.5f), Variant.DEFAULT, 0, App::onSaveAsClicked);
+        Component modulesBtn = Themed.button("Modules", Em.of(8f), Variant.DEFAULT, 0, App::openModuleExplorer);
         Component systemBtn = Themed.iconButton(Icons.SETTINGS, "System", Em.of(7f), Variant.DEFAULT, 0, App::openSystemMenu);
 
         filenameLabel = new Component.Text(
@@ -331,7 +332,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, guiBtn, newBtn, openBtn, saveBtn, saveAsBtn, filenameLabel, systemBtn),
+            List.of(runBtn, guiBtn, newBtn, openBtn, saveBtn, saveAsBtn, modulesBtn, filenameLabel, systemBtn),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane
@@ -855,6 +856,14 @@ public final class App {
             }
             if (ctrl && key == 'Y' && TextInputController.onRedo()) return;
 
+            // Ctrl+Enter on the caret's word: navigate to its definition, or add the
+            // requires for it — the keyboard twin of Ctrl+click. Must precede the plain
+            // Enter handler (which would otherwise insert a newline).
+            if (ctrl && key == Glfw.GLFW_KEY_ENTER) {
+                handleNavigateOrImportAtCaret();
+                return;
+            }
+
             // Editing keys.
             if (key == Glfw.GLFW_KEY_BACKSPACE && TextInputController.onBackspace(ctrl)) return;
             if (key == Glfw.GLFW_KEY_DELETE    && TextInputController.onDelete(ctrl))    return;
@@ -961,10 +970,11 @@ public final class App {
                     pressTarget = null;
                     return;
                 }
-                // Ctrl+click on an editor identifier navigates to its definition
-                // (a read-only tab) instead of moving the caret.
+                // Ctrl+click on an editor identifier navigates to its definition or,
+                // when the name isn't in scope, adds the requires for it — instead of
+                // moving the caret (the same action Ctrl+Enter runs from the caret).
                 boolean ctrl = (mods & Glfw.GLFW_MOD_CONTROL) != 0;
-                if (ctrl && HoverState.hovered() == codeText && handleGoToDefinition()) {
+                if (ctrl && HoverState.hovered() == codeText && handleNavigateOrImportUnderMouse()) {
                     pressTarget = null;
                     return;
                 }
@@ -1048,14 +1058,180 @@ public final class App {
 
     // --- Ctrl+click "go to definition" + Ctrl-hover link underline ---
 
-    /** Resolve the editor identifier under the mouse and open it in the Definition
-     *  tab. Returns false when there's no identifier under the cursor, so the click
-     *  falls through to ordinary caret placement. */
-    private static boolean handleGoToDefinition() {
+    /** Run the navigate-or-import action on the identifier under the mouse. Returns
+     *  false when there's no identifier there, so the click falls through to ordinary
+     *  caret placement. */
+    private static boolean handleNavigateOrImportUnderMouse() {
         int[] w = editorIdentBoundsUnderMouse();
         if (w == null) return false;
-        openDefinition(TextStates.contentOf(codeText).substring(w[0], w[1]));
+        navigateOrImport(TextStates.contentOf(codeText).substring(w[0], w[1]));
         return true;
+    }
+
+    /** Run the navigate-or-import action on the identifier at the caret (Ctrl+Enter). */
+    private static void handleNavigateOrImportAtCaret() {
+        int[] w = caretIdentBounds();
+        if (w == null) {
+            Status.info("Put the caret on a name to navigate to it or add its requires.");
+            return;
+        }
+        navigateOrImport(TextStates.contentOf(codeText).substring(w[0], w[1]));
+    }
+
+    /**
+     * The unified action behind Ctrl+click and Ctrl+Enter:
+     * <ul>
+     *   <li>in scope (declared here or already imported) → open its definition;</li>
+     *   <li>not in scope but exported by a module → add/merge its {@code requires}
+     *       (a chooser when more than one module exports the name);</li>
+     *   <li>not in scope, not exported, but defined somewhere → open it anyway;</li>
+     *   <li>primitive / unknown → a status message.</li>
+     * </ul>
+     */
+    private static void navigateOrImport(String name) {
+        if (DefinitionNavigator.isPrimitive(name)) {
+            Status.info("'" + name + "' is a builtin primitive — no source or import.");
+            return;
+        }
+        String content = TextStates.contentOf(codeText);
+        if (DefinitionNavigator.inScope(content, name)) {
+            openDefinition(name);
+            return;
+        }
+        java.util.List<String> exporters = DefinitionNavigator.exporters(content, name, resolveDir());
+        if (exporters.isEmpty()) {
+            if (DefinitionNavigator.resolve(content, name, resolveDir()).isPresent()) {
+                openDefinition(name);   // exists but isn't exported — show it, can't import
+            } else {
+                Status.warn("No definition or exporting module found for '" + name + "'.");
+            }
+        } else if (exporters.size() == 1) {
+            addRequires(exporters.get(0), name);
+        } else {
+            openImportChoice(name, exporters);
+        }
+    }
+
+    /** Identifier bounds {@code [start, end)} at the caret, or null when the caret
+     *  isn't on (or just past) an identifier. A caret resting at a word's end counts. */
+    private static int[] caretIdentBounds() {
+        if (codeText == null) return null;
+        String content = TextStates.contentOf(codeText);
+        if (content.isEmpty()) return null;
+        int caret = Math.max(0, Math.min(TextStates.of(codeText).caretIndex, content.length()));
+        int probe = caret;
+        if (probe >= content.length() || !isIdentChar(content.charAt(probe))) {
+            if (caret > 0 && isIdentChar(content.charAt(caret - 1))) probe = caret - 1;  // just past a word
+            else return null;
+        }
+        int[] w = WordBoundary.wordBoundsAt(content, probe);
+        if (w == null || w[1] <= w[0]) return null;
+        return isIdentifier(content.substring(w[0], w[1])) ? w : null;
+    }
+
+    /** Apply {@link DefinitionNavigator#insertRequires} to the editor buffer, shifting the
+     *  caret to track inserted text. The pure surgery lives in DefinitionNavigator (tested). */
+    private static void addRequires(String module, String name) {
+        int caret = TextStates.of(codeText).caretIndex;
+        DefinitionNavigator.RequiresEdit edit =
+                DefinitionNavigator.insertRequires(TextStates.contentOf(codeText), module, name);
+        if (!edit.changed()) {
+            Status.info(edit.message());
+            return;
+        }
+        TextStates.setContent(codeText, edit.text());
+        TextState ts = TextStates.of(codeText);
+        int newCaret = caret >= edit.editOffset()
+                ? Math.min(edit.text().length(), caret + edit.delta())
+                : caret;
+        ts.caretIndex = newCaret;
+        ts.selectionAnchor = newCaret;
+        Status.success(edit.message() + " — Ctrl+click/Ctrl+Enter again to open it.");
+    }
+
+    // Module explorer palette colors.
+    private static final Color EXPLORER_MODULE_FG = new Color(0.62f, 0.80f, 1.00f, 1f);
+
+    /**
+     * Modal module explorer: browse every importable module and its exported names —
+     * the discovery surface for "I don't know the name." Clicking a name imports it
+     * from that module (or opens it if already in scope). Scrollable; grouped by module,
+     * siblings before builtins.
+     */
+    private static void openModuleExplorer() {
+        if (OverlayStack.isActive()) return;
+        String content = TextStates.contentOf(codeText);
+        java.util.List<DefinitionNavigator.ModuleExports> modules =
+                DefinitionNavigator.allModules(content, resolveDir());
+
+        java.util.List<Component> rows = new java.util.ArrayList<>();
+        rows.add(new Component.Text("Modules", Em.of(1.15f), MENU_TITLE_FG));
+        rows.add(new Component.Text(
+                "Browse exported names. Click one to import it (or open it if already in scope).",
+                Em.of(0.9f), MENU_HINT_FG));
+        if (modules.isEmpty()) {
+            rows.add(new Component.Text("No modules found.", Em.of(0.9f), MENU_HINT_FG));
+        }
+        String lastGroup = null;
+        for (DefinitionNavigator.ModuleExports me : modules) {
+            String group = me.builtin() ? "Builtins" : "This project";
+            if (!group.equals(lastGroup)) {
+                rows.add(new Component.Text(group, Em.of(0.8f), MENU_HINT_FG));
+                lastGroup = group;
+            }
+            rows.add(new Component.Text(me.module(), Em.of(1.0f), EXPLORER_MODULE_FG));
+            for (String sym : me.symbols()) {
+                final String module = me.module();
+                final String symbol = sym;
+                boolean inScope = DefinitionNavigator.inScope(content, symbol);
+                String label = inScope ? symbol + "  (in scope)" : symbol;
+                rows.add(Themed.button(label, Em.of(24f),
+                        inScope ? Variant.SUCCESS : Variant.DEFAULT, 0, () -> {
+                            OverlayStack.pop();
+                            String now = TextStates.contentOf(codeText);
+                            if (DefinitionNavigator.inScope(now, symbol)) openDefinition(symbol);
+                            else addRequires(module, symbol);
+                        }));
+            }
+        }
+        rows.add(Themed.button("Close", Em.of(24f), Variant.DEFAULT, 0, OverlayStack::pop));
+
+        Component list = new Component.Flex(
+                null, null, Em.ZERO, MENU_BG,
+                Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.of(0.3f),
+                rows, false, 1);
+        Component scroll = new Component.Scroll(Em.of(30f), Em.of(32f), Em.of(0.5f), MENU_BG, list, false, 0);
+        Component panel = new Component.Flex(
+                Em.AUTO, Em.AUTO, Em.of(0.5f), MENU_BG,
+                Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.ZERO,
+                java.util.List.of(scroll), false, 0);
+        OverlayStack.push(new OverlayStack.Overlay(panel, Anchor.CENTER, true, () -> {}));
+    }
+
+    /** Modal chooser when more than one module exports the name — pick the import source. */
+    private static void openImportChoice(String name, java.util.List<String> exporters) {
+        if (OverlayStack.isActive()) return;
+        java.util.List<Component> rows = new java.util.ArrayList<>();
+        rows.add(new Component.Text("Import '" + name + "' from…", Em.of(1.15f), MENU_TITLE_FG));
+        rows.add(new Component.Text(
+                "Several modules export this name — choose where to import it from.",
+                Em.of(0.9f), MENU_HINT_FG));
+        for (String mod : exporters) {
+            rows.add(Themed.button(mod, Em.of(20f), Variant.DEFAULT, 0, () -> {
+                addRequires(mod, name);
+                OverlayStack.pop();
+            }));
+        }
+        rows.add(Themed.button("Cancel", Em.of(20f), Variant.DEFAULT, 0, OverlayStack::pop));
+        Component panel = new Component.Flex(
+                Em.of(26f), Em.AUTO, Em.of(1f), MENU_BG,
+                Direction.COLUMN, JustifyContent.START, AlignItems.STRETCH, Em.of(0.5f),
+                rows, false, 0);
+        OverlayStack.push(new OverlayStack.Overlay(panel, Anchor.CENTER, true, () -> {}));
+    }
+
+    private static boolean isIdentChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_' || c == '$';
     }
 
     /** Identifier bounds {@code [start, end)} under the mouse in the editor, or

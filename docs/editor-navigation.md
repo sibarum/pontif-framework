@@ -1,22 +1,66 @@
-# Editor navigation — go to definition
+# Editor navigation — navigate or import
 
-Ctrl+click a name in the Pontif Editor (pontif-playground) to jump to where it's
-defined. An IntelliJ-style affordance: hold Ctrl and the identifier under the
-mouse underlines + the cursor turns to a hand; click and the declaring module's
-source opens in a read-only **Definition** tab with the name highlighted. Esc (or
-switching back to Editor) returns.
+One gesture in the Pontif Editor (pontif-playground), two triggers, two outcomes:
+Ctrl a name and it either **jumps to the definition** or **adds the `requires`** for
+it, depending on whether the name is already in scope. An IntelliJ-style affordance:
+hold Ctrl and the identifier under the mouse underlines + the cursor turns to a hand.
 
-Landed 2026-06-30.
+Landed 2026-06-30 (go-to-definition); navigate-or-import unification added same day.
 
 ## Surface
 
 - **Ctrl-hover** — while Ctrl is held, the editor identifier under the mouse is
   underlined and the cursor is a hand. Updates live on mouse move and on Ctrl
-  press/release. Primitives (`Int`, `Bool`, …) don't underline — nothing to open.
-- **Ctrl+click** — resolves the name and opens the **Definition** tab (a fixed,
-  read-only 5th tab) showing the declaring module's source, the name highlighted
-  and scrolled into view. A status line names the source module.
+  press/release. Primitives (`Int`, `Bool`, …) don't underline — nothing to do.
+- **Ctrl+click** (mouse) and **Ctrl+Enter** (caret) — run the same **navigate-or-import**
+  action on the word under the mouse / at the caret. (Ctrl+Space is the Everything
+  menu; Ctrl+Enter is intercepted before the newline insert.)
+- **Modules** toolbar button — opens the **module explorer** (below): browse what's
+  importable when you don't know the name.
 - **Esc** on the Definition tab → back to the Editor.
+
+### The navigate-or-import decision
+
+`navigateOrImport(name)` (App), the shared action behind both triggers:
+
+1. **In scope** — declared in this file, or already in a `requires`
+   (`DefinitionNavigator.inScope`) → **open the definition** (below).
+2. **Not in scope but exported by a module** (`DefinitionNavigator.exporters`) →
+   **add/merge the `requires`** (below). More than one exporter → a modal chooser.
+3. **Not in scope, not exported, but defined somewhere** → open it anyway (no dead end).
+4. **Primitive / unknown** → a status message.
+
+So the first Ctrl on an unimported name imports it; a second Ctrl (now in scope)
+navigates to it.
+
+## Adding a `requires` (`DefinitionNavigator.insertRequires`)
+
+Pure line-based surgery on the single-line `requires` form, returning the new text
++ the edit position (the caller applies it and shifts the caret):
+
+- merges into the module's existing `requires <module>.{…}` line when present
+  (preserving rename entries like `min -> lo`);
+- else inserts a fresh line after the last `requires`, or the `module` header, or top;
+- a no-op with a status when the name is already imported from that module.
+
+Importable candidates come from `exporters`: sibling modules (by their declared
+`module` name) and the builtins (+ GUI extension) that **export** the name —
+importing a non-exported name would be a link error, so only exports qualify.
+
+## Module explorer (the discovery surface)
+
+The **Modules** toolbar button opens a modal, scrollable list of every importable
+module and its exported names (`DefinitionNavigator.allModules`) — siblings grouped
+under "This project", the rest under "Builtins". For "I don't know the name, show me
+what's there." Clicking a name imports it from that module (or opens its definition
+if already in scope — marked "(in scope)"). It's the browse-side counterpart to the
+name-driven Ctrl gesture; both end in the same import / open.
+
+## Go to definition (the in-scope outcome)
+
+When the name is in scope, the declaring module's source opens in a read-only
+**Definition** tab with the name highlighted and scrolled into view; a status line
+names the source module. Esc (or switching to Editor) returns.
 
 The tab is fixed, not created per-click: dasum's `Component.Tabs` is an immutable
 record, so adding a tab at runtime means rebuilding the root (breaking
@@ -99,15 +143,21 @@ change needed.
 
 | Piece | File |
 |-------|------|
-| Resolution + references + reflection routing | `pontif-playground/.../DefinitionNavigator.java` |
+| Resolution, references, reflection, `inScope`/`exporters`/`insertRequires`/`allModules` | `pontif-playground/.../DefinitionNavigator.java` |
 | IR → Pontif-source unparser | `pontif-ir/.../IrSourcePrinter.java` |
 | Real-source accessor for builtins | `pontif-runtime/.../module/BuiltinModules.java` (`sourceOf`) |
-| Editor wiring (tab, Ctrl+click, underline, Esc, highlight) | `pontif-playground/.../App.java` |
+| Editor wiring (tab, Ctrl+click / Ctrl+Enter, underline, Esc, highlight, `addRequires`, module explorer) | `pontif-playground/.../App.java` |
 | Stateless foreground colorizer | `pontif-playground/.../AltHighlighter.java` (`foreground`) |
 | Tests | `pontif-playground/.../DefinitionNavigatorTest.java` |
 
 ## Deferred
 
+- **As-you-type `requires` autocomplete** — a caret-anchored completion popup
+  (module names after `requires `, exported symbols inside `.{ }`). Needs
+  completion-popup infra the editor doesn't have yet; the Ctrl navigate-or-import
+  covers the common case meanwhile.
+- **Multi-line `requires`** — `insertRequires` is line-based and assumes the
+  single-line form (the norm); a `requires` split across lines isn't merged.
 - **Editor-side usage highlighting** — highlight a symbol's references in the
   editor itself (not just the opened Definition view), as IDEs do when the caret
   rests on a name.

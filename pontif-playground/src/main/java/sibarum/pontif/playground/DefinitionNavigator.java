@@ -58,6 +58,169 @@ public final class DefinitionNavigator {
         return PRIMITIVES.contains(name);
     }
 
+    /**
+     * True when {@code name} is usable in the editor buffer <em>without</em> a new
+     * import — declared locally, or already brought in by an existing {@code requires}.
+     * The navigate-vs-import switch: in scope ⇒ go to definition; not ⇒ offer the import.
+     */
+    public static boolean inScope(String editorContent, String name) {
+        IrModule mod = tryParse(editorContent, "<editor>");
+        if (mod == null) return false;
+        if (declares(mod, name)) return true;
+        for (IrStmt s : mod.statements()) {
+            if (s instanceof IrStmt.Requires r) {
+                for (IrStmt.RequireEntry e : r.entries()) {
+                    if (e.localName().equals(name)) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Module names that <em>export</em> {@code name} — the candidates a {@code requires}
+     * could pull it from. Searches sibling {@code .ptf} modules (by their declared
+     * {@code module} name) and the builtins (+ the GUI extension). Only exported names
+     * qualify: importing a non-exported name would be a link error.
+     */
+    public static List<String> exporters(String editorContent, String name, Path resolveDir) {
+        List<String> out = new ArrayList<>();
+        if (resolveDir != null && Files.isDirectory(resolveDir)) {
+            for (Map.Entry<String, String> e : siblingSources(resolveDir).entrySet()) {
+                IrModule m = tryParse(e.getValue(), e.getKey());
+                if (m != null && !"_anonymous".equals(m.name())
+                        && exportsName(m, name) && !out.contains(m.name())) {
+                    out.add(m.name());
+                }
+            }
+        }
+        for (Map.Entry<String, Builtin> e : candidateBuiltins().entrySet()) {
+            Builtin b = e.getValue();
+            if (b != null && b.module() != null && exportsName(b.module(), name)
+                    && !out.contains(e.getKey())) {
+                out.add(e.getKey());
+            }
+        }
+        return out;
+    }
+
+    /** Result of {@link #insertRequires}: the edited text plus where it changed (for
+     *  caret tracking), or {@code changed=false} with a reason when nothing was done. */
+    public record RequiresEdit(String text, int editOffset, int delta, boolean changed, String message) {}
+
+    /**
+     * Add {@code name} to a {@code requires <module>.{…}} in {@code content}, merging into
+     * the module's existing line if present, else inserting a fresh line after the last
+     * {@code requires} (or the {@code module} header, or the top). Pure: returns the new
+     * text and the edit position; the caller applies it and moves the caret. Line-based on
+     * the single-line {@code requires} form (the norm). A no-op (with a message) when the
+     * name is already imported from that module.
+     */
+    public static RequiresEdit insertRequires(String content, String module, String name) {
+        List<String> lines = new ArrayList<>(java.util.Arrays.asList(content.split("\n", -1)));
+        int mergeLine = -1, lastRequires = -1, moduleLine = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            String t = lines.get(i).strip();
+            if (t.startsWith("requires ")) {
+                lastRequires = i;
+                String rest = t.substring("requires ".length()).strip();
+                int db = rest.indexOf(".{");
+                if (db > 0 && rest.substring(0, db).equals(module)) mergeLine = i;
+            } else if (t.startsWith("module ")) {
+                moduleLine = i;
+            }
+        }
+
+        if (mergeLine >= 0) {
+            String line = lines.get(mergeLine);
+            int open = line.indexOf('{', line.indexOf(".{"));
+            int close = line.lastIndexOf('}');
+            if (open < 0 || close < 0 || close < open) {
+                return new RequiresEdit(content, 0, 0, false,
+                        "Couldn't merge into the existing requires for " + module + ".");
+            }
+            List<String> entries = new ArrayList<>();
+            String inner = line.substring(open + 1, close).strip();
+            if (!inner.isEmpty()) for (String p : inner.split(",")) entries.add(p.strip());
+            for (String e : entries) {
+                String local = e.contains("->") ? e.substring(e.indexOf("->") + 2).strip() : e;
+                if (local.equals(name)) {
+                    return new RequiresEdit(content, 0, 0, false,
+                            "'" + name + "' is already imported from " + module + ".");
+                }
+            }
+            entries.add(name);
+            String indent = line.substring(0, line.length() - line.stripLeading().length());
+            String rebuilt = indent + "requires " + module + ".{" + String.join(", ", entries) + "}";
+            int editOffset = lineStartOffset(lines, mergeLine);
+            int delta = rebuilt.length() - line.length();
+            lines.set(mergeLine, rebuilt);
+            return new RequiresEdit(String.join("\n", lines), editOffset, delta, true,
+                    "Added " + name + " to requires " + module + ".{…}");
+        }
+
+        String insert = "requires " + module + ".{" + name + "}";
+        int at = lastRequires >= 0 ? lastRequires + 1 : (moduleLine >= 0 ? moduleLine + 1 : 0);
+        int editOffset = lineStartOffset(lines, at);
+        lines.add(at, insert);
+        return new RequiresEdit(String.join("\n", lines), editOffset, insert.length() + 1, true,
+                "Added requires " + module + ".{" + name + "}");
+    }
+
+    /** Char offset of {@code lineIdx}'s start in a newline-joined {@code lines} list. */
+    private static int lineStartOffset(List<String> lines, int lineIdx) {
+        int off = 0;
+        for (int i = 0; i < lineIdx && i < lines.size(); i++) off += lines.get(i).length() + 1;
+        return off;
+    }
+
+    private static boolean exportsName(IrModule m, String name) {
+        for (IrStmt s : m.statements()) {
+            if (s instanceof IrStmt.Exports ex && ex.names().contains(name)) return true;
+        }
+        return false;
+    }
+
+    /** A module and the names it exports — one row group in the module explorer.
+     *  {@code builtin} separates the shipped modules from this project's siblings. */
+    public record ModuleExports(String module, List<String> symbols, boolean builtin) {}
+
+    /**
+     * Every importable module with its exported names — sibling project modules first
+     * (alphabetical by file), then the builtins (+ the GUI extension). The browse-side
+     * complement of {@link #exporters}: for "I don't know the name, show me what's there."
+     * Modules that export nothing are omitted.
+     */
+    public static List<ModuleExports> allModules(String editorContent, Path resolveDir) {
+        List<ModuleExports> out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        if (resolveDir != null && Files.isDirectory(resolveDir)) {
+            for (Map.Entry<String, String> e : siblingSources(resolveDir).entrySet()) {
+                IrModule m = tryParse(e.getValue(), e.getKey());
+                if (m == null || "_anonymous".equals(m.name()) || !seen.add(m.name())) continue;
+                List<String> syms = exportedNames(m);
+                if (!syms.isEmpty()) out.add(new ModuleExports(m.name(), syms, false));
+            }
+        }
+        for (Map.Entry<String, Builtin> e : candidateBuiltins().entrySet()) {
+            Builtin b = e.getValue();
+            if (b == null || b.module() == null || !seen.add(e.getKey())) continue;
+            List<String> syms = exportedNames(b.module());
+            if (!syms.isEmpty()) out.add(new ModuleExports(e.getKey(), syms, true));
+        }
+        return out;
+    }
+
+    private static List<String> exportedNames(IrModule m) {
+        List<String> out = new ArrayList<>();
+        for (IrStmt s : m.statements()) {
+            if (s instanceof IrStmt.Exports ex) {
+                for (String n : ex.names()) if (!out.contains(n)) out.add(n);
+            }
+        }
+        return out;
+    }
+
     /** Every whole-word occurrence of {@code name} in {@code text}, as {@code [start, end)}
      *  ranges — the references to highlight in the opened definition view. */
     public static List<int[]> references(String text, String name) {
