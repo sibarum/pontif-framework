@@ -23,6 +23,7 @@ public final class GuiLauncher {
             return;
         }
         Extensions.install(new GuiExtension());
+        Extensions.install(new PlotExtension());
 
         Path target = Path.of(args[0]);
         String source = Files.readString(target);

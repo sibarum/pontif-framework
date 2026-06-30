@@ -1,0 +1,11 @@
+requires pontif.plot.{Curve2D, plotLine}
+
+# A parabola, made plottable by satisfying the Curve2D shape: the projection is
+# the method body. plotLine samples it over its domain and draws the line.
+struct Parabola()
+assign trait Parabola:Curve2D {
+  at(x:Decimal):Decimal -> x * x
+  domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+}
+
+main ( plotLine(Parabola()) )

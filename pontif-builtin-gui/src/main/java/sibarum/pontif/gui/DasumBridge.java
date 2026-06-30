@@ -92,7 +92,28 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Pontif";
         Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
+        return openWindowWithRoot(title, () -> toComponent(rootTree, ctx));
+    }
 
+    /**
+     * {@code renderCurve(xs, ys)} (pontif.plot, docs/plotting.md): opens a window showing a line
+     * chart of the two sample aggregates. The sampling itself happens in Pontif (pontif.plot's
+     * {@code plotLine}); this native receives only the concrete numbers and renders them — the
+     * same primitives-only boundary as the declarative GUI.
+     */
+    public static Object renderCurve(List<Object> args, NativeCalls.Context ctx) {
+        double[] xs = !args.isEmpty() ? doubles(args.get(0)) : new double[0];
+        double[] ys = args.size() > 1 ? doubles(args.get(1)) : new double[0];
+        return openWindowWithRoot("Plot", () -> buildLinePlotView(xs, ys));
+    }
+
+    /**
+     * Opens a window on the calling (root) thread, builds its root via {@code rootFactory}
+     * <b>after</b> GL + font setup (so styled / plotted components resolve correctly), then renders
+     * in the loop until the window closes. Shared by the declarative-UI window ({@link #openWindow})
+     * and the plot window ({@link #renderCurve}). Returns the inert for-effect result.
+     */
+    private static Object openWindowWithRoot(String title, java.util.function.Supplier<Component> rootFactory) {
         try (GlfwContext glfw = GlfwContext.init();
              Window win = Window.create(WIDTH, HEIGHT, title);
              Batcher batcher = new Batcher()) {
@@ -109,7 +130,7 @@ public final class DasumBridge {
             FontGroups.register(FontGroup.of(FontGroups.DEFAULT, atlas, fontTexture));
 
             // Build components after font + Em setup, so styled widgets resolve correctly.
-            Component root = toComponent(rootTree, ctx);
+            Component root = rootFactory.get();
             wireInput();
 
             EventLoop loop = new EventLoop(win, () -> {
@@ -233,8 +254,17 @@ public final class DasumBridge {
      * (it has — {@link #openWindow} calls it before walking the tree).
      */
     private static Component buildLinePlot(RecordValue rv) {
-        double[] xs = doubles(rv.members().get("xs"));
-        double[] ys = doubles(rv.members().get("ys"));
+        return buildLinePlotView(doubles(rv.members().get("xs")), doubles(rv.members().get("ys")));
+    }
+
+    /**
+     * The shared line-chart component: a {@link Component.SceneView} carrying a single
+     * {@link Series} published through a {@link PlotView}, axes auto-ranged to the data, pan/zoom
+     * enabled (wired in {@link #wireInput}). Used both by the {@code LinePlot} element
+     * ({@link #buildLinePlot}) and the {@code plotLine} sampler ({@link #renderCurve}).
+     * {@code DasumVis.init()} must have run first ({@link #openWindowWithRoot} ensures it).
+     */
+    static Component buildLinePlotView(double[] xs, double[] ys) {
         Component.SceneView view =
                 new Component.SceneView(Em.of(22f), Em.of(12f), Em.ZERO, PLOT_BG, true, 1);
         List<Series> series = List.of(Series.line(xs, ys, SERIES_COLOR));
