@@ -24,16 +24,25 @@ import java.util.Map;
  * {@code AltParser.parsePositionalStructLiteral} does for local structs. Arity is
  * checked against the struct's declared field count.
  *
+ * <p><b>By-name imported literals.</b> The by-name form {@code Point{x=…}} for an
+ * imported struct is the parser-blind twin: {@code AltParser} emits an
+ * <em>uncanonicalized</em> {@link IrExpr.Record} (source field order, no field-set
+ * check — it can't see the declaration). This pass validates the field set and
+ * reorders members to declared order in {@link #canonicalizeByName}, applied to
+ * <em>every</em> Record whose typeName resolves to a registered struct. It is
+ * idempotent for records the parser already canonicalized (local literals,
+ * positional literals) and a no-op for anonymous dicts (null typeName) and
+ * non-struct typeNames (e.g. native {@code Decimal}).
+ *
  * <p>Invoked <b>only by the module linker</b>. A single-file compile never runs
  * here — and never needs to, since its struct literals are already {@code Record}s
  * (the parser sees the local declaration). The pass is therefore additive and
  * leaves the single-file path byte-for-byte unchanged, exactly like
  * {@link NameResolver}.
  *
- * <p>Scope: the positional form only. The by-name form {@code Point{x=…}} for an
- * imported struct still fails at parse time (the parser can't even produce a Call
- * for it), and struct literals embedded inside refinement <em>predicates</em> are
- * not walked — both remain in the parser-blindness bucket.
+ * <p>Scope: positional and by-name construction. Struct literals embedded inside
+ * refinement <em>predicates</em> are still not walked — they remain in the
+ * parser-blindness bucket.
  */
 public final class StructLiteralRewriter {
 
@@ -123,6 +132,17 @@ public final class StructLiteralRewriter {
                 for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
                     mem.put(en.getKey(), rewriteExpr(en.getValue(), structs));
                 }
+                // A by-name literal for an IMPORTED struct was deferred by the
+                // parser (uncanonicalized, source field order — it couldn't see
+                // the declaration). Now the struct is FQN'd and visible: validate
+                // the field set and reorder to declared order, the by-name twin of
+                // asRecord. Idempotent for already-canonical records (locally
+                // resolved literals, positional literals), and a no-op for
+                // anonymous dicts / non-struct typeNames (e.g. native Decimal).
+                IrSort.Structural decl = r.typeName() == null ? null : structs.get(r.typeName());
+                if (decl != null) {
+                    yield canonicalizeByName(r.typeName(), decl, mem, r.origin());
+                }
                 yield new IrExpr.Record(r.typeName(), mem, r.origin());
             }
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
@@ -157,6 +177,37 @@ public final class StructLiteralRewriter {
         Map<String, IrExpr> ordered = new LinkedHashMap<>();
         for (int i = 0; i < args.size(); i++) {
             ordered.put(fields.get(i), args.get(i));
+        }
+        return new IrExpr.Record(typeName, ordered, origin);
+    }
+
+    /**
+     * Validates a by-name record's field set against the declared struct and
+     * reorders its members to declared field order — mirroring
+     * {@code AltParser.parseByNameStructLiteral} for a struct the parser couldn't
+     * see (imported). Idempotent: a record already in declared order with the full
+     * field set passes through unchanged.
+     */
+    private static IrExpr.Record canonicalizeByName(
+            String typeName, IrSort.Structural decl, Map<String, IrExpr> provided,
+            sibarum.pontif.core.Origin origin) throws CompileException {
+        List<String> fields = new ArrayList<>(decl.members().keySet());
+        for (String name : provided.keySet()) {
+            if (!decl.members().containsKey(name)) {
+                throw new CompileException(
+                        "Struct '" + typeName + "' has no field '" + name
+                                + "'; declared fields: " + fields, origin);
+            }
+        }
+        Map<String, IrExpr> ordered = new LinkedHashMap<>();
+        for (String field : fields) {
+            IrExpr value = provided.get(field);
+            if (value == null) {
+                throw new CompileException(
+                        "Struct literal for '" + typeName + "' is missing field '"
+                                + field + "'; required fields: " + fields, origin);
+            }
+            ordered.put(field, value);
         }
         return new IrExpr.Record(typeName, ordered, origin);
     }

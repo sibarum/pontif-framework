@@ -156,6 +156,83 @@ class ModuleSystemTest {
     }
 
     @Test
+    void importedStruct_constructedByName_inLet() {
+        // The by-name twin: app imports geo's Point and binds a by-name literal
+        // in a top-level let. The parser can't see the imported struct, so it
+        // defers an uncanonicalized Record; StructLiteralRewriter validates and
+        // reorders it post-link.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                let p = Point{x=7, y=9}
+                originX(p)
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
+    void importedStruct_byNameFreeOrder_isCanonicalized() {
+        // Source writes `y` before `x`; originX reads `.x`, which must be 7 —
+        // the literal is reordered to declared field order at link time.
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                originX(Point{y=9, x=7})
+                """);
+        assertEquals("7", runProject(src, "app").text());
+    }
+
+    @Test
+    void importedStruct_byNameMissingField_isHardError() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                originX(Point{x=7})
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("missing field 'y'"), () -> err);
+    }
+
+    @Test
+    void importedStruct_byNameUnknownField_isHardError() {
+        Map<String, String> src = new LinkedHashMap<>();
+        src.put("geo", """
+                module geo
+                exports @.{Point, originX}
+                struct Point(x:Int, y:Int)
+                function originX(p:Point):Int -> p.x
+                """);
+        src.put("app", """
+                module app
+                requires geo.{Point, originX}
+                originX(Point{x=7, y=9, z=1})
+                """);
+        String err = assertLinkRejected(src, "app");
+        assertTrue(err.contains("has no field 'z'"), () -> err);
+    }
+
+    @Test
     void importedStruct_wrongArity_isHardError() {
         Map<String, String> src = new LinkedHashMap<>();
         src.put("geo", """

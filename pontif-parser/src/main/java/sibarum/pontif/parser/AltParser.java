@@ -450,6 +450,23 @@ public final class AltParser {
     }
 
     /**
+     * True when {@code peek()} is a {@code {} opening a by-name aggregate — the
+     * next two tokens are {@code IDENT =}. Distinguishes a by-name struct literal
+     * {@code Foo{x = …}} from a positional aggregate {@code Foo{1, 2}} so the
+     * deferred (parser-blind, imported-struct) literal path fires only for the
+     * by-name form.
+     */
+    private boolean byNameAggregateAhead() {
+        return peek().kind() == AltToken.Kind.LBRACE
+                && peek(1).kind() == AltToken.Kind.IDENT
+                && peek(2).kind() == AltToken.Kind.EQUALS;
+    }
+
+    private static boolean isCapitalizedName(String s) {
+        return !s.isEmpty() && Character.isUpperCase(s.charAt(0));
+    }
+
+    /**
      * Infers a generic function's type args at a bare call by unifying each param sort
      * against the argument's inferred sort (docs/stream-war.md §8b). Returns the mangled
      * specialization name (recording the instantiation) when every type param is solved,
@@ -4047,6 +4064,19 @@ public final class AltParser {
                         ? declaredStructs.get(v.name())
                         : sibarum.pontif.ir.NativeConstructors.get(v.name()).shape();
                 expr = parseByNameStructLiteral(shape, v.name(), open);
+            } else if (t.kind() == AltToken.Kind.LBRACE
+                    && postfixOpensOnSameLine(t)
+                    && expr instanceof IrExpr.Var v
+                    && isCapitalizedName(v.name())
+                    && byNameAggregateAhead()) {
+                // Deferred by-name struct literal for an IMPORTED struct. The
+                // parser can't see the declaration (not in declaredStructs), so —
+                // mirroring the positional Call deferral — emit an uncanonicalized
+                // Record(typeName, source-order members). The linker's
+                // StructLiteralRewriter validates the field set and reorders to
+                // declared order once every struct is FQN'd and visible.
+                AltToken open = consume();
+                expr = parseDeferredByNameStructLiteral(v.name(), open);
             } else {
                 break;
             }
@@ -4243,6 +4273,38 @@ public final class AltParser {
             ordered.put(declaredField, provided.get(declaredField));
         }
         return new IrExpr.Record(typeName, ordered, openBrace.spanTo(close));
+    }
+
+    /**
+     * Parses {@code {x=a, y=b, …}} after a capitalized name that is NOT a locally
+     * declared struct — an IMPORTED struct, invisible at parse time. Produces an
+     * <em>uncanonicalized</em> {@link IrExpr.Record} carrying the source field
+     * order; the field-set check and reorder to declared order happen post-link in
+     * {@link sibarum.pontif.ir.StructLiteralRewriter} (the by-name twin of the
+     * positional Call deferral). The opening brace is already consumed. Only
+     * duplicate keys — a purely syntactic error knowable without the declaration —
+     * are rejected here.
+     */
+    private IrExpr.Record parseDeferredByNameStructLiteral(String typeName, AltToken openBrace)
+            throws ParseException {
+        Map<String, IrExpr> provided = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            AltToken fieldTok = expect(AltToken.Kind.IDENT);
+            String fieldName = fieldTok.text();
+            if (provided.containsKey(fieldName)) {
+                throw new ParseException(
+                        "Field '" + fieldName + "' appears more than once in struct "
+                                + "literal for '" + typeName + "'",
+                        fieldTok.origin());
+            }
+            expect(AltToken.Kind.EQUALS);
+            provided.put(fieldName, parseExpr());
+            first = false;
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        return new IrExpr.Record(typeName, provided, openBrace.spanTo(close));
     }
 
     /**
