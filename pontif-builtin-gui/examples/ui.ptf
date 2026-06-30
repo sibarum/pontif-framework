@@ -1,20 +1,22 @@
-requires pontif.gui.{label, column, window, Button, Clickable}
+requires pontif.gui.{Label, Button, Column, window, Clickable}
 requires pontif.events.{StdOut}
 
-# A clickable widget (docs/extensions.md, G6): subtype the library Button into a type YOU own
-# (so you may legally give it a method — the orphan rule forbids methods on the library Button),
-# and assign Clickable with an onClick that emits. The bridge renders any Clickable as a button
-# and invokes its onClick on click. `this` is the clicked widget.
+# A clickable widget (docs/extensions.md): subtype the library Button into a type YOU own (so you
+# may legally give it a method — the orphan rule forbids methods on the library Button), and assign
+# Clickable with an onClick that emits. `this` is the clicked widget.
 struct PushButton:[Button](text:String)
 assign trait PushButton:Clickable {
   onClick():_ -> emit StdOut("button clicked!")  this
 }
 
-# The let-chain ends in window(...) as the trailing expression.
+# Elements are constructed directly (capitalized structs); `window` is the action that renders the
+# tree. The let-chain ends in window(...) as the trailing expression.
+# Elements are constructed positionally (like PushButton); `window` is the action that renders the
+# tree. The let-chain ends in window(...) as the trailing expression.
 main (
-  let lbl = label({text = "Press the Button"})
+  let lbl = Label("Press the Button")
   let btn = PushButton("Press me")
   window({title = "Title"}, {
-    column({justify = "center", align = "middle"}, {lbl, btn})
+    Column("center", "middle", {lbl, btn})
   })
 )

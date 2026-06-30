@@ -62,27 +62,8 @@ public final class DasumBridge {
 
     private DasumBridge() {}
 
-    // --- Builder natives: each returns an element record the window walker interprets ----------
-
-    /** {@code label({text = …})} → a Label element record. */
-    public static Object label(List<Object> args, NativeCalls.Context ctx) {
-        return element("pontif.gui/Label", "text", cfgStr(args, 0, "text"));
-    }
-
-    /** {@code button("…")} → a Button element record (positional label). */
-    public static Object button(List<Object> args, NativeCalls.Context ctx) {
-        String text = args.isEmpty() || !(args.get(0) instanceof StringValue s) ? "" : s.content();
-        return element("pontif.gui/Button", "text", text);
-    }
-
-    /** {@code column({justify = …, align = …}, {children…})} → a Column element record. */
-    public static Object column(List<Object> args, NativeCalls.Context ctx) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("justify", new StringValue(cfgStr(args, 0, "justify")));
-        m.put("align", new StringValue(cfgStr(args, 0, "align")));
-        m.put("children", args.size() > 1 ? args.get(1) : emptyTuple());
-        return new RecordValue("pontif.gui/Column", m);
-    }
+    // Elements (Label/Button/Column) are now constructed directly in Pontif — no builder natives.
+    // The window action walks the resulting record tree (toComponent below).
 
     private static RecordValue element(String type, String field, String value) {
         Map<String, Object> m = new LinkedHashMap<>();

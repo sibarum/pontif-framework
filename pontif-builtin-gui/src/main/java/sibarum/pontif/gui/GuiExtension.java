@@ -39,14 +39,16 @@ public final class GuiExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.events.{Event}
-                exports @.{label, button, column, window, Label, Button, Column, ButtonEvent, Clickable}
+                exports @.{Label, Button, Column, window, ButtonEvent, Clickable}
 
-                # Element values, built by the functions below. The fields document the shape; the
-                # native builders construct the records directly (so there is no construction-gate
-                # or typing friction), and the bridge switches on the type name to render each.
+                # Elements are ordinary structs you CONSTRUCT directly — Label{text = "hi"},
+                # Button{text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
+                # The bridge walks the resulting record tree, switching on each element's type name.
+                # children is `_` so any aggregate of elements fits (it is validated structurally as
+                # the bridge renders it).
                 struct Label(text:String)
                 struct Button(text:String)
-                struct Column(justify:String, align:String)
+                struct Column(justify:String, align:String, children:_)
 
                 # A widget the bridge renders as a clickable button and invokes on click. Make your
                 # own button by subtyping Button and assigning Clickable with an onClick that emits:
@@ -58,13 +60,8 @@ public final class GuiExtension implements Extension {
                 struct ButtonEvent(label:String)
                 assign trait ButtonEvent:Event{}
 
-                # Builders (native-backed; placeholder bodies are never run). `_` params accept
-                # the config record / children aggregate as-is; the bridge reads them in Java.
-                function label(cfg:_):Label -> {}
-                function button(text:String):Button -> {}
-                function column(cfg:_, children:_):Column -> {}
-
-                # Opens a window rendering the given root tree, on the root thread, until closed.
+                # The window action (native; the placeholder body is never run): opens a window
+                # rendering the given root tree on the root thread, until closed.
                 function window(cfg:_, children:_):Stream[String] -> {}
 
                 0
@@ -73,10 +70,7 @@ public final class GuiExtension implements Extension {
 
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
-        return Map.of(
-                "label", DasumBridge::label,
-                "button", DasumBridge::button,
-                "column", DasumBridge::column,
-                "window", DasumBridge::openWindow);
+        // window is the only native: elements are constructed directly in Pontif now.
+        return Map.of("window", DasumBridge::openWindow);
     }
 }

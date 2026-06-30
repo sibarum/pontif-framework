@@ -23,23 +23,21 @@ class GuiExtensionTest {
     void installingGuiExtension_linksDeclarativeUi_andBindsBuilders() {
         Extensions.install(new GuiExtension());
 
-        // A clickable-widget program: a user subtype of Button + Clickable with an onClick.
+        // Capitalized, directly-constructed elements + a clickable widget subtype.
         CompileResult result = new PontifCompiler().compileAlt("""
-                requires pontif.gui.{label, column, window, Button, Clickable}
+                requires pontif.gui.{Label, Button, Column, window, Clickable}
                 requires pontif.events.{StdOut}
                 struct PushButton:[Button](text:String)
                 assign trait PushButton:Clickable { onClick():_ -> emit StdOut("hi")  this }
                 main (
-                  let lbl = label({text = "hi"})
+                  let lbl = Label("hi")
                   let btn = PushButton("go")
-                  window({title = "t"}, { column({justify = "center", align = "middle"}, {lbl, btn}) })
+                  window({title = "t"}, { Column("center", "middle", {lbl, btn}) })
                 )""", "gui.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
-                () -> "clickable-widget pontif.gui program should link; got "
+                () -> "capitalized-element pontif.gui program should link; got "
                         + (result instanceof CompileResult.Failed f ? f.error().text() : result));
 
-        assertNotNull(NativeCalls.get("label"), "label should be a registered native call");
-        assertNotNull(NativeCalls.get("column"), "column should be registered");
-        assertNotNull(NativeCalls.get("window"), "window should be registered");
+        assertNotNull(NativeCalls.get("window"), "window should be the registered native call");
     }
 }
