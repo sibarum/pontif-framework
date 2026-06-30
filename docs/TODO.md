@@ -514,3 +514,15 @@ The receipt-graph format is the contract; none of this is Pontif's to ship.
   accepted by attribution. Roadmap goal, low priority.
 - **Decimal constructor arg naming** — `Decimal(unscaled, scale)` shipped with BigDecimal's
   vocabulary (provisional); revisit once Strings are fully implemented.
+
+## Editor — go to definition (landed 2026-06-30, docs/editor-navigation.md)
+
+Ctrl+click navigates to a name's definition (read-only Definition tab; builtins
+reflected to Pontif source via `IrSourcePrinter`); Ctrl-hover underlines the word.
+Forward-looking:
+- **Editor-side usage highlighting** — highlight a symbol's references in the editor
+  itself when the caret rests on it, not only in the opened Definition view.
+- **Body-div parity in the Definition view** — the read-only view applies foreground
+  syntax coloring but omits the editor's parser-backed function-body background tint
+  (it carries cross-keystroke state and contends with the reference highlights). Add
+  if full visual parity is wanted.

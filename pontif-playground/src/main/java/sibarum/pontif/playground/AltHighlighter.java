@@ -75,6 +75,20 @@ final class AltHighlighter {
 
     private AltHighlighter() {}
 
+    /**
+     * Foreground token colors only — the stateless half of {@link #highlight}
+     * (comments, literals, the {@code @} subject, and the user-name rainbow), with
+     * neither the parser-backed body-div backgrounds nor the cross-keystroke carry
+     * state {@link #bodySpans} keeps. For read-only views (the definition pane) that
+     * want syntax coloring but manage their own background (e.g. reference
+     * highlights) and must not perturb the live editor's body-div tracking.
+     */
+    static List<TextStyle> foreground(String content) {
+        List<TextStyle> fg = new ArrayList<>();
+        scanTokens(content, fg, new ArrayList<>());
+        return fg;
+    }
+
     /** Style ranges for {@code content}. Never throws. */
     static Styles highlight(String content) {
         List<TextStyle> fg = new ArrayList<>();

@@ -36,7 +36,8 @@ public final class Extensions {
         try {
             IrModule parsed = AltParser.parseModule(ext.pontifSource(), module);
             BuiltinModules.registerExtensionModule(
-                    module, new IrModule(module, parsed.statements(), parsed.main()));
+                    module, new IrModule(module, parsed.statements(), parsed.main()),
+                    ext.pontifSource());
         } catch (ParseException pe) {
             throw new IllegalStateException(
                     "extension '" + module + "' source failed to parse: " + pe.getMessage(), pe);

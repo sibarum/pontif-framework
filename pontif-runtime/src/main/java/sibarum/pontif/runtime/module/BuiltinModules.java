@@ -52,7 +52,27 @@ public final class BuiltinModules {
      */
     private static final Map<String, IrModule> EXTENSION_MODULES = new LinkedHashMap<>();
 
+    /**
+     * Pontif source of the source-authored builtins, by module name — {@code pontif.core}
+     * plus every installed extension module ({@code pontif.events}, the GUI, …). The
+     * IR-built modules ({@code std.*}) have no entry here; they have no shipped source.
+     * Consumed by tooling (the editor's "go to definition") to show a builtin's real
+     * source rather than a reconstruction.
+     */
+    private static final Map<String, String> SOURCES = new LinkedHashMap<>();
+
+    private static final String PONTIF_CORE_SOURCE = """
+            exports @.{Stream, Nothing}
+
+            trait Stream[type E]{}
+
+            struct Nothing()
+
+            0
+            """;
+
     static {
+        SOURCES.put(PONTIF_CORE, PONTIF_CORE_SOURCE);
         // The builtin IO extension is always present (no external dependency), so every path —
         // CLI included — keeps StdOut/StdErr/stdin. External extensions (the GUI) are installed
         // by their launcher before compile.
@@ -64,6 +84,19 @@ public final class BuiltinModules {
     /** Records an installed extension's module so {@link #all()} offers it to the linker. */
     static void registerExtensionModule(String name, IrModule module) {
         EXTENSION_MODULES.put(name, module);
+    }
+
+    /** As {@link #registerExtensionModule(String, IrModule)}, also retaining the
+     *  extension's Pontif source for {@link #sourceOf}. */
+    static void registerExtensionModule(String name, IrModule module, String source) {
+        EXTENSION_MODULES.put(name, module);
+        if (source != null) SOURCES.put(name, source);
+    }
+
+    /** The Pontif source of a source-authored builtin ({@code pontif.core} and installed
+     *  extension modules), or {@code null} for a module built directly from IR ({@code std.*}). */
+    public static String sourceOf(String name) {
+        return SOURCES.get(name);
     }
 
     /** All builtin modules, by name — the pure builtins plus every installed extension module. */
@@ -91,17 +124,8 @@ public final class BuiltinModules {
      * docs/stream-war.md §3). Written in Pontif source, like {@code std.stream}.
      */
     private static IrModule pontifCore() {
-        String source = """
-                exports @.{Stream, Nothing}
-
-                trait Stream[type E]{}
-
-                struct Nothing()
-
-                0
-                """;
         try {
-            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(source, PONTIF_CORE);
+            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(PONTIF_CORE_SOURCE, PONTIF_CORE);
             return new IrModule(PONTIF_CORE, parsed.statements(), parsed.main());
         } catch (sibarum.pontif.parser.ParseException pe) {
             throw new IllegalStateException(

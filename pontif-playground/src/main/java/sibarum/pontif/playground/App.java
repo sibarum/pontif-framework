@@ -21,6 +21,7 @@ import sibarum.dasum.gui.core.input.TabsController;
 import sibarum.dasum.gui.core.input.TextInputController;
 import sibarum.dasum.gui.core.input.TextState;
 import sibarum.dasum.gui.core.input.TextStates;
+import sibarum.dasum.gui.core.input.TextStyle;
 import sibarum.dasum.gui.core.input.TextStyleStates;
 import sibarum.dasum.gui.core.layout.HitTest;
 import sibarum.dasum.gui.core.layout.LatestLayout;
@@ -41,6 +42,8 @@ import sibarum.dasum.gui.core.text.AtlasData;
 import sibarum.dasum.gui.core.text.FontGroup;
 import sibarum.dasum.gui.core.text.FontGroups;
 import sibarum.dasum.gui.core.text.Icon;
+import sibarum.dasum.gui.core.text.TextGeometry;
+import sibarum.dasum.gui.core.text.WordBoundary;
 import sibarum.dasum.gui.core.theme.Palette;
 import sibarum.dasum.gui.core.theme.Theme;
 import sibarum.dasum.gui.core.theme.Themed;
@@ -101,6 +104,15 @@ public final class App {
     private static final int IR_AST_TAB = 1;
     private static final int REPORT_TAB = 2;
     private static final int NARROWINGS_TAB = 3;
+    /** Read-only "go to definition" view, populated on Ctrl+click (see {@link #openDefinition}). */
+    private static final int DEFINITION_TAB = 4;
+
+    // Ctrl+click navigation palette: the IntelliJ-style "this is a link" affordance.
+    private static final Color LINK_UNDERLINE = new Color(0.40f, 0.62f, 1.00f, 1f);
+    // The clicked declaration (strong) vs. its other references (faint) in the
+    // definition view — every occurrence of the name is highlighted.
+    private static final Color DEFN_HIGHLIGHT     = new Color(0.40f, 0.62f, 1.00f, 0.45f);
+    private static final Color DEFN_REF_HIGHLIGHT = new Color(0.85f, 0.75f, 0.30f, 0.30f);
 
     /** ASCII divider between the two report sections — the mono atlas is ASCII-only. */
     private static final String REPORT_DIVIDER = "=".repeat(72);
@@ -119,6 +131,21 @@ public final class App {
     private static Component.Text reportText;
     private static Component.Text irAstText;
     private static Component.Text narrowingsText;
+    private static Component.Text definitionText;
+    // The editor's scroll pane — held so the Ctrl-hover underline can be clipped
+    // to its viewport (the underline is drawn in the top-level render pass, not
+    // inside the Scroll's own clipped render).
+    private static Component.Scroll codeScroll;
+
+    // Ctrl-hover "link" underline over the identifier under the mouse (IntelliJ
+    // style). [linkStart, linkEnd) into the editor content, or -1/-1 when no word
+    // is underlined. Set by updateLinkHover, drawn in the render loop.
+    private static int linkStart = -1;
+    private static int linkEnd = -1;
+    // The Definition tab's selected name must be scrolled into view, but only
+    // after the tab is active and its text has been laid out — so the request is
+    // deferred one frame and serviced in the render loop.
+    private static boolean scrollDefnPending = false;
     // The main tab strip's active index, hoisted so the entrypoint menu can revert
     // it on dismiss. `committedTab` is the tab the user actually settled on (a press
     // of the Narrowings tab is transient until an entrypoint is chosen);
@@ -229,8 +256,17 @@ public final class App {
                     LayoutResult layout = new LayoutResult(mergedRects);
                     LatestLayout.store(root, layout);
 
+                    // A just-opened definition needs its highlighted name scrolled
+                    // into view, but only now that the Definition tab is active and
+                    // its text has a layout rect (it had none while another tab showed).
+                    if (scrollDefnPending) {
+                        scrollSelectionIntoView(definitionText);
+                        scrollDefnPending = false;
+                    }
+
                     batcher.beginFrame(fbH);
                     Render.render(root, layout, batcher, projection);
+                    drawLinkUnderline(layout, batcher);
                     if (OverlayStack.isActive()) {
                         batcher.flush(projection);
                         if (OverlayStack.anyModal()) {
@@ -313,7 +349,8 @@ public final class App {
         TextStates.onContentChange(codeText, App::onEditorContentChanged);
         onEditorContentChanged(DEFAULT_CODE);
 
-        Component codePane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
+        codeScroll = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
+        Component codePane = codeScroll;
 
         // Read-only combined proof-graph view (receipt graph + conservation
         // ledger). Selectable so text can be copied out; regenerated from the
@@ -349,6 +386,18 @@ public final class App {
 
         Component narrowingsPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, narrowingsText, false, 1);
 
+        // Read-only "go to definition" view: Ctrl+click a name in the editor and
+        // the declaring module's source opens here with the name highlighted
+        // (see onMouseDown's Ctrl branch → openDefinition). Esc returns to Editor.
+        definitionText = new Component.Text(
+            "Ctrl+click a type, function, or method name in the editor to open its definition here.",
+            MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
+            null, null, Em.of(0.5f),
+            null, false,
+            true, true, false, false, 1);
+
+        Component definitionPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, definitionText, false, 1);
+
         activeTab = new Property<>(0);
         activeTab.subscribe(i -> {
             if (i == null) return;
@@ -367,7 +416,8 @@ public final class App {
                 new Component.Tabs.TabPanel("Editor",   codePane),
                 new Component.Tabs.TabPanel("IR / AST", irAstPane),
                 new Component.Tabs.TabPanel("Receipts", reportPane),
-                new Component.Tabs.TabPanel("Narrowings", narrowingsPane)),
+                new Component.Tabs.TabPanel("Narrowings", narrowingsPane),
+                new Component.Tabs.TabPanel("Definition", definitionPane)),
             activeTab,
             Variant.PRIMARY
         ).withOnTabPressed(App::onTabPressed).withFlexGrow(1);
@@ -787,6 +837,9 @@ public final class App {
     private static void wireInput(Window window, CursorManager cursors) {
         GlfwCallbacks.setKeyListener((win, key, scancode, action, mods) -> {
             InputState.setMods(mods);
+            // Ctrl press/release toggles the link-hover underline even with no
+            // mouse movement (IntelliJ shows/hides it the instant Ctrl changes).
+            updateLinkHover();
             if (action != Glfw.GLFW_PRESS && action != Glfw.GLFW_REPEAT) return;
             boolean ctrl  = (mods & Glfw.GLFW_MOD_CONTROL) != 0;
             boolean shift = (mods & Glfw.GLFW_MOD_SHIFT)   != 0;
@@ -815,6 +868,13 @@ public final class App {
             if (key == Glfw.GLFW_KEY_ESCAPE && action == Glfw.GLFW_PRESS) {
                 if (OverlayStack.isActive()) {
                     OverlayStack.pop();
+                    return;
+                }
+                // Leaving the read-only definition view returns to the Editor.
+                if (activeTab != null && activeTab.get() != null
+                        && activeTab.get() == DEFINITION_TAB) {
+                    activeTab.set(0);
+                    Invalidator.invalidate();
                     return;
                 }
                 Component focused = FocusState.focused();
@@ -853,7 +913,10 @@ public final class App {
             Component hitRoot = OverlayStack.activeInputRoot(layoutRoot);
             Component hit = HitTest.test(hitRoot, lr, (float) x, (float) y);
             HoverState.update(hit);
-            cursors.setShape(cursorShapeFor(hit));
+            // Ctrl-hover: underline the editor identifier under the mouse and show
+            // a hand cursor — the "this is a link" affordance (see drawLinkUnderline).
+            updateLinkHover();
+            cursors.setShape(linkStart >= 0 ? CursorManager.CursorShape.HAND : cursorShapeFor(hit));
 
             TextInputController.onCursorMove(hit, x, y);
             TabsController.onCursorMove(x, y);
@@ -898,6 +961,13 @@ public final class App {
                     pressTarget = null;
                     return;
                 }
+                // Ctrl+click on an editor identifier navigates to its definition
+                // (a read-only tab) instead of moving the caret.
+                boolean ctrl = (mods & Glfw.GLFW_MOD_CONTROL) != 0;
+                if (ctrl && HoverState.hovered() == codeText && handleGoToDefinition()) {
+                    pressTarget = null;
+                    return;
+                }
                 Component hovered = HoverState.hovered();
                 pressTarget = hovered;
                 if (hovered != null) FocusState.set(hovered);
@@ -930,6 +1000,8 @@ public final class App {
                 ScrollbarController.clearHover();
                 TabsController.clearHover();
                 cursors.setShape(CursorManager.CursorShape.ARROW);
+                linkStart = -1;   // drop the Ctrl-hover underline when the mouse leaves
+                linkEnd = -1;
                 Invalidator.invalidate();
             }
         });
@@ -972,5 +1044,164 @@ public final class App {
         if (hit instanceof Component.Text t && t.selectable()) return CursorManager.CursorShape.IBEAM;
         if (hit != null) return CursorManager.CursorShape.HAND;
         return CursorManager.CursorShape.ARROW;
+    }
+
+    // --- Ctrl+click "go to definition" + Ctrl-hover link underline ---
+
+    /** Resolve the editor identifier under the mouse and open it in the Definition
+     *  tab. Returns false when there's no identifier under the cursor, so the click
+     *  falls through to ordinary caret placement. */
+    private static boolean handleGoToDefinition() {
+        int[] w = editorIdentBoundsUnderMouse();
+        if (w == null) return false;
+        openDefinition(TextStates.contentOf(codeText).substring(w[0], w[1]));
+        return true;
+    }
+
+    /** Identifier bounds {@code [start, end)} under the mouse in the editor, or
+     *  null when the cursor isn't over an identifier (or the editor isn't laid
+     *  out — e.g. another tab is showing). */
+    private static int[] editorIdentBoundsUnderMouse() {
+        if (codeText == null) return null;
+        LayoutResult lr = LatestLayout.result();
+        PixelRect rect = lr == null ? null : lr.rectOf(codeText);
+        if (rect == null) return null;
+        String content = TextStates.contentOf(codeText);
+        int idx = TextGeometry.charIndexAt(codeText, content, rect,
+                (float) InputState.mouseX(), (float) InputState.mouseY());
+        int[] w = WordBoundary.wordBoundsAt(content, idx);
+        if (w == null || w[1] <= w[0]) return null;
+        return isIdentifier(content.substring(w[0], w[1])) ? w : null;
+    }
+
+    /** Look up {@code name}'s definition and show it in the read-only Definition
+     *  tab — name highlighted, scrolled into view. Primitives and misses flash an
+     *  explanatory status instead of switching tabs. */
+    private static void openDefinition(String name) {
+        if (DefinitionNavigator.isPrimitive(name)) {
+            Status.info("'" + name + "' is a builtin primitive — no source to open.");
+            return;
+        }
+        Optional<DefinitionNavigator.Target> found = DefinitionNavigator.resolve(
+                TextStates.contentOf(codeText), name, resolveDir());
+        if (found.isEmpty()) {
+            Status.warn("No definition found for '" + name + "'.");
+            return;
+        }
+        DefinitionNavigator.Target def = found.get();
+        TextStates.setContent(definitionText, def.sourceText());
+        // Same token syntax coloring as the editor (foreground only — the
+        // background axis carries the reference highlights below).
+        TextStyleStates.setForeground(definitionText, AltHighlighter.foreground(def.sourceText()));
+        // Highlight EVERY occurrence of the name — the declaration strongly, its
+        // other references faintly. Background spans render whether or not the text
+        // is focused (unlike a selection highlight), so they're the reliable marker;
+        // the selection rides along so the caret sits on the declaration and Ctrl+C
+        // copies it.
+        java.util.List<TextStyle> spans = new java.util.ArrayList<>();
+        for (int[] ref : DefinitionNavigator.references(def.sourceText(), name)) {
+            boolean isDecl = ref[0] == def.selStart() && ref[1] == def.selEnd();
+            spans.add(new TextStyle(ref[0], ref[1], isDecl ? DEFN_HIGHLIGHT : DEFN_REF_HIGHLIGHT));
+        }
+        TextStyleStates.setBackground(definitionText, spans);
+        TextState ts = TextStates.of(definitionText);
+        ts.selectionAnchor = def.selStart();
+        ts.caretIndex = def.selEnd();
+        ts.hoverCaretIndex = -1;
+        activeTab.set(DEFINITION_TAB);
+        scrollDefnPending = true;   // scroll once the tab's text has a layout rect
+        Status.success("Definition of '" + name + "' in " + def.moduleLabel()
+                + " — Esc to return to the editor.");
+    }
+
+    /** Nudge the Definition pane's scroll so the highlighted name is visible — the
+     *  public-API twin of {@code TextInputController.scrollCaretIntoView}, which is
+     *  package-private to dasum. */
+    private static void scrollSelectionIntoView(Component.Text text) {
+        Component rootC = LatestLayout.root();
+        LayoutResult lr = LatestLayout.result();
+        if (rootC == null || lr == null) return;
+        PixelRect textRect = lr.rectOf(text);
+        if (textRect == null) return;
+        TextState ts = TextStates.of(text);
+        PixelRect caret = TextGeometry.caretBounds(
+                text, TextStates.contentOf(text), textRect, ts.selectionStart());
+        for (Component anc : HitTest.pathTo(rootC, text)) {
+            if (!(anc instanceof Component.Scroll scroll)) continue;
+            PixelRect outer = lr.rectOf(scroll);
+            if (outer == null) continue;
+            float pad = scroll.padding().toPixels();
+            PixelRect interior = new PixelRect(
+                    outer.x() + pad, outer.y() + pad,
+                    Math.max(0f, outer.width() - 2f * pad),
+                    Math.max(0f, outer.height() - 2f * pad));
+            float dx = 0f, dy = 0f;
+            if (caret.bottom() > interior.bottom()) dy = caret.bottom() - interior.bottom();
+            else if (caret.y() < interior.y())      dy = caret.y() - interior.y();
+            if (caret.right() > interior.right())   dx = caret.right() - interior.right();
+            else if (caret.x() < interior.x())      dx = caret.x() - interior.x();
+            if (dx != 0f || dy != 0f) ScrollStates.of(scroll).scrollByPx(dx, dy);
+        }
+        Invalidator.invalidate();
+    }
+
+    /** Recompute the Ctrl-hover underline target: the editor identifier under the
+     *  mouse while Ctrl is held and the editor is the active, hovered pane. Cheap
+     *  enough to run on every cursor move and Ctrl press/release. */
+    private static void updateLinkHover() {
+        boolean ctrl = window != null
+                && (Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_LEFT_CONTROL) == Glfw.GLFW_PRESS
+                 || Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_RIGHT_CONTROL) == Glfw.GLFW_PRESS);
+        int[] w = (ctrl && !OverlayStack.isActive() && HoverState.hovered() == codeText)
+                ? editorIdentBoundsUnderMouse() : null;
+        // Don't underline primitives — they aren't navigable.
+        if (w != null && DefinitionNavigator.isPrimitive(
+                TextStates.contentOf(codeText).substring(w[0], w[1]))) {
+            w = null;
+        }
+        int ns = w == null ? -1 : w[0];
+        int ne = w == null ? -1 : w[1];
+        if (ns != linkStart || ne != linkEnd) {
+            linkStart = ns;
+            linkEnd = ne;
+            Invalidator.invalidate();
+        }
+    }
+
+    /** Draw the Ctrl-hover underline beneath the editor identifier, clipped to the
+     *  editor viewport. No-op unless a word is hovered and the Editor tab is showing
+     *  (an inactive tab's text has no layout rect). */
+    private static void drawLinkUnderline(LayoutResult layout, Batcher batcher) {
+        if (linkStart < 0 || linkEnd <= linkStart || codeText == null) return;
+        PixelRect tr = layout.rectOf(codeText);
+        if (tr == null) return;   // Editor tab not active
+        String content = TextStates.contentOf(codeText);
+        if (linkEnd > content.length()) return;
+        PixelRect a = TextGeometry.caretBounds(codeText, content, tr, linkStart);
+        PixelRect b = TextGeometry.caretBounds(codeText, content, tr, linkEnd);
+        float x = a.x();
+        float right = b.x();
+        if (right <= x) return;   // word wrapped across visual lines — skip
+        float y = a.bottom() - 2f;
+        PixelRect vp = codeScroll == null ? null : layout.rectOf(codeScroll);
+        if (vp != null) {
+            if (y < vp.y() || y > vp.bottom()) return;   // scrolled out of view
+            x = Math.max(x, vp.x());
+            right = Math.min(right, vp.right());
+            if (right <= x) return;
+        }
+        batcher.submit(new DrawCommand.ColoredQuad(x, y, right - x, 1.5f, LINK_UNDERLINE));
+    }
+
+    /** A bare Pontif identifier: a letter/underscore start, then letters/digits/{@code _}/{@code $}. */
+    private static boolean isIdentifier(String s) {
+        if (s.isEmpty()) return false;
+        char c0 = s.charAt(0);
+        if (!(Character.isLetter(c0) || c0 == '_')) return false;
+        for (int i = 1; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!(Character.isLetterOrDigit(c) || c == '_' || c == '$')) return false;
+        }
+        return true;
     }
 }
