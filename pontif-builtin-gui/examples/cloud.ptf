@@ -1,0 +1,15 @@
+requires pontif.plot.{Cloud3D, plotCloud}
+
+# A few 3D points, made plottable by satisfying the Cloud3D shape: points() is the
+# projection. plotCloud renders them in an orbitable viewport (drag orbits, scroll zooms).
+struct Tetra()
+assign trait Tetra:Cloud3D {
+  points():Stream[[{Decimal,Decimal,Decimal}]] -> {
+    {0.0, 0.0, 0.0},
+    {1.0, 0.0, 0.0},
+    {0.0, 1.0, 0.0},
+    {0.0, 0.0, 1.0}
+  }
+}
+
+main ( plotCloud(Tetra()) )

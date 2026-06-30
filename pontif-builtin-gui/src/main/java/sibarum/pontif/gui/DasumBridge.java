@@ -35,9 +35,15 @@ import sibarum.dasum.gui.vis.plot.LinePlot;
 import sibarum.dasum.gui.vis.plot.PlotStyle;
 import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
+import sibarum.dasum.gui.vis.math.CameraRig;
+import sibarum.dasum.gui.vis.math.CameraSpec;
+import sibarum.dasum.gui.vis.math.Vec3;
 import sibarum.dasum.gui.vis.pointcloud.SceneViewController;
 import sibarum.dasum.gui.vis.scene.InteractionSpec;
+import sibarum.dasum.gui.vis.scene.PointLayer;
+import sibarum.dasum.gui.vis.scene.SceneSnapshot;
 import sibarum.dasum.gui.vis.scene.SceneStates;
+import sibarum.dasum.gui.vis.scene.TriangleLayer;
 import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
@@ -105,6 +111,32 @@ public final class DasumBridge {
         double[] xs = !args.isEmpty() ? doubles(args.get(0)) : new double[0];
         double[] ys = args.size() > 1 ? doubles(args.get(1)) : new double[0];
         return openWindowWithRoot("Plot", () -> buildLinePlotView(xs, ys));
+    }
+
+    /**
+     * {@code renderCloud(points)} (pontif.plot): opens an orbitable 3D window showing a point
+     * cloud. {@code points} is an aggregate of {@code {x,y,z}} triples shaped in Pontif
+     * (pontif.plot's {@code plotCloud}); this native flattens it to {@code float[]} and renders.
+     */
+    public static Object renderCloud(List<Object> args, NativeCalls.Context ctx) {
+        float[] xyz = !args.isEmpty() ? xyzTriples(args.get(0)) : new float[0];
+        return openWindowWithRoot("Cloud", () -> buildCloudView(xyz));
+    }
+
+    /**
+     * {@code renderSurface(zs, xlo, xhi, ylo, yhi)} (pontif.plot): opens an orbitable 3D surface
+     * from a row-major height grid {@code zs} (length {@code N*N}) over the rectangular domain. The
+     * grid sampling happens in Pontif (pontif.plot's {@code plotSurface}); this native rebuilds the
+     * {@code (x,y)} coordinates from the domain and meshes the surface into triangles.
+     */
+    public static Object renderSurface(List<Object> args, NativeCalls.Context ctx) {
+        double[] zs = !args.isEmpty() ? doubles(args.get(0)) : new double[0];
+        double xlo = arg(args, 1), xhi = arg(args, 2), ylo = arg(args, 3), yhi = arg(args, 4);
+        return openWindowWithRoot("Surface", () -> buildSurfaceView(zs, xlo, xhi, ylo, yhi));
+    }
+
+    private static double arg(List<Object> args, int i) {
+        return i < args.size() ? toDouble(args.get(i)) : 0.0;
     }
 
     /**
@@ -275,6 +307,76 @@ public final class DasumBridge {
     }
 
     /**
+     * A 3D point cloud: a {@link Component.SceneView} carrying a single {@link PointLayer},
+     * a perspective camera, and orbit/zoom interaction (drag orbits, scroll zooms — wired in
+     * {@link #wireInput}). {@code DasumVis.init()} must have run first ({@link #openWindowWithRoot}
+     * ensures it).
+     */
+    static Component buildCloudView(float[] xyz) {
+        Component.SceneView view =
+                new Component.SceneView(Em.of(24f), Em.of(16f), Em.ZERO, PLOT_BG, true, 1);
+        SceneStates.publish(view, SceneSnapshot.of(new PointLayer(xyz, null)));
+        SceneStates.setCamera(view, CameraSpec.defaultPerspective());
+        SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
+        return view;
+    }
+
+    /**
+     * A 3D surface from a row-major height grid {@code zs} (length {@code N*N}) over the
+     * {@code [xlo,xhi] x [ylo,yhi]} domain: each grid cell becomes two triangles
+     * ({@link TriangleLayer}), height is the up (y) axis, colour ramps blue→red by height. The
+     * camera is framed to the surface bounds; drag orbits, scroll zooms (wired in
+     * {@link #wireInput}).
+     */
+    static Component buildSurfaceView(double[] zs, double xlo, double xhi, double ylo, double yhi) {
+        int n = (int) Math.round(Math.sqrt(zs.length));
+        if (n < 2) return errorLabel("surface needs an N*N grid (N>=2); got " + zs.length + " heights");
+
+        double zmin = Double.POSITIVE_INFINITY, zmax = Double.NEGATIVE_INFINITY;
+        for (double z : zs) { zmin = Math.min(zmin, z); zmax = Math.max(zmax, z); }
+        double zspan = zmax - zmin == 0 ? 1 : zmax - zmin;
+        double sx = (xhi - xlo) / (n - 1), sy = (yhi - ylo) / (n - 1);
+
+        int cells = (n - 1) * (n - 1);
+        float[] verts = new float[cells * 2 * 9];   // 2 triangles/cell * 3 vertices * 3 floats
+        float[] cols = new float[verts.length];
+        int[] o = {0};
+        for (int r = 0; r < n - 1; r++) {
+            for (int c = 0; c < n - 1; c++) {
+                int i00 = r * n + c, i01 = i00 + 1, i10 = i00 + n, i11 = i10 + 1;
+                emitSurfaceVerts(verts, cols, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, i00, i10, i11);
+                emitSurfaceVerts(verts, cols, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, i00, i11, i01);
+            }
+        }
+
+        Component.SceneView view =
+                new Component.SceneView(Em.of(26f), Em.of(18f), Em.ZERO, PLOT_BG, true, 1);
+        SceneStates.publish(view, SceneSnapshot.of(new TriangleLayer(verts, cols)));
+        SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
+                new Vec3((float) xlo, (float) zmin, (float) ylo),
+                new Vec3((float) xhi, (float) zmax, (float) yhi)));
+        SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
+        return view;
+    }
+
+    /** Appends the given grid vertices (by index) as world (x, height, y) positions + height colour. */
+    private static void emitSurfaceVerts(float[] verts, float[] cols, int[] o, int n,
+            double xlo, double ylo, double sx, double sy, double[] zs, double zmin, double zspan,
+            int... indices) {
+        for (int idx : indices) {
+            double x = xlo + (idx % n) * sx, z = ylo + (idx / n) * sy, h = zs[idx];
+            verts[o[0]] = (float) x;
+            verts[o[0] + 1] = (float) h;     // height is the up axis
+            verts[o[0] + 2] = (float) z;
+            float t = (float) ((h - zmin) / zspan);
+            cols[o[0]] = t;                  // blue (low) → red (high)
+            cols[o[0] + 1] = 0.5f;
+            cols[o[0] + 2] = 1f - t;
+            o[0] += 3;
+        }
+    }
+
+    /**
      * Converts a Pontif numeric aggregate (a {@code _tuple} RecordValue whose members are Pontif
      * Int/Decimal scalars) to a {@code double[]} in member order — the data marshalling across the
      * native boundary (only primitives cross). Non-record or non-numeric members yield 0.0.
@@ -284,6 +386,28 @@ public final class DasumBridge {
         double[] out = new double[rv.members().size()];
         int i = 0;
         for (Object member : rv.members().values()) out[i++] = toDouble(member);
+        return out;
+    }
+
+    /**
+     * Flattens a Pontif aggregate of {@code {x,y,z}} triples (a {@code _tuple} whose members are
+     * each a {@code _tuple} of three numeric scalars) to a row-major {@code float[]} of length
+     * {@code 3*N} — the marshalling for {@link #renderCloud}. Missing coordinates default to 0.
+     */
+    static float[] xyzTriples(Object value) {  // package-private: unit-tested in PlotExtensionTest
+        if (!(value instanceof RecordValue rv)) return new float[0];
+        float[] out = new float[rv.members().size() * 3];
+        int p = 0;
+        for (Object point : rv.members().values()) {
+            if (point instanceof RecordValue pr) {
+                int j = 0;
+                for (Object coord : pr.members().values()) {
+                    if (j < 3) out[p * 3 + j] = (float) toDouble(coord);
+                    j++;
+                }
+            }
+            p++;
+        }
         return out;
     }
 
