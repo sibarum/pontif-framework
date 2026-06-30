@@ -52,10 +52,14 @@ import sibarum.dasum.gui.core.window.Window;
 import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.playground.generated.Icons;
+import sibarum.pontif.gui.GuiExtension;
+import sibarum.pontif.gui.PlotExtension;
 import sibarum.pontif.runtime.ConservationReport;
 import sibarum.pontif.runtime.IrAstReport;
 import sibarum.pontif.runtime.PontifCompiler;
+import sibarum.pontif.runtime.module.Extensions;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
@@ -65,8 +69,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static sibarum.dasum.gui.natives.gl.Gl.GL_COLOR_BUFFER_BIT;
 
@@ -93,6 +102,10 @@ public final class App {
 
     /** Font group key for the monospace atlas (registered alongside the primary one). */
     private static final String MONO_FONT_GROUP = "mono";
+
+    /** The idle status-ribbon message; restored when the caret leaves an error. */
+    private static final String DEFAULT_STATUS =
+            "Pontif Editor — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.";
 
     private static final String UNTITLED_LABEL = "(untitled)";
     private static final String DEFAULT_FILE_NAME = "untitled.ptf";
@@ -157,6 +170,47 @@ public final class App {
     // ribbon's docked field when the caret actually moved.
     private static String lastCursorText = null;
 
+    // --- Live compilation state ---
+    // The editor recompiles on a short debounce as you type; a clean compile
+    // autosaves the open file and a failed one underlines the offending token
+    // (or its requires statement) and shows the message when the caret is near.
+
+    /** Red error underline + ribbon tint. */
+    private static final Color ERROR_MARK = new Color(0.95f, 0.36f, 0.36f, 1f);
+
+    /** Recompile this long after the last edit settles. */
+    private static final long COMPILE_DEBOUNCE_MS = 400L;
+
+    /**
+     * One error to surface: a half-open {@code [start, end)} char range in the
+     * editor buffer and the message shown when the caret is near it.
+     * {@code fromImport} records that the failure came from an imported module —
+     * the range then points at the offending {@code requires} statement, not a
+     * foreign offset that can't be mapped into this buffer.
+     */
+    private record ErrorMark(int start, int end, String message, boolean fromImport) {}
+
+    /** Latest compile's error marks; read each frame by the underline + caret
+     *  hooks. Single-writer (the debounce worker) / many-reader (GLFW thread). */
+    private static volatile List<ErrorMark> errorMarks = List.of();
+
+    /** Monotonic edit counter, bumped on every content change. A compile captures
+     *  it at schedule time and discards its result if a newer edit has landed, so
+     *  stale marks (computed against text the user has since changed) never show. */
+    private static volatile long editVersion = 0L;
+
+    /** The error message currently parked in the ribbon's default slot, so the
+     *  per-frame caret check only republishes when it actually changes. */
+    private static String shownErrorMessage = null;
+
+    private static final ScheduledExecutorService COMPILE_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "pontif-live-compile");
+                t.setDaemon(true);
+                return t;
+            });
+    private static ScheduledFuture<?> pendingCompile = null;
+
     // Hoisted so file-dialog button handlers can reach it. Lifetime is
     // bounded by main()'s try-with-resources; handlers only fire while the
     // event loop is running, so the field is always non-null when read.
@@ -178,6 +232,13 @@ public final class App {
     private static final PontifRunner RUNNER = new PontifRunner();
 
     public static void main(String[] args) {
+        // The editor compiles in-process, so install the windowed extensions up front — otherwise
+        // the live compiler reports a false "unknown module 'pontif.plot'/'pontif.gui'". This only
+        // makes those modules RESOLVABLE; GUI programs still RUN in a separate process
+        // (see onRunGuiClicked / isGuiProgram), so nothing windowed executes in the editor.
+        Extensions.install(new GuiExtension());
+        Extensions.install(new PlotExtension());
+
         // An optional file argument (the CLI's `pontif editor <file>`): open it
         // at startup instead of restoring the last session's file.
         if (args.length > 0 && args[0] != null && !args[0].isBlank()) {
@@ -217,9 +278,7 @@ public final class App {
                 FontGroups.register(FontGroup.of(MONO_FONT_GROUP,           monoAtlas,    monoTexture));
                 FontGroups.register(FontGroup.of(Icon.DEFAULT_FONT_GROUP,   iconsAtlas,   iconsTexture));
 
-                Status.setDefaultMessage(
-                    "Pontif Editor — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.",
-                    Variant.DEFAULT);
+                Status.setDefaultMessage(DEFAULT_STATUS, Variant.DEFAULT);
                 Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
                 wireInput(win, cursors);
@@ -232,6 +291,9 @@ public final class App {
                     // refreshing the indicator at the top of the frame catches
                     // every move; it writes the label only on change.
                     updateCursorIndicator();
+                    // Surface the nearest live-compile error in the ribbon when the
+                    // caret is on it; restore the default hint when it moves away.
+                    updateErrorStatus();
                     // Sample window placement each frame for the session file;
                     // the manager only writes when it actually changed.
                     int[] winPos  = win.position();
@@ -267,6 +329,7 @@ public final class App {
                     batcher.beginFrame(fbH);
                     Render.render(root, layout, batcher, projection);
                     drawLinkUnderline(layout, batcher);
+                    drawErrorUnderlines(layout, batcher);
                     if (OverlayStack.isActive()) {
                         batcher.flush(projection);
                         if (OverlayStack.anyModal()) {
@@ -430,8 +493,40 @@ public final class App {
             false, 0);
     }
 
+    /**
+     * Module paths whose {@code requires} marks a program as a GUI/windowed
+     * program — exactly the extensions {@code GuiLauncher} installs
+     * ({@code GuiExtension.moduleName()} / {@code PlotExtension.moduleName()}).
+     * A program importing either opens its own GLFW window, so it must run in a
+     * separate process rather than in-process in the editor (which already owns a
+     * GLFW root thread). Mirrored here as literals to keep the editor from
+     * instantiating the dasum-bearing extensions just to read a name.
+     */
+    private static final java.util.Set<String> GUI_MODULES = java.util.Set.of("pontif.gui", "pontif.plot");
+
+    /** True when the buffer directly {@code requires} a windowed module (see
+     *  {@link #GUI_MODULES}). Line-based on the single-line {@code requires} form,
+     *  matching {@link DefinitionNavigator}. */
+    private static boolean isGuiProgram(String code) {
+        for (String line : code.split("\n", -1)) {
+            String t = line.strip();
+            if (t.startsWith("requires ")) {
+                String module = requiresModule(t);
+                if (module != null && GUI_MODULES.contains(module)) return true;
+            }
+        }
+        return false;
+    }
+
     private static void onRunClicked() {
         String code = TextStates.contentOf(codeText);
+        // A program that imports a windowed extension opens its own GLFW window —
+        // it can't run in-process here (the editor owns the root thread), so route
+        // it to the same separate-process launcher the "Window" button uses.
+        if (isGuiProgram(code)) {
+            onRunGuiClicked();
+            return;
+        }
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
         // Resolve sibling `requires` from the open file's directory; captured on
         // the main thread so the worker doesn't race a file change.
@@ -467,6 +562,10 @@ public final class App {
     private static void onRunGuiClicked() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "editor.ptf";
+        // The buffer runs from a temp file, so sibling `requires` must resolve against the
+        // ORIGINAL file's directory (the temp dir has none). Captured on the main thread.
+        Path resolveDir = resolveDir();
+        String resolveArg = resolveDir != null ? resolveDir.toString() : "";
         Thread worker = new Thread(() -> {
             Path tmp = null;
             try {
@@ -478,7 +577,9 @@ public final class App {
                         "--enable-native-access=ALL-UNNAMED",
                         "-cp", System.getProperty("java.class.path"),
                         "sibarum.pontif.gui.GuiLauncher",
-                        tmp.toString());
+                        tmp.toString(),
+                        resolveArg,
+                        sourceName);
                 pb.inheritIO();
                 Process proc = pb.start();
                 int exit = proc.waitFor();
@@ -738,6 +839,7 @@ public final class App {
     private static void onEditorContentChanged(String content) {
         applyHighlight(content);
         if (session != null) session.onContentChanged(content);
+        scheduleLiveCompile(content);
     }
 
     /** Apply restored window size/position/maximized state before the first
@@ -1367,6 +1469,217 @@ public final class App {
             if (right <= x) return;
         }
         batcher.submit(new DrawCommand.ColoredQuad(x, y, right - x, 1.5f, LINK_UNDERLINE));
+    }
+
+    // --- Live compilation: debounced compile + error underlines + autosave ---
+
+    /** Debounced live compile: cancel any pending pass and schedule a fresh one
+     *  {@value #COMPILE_DEBOUNCE_MS} ms out. The buffer, source name, resolve
+     *  directory, and file are captured on the GLFW thread so the worker can't
+     *  race a file swap. Stale underlines are dropped immediately — we no longer
+     *  know where the errors are until the next pass settles (matching the
+     *  highlighter's mid-edit tolerance: show nothing rather than something wrong). */
+    private static void scheduleLiveCompile(String content) {
+        long version = ++editVersion;
+        errorMarks = List.of();
+        String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
+        Path resolveDir = resolveDir();
+        Path file = currentFile;
+        if (pendingCompile != null) pendingCompile.cancel(false);
+        pendingCompile = COMPILE_SCHEDULER.schedule(
+                () -> runLiveCompile(content, sourceName, resolveDir, file, version),
+                COMPILE_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Compile {@code content} (no run), publish error underlines, and — on a clean
+     *  compile — autosave to {@code file}. Runs on the debounce thread. The result
+     *  is discarded if the buffer changed since it was scheduled ({@code version}
+     *  no longer current): a newer pass already owns the marks. */
+    private static void runLiveCompile(String content, String sourceName, Path resolveDir,
+                                       Path file, long version) {
+        PontifCompiler.CompileResult result = COMPILER.compileAlt(content, sourceName, resolveDir);
+        if (version != editVersion) return;   // superseded by a newer edit
+        if (result instanceof PontifCompiler.CompileResult.Failed failed) {
+            errorMarks = computeMarks(content, sourceName, failed.error());
+        } else {
+            errorMarks = List.of();
+            autosaveClean(content, file, version);
+        }
+        Invalidator.invalidate();
+    }
+
+    /** Translate a failed compile into editor underlines. An error located in an
+     *  imported module (a link error, or an origin from another source) is mapped
+     *  to the offending {@code requires} statement; an in-buffer error is mapped to
+     *  its origin span. Empty when there is no origin to anchor to. */
+    private static List<ErrorMark> computeMarks(String content, String sourceName,
+                                                PontifRunner.RunResult error) {
+        String message = error.text();
+        Optional<Origin> originOpt = error.origin();
+        boolean fromImport = message.startsWith("Link error")
+                || (originOpt.isPresent() && !sourceName.equals(originOpt.get().source()));
+        if (fromImport) {
+            return requiresMarks(content, message, originOpt.orElse(null));
+        }
+        if (originOpt.isPresent() && originOpt.get().isPresent()) {
+            int[] span = spanOffsets(content, originOpt.get());
+            if (span != null) return List.of(new ErrorMark(span[0], span[1], message, false));
+        }
+        return List.of();
+    }
+
+    /** Char offsets {@code [start, end)} for an origin span, clamped to the start
+     *  line so a multi-line span underlines just its first line. A point span
+     *  (start == end) is widened over the token that begins there. Null if it
+     *  doesn't map into {@code content}. */
+    private static int[] spanOffsets(String content, Origin o) {
+        int start = offsetOf(content, o.span().start().line(), o.span().start().column());
+        if (start < 0) return null;
+        int end = offsetOf(content, o.span().end().line(), o.span().end().column());
+        if (end <= start) end = wordEnd(content, start);
+        int lineEnd = content.indexOf('\n', start);
+        if (lineEnd < 0) lineEnd = content.length();
+        end = Math.min(end, lineEnd);
+        if (end <= start) end = Math.min(start + 1, content.length());
+        return start >= end ? null : new int[]{start, end};
+    }
+
+    /** Char offset of 1-based {@code (line, column)}, or -1 if the line is out of
+     *  range. The column is clamped to the buffer length. */
+    private static int offsetOf(String content, int line, int column) {
+        int idx = 0, ln = 1;
+        while (ln < line && idx < content.length()) {
+            if (content.charAt(idx) == '\n') ln++;
+            idx++;
+        }
+        if (ln != line) return -1;
+        return Math.min(idx + (column - 1), content.length());
+    }
+
+    /** End of the identifier token starting at {@code start} (at least one char). */
+    private static int wordEnd(String content, int start) {
+        int i = start;
+        while (i < content.length()) {
+            char c = content.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '_' || c == '$') i++;
+            else break;
+        }
+        return i > start ? i : Math.min(start + 1, content.length());
+    }
+
+    /** Underlines over the {@code requires} statement(s) implicated by an import
+     *  error. Prefers the one whose module name appears in the error message or
+     *  matches the foreign origin's source; falls back to every {@code requires}
+     *  line so the import area is still flagged when no single one can be pinned. */
+    private static List<ErrorMark> requiresMarks(String content, String message, Origin origin) {
+        String foreign = origin != null && origin.isPresent() ? stripExt(origin.source()) : null;
+        List<ErrorMark> all = new ArrayList<>();
+        List<ErrorMark> matched = new ArrayList<>();
+        int offset = 0;
+        for (String line : content.split("\n", -1)) {
+            String t = line.strip();
+            if (t.startsWith("requires ")) {
+                int lead = line.length() - line.stripLeading().length();
+                int start = offset + lead;
+                int end = offset + line.length();
+                if (end > start) {
+                    ErrorMark mark = new ErrorMark(start, end, message, true);
+                    all.add(mark);
+                    String module = requiresModule(t);
+                    if (module != null && (message.contains(module) || (foreign != null
+                            && (foreign.equals(module) || foreign.contains(module) || module.contains(foreign))))) {
+                        matched.add(mark);
+                    }
+                }
+            }
+            offset += line.length() + 1;   // + the '\n' that split removed
+        }
+        return List.copyOf(matched.isEmpty() ? all : matched);
+    }
+
+    /** The module name in a {@code requires <module>.{…}} (or {@code requires <module>}) line. */
+    private static String requiresModule(String strippedLine) {
+        String rest = strippedLine.substring("requires ".length()).strip();
+        int db = rest.indexOf(".{");
+        if (db > 0) return rest.substring(0, db).strip();
+        int sp = rest.indexOf(' ');
+        return sp > 0 ? rest.substring(0, sp).strip() : rest;
+    }
+
+    private static String stripExt(String source) {
+        if (source == null) return null;
+        int dot = source.lastIndexOf('.');
+        return dot > 0 ? source.substring(0, dot) : source;
+    }
+
+    /** Write {@code content} to {@code file} after a clean compile — the autosave-
+     *  on-success rule. Skips an untitled buffer (no file; the recovery snapshot
+     *  still covers it), a buffer that changed since the compile, and a file that
+     *  already matches. Quiet on success; failures flash in the ribbon. */
+    private static void autosaveClean(String content, Path file, long version) {
+        if (file == null || version != editVersion) return;
+        try {
+            String onDisk = Files.exists(file) ? Files.readString(file, StandardCharsets.UTF_8) : null;
+            if (content.equals(onDisk)) return;   // nothing to write
+            Files.writeString(file, content, StandardCharsets.UTF_8);
+            // The on-disk file is now the source of truth, so drop the recovery copy
+            // and reset the dirty baseline (same as an explicit Save of this file).
+            if (session != null) {
+                String key = RecoveryStore.keyFor(file);
+                session.onSaved(key, key, content, file.toAbsolutePath().normalize().toString());
+            }
+        } catch (IOException e) {
+            Status.error("Autosave failed for " + file.getFileName() + ": " + e.getMessage());
+        }
+    }
+
+    /** Show the nearest error's message in the ribbon when the caret is within or
+     *  adjacent to an underlined error; restore the default hint otherwise. Runs
+     *  each frame on the GLFW thread, republishing only when the message changes. */
+    private static void updateErrorStatus() {
+        if (codeText == null) return;
+        int caret = TextStates.of(codeText).caretIndex;
+        String near = null;
+        for (ErrorMark m : errorMarks) {
+            if (caret >= m.start() && caret <= m.end()) { near = m.message(); break; }
+        }
+        if (near != null) {
+            if (!near.equals(shownErrorMessage)) {
+                shownErrorMessage = near;
+                Status.setDefaultMessage(near, Variant.ERROR);
+            }
+        } else if (shownErrorMessage != null) {
+            shownErrorMessage = null;
+            Status.setDefaultMessage(DEFAULT_STATUS, Variant.DEFAULT);
+        }
+    }
+
+    /** Red underline beneath each error's token (or its {@code requires} statement),
+     *  clipped to the editor viewport — the error analogue of {@link
+     *  #drawLinkUnderline}. No-op unless the Editor tab is showing. */
+    private static void drawErrorUnderlines(LayoutResult layout, Batcher batcher) {
+        List<ErrorMark> marks = errorMarks;
+        if (marks.isEmpty() || codeText == null) return;
+        PixelRect tr = layout.rectOf(codeText);
+        if (tr == null) return;   // Editor tab not active
+        String content = TextStates.contentOf(codeText);
+        PixelRect vp = codeScroll == null ? null : layout.rectOf(codeScroll);
+        for (ErrorMark m : marks) {
+            if (m.start() >= m.end() || m.end() > content.length()) continue;
+            PixelRect a = TextGeometry.caretBounds(codeText, content, tr, m.start());
+            PixelRect b = TextGeometry.caretBounds(codeText, content, tr, m.end());
+            float x = a.x();
+            float right = b.x();
+            if (right <= x) continue;   // wrapped across visual lines — skip
+            float y = a.bottom() - 1.5f;
+            if (vp != null) {
+                if (y < vp.y() || y > vp.bottom()) continue;   // scrolled out of view
+                x = Math.max(x, vp.x());
+                right = Math.min(right, vp.right());
+                if (right <= x) continue;
+            }
+            batcher.submit(new DrawCommand.ColoredQuad(x, y, right - x, 2f, ERROR_MARK));
+        }
     }
 
     /** A bare Pontif identifier: a letter/underscore start, then letters/digits/{@code _}/{@code $}. */
