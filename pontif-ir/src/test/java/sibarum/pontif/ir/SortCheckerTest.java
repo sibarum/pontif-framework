@@ -208,12 +208,18 @@ class SortCheckerTest {
         IrModule m = new IrModule("m", List.of(fd), IrExpr.lit(0));
 
         CompileException ex = assertThrows(CompileException.class, () -> compile(m));
-        // Either Zzzzz (params validated first) or Xxxxx is fine — both are
-        // the right kind of error. Just verify it's a sort error.
-        assertTrue(ex.getMessage().contains("Zzzzz") || ex.getMessage().contains("Xxxxx"),
-                () -> "Expected unknown-sort error; got: " + ex.getMessage());
-        assertTrue(ex.getMessage().toLowerCase().contains("unknown sort")
-                        || ex.getMessage().toLowerCase().contains("not a primitive"),
-                () -> "Expected user-friendly message; got: " + ex.getMessage());
+        // Any of the three offending names is fine — whichever pass fires first wins.
+        // CallNameCheck (call-name validation) now runs before SortChecker (sort validation),
+        // so the unknown call 'Qqqqq' is typically reported first; an unknown-sort error
+        // (Zzzzz/Xxxxx) is equally acceptable. The contract is: a clear message naming an
+        // offending symbol, not which one.
+        String msg = ex.getMessage();
+        assertTrue(msg.contains("Zzzzz") || msg.contains("Xxxxx") || msg.contains("Qqqqq"),
+                () -> "Expected an offending name; got: " + msg);
+        assertTrue(msg.toLowerCase().contains("unknown sort")
+                        || msg.toLowerCase().contains("not a primitive")
+                        || msg.toLowerCase().contains("unknown function")
+                        || msg.toLowerCase().contains("not in scope"),
+                () -> "Expected a user-friendly unknown-name message; got: " + msg);
     }
 }

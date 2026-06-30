@@ -632,7 +632,7 @@ public final class SortChecker {
      * sort wins — best-effort, since cross-overload return narrowing waits
      * on the in-progress dispatch-inference work.
      */
-    private static Map<String, IrSort> collectFunctionReturns(IrModule module) {
+    static Map<String, IrSort> collectFunctionReturns(IrModule module) {  // reused by CallNameCheck
         Map<String, IrSort> map = new LinkedHashMap<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {

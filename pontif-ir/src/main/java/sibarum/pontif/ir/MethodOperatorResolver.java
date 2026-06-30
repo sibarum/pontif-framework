@@ -82,6 +82,11 @@ public final class MethodOperatorResolver {
 
     public static IrModule resolve(IrModule module, boolean resolveMethods, boolean routeOperators)
             throws CompileException {
+        // Reject an unresolved free/static call before receiver-type inference runs — else a
+        // missing import surfaces downstream as the misleading "cannot determine the receiver"
+        // error. Idempotent: a no-op re-run on already-resolved IR (resolved operator/method
+        // Calls are declared names or operator symbols). See CallNameCheck.
+        CallNameCheck.check(module);
         MethodOperatorResolver r = new MethodOperatorResolver(module, resolveMethods, routeOperators);
         InferenceContext ctx = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
@@ -105,6 +110,9 @@ public final class MethodOperatorResolver {
      */
     public static IrModule resolvePerModule(IrModule combined, ModuleSymbolTable table)
             throws CompileException {
+        // The linker's confusing-error site: catch unresolved free/static calls (e.g. an
+        // un-imported TractionCD.of) here, before receiver-type inference. See CallNameCheck.
+        CallNameCheck.check(combined);
         MethodOperatorResolver r = new MethodOperatorResolver(combined, true, true);
         InferenceContext ctx = InferenceContext.fromModule(combined);
         Map<String, ModuleScope> scopes = new LinkedHashMap<>();
@@ -502,7 +510,7 @@ public final class MethodOperatorResolver {
         };
     }
 
-    private static boolean isOperatorSymbol(String s) {
+    static boolean isOperatorSymbol(String s) {  // package-private: reused by CallNameCheck
         return switch (s) {
             case "+", "-", "*", "/", "%", "^", "<", "<=", ">", ">=", "==", "!=" -> true;
             default -> false;
