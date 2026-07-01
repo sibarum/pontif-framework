@@ -76,8 +76,9 @@ no metareference (`$f[…]`), no `[Dispatch(…)]` / `[Method(…)]`, no trait h
 sort. Every trait subject is a **named type**, which is exactly the proven G6 path
 (`assign trait <Struct>:<Trait>`), so the whole mechanism is already supported.
 
-To plot a standalone function, write the one-line type for it:
+To plot a standalone function, write the one-line type for it (`sin` from `pontif.math`):
 ```
+requires pontif.math.{sin}
 struct Sine()
 assign trait Sine:Curve2D { at(x:Decimal):Decimal -> sin(x)  domain() -> {-10.0, 10.0} }
 plotLine(Sine())

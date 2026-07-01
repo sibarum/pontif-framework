@@ -77,6 +77,10 @@ public final class BuiltinModules {
         // CLI included — keeps StdOut/StdErr/stdin. External extensions (the GUI) are installed
         // by their launcher before compile.
         Extensions.install(IoExtension.INSTANCE);
+        // The math library is pure-JDK (java.lang.Math / BigInteger), so it's always present too.
+        // pontif.math = the SPIR-V GLSL.std.450 set; pontif.math.ext = the CPU-only extras.
+        Extensions.install(MathExtension.INSTANCE);
+        Extensions.install(MathExtExtension.INSTANCE);
     }
 
     private BuiltinModules() {}
