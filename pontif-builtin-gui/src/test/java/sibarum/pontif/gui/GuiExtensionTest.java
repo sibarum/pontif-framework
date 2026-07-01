@@ -38,7 +38,10 @@ class GuiExtensionTest {
                 () -> "capitalized-element pontif.gui program should link; got "
                         + (result instanceof CompileResult.Failed f ? f.error().text() : result));
 
-        assertNotNull(NativeCalls.get("window"), "window should be the registered native call");
+        // Natives are registered under their qualified name only (the resolved call name is the
+        // FQN); the bare name is intentionally NOT registered, so it can't hijack a user's local
+        // function of the same name.
+        assertNotNull(NativeCalls.get("pontif.gui/window"), "window should be the registered native call");
     }
 
     @Test

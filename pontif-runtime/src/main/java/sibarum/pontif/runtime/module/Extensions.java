@@ -46,7 +46,10 @@ public final class Extensions {
             NativeFunctions.register(module + "/" + e.getKey(), e.getValue());
         }
         for (Map.Entry<String, NativeCalls.NativeCall> c : ext.calls().entrySet()) {
-            NativeCalls.register(c.getKey(), c.getValue());
+            // Qualified name ONLY. Registering the bare name too would let a common function name
+            // (pow, min, sign, …) from a math extension HIJACK a user's local function of the same
+            // name — the resolved call name is always the FQN (module/name), so the qualified key
+            // is what's looked up. (Bare registration silently overrode local functions.)
             NativeCalls.register(module + "/" + c.getKey(), c.getValue());
         }
     }
