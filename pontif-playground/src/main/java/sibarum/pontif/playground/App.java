@@ -787,10 +787,13 @@ public final class App {
      *  Replaces the buffer outright, like Open; there is no dirty-tracking, so
      *  no save prompt (consistent with the rest of the toolbar). */
     private static void onNewClicked() {
-        TextStates.setContent(codeText, "");
+        // Detach the document BEFORE clearing the buffer — see loadFile: setContent fires the
+        // live-compile autosave synchronously, so a stale currentFile here would blank the
+        // previously open file on disk.
         currentFile = null;
         updateFilenameLabel();
         if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), "", null);
+        TextStates.setContent(codeText, "");
         Status.success("New file");
     }
 
@@ -805,13 +808,18 @@ public final class App {
     private static boolean loadFile(Path path, boolean announce) {
         try {
             String content = Files.readString(path, StandardCharsets.UTF_8);
-            TextStates.setContent(codeText, content);  // fires onEditorContentChanged → snapshot + highlight
+            // Adopt the document BEFORE pushing content into the editor. setContent fires
+            // onEditorContentChanged synchronously, which schedules the live-compile autosave
+            // against `currentFile` (and pushes the recovery baseline). If the buffer were set
+            // first, that autosave would target the PREVIOUSLY open file and overwrite it with
+            // the newly opened file's content — the file-swap corruption bug.
             currentFile = path;
             updateFilenameLabel();
             if (session != null) {
                 session.onDocumentChanged(RecoveryStore.keyFor(path), content,
                         path.toAbsolutePath().normalize().toString());
             }
+            TextStates.setContent(codeText, content);  // fires onEditorContentChanged → highlight + live-compile
             if (announce) Status.success("Opened " + path.getFileName());
             return true;
         } catch (IOException e) {
