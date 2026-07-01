@@ -65,7 +65,9 @@ import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
 import sibarum.pontif.runtime.ReflectionReport;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -555,9 +557,12 @@ public final class App {
      * the {@code pontif-builtin-gui} {@code GuiLauncher} (docs/extensions.md). The GUI program
      * owns its own GLFW context + root thread, so it never collides with the editor's window/loop
      * (which is why this can't just run in-process via the "Run" path). Runs on a worker thread
-     * so the editor stays responsive while the window is open; the subprocess inherits stdio so
-     * its console (link errors, emit output) is visible. Classpath is inherited from the editor,
-     * which depends on pontif-builtin-gui — so {@code GuiLauncher} and dasum resolve.
+     * so the editor stays responsive while the window is open. The subprocess's stdout/stderr are
+     * merged and captured on that worker thread: each line is echoed to the editor's own console
+     * (preserving the dev-tree console view) AND appended to a bounded tail buffer; on a non-zero
+     * exit the buffer is surfaced in the status log dialog, so the failure reason is visible even
+     * when the editor was launched from the native binary with no console. Classpath is inherited
+     * from the editor, which depends on pontif-builtin-gui — so {@code GuiLauncher} and dasum resolve.
      */
     private static void onRunGuiClicked() {
         String code = TextStates.contentOf(codeText);
@@ -580,14 +585,21 @@ public final class App {
                         tmp.toString(),
                         resolveArg,
                         sourceName);
-                pb.inheritIO();
+                pb.redirectErrorStream(true);   // merge stderr into stdout: one chronological stream
                 Process proc = pb.start();
+                // Drain the merged stream to EOF (which coincides with process exit), echoing each
+                // line to the console and accumulating a bounded tail — no separate reader thread,
+                // no pipe-buffer deadlock. waitFor() then returns immediately.
+                String captured = drainAndCapture(proc);
                 int exit = proc.waitFor();
                 if (exit == 0) {
                     Status.success("GUI window closed (" + sourceName + ")");
                 } else {
+                    String details = captured.isBlank()
+                            ? "The GUI program reported a non-zero exit — see the console for details."
+                            : captured;
                     Status.error("GUI program exited with code " + exit + " (" + sourceName + ")",
-                            "The GUI program reported a non-zero exit — see the console for details.");
+                            details);
                 }
             } catch (IOException | InterruptedException e) {
                 Status.error("Could not launch GUI window: " + e.getMessage(), String.valueOf(e));
@@ -603,6 +615,37 @@ public final class App {
         }, "pontif-gui-runner");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /** Cap on the captured GUI-output tail surfaced in the log dialog (chars). */
+    private static final int GUI_CAPTURE_CAP = 64 * 1024;
+
+    /**
+     * Reads {@code proc}'s (merged) output stream to EOF, echoing each line to the editor's own
+     * {@code System.out} and accumulating a bounded tail. Only the last {@link #GUI_CAPTURE_CAP}
+     * characters are retained (a long-lived window can't grow this without limit); when the tail
+     * is trimmed a marker is prefixed. Returns the captured tail; never throws (a read failure
+     * just ends capture, leaving what was gathered so far).
+     */
+    private static String drainAndCapture(Process proc) {
+        StringBuilder buf = new StringBuilder();
+        try (BufferedReader r = new BufferedReader(
+                new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                System.out.println(line);           // preserve the live console view
+                buf.append(line).append('\n');
+                if (buf.length() > GUI_CAPTURE_CAP) {
+                    buf.delete(0, buf.length() - GUI_CAPTURE_CAP);
+                }
+            }
+        } catch (IOException ignored) {
+            // read failed / stream closed early — return whatever was captured so far
+        }
+        String out = buf.toString();
+        return out.length() >= GUI_CAPTURE_CAP
+                ? "…(earlier output truncated)…\n" + out
+                : out;
     }
 
     /**
