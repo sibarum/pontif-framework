@@ -1,0 +1,22 @@
+requires pontif.plot.{HeightMap3D, surface, wire, cmap, scene}
+requires cott.traction.cd.{TractionCD}
+
+# The traction field x / y — a ratio, so its height depends only on the angle around the
+# origin, which reads as a spiral ramp. Now a composed scene: turbo colormap, a wireframe of
+# the sample grid, and a labeled/tick-marked axis box (scene draws graduations by default).
+
+struct TractionField()
+
+assign trait TractionField:HeightMap3D {
+
+  at(x:Decimal, y:Decimal):Decimal -> (
+    TractionCD.of(x, 1.0) / TractionCD.of(y, 1.0)
+  ).normalize().n.toReal()
+
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-10.0, 10.0, -10.0, 10.0}
+
+}
+
+main ( scene({title = "Traction field  x / y"}, {
+  wire(cmap(surface(TractionField()), "turbo"))
+}) )

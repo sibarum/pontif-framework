@@ -168,8 +168,9 @@ public final class DasumBridge {
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
         boolean axes = cfgBool(args, 0, "axes", true);   // graduations on by default
         boolean grid = cfgBool(args, 0, "grid", true);
+        boolean equalAspect = "equal".equals(cfgStr(args, 0, "aspect"));  // default: box (cube) aspect
         SceneBuild build = buildSceneLayers(layers);
-        return openWindowWithRoot(title, () -> sceneComponent(build, axes, grid));
+        return openWindowWithRoot(title, () -> sceneComponent(build, axes, grid, equalAspect));
     }
 
     private static double arg(List<Object> args, int i) {
@@ -385,8 +386,8 @@ public final class DasumBridge {
      * ensures it).
      */
     static Component buildCloudView(float[] xyz) {
-        Component.SceneView view =
-                new Component.SceneView(Em.of(24f), Em.of(16f), Em.ZERO, PLOT_BG, true, 1);
+        Component.SceneView view =                       // null size → fills the window
+                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
         SceneStates.publish(view, SceneSnapshot.of(new PointLayer(xyz, null)));
         SceneStates.setCamera(view, CameraSpec.defaultPerspective());
         SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
@@ -405,8 +406,8 @@ public final class DasumBridge {
         if (mesh == null) {
             return errorLabel("surface needs an N*N grid (N>=2); got " + zs.length + " heights");
         }
-        Component.SceneView view =
-                new Component.SceneView(Em.of(26f), Em.of(18f), Em.ZERO, PLOT_BG, true, 1);
+        Component.SceneView view =                       // null size → fills the window
+                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
         // OPAQUE (not the TriangleLayer 2-arg default of ALPHA): the surface is solid, so it must
         // WRITE the depth buffer. An ALPHA layer has depth writes disabled in SceneRenderer, which
         // leaves the surface rendering in submission order — far triangles bleed through near ones.
@@ -630,37 +631,98 @@ public final class DasumBridge {
         b.add(memberD(rv, "x"), memberD(rv, "y"), memberD(rv, "z"));
     }
 
-    /** The scene component: one {@link Component.SceneView} carrying all layers (plus the axis box
-     *  when {@code axes}), framed to bounds. */
-    private static Component sceneComponent(SceneBuild build, boolean axes, boolean grid) {
-        List<Layer> layers = new ArrayList<>(build.layers());
-        if (axes) layers.addAll(axisBoxLayers(build.min(), build.max(), grid));
-        Component.SceneView view =
-                new Component.SceneView(Em.of(26f), Em.of(18f), Em.ZERO, PLOT_BG, true, 1);
-        SceneStates.publish(view, new SceneSnapshot(layers));
-        SceneStates.setCamera(view,
-                CameraRig.fitToBounds(CameraSpec.defaultPerspective(), build.min(), build.max()));
+    /** Target side length of the display cube for box-aspect normalization. */
+    private static final float CUBE = 10f;
+
+    /**
+     * The scene component: one window-filling {@link Component.SceneView} carrying all layers (plus
+     * the axis box when {@code axes}). Geometry is built in DATA space and then mapped into a display
+     * cube so any data range reads well (box aspect); {@code equalAspect} keeps true proportions
+     * instead. A colorbar sidebar is added when the scene has a surface.
+     */
+    private static Component sceneComponent(SceneBuild build, boolean axes, boolean grid, boolean equalAspect) {
+        List<Layer> raw = new ArrayList<>(build.layers());
+        if (axes) raw.addAll(axisBoxLayers(build.min(), build.max(), grid));
+
+        Transform t = equalAspect ? Transform.IDENTITY : boxTransform(build.min(), build.max());
+        float textScale = t.gmean();
+        List<Layer> shown = new ArrayList<>(raw.size());
+        for (Layer l : raw) shown.add(scaleLayer(l, t, textScale));
+
+        Component.SceneView view =                       // null width/height → fills the window
+                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+        SceneStates.publish(view, new SceneSnapshot(shown));
+        SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
+                t.apply(build.min()), t.apply(build.max())));
         SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
         if (build.bar() == null) return view;
-        // Colorbar key beside the scene (reuses component composition, not a second camera).
+        // Colorbar key beside the scene: the view flex-grows to fill, the bar takes its own width.
         return new Component.Flex(null, null, Em.of(0.6f), TRANSPARENT,
-                Direction.ROW, JustifyContent.CENTER, AlignItems.CENTER, Em.of(1f),
+                Direction.ROW, JustifyContent.START, AlignItems.STRETCH, Em.of(0.8f),
                 List.of(view, colorbar(build.bar())), false, 1);
     }
 
-    /** A vertical colorbar strip (high at top) for {@code bar}'s colormap, with min/max labels. */
+    // --- Box-aspect normalization: map data-space coordinates into a display cube ---------------
+
+    /** A per-axis affine map (center + scale) from data space into the display cube. Tick labels
+     *  keep their data values; only positions are transformed. */
+    private record Transform(float cx, float cy, float cz, float sx, float sy, float sz) {
+        static final Transform IDENTITY = new Transform(0, 0, 0, 1, 1, 1);
+        float ax(double v) { return (float) ((v - cx) * sx); }
+        float ay(double v) { return (float) ((v - cy) * sy); }
+        float az(double v) { return (float) ((v - cz) * sz); }
+        Vec3 apply(Vec3 p) { return new Vec3(ax(p.x()), ay(p.y()), az(p.z())); }
+        /** Uniform factor for scaling text height (geometric mean of the axis scales). */
+        float gmean() { return (float) Math.cbrt(Math.abs((double) sx * sy * sz)); }
+    }
+
+    /** Build the box transform mapping {@code [lo, hi]} onto a {@code CUBE}-sided cube centred at origin. */
+    private static Transform boxTransform(Vec3 lo, Vec3 hi) {
+        float cx = (lo.x() + hi.x()) / 2f, cy = (lo.y() + hi.y()) / 2f, cz = (lo.z() + hi.z()) / 2f;
+        return new Transform(cx, cy, cz,
+                CUBE / Math.max(1e-4f, hi.x() - lo.x()),
+                CUBE / Math.max(1e-4f, hi.y() - lo.y()),
+                CUBE / Math.max(1e-4f, hi.z() - lo.z()));
+    }
+
+    /** Rebuild a layer with its coordinates mapped through {@code t} (text height by {@code textScale}). */
+    private static Layer scaleLayer(Layer l, Transform t, float textScale) {
+        if (t == Transform.IDENTITY) return l;
+        return switch (l) {
+            case TriangleLayer tr -> new TriangleLayer(scaleXYZ(tr.vertices(), t), tr.colors(), tr.blend(), tr.opacity());
+            case PointLayer p -> new PointLayer(scaleXYZ(p.positions(), t), p.colors(), p.sizes(),
+                    p.defaultSizePx(), p.blend(), p.opacity());
+            case LineLayer ln -> new LineLayer(scaleXYZ(ln.endpoints(), t), ln.colors(), ln.blend(), ln.opacity());
+            case TextLayer tx -> new TextLayer(tx.text(), tx.fontGroup(), t.apply(tx.anchor()),
+                    tx.heightWorld() * textScale, tx.color(), tx.align(), tx.billboard(), tx.blend(), tx.opacity());
+            default -> l;
+        };
+    }
+
+    /** Map every interleaved xyz triple in {@code a} through {@code t}, returning a new array. */
+    private static float[] scaleXYZ(float[] a, Transform t) {
+        float[] o = new float[a.length];
+        for (int i = 0; i + 2 < a.length; i += 3) {
+            o[i] = t.ax(a[i]); o[i + 1] = t.ay(a[i + 1]); o[i + 2] = t.az(a[i + 2]);
+        }
+        return o;
+    }
+
+    /** A vertical colorbar strip (high at top) for {@code bar}'s colormap, with min/max labels.
+     *  Fixed width (an explicit flex basis): a null-width flex child resolves to intrinsic 0 and,
+     *  with no grow weight, would be allocated 0px and overflow its content off-screen. */
     private static Component colorbar(Bar bar) {
         int steps = 24;
         List<Component> col = new ArrayList<>();
         col.add(new Component.Text(fmtNum(bar.hi()), Em.of(0.85f), TEXT));
         for (int i = steps - 1; i >= 0; i--) {           // top row = highest value
             float[] c = colorFor(bar.colormap(), i / (float) (steps - 1));
-            col.add(new Component.Flex(Em.of(1.5f), Em.of(0.32f), Em.ZERO, new Color(c[0], c[1], c[2], 1f),
+            col.add(new Component.Flex(Em.of(2.4f), Em.of(0.32f), Em.ZERO, new Color(c[0], c[1], c[2], 1f),
                     Direction.COLUMN, JustifyContent.CENTER, AlignItems.CENTER, Em.ZERO,
                     List.of(), false, 0));
         }
         col.add(new Component.Text(fmtNum(bar.lo()), Em.of(0.85f), TEXT));
-        return new Component.Flex(null, null, Em.of(0.4f), TRANSPARENT,
+        return new Component.Flex(Em.of(4f), null, Em.of(0.4f), TRANSPARENT,
                 Direction.COLUMN, JustifyContent.CENTER, AlignItems.CENTER, Em.of(0.15f),
                 col, false, 0);
     }
