@@ -54,6 +54,21 @@ class ReadmeSnippetTest {
                 "expected a compile rejection");
     }
 
+    /** A gated run plus whatever the program wrote to stdout (for the {@code emit StdOut} snippet). */
+    private record StdoutRun(String value, String stdout) {}
+
+    private StdoutRun runCapturingStdout(String src) {
+        java.io.PrintStream orig = System.out;
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        try {
+            System.setOut(new java.io.PrintStream(buf, true, java.nio.charset.StandardCharsets.UTF_8));
+            String value = runGated(src);
+            return new StdoutRun(value, buf.toString(java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            System.setOut(orig);
+        }
+    }
+
     // --- Read it top to bottom (the opener) ---------------------------------
 
     @Test
@@ -458,5 +473,44 @@ class ReadmeSnippetTest {
 
                 let [{x, y}] = swap({1, true}) y
                 """));
+    }
+
+    // --- The math library (pontif.math + pontif.math.ext, default-installed) --
+
+    @Test
+    void readmeMathSnippet_mixesGlslAndExtInteger() {
+        assertEquals("22.0", runGated("""
+                requires pontif.math.{sqrt, clamp}
+                requires pontif.math.ext.{gcd, choose}
+
+                sqrt(9.0) + clamp(9.0, 0.0, 5.0) + gcd(12, 8) + choose(5, 2)
+                """));
+    }
+
+    @Test
+    void readmeMathSnippet_transcendentalPrecisionIsHonest() {
+        assertEquals("1.4142135623730951", runGated("""
+                requires pontif.math.{sqrt}
+                sqrt(2.0)
+                """));
+    }
+
+    // --- Actions and events (pontif.events, emit + action) -------------------
+
+    @Test
+    void readmeEventsSnippet_emitFansOutToMatchingActions() {
+        StdoutRun r = runCapturingStdout("""
+                requires pontif.events.{Event, StdOut}
+
+                struct Tick(n:Int)
+                assign trait Tick:Event{}
+
+                action log(e:Tick)              -> emit StdOut("tick ")  e
+                action alarm(e:[Tick:@.n > 10]) -> emit StdOut("BIG")    e
+
+                main ( emit Tick(42)  0 )
+                """);
+        assertEquals("0", r.value());          // main's trailing expr; emit is write-only
+        assertEquals("tick BIG", r.stdout());   // log fires for every Tick, alarm only when @.n > 10
     }
 }

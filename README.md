@@ -24,6 +24,10 @@ allowed to lie.
 - [Operator overloading](#operator-overloading)
 - [Proofs and synthesis](#proofs-and-synthesis)
 - [Conservation receipts — the second ledger](#conservation-receipts--the-second-ledger)
+- [The math library](#the-math-library)
+- [Actions and events](#actions-and-events)
+- [The GUI framework](#the-gui-framework)
+- [Plotting](#plotting)
 - [One inference engine, every stage](#one-inference-engine-every-stage)
 - [The compiler](#the-compiler)
 - [Source code explained](#source-code-explained)
@@ -320,9 +324,9 @@ return — there they are the author's own, not a contract's. See
 Two receivers to keep distinct: **`this`** is a method's injected instance
 (`this.weight`); **`@`** is the value in flight inside a `[...]` — the one under a
 refinement predicate, or the one a transform-chain is mid-converting. They are
-orthogonal. (Looking ahead: a future `action` construct will be where
-*mutation* lives — observed, ledgered, and proof-licensed; it is drafted in
-`docs/actions.md`, not yet implemented.)
+orthogonal. (Effects live in the event substrate — the write-only `emit`
+primitive and `action` reactions — its own section below:
+[Actions and events](#actions-and-events).)
 
 ## Type extension — a richer type
 
@@ -704,6 +708,139 @@ proof swap = Reversible()          # bijective rewiring — invertibility witnes
 let [{x, y}] = swap({1, true}) y   # → 1
 ```
 
+## The math library
+
+Two builtin modules ship with every program, split by *where the math can run*.
+`pontif.math` is exactly the SPIR-V `GLSL.std.450` set — `sin` / `cos` / `sqrt` /
+`pow`, `clamp` / `mix` / `smoothstep`, `floor` / `abs` / `sign`, and constants like
+`pi()` — the GPU-portable surface, every function mapping 1:1 to a GPU opcode.
+`pontif.math.ext` adds the CPU-only integer number theory that has no such opcode —
+`gcd`, `lcm`, `factorial`, `choose`, `modpow`, `isqrt`. Both are installed by
+default; you reach a function by `requires`-ing it.
+
+```pontif
+requires pontif.math.{sqrt, clamp}
+requires pontif.math.ext.{gcd, choose}
+
+sqrt(9.0) + clamp(9.0, 0.0, 5.0) + gcd(12, 8) + choose(5, 2)   # → 22.0
+```
+
+The split is enforced, not cosmetic: `requires pontif.math.{gcd}` is a compile error
+(`gcd` has no GLSL opcode, so it lives only in `pontif.math.ext`) — the module
+boundary states honestly what will and won't lower to a GPU.
+
+Honesty extends to precision. The exact common ops (`abs`, `floor`, `clamp`, `mix`,
+`fma`, …) are computed exactly over `Decimal`; the transcendentals are `double`-backed
+and return *exactly the digits a `double` justifies* — never a long exact-looking
+expansion claiming a certainty it doesn't have:
+
+```pontif
+requires pontif.math.{sqrt}
+sqrt(2.0)   # → 1.4142135623730951  (the honest ~17 digits of a double, no more)
+```
+
+## Actions and events
+
+Side effects enter through one door: **`emit`**. `emit E(…)` fires a value of an event
+type into a per-type conduit and *returns nothing* — it is write-only, and the emitter
+never observes what happens downstream. You react with an **`action`**: a consumer
+`action name(e:Sort) -> body` that runs — synchronously, in declaration order —
+whenever an `emit` produces an event its parameter *sort* accepts. The sort **is** the
+filter, so a refinement narrows which instances fire, and one event fans out to every
+matching action. `StdOut` / `StdErr` are the builtin sink events.
+
+```pontif
+requires pontif.events.{Event, StdOut}
+
+struct Tick(n:Int)
+assign trait Tick:Event{}
+
+action log(e:Tick)              -> emit StdOut("tick ")  e
+action alarm(e:[Tick:@.n > 10]) -> emit StdOut("BIG")    e
+
+main ( emit Tick(42)  0 )       # prints "tick BIG"; main's own value is 0
+```
+
+`log` fires for every `Tick`; `alarm` fires only when `@.n > 10`, so `Tick(42)`
+triggers both (in declaration order) while `Tick(3)` would trigger only `log`. An
+event with *no* consumer — neither a sink nor an action — is an error, not a silent
+drop: effects fail closed like everything else. `main ( … )` is the program's
+top-level effect block. This is the realized core of the effect model — the `emit`
+primitive the trait *sort-transform shells* were scaffolding for (`docs/events.md`).
+
+## The GUI framework
+
+`pontif.gui` drives a native window through that same trait-and-event machinery.
+Elements are plain structs — `Label`, `Button`, `Column` — and `window(cfg, tree)` is
+the effect that renders them. Interactivity rides the event substrate: subtype the
+library `Button` into a type *you* own (the orphan rule forbids adding a method to a
+type you don't), give it the `Clickable` trait, and have `onClick` **emit** — so a
+click becomes an event your `action`s react to, exactly as above.
+
+```pontif
+requires pontif.gui.{Label, Button, Column, window, Clickable}
+requires pontif.events.{StdOut}
+
+struct PushButton:[Button](text:String)
+assign trait PushButton:Clickable {
+  onClick():_ -> emit StdOut("button clicked!")  this
+}
+
+main (
+  let lbl = Label("Press the Button")
+  let btn = PushButton("Press me")
+  window({title = "Hello"}, {
+    Column("center", "middle", {lbl, btn})
+  })
+)
+```
+
+The backing toolkit is the author's own flexbox / OpenGL library; `pontif.gui` is the
+only module that depends on it, and it is installed by the GUI launcher rather than the
+bare runtime (see below).
+
+## Plotting
+
+`pontif.plot` turns *any type that describes a shape* into a chart: you implement a
+tiny trait and the library samples it and opens an orbitable window. A 2D curve is a
+`Curve2D` (`at(x)` plus a `domain()`); a 3D surface is a `HeightMap3D` (`at(x, y)` plus
+a rectangular domain); a point set is a `Cloud3D`. The projection body is ordinary
+Pontif — free to call the math library above (`at(x) -> sin(x)`, say).
+
+```pontif
+requires pontif.plot.{HeightMap3D, plotSurface}
+
+struct Bowl()
+assign trait Bowl:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+main ( plotSurface(Bowl()) )   # samples a 33×33 grid, meshes it, orbits on drag
+```
+
+The 2D and point-cloud siblings are symmetric — implement `Curve2D` / `Cloud3D` and
+hand the value to `plotLine` / `plotCloud`:
+
+```pontif
+requires pontif.plot.{Curve2D, plotLine}
+
+struct Parabola()
+assign trait Parabola:Curve2D {
+  at(x:Decimal):Decimal -> x * x
+  domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+}
+
+main ( plotLine(Parabola()) )
+```
+
+The `pontif.gui` and `pontif.plot` modules are provided by the `pontif-builtin-gui`
+package and installed by its `GuiLauncher` (which the Pontif Editor's **Run GUI** uses)
+— not by the bare `pontif-runtime` compiler — so these four snippets open a real window
+and are illustrative here rather than pinned by `ReadmeSnippetTest`. Everything in the
+[math](#the-math-library) and [actions/events](#actions-and-events) sections *is* pinned:
+those modules are built in.
+
 ## One inference engine, every stage
 
 Everything above — refinement, dispatch, match, the return gate — rests on one
@@ -801,9 +938,13 @@ parse → link modules → resolve aliases → promote literals → construction
   shipped feature.
 
 Every ` ```pontif ` snippet above — except the illustrative fragments in the
-[Streams](#streams) section — is pinned by `ReadmeSnippetTest`: the README compiles,
-or the build fails. (The stream operations carry their own dedicated tests —
-`StreamMapTest`, `StreamGeneratorTest`, `StreamTakeWhileTest`, and siblings.) See
+[Streams](#streams) section and the window-opening snippets in the
+[GUI](#the-gui-framework) and [Plotting](#plotting) sections (whose `pontif.gui` /
+`pontif.plot` modules live in `pontif-builtin-gui`, out of `pontif-runtime`'s reach)
+— is pinned by `ReadmeSnippetTest`: the README compiles, or the build fails. (The
+stream operations carry their own dedicated tests — `StreamMapTest`,
+`StreamGeneratorTest`, `StreamTakeWhileTest`, and siblings; the GUI and plot snippets
+are pinned by `GuiExtensionTest` / `PlotExtensionTest` in that package.) See
 `docs/alternative-syntax.ptf` for the canonical
 reference, `docs/glossary.md` for terms, and `docs/backward-language-design.md`
 for the method that produced all of this (the theory is layer zero; the whole
@@ -821,8 +962,9 @@ language is one big syntactic sugar for it).
 | `pontif-parser` | Two parsers sharing the same IR: the **reference parser** (`Parser`, S-expression, stable, for tests / reference) and the **Pontif parser** (`AltParser`, the user-facing surface) — including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
-| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
-| `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
+| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), and `MathExtExtension` (`pontif.math.ext`). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
+| `pontif-builtin-gui` | The GUI + plotting extensions — `GuiExtension` (`pontif.gui`: `window`, `Label`/`Button`/`Column`, `Clickable`) and `PlotExtension` (`pontif.plot`: `Curve2D`/`HeightMap3D`/`Cloud3D` → `plotLine`/`plotSurface`/`plotCloud`), bridged onto the author's dasum flexbox/OpenGL toolkit via `DasumBridge` and installed by `GuiLauncher`. The one module that depends on dasum for rendering. |
+| `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit; its **Run GUI** launches a program through `pontif-builtin-gui`'s `GuiLauncher`. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
 | `pontif-cli` | The **`pontif`** command-line tool — `run`, `pack`, `console`, `new`, `editor` — over the `pontif-runtime` compile/run surface. picocli-based; runs on the JVM and as a GraalVM native image. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, match. |
 
@@ -884,6 +1026,20 @@ Capabilities that work end-to-end in the Pontif surface syntax:
   **first-class values** — passed, returned, typed `[Method(A):R]` — and **generic stream
   combinators** run both **explicitly** (`map[Int,String](s, $toString[Int])`) and by
   **inference** (`map(s, $double[Int])`)
+- **A builtin math library** — `pontif.math` (the SPIR-V `GLSL.std.450` set:
+  trig / hyperbolic / exp-log, `clamp` / `mix` / `smoothstep`, exact common ops,
+  constants) split from `pontif.math.ext` (CPU-only integer number theory:
+  `gcd` / `lcm` / `factorial` / `choose` / `modpow` / `isqrt`); both default-installed,
+  with honest double-bounded precision on the transcendentals
+- **An effect substrate** — the write-only **`emit`** primitive and **`action`**
+  reactions (`action name(e:Sort) -> …`, sort-as-filter, synchronous, fan-out in
+  declaration order, fail-closed on no consumer); `pontif.events` (`Event`, `StdOut` /
+  `StdErr`, `EventConduit` / `EventStream`) is built in
+- **A GUI framework and plotting** (`pontif-builtin-gui`) — `pontif.gui` renders a
+  native window from `Label` / `Button` / `Column` with `Clickable` widgets that
+  `emit` on click; `pontif.plot` charts any type that satisfies a shape trait
+  (`Curve2D` → `plotLine`, `HeightMap3D` → `plotSurface`, `Cloud3D` → `plotCloud`),
+  installed by the editor's **Run GUI** launcher
 
 ### What's next
 
@@ -903,11 +1059,14 @@ threads remain (see `docs/stream-war.md` and `docs/TODO.md`):
    `@%2==0` can't yet be written. Unblocking them adds constant-modulus congruences
    (the divisibility extension Presburger already needs) plus a piecewise-linear
    case-split for the variable-divisor case.
-3. **Sort-transforms → effects** — both shells (argument and return) on trait methods
-   now land (`docs/sort-transforms.md`); the frontier is the `emit` primitive they
-   scaffold (`docs/events.md`): a side-effect injected by a method's *shape* — declared
-   in the shell, adjacent to the function it belongs to, folded away by partial
-   evaluation everywhere it does nothing.
+3. **The effect substrate is live — concurrency is the remainder.** `emit` + `action`
+   reactions now ship (`docs/events.md`), with the first external consumers built on
+   them: the `pontif.gui` window toolkit and `pontif.plot` charts (see
+   [Actions and events](#actions-and-events), [GUI](#the-gui-framework),
+   [Plotting](#plotting)). Both shells on trait methods that scaffolded `emit` also
+   landed (`docs/sort-transforms.md`). What remains is folding events into the
+   *concurrency* model — asynchronous conduits and back-pressured `EventStream`
+   receivers — which rides on the infinite-stream work in (1).
 
 See `docs/TODO.md` for the active work list and parked design sketches.
 
