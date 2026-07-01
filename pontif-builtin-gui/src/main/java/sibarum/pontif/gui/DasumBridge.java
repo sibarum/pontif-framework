@@ -39,6 +39,7 @@ import sibarum.dasum.gui.vis.math.CameraRig;
 import sibarum.dasum.gui.vis.math.CameraSpec;
 import sibarum.dasum.gui.vis.math.Vec3;
 import sibarum.dasum.gui.vis.pointcloud.SceneViewController;
+import sibarum.dasum.gui.vis.scene.BlendMode;
 import sibarum.dasum.gui.vis.scene.InteractionSpec;
 import sibarum.dasum.gui.vis.scene.PointLayer;
 import sibarum.dasum.gui.vis.scene.SceneSnapshot;
@@ -351,7 +352,11 @@ public final class DasumBridge {
 
         Component.SceneView view =
                 new Component.SceneView(Em.of(26f), Em.of(18f), Em.ZERO, PLOT_BG, true, 1);
-        SceneStates.publish(view, SceneSnapshot.of(new TriangleLayer(verts, cols)));
+        // OPAQUE (not the TriangleLayer 2-arg default of ALPHA): the surface is solid, so it must
+        // WRITE the depth buffer. An ALPHA layer has depth writes disabled in SceneRenderer, which
+        // leaves the surface rendering in submission order — far triangles bleed through near ones.
+        SceneStates.publish(view,
+                SceneSnapshot.of(new TriangleLayer(verts, cols).withBlend(BlendMode.OPAQUE)));
         SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
                 new Vec3((float) xlo, (float) zmin, (float) ylo),
                 new Vec3((float) xhi, (float) zmax, (float) yhi)));
