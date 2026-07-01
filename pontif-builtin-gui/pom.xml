@@ -29,6 +29,12 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-runtime</artifactId>
         </dependency>
+        <!-- The debug port: GuiLauncher attaches a DebugSession when the editor asks it to. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-net</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-core</artifactId>

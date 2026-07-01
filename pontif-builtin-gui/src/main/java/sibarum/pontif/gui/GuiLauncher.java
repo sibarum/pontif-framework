@@ -1,5 +1,6 @@
 package sibarum.pontif.gui;
 
+import sibarum.pontif.net.debug.DebugSession;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
@@ -29,12 +30,18 @@ public final class GuiLauncher {
         }
         Extensions.install(new GuiExtension());
         Extensions.install(new PlotExtension());
+        Extensions.install(new sibarum.pontif.net.NetExtension());
 
         Path target = Path.of(args[0]);
         Path resolveDir = args.length > 1 && !args[1].isBlank() ? Path.of(args[1]) : null;
         String source = Files.readString(target);
         String displayName = args.length > 2 && !args[2].isBlank()
                 ? args[2] : target.getFileName().toString();
+
+        // Attach the editor's debug port if it asked for one (via PONTIF_DEBUG_PORT); the tap then
+        // mirrors this program's emit fan-out back to the editor. No-op when run outside the editor.
+        DebugSession debug = DebugSession.attachFromEnv(displayName);
+
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
 
@@ -43,10 +50,16 @@ public final class GuiLauncher {
                 PontifRunner.Engine.INTERPRETER);
 
         if (result.isError()) {
+            if (debug != null) {
+                debug.runFailed(result.text(), 0, 0);
+            }
             System.err.println(result.text());
             System.exit(1);
         }
         // Success: the window has opened and been closed. The window call's result is the inert
         // for-effect placeholder (rendered as no output), so there is nothing to print.
+        if (debug != null) {
+            debug.runCompleted(result.text());
+        }
     }
 }

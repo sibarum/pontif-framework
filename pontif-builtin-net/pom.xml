@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-builtin-net</artifactId>
+
+    <!--
+      The networking builtin: bridges Pontif's event substrate onto elektro-Q (the reflection-free
+      message-passing library that is itself "part of the Pontif project"). Two consumers ride this
+      one bridge: (1) the Pontif Editor's debug port — a running program streams typed telemetry back
+      to the editor over TCP loopback; and (2) the `pontif.net` builtin module — cross-thread /
+      cross-process / cross-network EventConduits with the SAME program code. The RecordValue<->wire
+      converter (PontifDyn) is the shared crux. Depends on elektro-Q, not on dasum.
+    -->
+    <properties>
+        <elektroq.version>1.0-SNAPSHOT</elektroq.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ast</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.elektro.queue</groupId>
+            <artifactId>elektroq-core</artifactId>
+            <version>${elektroq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.elektro.queue</groupId>
+            <artifactId>elektroq-transport-tcp</artifactId>
+            <version>${elektroq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.elektro.queue</groupId>
+            <artifactId>elektroq-transport-local</artifactId>
+            <version>${elektroq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!--
+              Since JDK 23 javac no longer auto-discovers processors on the classpath, so the
+              elektro-Q codec generator is declared explicitly on the processor path (with
+              elektroq-core, which it needs). This keeps it out of the runtime jar.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>sibarum.elektro.queue</groupId>
+                            <artifactId>elektroq-codegen</artifactId>
+                            <version>${elektroq.version}</version>
+                        </path>
+                        <path>
+                            <groupId>sibarum.elektro.queue</groupId>
+                            <artifactId>elektroq-core</artifactId>
+                            <version>${elektroq.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

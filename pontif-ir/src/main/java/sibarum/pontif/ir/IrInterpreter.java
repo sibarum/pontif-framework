@@ -37,8 +37,36 @@ public final class IrInterpreter {
 
     private static final DriveResult DRIVE_RAN = new DriveResult();
 
+    /**
+     * An optional observer of the event substrate — the seam a debugger or telemetry channel taps
+     * to watch a program's {@code emit} fan-out without changing its behaviour (docs/events.md). It
+     * is notified for every event fired through {@link #fireEvent} (both a program {@code emit} and
+     * a native re-entry such as a GUI click), in the interpreter's own single thread, before the
+     * reactions run. A no-op by default; the Pontif Editor's debug port installs one via
+     * {@link #installEventListener}. Purely observational: it must not mutate the event or throw.
+     */
+    public interface EventListener {
+
+        /** A {@code rec} event was fired; {@code seq} is its monotonic index within this run. */
+        void onEmit(RecordValue event, long seq, Origin origin);
+
+        /** A registered {@code action} (named {@code reactionName}) matched and is about to run. */
+        default void onActionFired(String reactionName, RecordValue event) {}
+    }
+
+    private static volatile EventListener globalListener;
+
+    /** Installs the process-wide {@link EventListener} new interpreters pick up. Pass null to clear. */
+    public static void installEventListener(EventListener listener) {
+        globalListener = listener;
+    }
+
+    private final EventListener eventListener;
+    private final java.util.concurrent.atomic.AtomicLong emitSeq = new java.util.concurrent.atomic.AtomicLong();
+
     public IrInterpreter(Simplifier simplifier) {
         this.simplifier = simplifier;
+        this.eventListener = globalListener;
     }
 
     public Object eval(CompiledModule module) {
@@ -235,6 +263,9 @@ public final class IrInterpreter {
      */
     public void fireEvent(RecordValue rec, CompiledModule module, Origin origin) {
         String typeName = rec.typeName();
+        if (eventListener != null) {
+            eventListener.onEmit(rec, emitSeq.incrementAndGet(), origin);
+        }
         SymExpr sym = toSymExpr(rec);
         List<CompiledModule.CompiledAction> actions = module.actionsFor(typeName);
         if (actions.isEmpty()) actions = module.actionsFor(bareName(typeName));
@@ -242,6 +273,9 @@ public final class IrInterpreter {
             if (Refinements.satisfies(sym, action.matchSort(), checker(module))
                     instanceof ProofResult.Passed) {
                 CompiledModule.CompiledFunction fn = action.reaction();
+                if (eventListener != null) {
+                    eventListener.onActionFired(actionDisplayName(fn), rec);
+                }
                 Environment reactionEnv = Environment.empty()
                         .extend(fn.params().get(0).name(), rec);
                 eval(fn.body(), reactionEnv, module);
@@ -251,6 +285,13 @@ public final class IrInterpreter {
         if (sink != null) {
             sink.apply(rec, origin);
         }
+    }
+
+    /** The author-visible name of an action reaction, recovered from its {@code #action#N#name} key. */
+    private static String actionDisplayName(CompiledModule.CompiledFunction fn) {
+        String key = fn.decl().name();
+        int hash = key.lastIndexOf('#');
+        return hash < 0 ? key : key.substring(hash + 1);
     }
 
     /** The bare suffix of a possibly module-qualified type name ({@code mod/Tick} → {@code Tick}). */

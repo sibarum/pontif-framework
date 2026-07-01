@@ -56,6 +56,8 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.playground.generated.Icons;
 import sibarum.pontif.gui.GuiExtension;
 import sibarum.pontif.gui.PlotExtension;
+import sibarum.pontif.net.debug.DebugServer;
+import sibarum.pontif.net.debug.DebugSession;
 import sibarum.pontif.runtime.ConservationReport;
 import sibarum.pontif.runtime.IrAstReport;
 import sibarum.pontif.runtime.PontifCompiler;
@@ -573,9 +575,14 @@ public final class App {
         String resolveArg = resolveDir != null ? resolveDir.toString() : "";
         Thread worker = new Thread(() -> {
             Path tmp = null;
+            DebugServer debug = null;
             try {
                 tmp = Files.createTempFile("pontif-gui-", ".ptf");
                 Files.writeString(tmp, code, StandardCharsets.UTF_8);
+                // Stand up the debug port BEFORE spawning, so we can hand the child its port. The
+                // child streams typed telemetry (events, actions, run result) back over loopback;
+                // if the port can't open, run untapped rather than block the launch.
+                debug = startDebugServer(sourceName);
                 String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
                 ProcessBuilder pb = new ProcessBuilder(
                         javaBin,
@@ -585,6 +592,9 @@ public final class App {
                         tmp.toString(),
                         resolveArg,
                         sourceName);
+                if (debug != null) {
+                    pb.environment().put(DebugSession.PORT_ENV, Integer.toString(debug.port()));
+                }
                 pb.redirectErrorStream(true);   // merge stderr into stdout: one chronological stream
                 Process proc = pb.start();
                 // Drain the merged stream to EOF (which coincides with process exit), echoing each
@@ -604,6 +614,9 @@ public final class App {
             } catch (IOException | InterruptedException e) {
                 Status.error("Could not launch GUI window: " + e.getMessage(), String.valueOf(e));
             } finally {
+                if (debug != null) {
+                    debug.close();
+                }
                 if (tmp != null) {
                     try {
                         Files.deleteIfExists(tmp);
@@ -615,6 +628,38 @@ public final class App {
         }, "pontif-gui-runner");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Opens the loopback debug port for a run, or returns {@code null} if it can't bind (the
+     * program then runs untapped). The listener prints the child's typed telemetry — domain
+     * events, action fan-out, and the run result — to the editor's console with a {@code [debug]}
+     * prefix. Program stdout/stderr are intentionally NOT echoed here: the merged process stream
+     * (see {@link #drainAndCapture}) already carries them, so echoing would double them.
+     */
+    private static DebugServer startDebugServer(String source) {
+        try {
+            return DebugServer.start(new DebugServer.Listener() {
+                @Override public void onRunStarted(String src) {
+                    System.out.println("[debug] run started: " + src);
+                }
+                @Override public void onEvent(long seq, String typeName, sibarum.elektro.queue.dyn.DynValue payload) {
+                    System.out.println("[debug] event #" + seq + " " + typeName + " " + payload);
+                }
+                @Override public void onActionFired(String reactionName, String eventType) {
+                    System.out.println("[debug] action " + reactionName + " reacted to " + eventType);
+                }
+                @Override public void onRunCompleted(String resultText) {
+                    System.out.println("[debug] run completed: " + resultText);
+                }
+                @Override public void onRunFailed(String message, int line, int col) {
+                    System.out.println("[debug] run failed: " + message);
+                }
+            });
+        } catch (RuntimeException e) {
+            System.out.println("[debug] port unavailable (" + e.getMessage() + "); running untapped");
+            return null;
+        }
     }
 
     /** Cap on the captured GUI-output tail surfaced in the log dialog (chars). */

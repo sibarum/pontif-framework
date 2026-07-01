@@ -23,6 +23,7 @@
         <module>pontif-playground</module>
         <module>pontif-cli</module>
         <module>pontif-builtin-gui</module>
+        <module>pontif-builtin-net</module>
     </modules>
 
     <properties>
