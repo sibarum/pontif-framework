@@ -1,0 +1,14 @@
+requires pontif.plot.{HeightMap3D, surfaceFine, wire, cmap, scene}
+
+# Wireframe overlay + finer sampling. `surfaceFine` samples a 65x65 grid (4x the default);
+# `wire` overlays the sample-grid mesh so the shape reads clearly. Composes as usual.
+
+struct Spiral()
+assign trait Spiral:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+main ( scene({title = "z = x*y (fine + wireframe)"}, {
+  wire(cmap(surfaceFine(Spiral()), "turbo"))
+}) )

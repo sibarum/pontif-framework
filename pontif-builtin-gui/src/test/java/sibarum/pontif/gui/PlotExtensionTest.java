@@ -6,11 +6,20 @@ import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
+import sibarum.dasum.gui.vis.math.Vec3;
+import sibarum.dasum.gui.vis.scene.BlendMode;
+import sibarum.dasum.gui.vis.scene.Layer;
+import sibarum.dasum.gui.vis.scene.LineLayer;
+import sibarum.dasum.gui.vis.scene.TextLayer;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Headless verification of the plotting extension (docs/plotting.md V1). A user struct satisfies
@@ -130,5 +139,193 @@ class PlotExtensionTest {
         assertEquals(18.0, captured[0][0], 1e-6, "corner (-3,-3) -> 18");          // i=0
         assertEquals(0.0, captured[0][16 * 33 + 16], 1e-6, "centre (0,0) -> 0");   // row 16, col 16
         assertEquals(18.0, captured[0][1088], 1e-6, "corner (3,3) -> 18");         // i=1088
+    }
+
+    @Test
+    void scene_composesSurfaceCloudAndText_intoOneLayerList() {
+        Extensions.install(new PlotExtension());
+
+        // Capture the {layers} tuple scene(...) hands to renderScene — no window opens.
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{HeightMap3D, Cloud3D, surface, cloud, fade, text3d, scene}
+                        struct Bowl()
+                        assign trait Bowl:HeightMap3D {
+                          at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+                          domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+                        }
+                        struct Tetra()
+                        assign trait Tetra:Cloud3D {
+                          points():Stream[[{Decimal,Decimal,Decimal}]] ->
+                            { {0.0,0.0,0.0}, {1.0,0.0,0.0}, {0.0,2.0,0.0} }
+                        }
+                        scene({title = "s"}, {
+                          surface(Bowl()),
+                          fade(surface(Bowl()), 0.5),
+                          cloud(Tetra()),
+                          text3d("peak", {0.0, 18.0, 0.0})
+                        })""", "scene.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "scene program should run; got " + r.text());
+        assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
+
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        // 3 geometry layers (2 surfaces + 1 cloud) then the text label appended last.
+        assertEquals(4, build.layers().size(), "surface + faded surface + cloud + text");
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(0));
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(1));
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.PointLayer.class, build.layers().get(2));
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TextLayer.class, build.layers().get(3));
+
+        // Solid surface writes depth (OPAQUE → true occlusion); the faded one is translucent.
+        assertEquals(BlendMode.OPAQUE, build.layers().get(0).blend(), "solid surface is OPAQUE");
+        assertEquals(BlendMode.ALPHA, build.layers().get(1).blend(), "faded surface is ALPHA");
+        assertEquals(0.5f, build.layers().get(1).opacity(), 1e-6, "faded surface opacity");
+
+        // Bounds span the surface height [0,18] over [-3,3]^2 (world Y is height).
+        assertEquals(-3.0f, build.min().x(), 1e-6);
+        assertEquals(18.0f, build.max().y(), 1e-6, "max height 18 (corner of the bowl)");
+    }
+
+    @Test
+    void chart_overlaysMultipleCurves_withDistinctColors() {
+        Extensions.install(new PlotExtension());
+
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderChart", stub);
+        NativeCalls.register("pontif.plot/renderChart", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, curve, chart}
+                        struct Parabola()
+                        assign trait Parabola:Curve2D {
+                          at(x:Decimal):Decimal -> x * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        struct Line()
+                        assign trait Line:Curve2D {
+                          at(x:Decimal):Decimal -> 2.0 * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        chart({title = "two"}, { curve(Parabola()), curve(Line()) })""", "chart.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
+        assertNotNull(capturedLayers[0], "renderChart should have received the {layers} tuple");
+
+        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        assertEquals(2, series.size(), "two overlaid curves → two series");
+    }
+
+    @Test
+    void axisBox_generatesWireframeTicksAndNiceLabels() {
+        // World bounds of a bowl: x,z in [-3,3], height y in [0,18].
+        List<Layer> layers = DasumBridge.axisBoxLayers(new Vec3(-3f, 0f, -3f), new Vec3(3f, 18f, 3f), true);
+
+        long lineLayers = layers.stream().filter(l -> l instanceof LineLayer).count();
+        long textLayers = layers.stream().filter(l -> l instanceof TextLayer).count();
+        assertTrue(lineLayers >= 2, "box wireframe + tick/grid line layers; got " + lineLayers);
+        assertTrue(textLayers >= 3, "several numeric tick labels; got " + textLayers);
+
+        // Nice-number ticks (Heckbert) over [0,18] include a "0" label, billboarded to face the camera.
+        boolean zeroLabel = layers.stream().anyMatch(l ->
+                l instanceof TextLayer t && t.text().equals("0") && t.billboard());
+        assertTrue(zeroLabel, "expected a billboard '0' tick label");
+
+        // Empty/degenerate bounds produce nothing (no crash).
+        assertTrue(DasumBridge.axisBoxLayers(new Vec3(0f, 0f, 0f), new Vec3(0f, 0f, 0f), true).isEmpty());
+    }
+
+    @Test
+    void colormaps_areMonotoneAndNamed() {
+        // Endpoints and a distinct interior — each named map differs from the legacy "cool" ramp.
+        assertArrayEquals(new float[]{0f, 0f, 0f}, DasumBridge.colorFor("grayscale", 0f), 1e-6f);
+        assertArrayEquals(new float[]{1f, 1f, 1f}, DasumBridge.colorFor("grayscale", 1f), 1e-6f);
+        assertArrayEquals(new float[]{0f, 0.5f, 1f}, DasumBridge.colorFor("cool", 0f), 1e-6f);
+        assertArrayEquals(new float[]{1f, 0.5f, 0f}, DasumBridge.colorFor("cool", 1f), 1e-6f);
+        // t is clamped; an unknown name falls back to "cool".
+        assertArrayEquals(DasumBridge.colorFor("cool", 1f), DasumBridge.colorFor("cool", 2f), 1e-6f);
+        assertArrayEquals(DasumBridge.colorFor("cool", 0.5f), DasumBridge.colorFor("bogus", 0.5f), 1e-6f);
+        // viridis/turbo span dark→bright (green-ness rises), distinct from cool.
+        float[] vlo = DasumBridge.colorFor("viridis", 0f), vhi = DasumBridge.colorFor("viridis", 1f);
+        assertTrue(vhi[1] > vlo[1], "viridis brightens (green rises) low→high");
+    }
+
+    @Test
+    void scene_withSurface_reportsColorbarKey() {
+        Extensions.install(new PlotExtension());
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{HeightMap3D, surface, cmap, scene}
+                        struct Bowl()
+                        assign trait Bowl:HeightMap3D {
+                          at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+                          domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+                        }
+                        scene({title = "s"}, { cmap(surface(Bowl()), "viridis") })""", "cmap.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "cmap scene should run; got " + r.text());
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        assertNotNull(build.bar(), "a surface scene has a colorbar key");
+        assertEquals("viridis", build.bar().colormap(), "cmap selected viridis");
+        assertEquals(0.0, build.bar().lo(), 1e-6, "min height 0");
+        assertEquals(18.0, build.bar().hi(), 1e-6, "max height 18");
+    }
+
+    @Test
+    void wireAndFineResolution_addWireframeAndDenserGrid() {
+        Extensions.install(new PlotExtension());
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{HeightMap3D, surfaceFine, wire, scene}
+                        struct Bowl()
+                        assign trait Bowl:HeightMap3D {
+                          at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+                          domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+                        }
+                        scene({title = "wire"}, { wire(surfaceFine(Bowl())) })""", "wire.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "wire(surfaceFine(...)) should run; got " + r.text());
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        // A wired surface yields TWO layers: the triangle mesh + its wireframe line overlay.
+        assertEquals(2, build.layers().size(), "surface + wireframe");
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(0));
+        assertInstanceOf(LineLayer.class, build.layers().get(1));
+
+        // surfaceFine samples a 65×65 grid → (65-1)^2 cells × 2 triangles.
+        var tri = (sibarum.dasum.gui.vis.scene.TriangleLayer) build.layers().get(0);
+        assertEquals(64 * 64 * 2, tri.triangleCount(), "65x65 grid → 8192 triangles");
     }
 }

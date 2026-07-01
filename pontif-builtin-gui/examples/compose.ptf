@@ -1,0 +1,35 @@
+requires pontif.plot.{HeightMap3D, Cloud3D, surface, cloud, fade, text3d, scene}
+
+# Composing multiple 3D layers into ONE orbitable window (docs/plotting.md). Solid layers
+# occlude by depth; `fade` makes a surface translucent so what's behind shows through.
+
+# A paraboloid bowl.
+struct Bowl()
+assign trait Bowl:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+# A tilted plane cutting through the bowl.
+struct Plane()
+assign trait Plane:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> 3.0 + x
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+# A few marker points.
+struct Marks()
+assign trait Marks:Cloud3D {
+  points():Stream[[{Decimal,Decimal,Decimal}]] -> {
+    {0.0, 0.0, 0.0},
+    {3.0, 18.0, 3.0},
+    {-3.0, 18.0, -3.0}
+  }
+}
+
+main ( scene({title = "Bowl + cutting plane"}, {
+  surface(Bowl()),
+  fade(surface(Plane()), 0.45),   # translucent, so the bowl shows through it
+  cloud(Marks()),
+  text3d("origin", {0.0, 0.0, 0.0})
+}) )

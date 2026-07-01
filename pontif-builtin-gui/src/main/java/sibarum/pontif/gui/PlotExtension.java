@@ -38,7 +38,9 @@ public final class PlotExtension implements Extension {
     public String pontifSource() {
         return """
                 requires pontif.core.{Stream}
-                exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface}
+                exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
+                           Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
+                           fade, cmap, wire, scene, Curve, curve, chart}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -105,6 +107,94 @@ public final class PlotExtension implements Extension {
                   renderSurface(zs, xlo, xhi, ylo, yhi)
                 )
 
+                # --- Composition: layers rendered together in one window ---------------------
+                # A scene is a config record + a {…} of layer values, mirroring the GUI's
+                # window(cfg, {children}). Multiple 3D layers occlude by depth (the default);
+                # `fade` makes a surface translucent so a layer behind it shows through.
+
+                # A sampled height-map surface as a composable layer: the sampled grid `zs`, its
+                # domain, an opacity in [0,1] (1 = solid, depth-occluding), the height colormap
+                # name ("cool" | "viridis" | "turbo" | "grayscale"), and whether to overlay a
+                # wireframe of the sample grid.
+                struct Surface(zs:_, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal, opacity:Decimal, colormap:String, wire:Bool)
+
+                # 65*65 grid indices for the finer surface preset (surfaceFine).
+                let fineIndices:Stream[Int:0 <= @ < 4225];
+
+                # A point set as a composable layer.
+                struct Cloud(points:_, opacity:Decimal)
+
+                # A text label anchored at a 3D world point (billboards to face the camera).
+                struct Text3D(text:String, x:Decimal, y:Decimal, z:Decimal)
+
+                # Sample a height map into a Surface layer (33x33 grid) — the plotSurface sampling,
+                # returning a layer value instead of opening a window.
+                function surface(h:[HeightMap3D]):Surface -> (
+                  let [{xlo, xhi, ylo, yhi}] = h.domain()
+                  let dx = (xhi - xlo) / 32.0
+                  let dy = (yhi - ylo) / 32.0
+                  let zs = &surfaceIndices:[ (i:Int) -> surfaceZ(h, xlo + (i % 33) * dx, ylo + (i / 33) * dy) ]
+                  Surface(zs, xlo, xhi, ylo, yhi, 1.0, "cool", false)
+                )
+
+                # A finer 65x65 sampling of the same surface — more detail (e.g. for a spiral or a
+                # ridge), at 4x the samples. Dynamic resolution isn't expressible yet (the sample
+                # index stream is a statically-synthesized constant), so this is a fixed preset.
+                function surfaceFine(h:[HeightMap3D]):Surface -> (
+                  let [{xlo, xhi, ylo, yhi}] = h.domain()
+                  let dx = (xhi - xlo) / 64.0
+                  let dy = (yhi - ylo) / 64.0
+                  let zs = &fineIndices:[ (i:Int) -> surfaceZ(h, xlo + (i % 65) * dx, ylo + (i / 65) * dy) ]
+                  Surface(zs, xlo, xhi, ylo, yhi, 1.0, "cool", false)
+                )
+
+                # Take a point cloud straight from the shape into a Cloud layer.
+                function cloud(c:[Cloud3D]):Cloud -> Cloud(c.points(), 1.0)
+
+                # A 3D text label at the given {x,y,z}.
+                function text3d(text:String, at:[{Decimal, Decimal, Decimal}]):Text3D -> (
+                  let [{x, y, z}] = at
+                  Text3D(text, x, y, z)
+                )
+
+                # Make a surface translucent (opacity in [0,1]) so layers behind it show through —
+                # the "stack on top" knob; solid surfaces occlude by depth on their own.
+                function fade(s:Surface, opacity:Decimal):Surface ->
+                  Surface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi, opacity, s.colormap, s.wire)
+
+                # Choose a surface's height colormap: cmap(surface(h), "viridis").
+                function cmap(s:Surface, name:String):Surface ->
+                  Surface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi, s.opacity, name, s.wire)
+
+                # Overlay the sample-grid wireframe on a surface: wire(surface(h)).
+                function wire(s:Surface):Surface ->
+                  Surface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi, s.opacity, s.colormap, true)
+
+                # Native: opens ONE window compositing all the given layers (3D depth occlusion).
+                function renderScene(cfg:_, layers:_):Stream[String] -> {}
+
+                # Compose layers into one orbitable window: scene({title="…"}, {surface(a), cloud(b)}).
+                function scene(cfg:_, layers:_):Stream[String] -> renderScene(cfg, layers)
+
+                # A sampled 2D curve as a composable chart layer (65 points over its domain).
+                struct Curve(xs:_, ys:_)
+
+                # Sample a curve into a Curve layer — the plotLine sampling, as a layer value.
+                function curve(c:[Curve2D]):Curve -> (
+                  let [{lo, hi}] = c.domain()
+                  let step = (hi - lo) / 64.0
+                  let xs = &sampleIndices:[ (i:Int) -> lo + i * step ]
+                  let ys = &sampleIndices:[ (i:Int) -> sampleAt(c, lo + i * step) ]
+                  Curve(xs, ys)
+                )
+
+                # Native: one line-chart window with all the given curves overlaid (auto axes,
+                # gridlines, and tick labels; each curve gets its own colour).
+                function renderChart(cfg:_, layers:_):Stream[String] -> {}
+
+                # Overlay several curves in one 2D chart: chart({title="…"}, {curve(a), curve(b)}).
+                function chart(cfg:_, layers:_):Stream[String] -> renderChart(cfg, layers)
+
                 0
                 """;
     }
@@ -115,6 +205,8 @@ public final class PlotExtension implements Extension {
         return Map.of(
                 "renderCurve", DasumBridge::renderCurve,
                 "renderCloud", DasumBridge::renderCloud,
-                "renderSurface", DasumBridge::renderSurface);
+                "renderSurface", DasumBridge::renderSurface,
+                "renderScene", DasumBridge::renderScene,
+                "renderChart", DasumBridge::renderChart);
     }
 }

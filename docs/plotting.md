@@ -133,6 +133,40 @@ the function-shapes expose `at(...)`, the renderer can sample, then finite-diffe
 - **Slice 5 — adaptive sampling + derivative honesty.** Finite-difference refinement;
   discontinuity / asymptote breaks; undersampling warnings.
 
+## Composition, graduations, and styling (landed 2026-07-01)
+
+The single-shape entry points (`plotLine`/`plotCloud`/`plotSurface`) each open their own
+one-layer window. Alongside them, **composition mirrors the GUI's `window(cfg, {children})`**:
+a shape becomes a *layer value*, and one render call composites many layers into one window.
+The dasum-vis engine already renders a list of layers with correct depth occlusion (OPAQUE
+layers depth-write) and 3D text (`TextLayer`), and already carries the 2D axis stack (`Axis`,
+`Ticks`, `PlotFrame`) — so this is a Pontif-side surface over existing primitives.
+
+- **3D scenes** — `scene(cfg, {layers})`. Layer producers: `surface(h)` / `surfaceFine(h)`
+  (65×65), `cloud(c)`, `text3d(text, {x,y,z})`. Solid surfaces occlude by depth; `fade(surface(h),
+  0.5)` makes one translucent so a layer behind shows through (the "stack on top" case is just
+  opacity, not a mode). `cmap(surface(h), "viridis"|"turbo"|"grayscale"|"cool")` picks the height
+  colormap; `wire(surface(h))` overlays the sample-grid mesh.
+- **2D charts** — `chart(cfg, {curve(a), curve(b), …})`. Overlays multiple curves (each auto-coloured
+  from a palette) with the axes/gridlines/tick-labels the 2D stack already draws. Mixing 2D and 3D
+  layers is deliberately unsupported (different camera/interaction).
+- **Graduations** — 3D scenes draw a labeled, tick-marked bounding box + floor grid by default
+  (`{axes = false}` / `{grid = false}` to disable). Tick positions/labels reuse dasum's
+  `Ticks.forAxis` (the same nice-number engine as the 2D charts), placed as billboard `TextLayer`s.
+- **Colorbar** — a surface scene shows a colorbar key (colormap + height range) as a sidebar beside
+  the viewport, reusing component composition rather than a second camera.
+
+`cfg` mirrors the GUI's `{title = …}`, plus `{axes, grid}` for scenes. All of this is verified
+headlessly in `PlotExtensionTest` via `DasumBridge.buildSceneLayers` / `buildChartSeries` /
+`axisBoxLayers` / `colorFor` (no window opens); the window-opening examples live in
+`pontif-builtin-gui/examples/` (`compose.ptf`, `chart2.ptf`, `axes.ptf`, `colormap.ptf`,
+`wireframe.ptf`).
+
+**Known limit (configurable resolution).** Sampling maps over a *statically-synthesized* index
+stream (`let surfaceIndices:Stream[Int:0<=@<1089];`), and finite-range synthesis needs static
+bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif yet. `surfaceFine`
+(65×65) is a fixed preset; a truly dynamic `N` is blocked on the infinite/lazy-stream work.
+
 ## Open questions
 - Keep the bare `plot` (single-rendering shapes only) or drop it for explicit names + `plotAll`?
 - Module placement: a dedicated `pontif.plot` module vs folding into `pontif.gui` (leaning
