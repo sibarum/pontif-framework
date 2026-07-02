@@ -15,4 +15,4 @@ assign trait Radial:Volume3D {
 }
 
 # `fade` sets the glow opacity (additive alpha) — lower is subtler. Default is 0.3.
-main ( scene({title = "gradient-lit volume  r = x^2+y^2+z^2"}, { fade(volume(Radial()), 0.2) }) )
+main ( scene({title = "gradient-lit volume  r = x^2+y^2+z^2"}, { fade(volume(Radial()), 0.3) }) )

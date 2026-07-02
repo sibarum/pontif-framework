@@ -31,6 +31,7 @@ import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.dasum.gui.vis.DasumVis;
+import sibarum.dasum.gui.vis.render.BloomPass;
 import sibarum.dasum.gui.vis.plot.Axis;
 import sibarum.dasum.gui.vis.plot.LinePlot;
 import sibarum.dasum.gui.vis.plot.PlotStyle;
@@ -105,7 +106,7 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Pontif";
         Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
-        return openWindowWithRoot(title, () -> toComponent(rootTree, ctx));
+        return openWindowWithRoot(title, false, () -> toComponent(rootTree, ctx));
     }
 
     /**
@@ -117,7 +118,7 @@ public final class DasumBridge {
     public static Object renderCurve(List<Object> args, NativeCalls.Context ctx) {
         double[] xs = !args.isEmpty() ? doubles(args.get(0)) : new double[0];
         double[] ys = args.size() > 1 ? doubles(args.get(1)) : new double[0];
-        return openWindowWithRoot("Plot", () -> buildLinePlotView(xs, ys));
+        return openWindowWithRoot("Plot", false, () -> buildLinePlotView(xs, ys));
     }
 
     /**
@@ -131,7 +132,7 @@ public final class DasumBridge {
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
         List<Series> series = buildChartSeries(layers);
-        return openWindowWithRoot(title, () -> chartComponent(series));
+        return openWindowWithRoot(title, false, () -> chartComponent(series));
     }
 
     /**
@@ -141,7 +142,7 @@ public final class DasumBridge {
      */
     public static Object renderCloud(List<Object> args, NativeCalls.Context ctx) {
         float[] xyz = !args.isEmpty() ? xyzTriples(args.get(0)) : new float[0];
-        return openWindowWithRoot("Cloud", () -> buildCloudView(xyz));
+        return openWindowWithRoot("Cloud", true, () -> buildCloudView(xyz));
     }
 
     /**
@@ -153,7 +154,7 @@ public final class DasumBridge {
     public static Object renderSurface(List<Object> args, NativeCalls.Context ctx) {
         double[] zs = !args.isEmpty() ? doubles(args.get(0)) : new double[0];
         double xlo = arg(args, 1), xhi = arg(args, 2), ylo = arg(args, 3), yhi = arg(args, 4);
-        return openWindowWithRoot("Surface", () -> buildSurfaceView(zs, xlo, xhi, ylo, yhi));
+        return openWindowWithRoot("Surface", true, () -> buildSurfaceView(zs, xlo, xhi, ylo, yhi));
     }
 
     /**
@@ -171,7 +172,7 @@ public final class DasumBridge {
         boolean grid = cfgBool(args, 0, "grid", true);
         boolean equalAspect = "equal".equals(cfgStr(args, 0, "aspect"));  // default: box (cube) aspect
         SceneBuild build = buildSceneLayers(layers);
-        return openWindowWithRoot(title, () -> sceneComponent(build, axes, grid, equalAspect));
+        return openWindowWithRoot(title, true, () -> sceneComponent(build, axes, grid, equalAspect));
     }
 
     private static double arg(List<Object> args, int i) {
@@ -184,7 +185,8 @@ public final class DasumBridge {
      * in the loop until the window closes. Shared by the declarative-UI window ({@link #openWindow})
      * and the plot window ({@link #renderCurve}). Returns the inert for-effect result.
      */
-    private static Object openWindowWithRoot(String title, java.util.function.Supplier<Component> rootFactory) {
+    private static Object openWindowWithRoot(String title, boolean enableBloom,
+            java.util.function.Supplier<Component> rootFactory) {
         try (GlfwContext glfw = GlfwContext.init();
              Window win = Window.create(WIDTH, HEIGHT, title);
              Batcher batcher = new Batcher()) {
@@ -204,10 +206,16 @@ public final class DasumBridge {
             Component root = rootFactory.get();
             wireInput();
 
+            // 3D plot windows opt into HDR + bloom: the frame renders into an offscreen HDR target,
+            // then bright-pass/blur/tonemap composites to the screen (the emissive glow blooms).
+            BloomPass bloom = enableBloom ? new BloomPass() : null;
+            if (bloom != null) bloom.init();
+
             EventLoop loop = new EventLoop(win, () -> {
                 int fbW = win.framebufferWidth();
                 int fbH = win.framebufferHeight();
                 float[] projection = Projection.orthoTopLeft(fbW, fbH);
+                if (bloom != null) bloom.begin(fbW, fbH);   // bind HDR target; frame renders into it
                 Gl.glViewport(0, 0, fbW, fbH);
                 Gl.glClearColor(BACKGROUND.r(), BACKGROUND.g(), BACKGROUND.b(), BACKGROUND.a());
                 Gl.glClear(Gl.GL_COLOR_BUFFER_BIT);
@@ -216,8 +224,10 @@ public final class DasumBridge {
                 batcher.beginFrame(fbH);
                 Render.render(root, layout, batcher, projection);
                 batcher.endFrame(projection);
+                if (bloom != null) bloom.end(fbW, fbH);     // bloom + composite to the screen
             });
             loop.run();  // blocks on this (root) thread until the window is closed
+            if (bloom != null) bloom.close();               // free FBOs while the GL context is alive
         }
         return new IrInterpreter.DriveResult();
     }
@@ -616,8 +626,9 @@ public final class DasumBridge {
 
     /** Fraction of the peak gradient below which a voxel is dropped (flat space contributes nothing). */
     private static final float VOLUME_THRESHOLD = 0.05f;
-    /** Exposure on additive voxel colour, so overlapping contributions build up without instant white. */
-    private static final float VOLUME_EXPOSURE = 0.6f;
+    /** Emission gain on voxel density. HDR: pushed above 1 so bright cores overflow and bloom picks
+     *  them up (the ACES tone-map in the composite brings the range back). Tune by eye. */
+    private static final float VOLUME_EXPOSURE = 6.0f;
     /** Per-layer alpha for the additive voxels — the "how bright does the glow accumulate" knob. */
     private static final float VOLUME_OPACITY = 0.3f;
 
@@ -660,16 +671,15 @@ public final class DasumBridge {
         }
 
         // Pass 2: fill a dense RGBA grid — rgb = gradient DIRECTION (which axis it changes along),
-        // a = LOG of the gradient magnitude × exposure (log compresses the steep-vs-gentle range so
-        // both read). Flat voxels get ~0 alpha, so they contribute nothing when the shader
-        // accumulates rgb*a along the ray; below a small threshold they're zeroed outright.
+        // a = LOG of the gradient magnitude × exposure (log compresses steep-vs-gentle so both
+        // read). Flat voxels below a small threshold stay transparent (0).
         float[] rgba = new float[vs.length * 4];
         double logDen = Math.log1p(Math.E - 1);   // = 1; normalizes the log curve to [0,1]
         for (int idx = 0; idx < vs.length; idx++) {
             float t = mag[idx] / magMax;                       // linear steepness in [0,1]
             if (t < VOLUME_THRESHOLD) continue;                // leave this voxel transparent (0)
             float bright = (float) (Math.log1p(t * (Math.E - 1)) / logDen) * VOLUME_EXPOSURE;
-            float inv = 1f / mag[idx];                          // unit gradient direction → hue
+            float inv = 1f / mag[idx];                          // signed unit gradient direction
             rgba[idx*4    ] = gx[idx] * inv;
             rgba[idx*4 + 1] = gy[idx] * inv;
             rgba[idx*4 + 2] = gz[idx] * inv;
