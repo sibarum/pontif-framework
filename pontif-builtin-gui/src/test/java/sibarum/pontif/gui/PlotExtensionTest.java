@@ -372,4 +372,49 @@ class PlotExtensionTest {
         assertEquals(0f, g[2], 1e-6f, "no z-gradient → blue off");
         assertTrue(g[3] > 0f, "density/alpha lit by the gradient magnitude");
     }
+
+    @Test
+    void volumeWithNormals_addsGradientGlyphLineLayer() {
+        Extensions.install(new PlotExtension());
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        // f = x → gradient (1,0,0) everywhere: uniform magnitude, so every strided voxel clears the
+        // flat-region threshold and every glyph points along +x.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Volume3D, volume, normals, scene}
+                        struct Ramp()
+                        assign trait Ramp:Volume3D {
+                          at(x:Decimal, y:Decimal, z:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+                            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0}
+                        }
+                        scene({title = "n"}, { normals(volume(Ramp()), 3) })""", "normals.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "normals program should run; got " + r.text());
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        // TWO layers: the raymarched volume + its gradient-glyph overlay.
+        assertEquals(2, build.layers().size(), "volume + gradient glyphs");
+        assertInstanceOf(VolumeLayer.class, build.layers().get(0));
+        assertInstanceOf(LineLayer.class, build.layers().get(1));
+
+        LineLayer glyphs = (LineLayer) build.layers().get(1);
+        // stride 3 over a 24³ grid → 8 samples per axis → 8³ segments (uniform field: none culled).
+        assertEquals(8 * 8 * 8, glyphs.segmentCount(), "8^3 lattice of glyphs");
+
+        // Every glyph is axis-aligned along x: its two endpoints share y and z, and differ in x.
+        float[] ep = glyphs.endpoints();
+        assertEquals(0f, ep[4] - ep[1], 1e-6f, "glyph has no y extent (gradient is (1,0,0))");
+        assertEquals(0f, ep[5] - ep[2], 1e-6f, "glyph has no z extent");
+        assertTrue(Math.abs(ep[3] - ep[0]) > 1e-6f, "glyph extends along x");
+        // Centred on the first voxel at the domain corner (-1,-1,-1): midpoint x ≈ -1.
+        assertEquals(-1f, (ep[0] + ep[3]) / 2f, 1e-5f, "glyph centred on its voxel");
+    }
 }

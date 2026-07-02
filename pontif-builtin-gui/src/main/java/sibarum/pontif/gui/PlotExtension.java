@@ -41,7 +41,7 @@ public final class PlotExtension implements Extension {
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
                            fade, cmap, wire, scene, Curve, curve, chart,
-                           Volume3D, Volume, volume}
+                           Volume3D, Volume, volume, normals}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -185,8 +185,10 @@ public final class PlotExtension implements Extension {
                 function volumeAt(v:[Volume3D], x:Decimal, y:Decimal, z:Decimal):Decimal -> v.at(x, y, z)
 
                 # A sampled scalar field as a composable volumetric layer. `opacity` is the glow
-                # intensity (additive alpha) — set it with `fade`.
-                struct Volume(vs:_, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal, zlo:Decimal, zhi:Decimal, opacity:Decimal)
+                # intensity (additive alpha) — set it with `fade`. `normals` overlays a lattice of
+                # short gradient-direction glyphs (set it with `normals`); `stride` is how many
+                # voxels apart those glyphs sit (every k-th voxel of the 24^3 grid).
+                struct Volume(vs:_, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal, zlo:Decimal, zhi:Decimal, opacity:Decimal, normals:Bool, stride:Int)
 
                 # Sample a Volume3D on a 24^3 grid into a Volume layer (row-major x,y,z).
                 function volume(v:[Volume3D]):Volume -> (
@@ -196,12 +198,19 @@ public final class PlotExtension implements Extension {
                   let dz = (zhi - zlo) / 23.0
                   let vs = &volumeIndices:[ (i:Int) ->
                     volumeAt(v, xlo + (i % 24) * dx, ylo + ((i / 24) % 24) * dy, zlo + (i / 576) * dz) ]
-                  Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, 0.3)
+                  Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, 0.3, false, 3)
                 )
 
                 # Set a volume's glow opacity: fade(volume(v), 0.15). Lower = subtler additive glow.
                 function fade(v:Volume, opacity:Decimal):Volume ->
-                  Volume(v.vs, v.xlo, v.xhi, v.ylo, v.yhi, v.zlo, v.zhi, opacity)
+                  Volume(v.vs, v.xlo, v.xhi, v.ylo, v.yhi, v.zlo, v.zhi, opacity, v.normals, v.stride)
+
+                # Overlay gradient-direction glyphs: normals(volume(v), 3). At every `stride`-th
+                # voxel a short neutral segment points along the field's gradient there, its length
+                # tracking the (normalized) steepness — flat regions draw nothing. The glow shows
+                # where the field concentrates; the glyphs show which way it changes.
+                function normals(v:Volume, stride:Int):Volume ->
+                  Volume(v.vs, v.xlo, v.xhi, v.ylo, v.yhi, v.zlo, v.zhi, v.opacity, true, stride)
 
                 # Native: opens ONE window compositing all the given layers (3D depth occlusion).
                 function renderScene(cfg:_, layers:_):Stream[String] -> {}

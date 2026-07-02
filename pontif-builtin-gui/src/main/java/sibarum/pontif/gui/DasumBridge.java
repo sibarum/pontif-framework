@@ -543,7 +543,16 @@ public final class DasumBridge {
                         }
                     }
                     case "Cloud" -> geometry.add(cloudLayer(rv, b));
-                    case "Volume" -> { Layer l = volumeLayer(rv, b); if (l != null) geometry.add(l); }
+                    case "Volume" -> {
+                        Layer l = volumeLayer(rv, b);
+                        if (l != null) {
+                            geometry.add(l);
+                            if (rv.members().get("normals") instanceof Boolean nrm && nrm) {
+                                Layer g = gradientGlyphLayer(rv);   // overlay gradient-direction glyphs
+                                if (g != null) geometry.add(g);
+                            }
+                        }
+                    }
                     case "Text3D" -> { texts.add(rv); addText3dBounds(rv, b); }
                     default -> { /* skip unknown layer kinds rather than fail the whole scene */ }
                 }
@@ -690,6 +699,76 @@ public final class DasumBridge {
         Vec3 center = new Vec3((float) ((xlo + xhi) / 2), (float) ((ylo + yhi) / 2), (float) ((zlo + zhi) / 2));
         Vec3 half = new Vec3((float) ((xhi - xlo) / 2), (float) ((yhi - ylo) / 2), (float) ((zhi - zlo) / 2));
         return new VolumeLayer(rgba, n, n, n, center, half, 128, BlendMode.ADDITIVE, opacity);
+    }
+
+    /** Longest glyph spans this fraction of the inter-glyph spacing (<=1 ⇒ no glyph reaches a neighbour). */
+    private static final float GLYPH_FILL = 0.9f;
+    /** Neutral overlay colour for the gradient-direction glyphs — a distinct annotation over the glow. */
+    private static final Color GLYPH_COLOR = new Color(0.85f, 0.87f, 0.92f, 1f);
+
+    /**
+     * A {@code Volume} record with {@code normals} enabled → a {@link LineLayer} of short segments on a
+     * {@code stride}-spaced lattice, each centred on a voxel and oriented along the field's SIGNED
+     * gradient there. Segment length ∝ the gradient magnitude normalized by the volume's peak, scaled
+     * so the steepest glyph spans {@link #GLYPH_FILL} of the inter-glyph gap — so none reach into a
+     * neighbour. Near-flat voxels below {@link #VOLUME_THRESHOLD} are skipped, matching {@link
+     * #volumeLayer}. Length is relative within one volume (normalized by its own peak), not an absolute
+     * magnitude. Recomputes the gradient independently, as {@link #wireframeLayer} does for its surface.
+     */
+    private static Layer gradientGlyphLayer(RecordValue rv) {
+        double[] vs = doubles(rv.members().get("vs"));
+        int n = (int) Math.round(Math.cbrt(vs.length));
+        if (n < 2 || (long) n * n * n != vs.length) return null;
+        int stride = rv.members().containsKey("stride")
+                ? Math.max(1, (int) Math.round(memberD(rv, "stride"))) : 3;
+        double xlo = memberD(rv, "xlo"), xhi = memberD(rv, "xhi"),
+               ylo = memberD(rv, "ylo"), yhi = memberD(rv, "yhi"),
+               zlo = memberD(rv, "zlo"), zhi = memberD(rv, "zhi");
+        double sx = (xhi - xlo) / (n - 1), sy = (yhi - ylo) / (n - 1), sz = (zhi - zlo) / (n - 1);
+        int nn = n * n;
+
+        // Peak gradient magnitude over the whole grid — the SAME normalization the volume brightness
+        // uses (volumeLayer pass 1), so glyph length tracks the glow's steepness.
+        double magMax = 1e-12;
+        for (int iz = 0; iz < n; iz++) for (int iy = 0; iy < n; iy++) for (int ix = 0; ix < n; ix++) {
+            double[] g = gradVec(vs, n, nn, ix, iy, iz, sx, sy, sz);
+            magMax = Math.max(magMax, Math.sqrt(g[0]*g[0] + g[1]*g[1] + g[2]*g[2]));
+        }
+
+        // Steepest glyph = GLYPH_FILL of the inter-glyph spacing (stride cells along the tightest axis)
+        // so it can't reach its neighbour; glyphs are centred on the voxel (half the length each way).
+        double maxLen = GLYPH_FILL * stride * Math.min(sx, Math.min(sy, sz));
+
+        // One segment per surviving strided voxel: two xyz endpoints (6 floats) each.
+        List<Float> ep = new ArrayList<>();
+        for (int iz = 0; iz < n; iz += stride) for (int iy = 0; iy < n; iy += stride) for (int ix = 0; ix < n; ix += stride) {
+            double[] g = gradVec(vs, n, nn, ix, iy, iz, sx, sy, sz);   // signed ∂x,∂y,∂z
+            double m = Math.sqrt(g[0]*g[0] + g[1]*g[1] + g[2]*g[2]);
+            double t = m / magMax;                                     // normalized steepness in [0,1]
+            if (t < VOLUME_THRESHOLD) continue;                        // skip near-flat voxels, as the volume does
+            double half = 0.5 * t * maxLen / m;                        // (half length) / |g|, to unit-scale g below
+            double hx = g[0]*half, hy = g[1]*half, hz = g[2]*half;
+            double px = xlo + ix * sx, py = ylo + iy * sy, pz = zlo + iz * sz;
+            ep.add((float)(px - hx)); ep.add((float)(py - hy)); ep.add((float)(pz - hz));
+            ep.add((float)(px + hx)); ep.add((float)(py + hy)); ep.add((float)(pz + hz));
+        }
+        if (ep.isEmpty()) return null;
+        float[] arr = new float[ep.size()];
+        for (int i = 0; i < arr.length; i++) arr[i] = ep.get(i);
+        return new LineLayer(arr, filledColor(arr.length, GLYPH_COLOR));
+    }
+
+    /** Signed central-difference gradient {∂x,∂y,∂z} of the scalar grid at voxel (ix,iy,iz), one-sided
+     *  at edges — the signed sibling of {@link #volumeLayer}'s (abs) pass-1 gradient. */
+    private static double[] gradVec(double[] vs, int n, int nn, int ix, int iy, int iz,
+            double sx, double sy, double sz) {
+        int xm = Math.max(0, ix - 1), xp = Math.min(n - 1, ix + 1);
+        int ym = Math.max(0, iy - 1), yp = Math.min(n - 1, iy + 1);
+        int zm = Math.max(0, iz - 1), zp = Math.min(n - 1, iz + 1);
+        double dx = sx > 0 ? (vs[xp + iy*n + iz*nn] - vs[xm + iy*n + iz*nn]) / ((xp - xm) * sx) : 0;
+        double dy = sy > 0 ? (vs[ix + yp*n + iz*nn] - vs[ix + ym*n + iz*nn]) / ((yp - ym) * sy) : 0;
+        double dz = sz > 0 ? (vs[ix + iy*n + zp*nn] - vs[ix + iy*n + zm*nn]) / ((zp - zm) * sz) : 0;
+        return new double[]{dx, dy, dz};
     }
 
     /** A {@code Cloud} layer record → an OPAQUE point layer (so it occludes with surfaces). */
