@@ -232,8 +232,9 @@ public final class App {
      *  in {@link #main} once the state directory is confirmed writable. */
     private static SessionManager session;
 
+    // The editor compiles in-process for live error marks (runLiveCompile); programs
+    // are RUN out-of-process (see launchProgram), so no shared PontifRunner is held here.
     private static final PontifCompiler COMPILER = new PontifCompiler();
-    private static final PontifRunner RUNNER = new PontifRunner();
 
     public static void main(String[] args) {
         // The editor compiles in-process, so install the windowed extensions up front — otherwise
@@ -524,71 +525,69 @@ public final class App {
 
     private static void onRunClicked() {
         String code = TextStates.contentOf(codeText);
-        // A program that imports a windowed extension opens its own GLFW window —
-        // it can't run in-process here (the editor owns the root thread), so route
-        // it to the same separate-process launcher the "Window" button uses.
+        // A program that imports a windowed extension opens its own GLFW window and
+        // must own a root thread, so it runs under GuiLauncher rather than the headless
+        // launcher. Every other program runs out-of-process too (crash isolation +
+        // uniform log capture) via ProgramLauncher.
         if (isGuiProgram(code)) {
             onRunGuiClicked();
             return;
         }
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
-        // Resolve sibling `requires` from the open file's directory; captured on
-        // the main thread so the worker doesn't race a file change.
-        Path resolveDir = resolveDir();
-        long startNs = System.nanoTime();
-        Thread worker = new Thread(() -> {
-            PontifRunner.RunResult result = RUNNER.run(
-                    COMPILER.compileAlt(code, sourceName, resolveDir),
-                    PontifRunner.Engine.INTERPRETER);
-            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-            if (result.isError()) {
-                // First line in the ribbon (immediate signal), full text in the
-                // log dialog (one click away).
-                String firstLine = result.text().split("\\R", 2)[0];
-                Status.error(firstLine + " (" + elapsedMs + " ms)", result.text());
-            } else {
-                Status.success("Ran " + sourceName + " in " + elapsedMs + " ms → " + result.text());
-            }
-        }, "pontif-runner");
-        worker.setDaemon(true);
-        worker.start();
+        // Resolve sibling `requires` from the open file's directory; captured on the
+        // main thread (the click handler) so the worker doesn't race a file change.
+        launchProgram("sibarum.pontif.net.ProgramLauncher", sourceName, code, resolveDir(),
+                sourceName + " finished");
     }
 
     /**
-     * Launches the current buffer as a GUI program in its OWN window — a separate JVM running
-     * the {@code pontif-builtin-gui} {@code GuiLauncher} (docs/extensions.md). The GUI program
-     * owns its own GLFW context + root thread, so it never collides with the editor's window/loop
-     * (which is why this can't just run in-process via the "Run" path). Runs on a worker thread
-     * so the editor stays responsive while the window is open. The subprocess's stdout/stderr are
-     * merged and captured on that worker thread: each line is echoed to the editor's own console
-     * (preserving the dev-tree console view) AND appended to a bounded tail buffer; on a non-zero
-     * exit the buffer is surfaced in the status log dialog, so the failure reason is visible even
-     * when the editor was launched from the native binary with no console. Classpath is inherited
-     * from the editor, which depends on pontif-builtin-gui — so {@code GuiLauncher} and dasum resolve.
+     * Launches the current buffer as a GUI program in its OWN window, via the {@code GuiLauncher}
+     * subprocess (docs/extensions.md). The GUI program owns its own GLFW context + root thread, so
+     * it never collides with the editor's window/loop. Delegates to {@link #launchProgram} — the
+     * same out-of-process path ordinary runs use — differing only in the child main class (which
+     * installs the windowed extensions) and the completion wording.
      */
     private static void onRunGuiClicked() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "editor.ptf";
-        // The buffer runs from a temp file, so sibling `requires` must resolve against the
-        // ORIGINAL file's directory (the temp dir has none). Captured on the main thread.
-        Path resolveDir = resolveDir();
+        launchProgram("sibarum.pontif.gui.GuiLauncher", sourceName, code, resolveDir(),
+                "GUI window closed (" + sourceName + ")");
+    }
+
+    /**
+     * Runs {@code code} out-of-process through the debug port, on a worker thread so the editor
+     * stays responsive while the program (or its window) is alive. Stands up a loopback
+     * {@link DebugServer} first and hands the child its port via {@link DebugSession#PORT_ENV}; the
+     * child ({@code mainClass}: {@code ProgramLauncher} headless, or {@code GuiLauncher} windowed)
+     * streams typed telemetry back — all routed into the {@link Status} event log by
+     * {@link #startDebugServer}. The child's merged stdout/stderr is drained line-by-line into the
+     * same log (see {@link #drainAndCapture}), so uncaught exceptions and native/JVM output are
+     * captured even when the debug port never opens; the process exit code is the crash backstop.
+     * Classpath is inherited from the editor (which depends on pontif-builtin-gui → -net), so both
+     * launchers resolve. {@code resolveDir} is captured by the caller on the main thread so the
+     * worker can't race a file change.
+     */
+    private static void launchProgram(String mainClass, String sourceName, String code,
+                                      Path resolveDir, String successMessage) {
         String resolveArg = resolveDir != null ? resolveDir.toString() : "";
+        Status.info("launching " + sourceName + " ...");
         Thread worker = new Thread(() -> {
             Path tmp = null;
             DebugServer debug = null;
             try {
-                tmp = Files.createTempFile("pontif-gui-", ".ptf");
+                // The buffer runs from a temp file, so sibling `requires` resolve against the
+                // ORIGINAL file's directory (passed as resolveArg — the temp dir has none).
+                tmp = Files.createTempFile("pontif-run-", ".ptf");
                 Files.writeString(tmp, code, StandardCharsets.UTF_8);
-                // Stand up the debug port BEFORE spawning, so we can hand the child its port. The
-                // child streams typed telemetry (events, actions, run result) back over loopback;
-                // if the port can't open, run untapped rather than block the launch.
+                // Stand up the debug port BEFORE spawning so we can hand the child its port; if it
+                // can't open, run untapped rather than block the launch.
                 debug = startDebugServer(sourceName);
                 String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
                 ProcessBuilder pb = new ProcessBuilder(
                         javaBin,
                         "--enable-native-access=ALL-UNNAMED",
                         "-cp", System.getProperty("java.class.path"),
-                        "sibarum.pontif.gui.GuiLauncher",
+                        mainClass,
                         tmp.toString(),
                         resolveArg,
                         sourceName);
@@ -597,22 +596,26 @@ public final class App {
                 }
                 pb.redirectErrorStream(true);   // merge stderr into stdout: one chronological stream
                 Process proc = pb.start();
-                // Drain the merged stream to EOF (which coincides with process exit), echoing each
-                // line to the console and accumulating a bounded tail — no separate reader thread,
-                // no pipe-buffer deadlock. waitFor() then returns immediately.
+                // Drain the merged stream to EOF (which coincides with process exit), logging each
+                // line — no separate reader thread, no pipe-buffer deadlock. waitFor() then returns
+                // immediately.
                 String captured = drainAndCapture(proc);
                 int exit = proc.waitFor();
                 if (exit == 0) {
-                    Status.success("GUI window closed (" + sourceName + ")");
+                    Status.success(successMessage);
                 } else {
+                    // The process-level exit code is the crash backstop: a hard death (segfault,
+                    // System.exit, OOM) never gets to send RunFailed over the debug port, so this
+                    // is the authoritative failure witness. Each output line is already an event
+                    // (drainAndCapture → Status.log); only when nothing was captured do we carry a
+                    // hint as the event's details.
                     String details = captured.isBlank()
-                            ? "The GUI program reported a non-zero exit — see the console for details."
-                            : captured;
-                    Status.error("GUI program exited with code " + exit + " (" + sourceName + ")",
-                            details);
+                            ? "The program exited with code " + exit + " and produced no output."
+                            : null;
+                    Status.error(sourceName + " exited with code " + exit, details);
                 }
             } catch (IOException | InterruptedException e) {
-                Status.error("Could not launch GUI window: " + e.getMessage(), String.valueOf(e));
+                Status.error("Could not launch " + sourceName + ": " + e.getMessage(), String.valueOf(e));
             } finally {
                 if (debug != null) {
                     debug.close();
@@ -625,39 +628,43 @@ public final class App {
                     }
                 }
             }
-        }, "pontif-gui-runner");
+        }, "pontif-runner");
         worker.setDaemon(true);
         worker.start();
     }
 
     /**
      * Opens the loopback debug port for a run, or returns {@code null} if it can't bind (the
-     * program then runs untapped). The listener prints the child's typed telemetry — domain
-     * events, action fan-out, and the run result — to the editor's console with a {@code [debug]}
-     * prefix. Program stdout/stderr are intentionally NOT echoed here: the merged process stream
-     * (see {@link #drainAndCapture}) already carries them, so echoing would double them.
+     * program then runs untapped). The listener records the child's typed telemetry — run
+     * lifecycle, domain events, and action fan-out — into the {@link Status} event log (the
+     * dialog that opens when the bottom ribbon is clicked). Program stdout/stderr are
+     * intentionally NOT taken from here: the merged process stream (see {@link #drainAndCapture})
+     * already logs them verbatim (and carries native/JVM output the interpreter emit-seam can't
+     * see), so mirroring the {@code StdoutChunk}/{@code StderrChunk} telemetry too would double
+     * every line. Callbacks run on elektro-Q's receive thread; {@code Status.log} is thread-safe.
      */
     private static DebugServer startDebugServer(String source) {
         try {
             return DebugServer.start(new DebugServer.Listener() {
                 @Override public void onRunStarted(String src) {
-                    System.out.println("[debug] run started: " + src);
+                    Status.info("run started: " + src);
                 }
                 @Override public void onEvent(long seq, String typeName, sibarum.elektro.queue.dyn.DynValue payload) {
-                    System.out.println("[debug] event #" + seq + " " + typeName + " " + payload);
+                    Status.log("event #" + seq + " " + typeName + " " + payload);
                 }
                 @Override public void onActionFired(String reactionName, String eventType) {
-                    System.out.println("[debug] action " + reactionName + " reacted to " + eventType);
+                    Status.log("action " + reactionName + " reacted to " + eventType);
                 }
                 @Override public void onRunCompleted(String resultText) {
-                    System.out.println("[debug] run completed: " + resultText);
+                    Status.success("run completed -> " + resultText);
                 }
                 @Override public void onRunFailed(String message, int line, int col) {
-                    System.out.println("[debug] run failed: " + message);
+                    String at = (line > 0) ? " (" + line + ":" + col + ")" : "";
+                    Status.error("run failed" + at, message);
                 }
             });
         } catch (RuntimeException e) {
-            System.out.println("[debug] port unavailable (" + e.getMessage() + "); running untapped");
+            Status.warn("debug port unavailable (" + e.getMessage() + "); running untapped");
             return null;
         }
     }
@@ -678,7 +685,8 @@ public final class App {
                 new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
-                System.out.println(line);           // preserve the live console view
+                System.out.println(line);           // preserve the dev-tree terminal view
+                Status.log(line);                   // and record it in the editor's event log
                 buf.append(line).append('\n');
                 if (buf.length() > GUI_CAPTURE_CAP) {
                     buf.delete(0, buf.length() - GUI_CAPTURE_CAP);
