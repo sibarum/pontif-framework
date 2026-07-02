@@ -532,6 +532,7 @@ public final class DasumBridge {
                         }
                     }
                     case "Cloud" -> geometry.add(cloudLayer(rv, b));
+                    case "Volume" -> { Layer l = volumeLayer(rv, b); if (l != null) geometry.add(l); }
                     case "Text3D" -> { texts.add(rv); addText3dBounds(rv, b); }
                     default -> { /* skip unknown layer kinds rather than fail the whole scene */ }
                 }
@@ -612,6 +613,81 @@ public final class DasumBridge {
         o[0] += 6;
     }
 
+    /** Fraction of the peak gradient below which a voxel is dropped (flat space contributes nothing). */
+    private static final float VOLUME_THRESHOLD = 0.05f;
+    /** Exposure on additive voxel colour, so overlapping contributions build up without instant white. */
+    private static final float VOLUME_EXPOSURE = 0.6f;
+    /** Per-layer alpha for the additive voxels — the "how bright does the glow accumulate" knob. */
+    private static final float VOLUME_OPACITY = 0.3f;
+
+    /**
+     * A {@code Volume} record → an ADDITIVE point layer coloured by GRADIENT DIRECTION: at each grid
+     * voxel the field's gradient is estimated by central differences, and {@code (|∂x|, |∂y|, |∂z|)}
+     * — normalized by the peak component over the whole field — becomes the voxel's RGB. So an axis
+     * along which the field changes fastest lights its own channel, brightness tracks steepness, and
+     * additive blending sums contributions along the view ray. Near-flat voxels are dropped so only
+     * the field's changing structure glows. (docs/plotting.md)
+     */
+    private static Layer volumeLayer(RecordValue rv, Bounds b) {
+        double[] vs = doubles(rv.members().get("vs"));
+        int n = (int) Math.round(Math.cbrt(vs.length));
+        if (n < 2 || (long) n * n * n != vs.length) return null;
+        double xlo = memberD(rv, "xlo"), xhi = memberD(rv, "xhi"),
+               ylo = memberD(rv, "ylo"), yhi = memberD(rv, "yhi"),
+               zlo = memberD(rv, "zlo"), zhi = memberD(rv, "zhi");
+        b.add(xlo, ylo, zlo);
+        b.add(xhi, yhi, zhi);
+        double sx = (xhi - xlo) / (n - 1), sy = (yhi - ylo) / (n - 1), sz = (zhi - zlo) / (n - 1);
+        int nn = n * n;
+
+        // Pass 1: per-voxel abs gradient components (central differences, one-sided at edges) and
+        // gradient magnitude; track the peak magnitude for the log-brightness normalization.
+        float[] gx = new float[vs.length], gy = new float[vs.length], gz = new float[vs.length];
+        float[] mag = new float[vs.length];
+        float magMax = 1e-12f;
+        for (int iz = 0; iz < n; iz++) for (int iy = 0; iy < n; iy++) for (int ix = 0; ix < n; ix++) {
+            int idx = ix + iy * n + iz * nn;
+            int xm = Math.max(0, ix - 1), xp = Math.min(n - 1, ix + 1);
+            int ym = Math.max(0, iy - 1), yp = Math.min(n - 1, iy + 1);
+            int zm = Math.max(0, iz - 1), zp = Math.min(n - 1, iz + 1);
+            gx[idx] = sx > 0 ? (float) Math.abs((vs[xp + iy*n + iz*nn] - vs[xm + iy*n + iz*nn]) / ((xp - xm) * sx)) : 0f;
+            gy[idx] = sy > 0 ? (float) Math.abs((vs[ix + yp*n + iz*nn] - vs[ix + ym*n + iz*nn]) / ((yp - ym) * sy)) : 0f;
+            gz[idx] = sz > 0 ? (float) Math.abs((vs[ix + iy*n + zp*nn] - vs[ix + iy*n + zm*nn]) / ((zp - zm) * sz)) : 0f;
+            mag[idx] = (float) Math.sqrt((double) gx[idx]*gx[idx] + (double) gy[idx]*gy[idx] + (double) gz[idx]*gz[idx]);
+            magMax = Math.max(magMax, mag[idx]);
+        }
+
+        // Pass 2: hue = gradient DIRECTION (which axis it changes along), brightness = LOG of the
+        // gradient magnitude (log compresses the huge steep-vs-gentle range so both read), summed
+        // additively. Near-flat voxels are dropped so only the field's changing structure glows.
+        List<float[]> keep = new ArrayList<>();
+        double logDen = Math.log1p(Math.E - 1);   // = 1; normalizes the log curve to [0,1]
+        for (int iz = 0; iz < n; iz++) for (int iy = 0; iy < n; iy++) for (int ix = 0; ix < n; ix++) {
+            int idx = ix + iy * n + iz * nn;
+            float t = mag[idx] / magMax;                       // linear steepness in [0,1]
+            if (t < VOLUME_THRESHOLD) continue;
+            float bright = (float) (Math.log1p(t * (Math.E - 1)) / logDen) * VOLUME_EXPOSURE;
+            float inv = bright / mag[idx];                     // direction × log-brightness × exposure
+            keep.add(new float[]{
+                    (float) (xlo + ix * sx), (float) (ylo + iy * sy), (float) (zlo + iz * sz),
+                    gx[idx] * inv, gy[idx] * inv, gz[idx] * inv});
+        }
+        float[] pos = new float[keep.size() * 3], col = new float[keep.size() * 3];
+        for (int i = 0; i < keep.size(); i++) {
+            float[] p = keep.get(i);
+            pos[i*3] = p[0]; pos[i*3+1] = p[1]; pos[i*3+2] = p[2];
+            col[i*3] = p[3]; col[i*3+1] = p[4]; col[i*3+2] = p[5];
+        }
+        // World-space point size (perspective: shrinks with distance) ~ 1.5 voxels, so the glow is
+        // continuous. Empty (all-flat) volumes yield no points.
+        float voxel = (float) ((sx + sy + sz) / 3.0);
+        float opacity = rv.members().containsKey("opacity")
+                ? Math.max(0f, Math.min(1f, (float) memberD(rv, "opacity"))) : VOLUME_OPACITY;
+        return keep.isEmpty() ? null
+                : new PointLayer(pos, col).withBlend(BlendMode.ADDITIVE).withOpacity(opacity)
+                        .withDefaultSize(Math.max(1e-3f, 1.5f * voxel)).withPerspectiveSize(true);
+    }
+
     /** A {@code Cloud} layer record → an OPAQUE point layer (so it occludes with surfaces). */
     private static Layer cloudLayer(RecordValue rv, Bounds b) {
         float[] xyz = xyzTriples(rv.members().get("points"));
@@ -690,8 +766,13 @@ public final class DasumBridge {
         if (t == Transform.IDENTITY) return l;
         return switch (l) {
             case TriangleLayer tr -> new TriangleLayer(scaleXYZ(tr.vertices(), t), tr.colors(), tr.blend(), tr.opacity());
-            case PointLayer p -> new PointLayer(scaleXYZ(p.positions(), t), p.colors(), p.sizes(),
-                    p.defaultSizePx(), p.blend(), p.opacity());
+            case PointLayer p -> {
+                // World-sized points scale their diameter with the box transform (like text);
+                // screen-pixel points keep their fixed size.
+                float size = p.perspectiveSize() ? p.defaultSizePx() * textScale : p.defaultSizePx();
+                yield new PointLayer(scaleXYZ(p.positions(), t), p.colors(), p.sizes(),
+                        size, p.perspectiveSize(), p.blend(), p.opacity());
+            }
             case LineLayer ln -> new LineLayer(scaleXYZ(ln.endpoints(), t), ln.colors(), ln.blend(), ln.opacity());
             case TextLayer tx -> new TextLayer(tx.text(), tx.fontGroup(), t.apply(tx.anchor()),
                     tx.heightWorld() * textScale, tx.color(), tx.align(), tx.billboard(), tx.blend(), tx.opacity());

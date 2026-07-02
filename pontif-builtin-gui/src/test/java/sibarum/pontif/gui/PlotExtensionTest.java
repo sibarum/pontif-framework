@@ -10,6 +10,7 @@ import sibarum.dasum.gui.vis.math.Vec3;
 import sibarum.dasum.gui.vis.scene.BlendMode;
 import sibarum.dasum.gui.vis.scene.Layer;
 import sibarum.dasum.gui.vis.scene.LineLayer;
+import sibarum.dasum.gui.vis.scene.PointLayer;
 import sibarum.dasum.gui.vis.scene.TextLayer;
 
 import java.util.List;
@@ -327,5 +328,45 @@ class PlotExtensionTest {
         // surfaceFine samples a 65×65 grid → (65-1)^2 cells × 2 triangles.
         var tri = (sibarum.dasum.gui.vis.scene.TriangleLayer) build.layers().get(0);
         assertEquals(64 * 64 * 2, tri.triangleCount(), "65x65 grid → 8192 triangles");
+    }
+
+    @Test
+    void volume_colorsByGradientAxis_asAdditivePoints() {
+        Extensions.install(new PlotExtension());
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        // f = x  → gradient (1,0,0) everywhere → every voxel lights the RED channel only.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Volume3D, volume, scene}
+                        struct Ramp()
+                        assign trait Ramp:Volume3D {
+                          at(x:Decimal, y:Decimal, z:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+                            {-1.0, 1.0, -1.0, 1.0, -1.0, 1.0}
+                        }
+                        scene({title = "v"}, { volume(Ramp()) })""", "vol.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "volume program should run; got " + r.text());
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        assertEquals(1, build.layers().size(), "one volumetric point layer");
+        Layer l = build.layers().get(0);
+        assertInstanceOf(PointLayer.class, l);
+        assertEquals(BlendMode.ADDITIVE, l.blend(), "volume voxels accumulate additively");
+
+        PointLayer pts = (PointLayer) l;
+        // Constant x-gradient → all 24^3 voxels kept, each red-dominant (green/blue ~ 0).
+        assertEquals(24 * 24 * 24, pts.pointCount(), "no voxel pruned for a uniform-gradient field");
+        float[] c = pts.colors();
+        assertTrue(c[0] > 0f, "red channel lit by the x-gradient");
+        assertEquals(0f, c[1], 1e-6f, "no y-gradient → green off");
+        assertEquals(0f, c[2], 1e-6f, "no z-gradient → blue off");
     }
 }

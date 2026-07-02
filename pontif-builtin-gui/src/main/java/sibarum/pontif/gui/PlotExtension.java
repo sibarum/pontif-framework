@@ -40,7 +40,8 @@ public final class PlotExtension implements Extension {
                 requires pontif.core.{Stream}
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
-                           fade, cmap, wire, scene, Curve, curve, chart}
+                           fade, cmap, wire, scene, Curve, curve, chart,
+                           Volume3D, Volume, volume}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -169,6 +170,38 @@ public final class PlotExtension implements Extension {
                 # Overlay the sample-grid wireframe on a surface: wire(surface(h)).
                 function wire(s:Surface):Surface ->
                   Surface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi, s.opacity, s.colormap, true)
+
+                # A scalar field over a 3D box: value at each (x,y,z), over {xlo,xhi,ylo,yhi,zlo,zhi}.
+                # Rendered volumetrically — each voxel's colour is the field's GRADIENT DIRECTION
+                # (x-change → red, y → green, z → blue) and its brightness is the gradient steepness,
+                # summed additively along the view ray. So the field's fastest-changing boundaries
+                # glow, tinted by which axis they change along.
+                trait Volume3D{ at(x:Decimal, y:Decimal, z:Decimal):Decimal, domain():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] }
+
+                # 24*24*24 grid indices for volume sampling (x = i%24, y = (i/24)%24, z = i/576).
+                let volumeIndices:Stream[Int:0 <= @ < 13824];
+
+                # Fragment workaround for the 3-arg field value (as surfaceZ, but for volumes).
+                function volumeAt(v:[Volume3D], x:Decimal, y:Decimal, z:Decimal):Decimal -> v.at(x, y, z)
+
+                # A sampled scalar field as a composable volumetric layer. `opacity` is the glow
+                # intensity (additive alpha) — set it with `fade`.
+                struct Volume(vs:_, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal, zlo:Decimal, zhi:Decimal, opacity:Decimal)
+
+                # Sample a Volume3D on a 24^3 grid into a Volume layer (row-major x,y,z).
+                function volume(v:[Volume3D]):Volume -> (
+                  let [{xlo, xhi, ylo, yhi, zlo, zhi}] = v.domain()
+                  let dx = (xhi - xlo) / 23.0
+                  let dy = (yhi - ylo) / 23.0
+                  let dz = (zhi - zlo) / 23.0
+                  let vs = &volumeIndices:[ (i:Int) ->
+                    volumeAt(v, xlo + (i % 24) * dx, ylo + ((i / 24) % 24) * dy, zlo + (i / 576) * dz) ]
+                  Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, 0.3)
+                )
+
+                # Set a volume's glow opacity: fade(volume(v), 0.15). Lower = subtler additive glow.
+                function fade(v:Volume, opacity:Decimal):Volume ->
+                  Volume(v.vs, v.xlo, v.xhi, v.ylo, v.yhi, v.zlo, v.zhi, opacity)
 
                 # Native: opens ONE window compositing all the given layers (3D depth occlusion).
                 function renderScene(cfg:_, layers:_):Stream[String] -> {}
