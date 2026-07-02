@@ -12,6 +12,7 @@ import sibarum.dasum.gui.vis.scene.Layer;
 import sibarum.dasum.gui.vis.scene.LineLayer;
 import sibarum.dasum.gui.vis.scene.PointLayer;
 import sibarum.dasum.gui.vis.scene.TextLayer;
+import sibarum.dasum.gui.vis.scene.VolumeLayer;
 
 import java.util.List;
 
@@ -331,7 +332,7 @@ class PlotExtensionTest {
     }
 
     @Test
-    void volume_colorsByGradientAxis_asAdditivePoints() {
+    void volume_colorsByGradientAxis_asRaymarchedVolume() {
         Extensions.install(new PlotExtension());
         Object[] capturedLayers = new Object[1];
         NativeCalls.NativeCall stub = (args, ctx) -> {
@@ -356,17 +357,19 @@ class PlotExtensionTest {
 
         assertFalse(r.isError(), () -> "volume program should run; got " + r.text());
         DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
-        assertEquals(1, build.layers().size(), "one volumetric point layer");
+        assertEquals(1, build.layers().size(), "one volumetric layer");
         Layer l = build.layers().get(0);
-        assertInstanceOf(PointLayer.class, l);
-        assertEquals(BlendMode.ADDITIVE, l.blend(), "volume voxels accumulate additively");
+        assertInstanceOf(VolumeLayer.class, l);
+        assertEquals(BlendMode.ADDITIVE, l.blend(), "volume accumulates emissively (additive)");
 
-        PointLayer pts = (PointLayer) l;
-        // Constant x-gradient → all 24^3 voxels kept, each red-dominant (green/blue ~ 0).
-        assertEquals(24 * 24 * 24, pts.pointCount(), "no voxel pruned for a uniform-gradient field");
-        float[] c = pts.colors();
-        assertTrue(c[0] > 0f, "red channel lit by the x-gradient");
-        assertEquals(0f, c[1], 1e-6f, "no y-gradient → green off");
-        assertEquals(0f, c[2], 1e-6f, "no z-gradient → blue off");
+        VolumeLayer vol = (VolumeLayer) l;
+        assertEquals(24, vol.nx(), "24^3 sampling grid");
+        assertEquals(24L * 24 * 24 * 4, vol.rgba().length, "dense RGBA voxels");
+        // f=x → gradient (1,0,0): every voxel's colour is red (direction), with positive density.
+        float[] g = vol.rgba();
+        assertTrue(g[0] > 0f, "red channel = x-gradient direction");
+        assertEquals(0f, g[1], 1e-6f, "no y-gradient → green off");
+        assertEquals(0f, g[2], 1e-6f, "no z-gradient → blue off");
+        assertTrue(g[3] > 0f, "density/alpha lit by the gradient magnitude");
     }
 }

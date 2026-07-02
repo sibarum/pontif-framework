@@ -50,6 +50,7 @@ import sibarum.dasum.gui.vis.scene.SceneSnapshot;
 import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.dasum.gui.vis.scene.TextLayer;
 import sibarum.dasum.gui.vis.scene.TriangleLayer;
+import sibarum.dasum.gui.vis.scene.VolumeLayer;
 import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
@@ -621,12 +622,13 @@ public final class DasumBridge {
     private static final float VOLUME_OPACITY = 0.3f;
 
     /**
-     * A {@code Volume} record → an ADDITIVE point layer coloured by GRADIENT DIRECTION: at each grid
-     * voxel the field's gradient is estimated by central differences, and {@code (|∂x|, |∂y|, |∂z|)}
-     * — normalized by the peak component over the whole field — becomes the voxel's RGB. So an axis
-     * along which the field changes fastest lights its own channel, brightness tracks steepness, and
-     * additive blending sums contributions along the view ray. Near-flat voxels are dropped so only
-     * the field's changing structure glows. (docs/plotting.md)
+     * A {@code Volume} record → a raymarched {@link VolumeLayer} coloured by GRADIENT DIRECTION: at
+     * each grid voxel the field's gradient is estimated by central differences; its DIRECTION
+     * ({@code |∂x|,|∂y|,|∂z|} normalized) is the voxel's RGB (so the axis of fastest change lights
+     * its channel) and a LOG of its magnitude is the voxel's density/alpha (so steep and gentle
+     * boundaries both read). The dense RGBA grid uploads to a 3D texture and the shader accumulates
+     * it emissively along each ray — continuous (trilinear-filtered), crisper than points.
+     * (docs/plotting.md)
      */
     private static Layer volumeLayer(RecordValue rv, Bounds b) {
         double[] vs = doubles(rv.members().get("vs"));
@@ -657,35 +659,27 @@ public final class DasumBridge {
             magMax = Math.max(magMax, mag[idx]);
         }
 
-        // Pass 2: hue = gradient DIRECTION (which axis it changes along), brightness = LOG of the
-        // gradient magnitude (log compresses the huge steep-vs-gentle range so both read), summed
-        // additively. Near-flat voxels are dropped so only the field's changing structure glows.
-        List<float[]> keep = new ArrayList<>();
+        // Pass 2: fill a dense RGBA grid — rgb = gradient DIRECTION (which axis it changes along),
+        // a = LOG of the gradient magnitude × exposure (log compresses the steep-vs-gentle range so
+        // both read). Flat voxels get ~0 alpha, so they contribute nothing when the shader
+        // accumulates rgb*a along the ray; below a small threshold they're zeroed outright.
+        float[] rgba = new float[vs.length * 4];
         double logDen = Math.log1p(Math.E - 1);   // = 1; normalizes the log curve to [0,1]
-        for (int iz = 0; iz < n; iz++) for (int iy = 0; iy < n; iy++) for (int ix = 0; ix < n; ix++) {
-            int idx = ix + iy * n + iz * nn;
+        for (int idx = 0; idx < vs.length; idx++) {
             float t = mag[idx] / magMax;                       // linear steepness in [0,1]
-            if (t < VOLUME_THRESHOLD) continue;
+            if (t < VOLUME_THRESHOLD) continue;                // leave this voxel transparent (0)
             float bright = (float) (Math.log1p(t * (Math.E - 1)) / logDen) * VOLUME_EXPOSURE;
-            float inv = bright / mag[idx];                     // direction × log-brightness × exposure
-            keep.add(new float[]{
-                    (float) (xlo + ix * sx), (float) (ylo + iy * sy), (float) (zlo + iz * sz),
-                    gx[idx] * inv, gy[idx] * inv, gz[idx] * inv});
+            float inv = 1f / mag[idx];                          // unit gradient direction → hue
+            rgba[idx*4    ] = gx[idx] * inv;
+            rgba[idx*4 + 1] = gy[idx] * inv;
+            rgba[idx*4 + 2] = gz[idx] * inv;
+            rgba[idx*4 + 3] = bright;                           // density/alpha
         }
-        float[] pos = new float[keep.size() * 3], col = new float[keep.size() * 3];
-        for (int i = 0; i < keep.size(); i++) {
-            float[] p = keep.get(i);
-            pos[i*3] = p[0]; pos[i*3+1] = p[1]; pos[i*3+2] = p[2];
-            col[i*3] = p[3]; col[i*3+1] = p[4]; col[i*3+2] = p[5];
-        }
-        // World-space point size (perspective: shrinks with distance) ~ 1.5 voxels, so the glow is
-        // continuous. Empty (all-flat) volumes yield no points.
-        float voxel = (float) ((sx + sy + sz) / 3.0);
         float opacity = rv.members().containsKey("opacity")
                 ? Math.max(0f, Math.min(1f, (float) memberD(rv, "opacity"))) : VOLUME_OPACITY;
-        return keep.isEmpty() ? null
-                : new PointLayer(pos, col).withBlend(BlendMode.ADDITIVE).withOpacity(opacity)
-                        .withDefaultSize(Math.max(1e-3f, 1.5f * voxel)).withPerspectiveSize(true);
+        Vec3 center = new Vec3((float) ((xlo + xhi) / 2), (float) ((ylo + yhi) / 2), (float) ((zlo + zhi) / 2));
+        Vec3 half = new Vec3((float) ((xhi - xlo) / 2), (float) ((yhi - ylo) / 2), (float) ((zhi - zlo) / 2));
+        return new VolumeLayer(rgba, n, n, n, center, half, 128, BlendMode.ADDITIVE, opacity);
     }
 
     /** A {@code Cloud} layer record → an OPAQUE point layer (so it occludes with surfaces). */
@@ -776,6 +770,14 @@ public final class DasumBridge {
             case LineLayer ln -> new LineLayer(scaleXYZ(ln.endpoints(), t), ln.colors(), ln.blend(), ln.opacity());
             case TextLayer tx -> new TextLayer(tx.text(), tx.fontGroup(), t.apply(tx.anchor()),
                     tx.heightWorld() * textScale, tx.color(), tx.align(), tx.billboard(), tx.blend(), tx.opacity());
+            case VolumeLayer vol -> {
+                // The box maps into the display cube: centre transforms like a point, the per-axis
+                // half-extent scales (no centre offset). Grid data is unchanged.
+                Vec3 h = new Vec3(vol.halfExtent().x() * t.sx(),
+                        vol.halfExtent().y() * t.sy(), vol.halfExtent().z() * t.sz());
+                yield new VolumeLayer(vol.rgba(), vol.nx(), vol.ny(), vol.nz(),
+                        t.apply(vol.center()), h, vol.maxSteps(), vol.blend(), vol.opacity());
+            }
             default -> l;
         };
     }
