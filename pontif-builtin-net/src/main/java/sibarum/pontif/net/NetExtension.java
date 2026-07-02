@@ -42,24 +42,30 @@ public final class NetExtension implements Extension {
         calls.put("local", NetConduits.local());
         calls.put("localListen", NetConduits.localListen());
         calls.put("send", NetConduits.send());
-        calls.put("receive", NetConduits.receive());
+        calls.put("receiveN", NetConduits.receiveN());
         return calls;
     }
 
     private static final String SOURCE = """
             requires pontif.core.{Stream}
-            exports @.{connect, listen, local, localListen, send, receive}
+            exports @.{NetConduit, connect, listen, local, localListen, send, receiveN}
 
-            # A conduit handle is an opaque native value (`_`): open one with a transport-specific
-            # opener, then send/receive over it regardless of which transport backs it.
-            function connect(host:String, port:Int):_ -> {}
-            function listen(port:Int):_ -> {}
-            function local(name:String):_ -> {}
-            function localListen(name:String):_ -> {}
+            # A conduit is a first-class value: a struct carrying an opaque id (the real transport
+            # handle lives native-side, keyed by that id). It flows through dispatch like any struct.
+            struct NetConduit(id:Int)
 
-            # send is write-only (returns Int 0); receive yields a demand-driven inbound stream.
-            function send(conduit:_, event:_):Int -> 0
-            function receive(conduit:_):Stream[_] -> {}
+            # Openers differ only in transport; every one returns a NetConduit.
+            function connect(host:String, port:Int):NetConduit -> NetConduit(0)
+            function listen(port:Int):NetConduit -> NetConduit(0)
+            function local(name:String):NetConduit -> NetConduit(0)
+            function localListen(name:String):NetConduit -> NetConduit(0)
+
+            # send is write-only (returns Int 0); receiveN pulls a bounded batch of inbound events.
+            # receiveN CONSUMES from the inbox, so bind it with `let` before spreading — a spread
+            # source can be evaluated more than once, and a second consuming pull would block:
+            #   let batch = receiveN(c, 2)   &batch:[ (e:_) -> e ]
+            function send(conduit:NetConduit, event:_):Int -> 0
+            function receiveN(conduit:NetConduit, count:Int):Stream[_] -> {}
 
             0
             """;

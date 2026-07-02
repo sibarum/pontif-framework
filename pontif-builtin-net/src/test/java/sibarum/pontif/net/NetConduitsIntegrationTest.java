@@ -6,6 +6,7 @@ import sibarum.elektro.queue.DefaultConduit;
 import sibarum.elektro.queue.dyn.DynMessages;
 import sibarum.elektro.queue.message.ArrayMessageRegistry;
 import sibarum.elektro.queue.message.MessageRegistry;
+import sibarum.elektro.queue.transport.local.ElektroLocal;
 import sibarum.elektro.queue.transport.tcp.ElektroTcp;
 import sibarum.elektro.queue.transport.tcp.TcpTransport;
 import sibarum.pontif.ast.record.RecordValue;
@@ -60,11 +61,15 @@ class NetConduitsIntegrationTest {
     }
 
     @Test
-    void sendReceiveAcrossThreadsViaLocalTransport() {
-        // Drive the SAME native calls the interpreter binds — proving the language-facing openers.
+    void sendReceiveAcrossThreadsViaLocalTransport() throws Exception {
         String endpoint = "net-test-" + ENDPOINTS.incrementAndGet();
-        NetConduitHandle server = open(NetConduits.localListen(), endpoint);
-        NetConduitHandle client = open(NetConduits.local(), endpoint);
+        Conduit sc = ElektroLocal.server("pontif-net", endpoint, registry());
+        sc.start().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        Conduit cc = ElektroLocal.client("pontif-net", endpoint, registry());
+        cc.start().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        NetConduitHandle server = new NetConduitHandle(sc);
+        NetConduitHandle client = new NetConduitHandle(cc);
         try {
             assertRoundTrips(client, server);
             assertRoundTrips(server, client); // bidirectional over the same handles
@@ -94,11 +99,7 @@ class NetConduitsIntegrationTest {
         }
     }
 
-    // --- helpers: drive the native calls exactly as the interpreter would ---------
-
-    private static NetConduitHandle open(NativeCalls.NativeCall call, Object arg) {
-        return (NetConduitHandle) call.call(List.of(arg), null);
-    }
+    // --- helpers ----------------------------------------------------------------
 
     private static NetConduitHandle openTcpClient(int port) {
         Conduit conduit = ElektroTcp.client("pontif-net", "127.0.0.1", port, registry());
