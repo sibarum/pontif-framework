@@ -2,10 +2,26 @@
 
 As of 2026-06-09-ET
 
-STATUS: **DRAFT — design brainstorm, not implemented.** Only `Type[…]` / `Type{…}`
-parse today (and `Type[…]` is itself unbuilt as of this writing — see
-`univocal-language-design.md`). `inverse[f]` and the rest below are unbuilt.
-Real-vs-aspirational is marked honestly per section; do not read this as shipped.
+STATUS: **DRAFT — design brainstorm.** Real-vs-aspirational is marked honestly per
+section; do not read this as shipped.
+
+> **STALE NOTICE (2026-06-26, verified against code on master).** The original
+> "only `Type[…]`/`Type{…}` parse today, and `Type[…]` is itself unbuilt" claim is
+> out of date. As of master:
+> - **Built:** `Type[…]` reusable-sort aliases (`f84ebe5`, `ReusableSortTest`); the
+>   `;` synthesis directive (`873830c`); value/promotion synthesis (`eee41a3`,
+>   `f9506c3`); and a **prover-resident synthesis engine + bridge seam**
+>   (`pontif-predicates/Synthesis` + `pontif-ir/SynthesisBridge`, `3257457`) — "all
+>   synthesis lives in the prover, behind a fragment-gated bridge."
+> - **Important scope caveat:** that engine synthesizes *values from refinement
+>   predicates* (`SynthesisBridge.enumerateInt: IrSort → List<Long>`), **not**
+>   function-body-from-function-structure.
+> - **Still unbuilt:** `inverse[f]`/`differential[f]` (absent from code); a *generic*
+>   `M[arg]` operator dispatch (`Type[…]` is special-cased to the keyword `"Type"` in
+>   `AltParser:1699`, sort-only).
+> - **So:** `inverse`/`differential` *extend* a proven prover-synthesis seam (adding a
+>   function-from-function routine + an `IrExpr→IrExpr` bridge + generalizing the
+>   application surface), rather than building the substrate from scratch.
 
 ---
 
