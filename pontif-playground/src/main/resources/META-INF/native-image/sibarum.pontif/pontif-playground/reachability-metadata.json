@@ -457,6 +457,39 @@
           "jint",
           "jint"
         ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jfloat",
+          "jfloat"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "jint",
+          "void*"
+        ]
       }
     ],
     "directUpcalls": [

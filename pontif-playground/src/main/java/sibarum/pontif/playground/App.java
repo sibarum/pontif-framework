@@ -236,7 +236,28 @@ public final class App {
     // are RUN out-of-process (see launchProgram), so no shared PontifRunner is held here.
     private static final PontifCompiler COMPILER = new PontifCompiler();
 
-    public static void main(String[] args) {
+    /** Self-exec flags: {@code pontif-editor <flag> <program.ptf> [resolveDir] [name]} runs a
+     *  program in a child instance of this executable instead of opening the editor. Used only when
+     *  the editor is a native image (no bundled {@code java} to spawn). */
+    private static final String RUN_HEADLESS_FLAG = "--pontif-run";
+    private static final String RUN_GUI_FLAG = "--pontif-run-gui";
+
+    public static void main(String[] args) throws Exception {
+        // Program-run modes: the editor re-invokes its OWN executable to run a program
+        // out-of-process (see launchProgram / childCommand) whenever it is itself a native image,
+        // because a native image has no bundled `java` to spawn (System.getProperty("java.home")
+        // is null). These flags route straight to the launchers and never open the editor. On the
+        // JVM the editor spawns `java -cp … <launcher>` instead, so these branches are dormant
+        // there — but they are the reachability anchor that pulls the launchers into the image.
+        if (args.length >= 1 && RUN_HEADLESS_FLAG.equals(args[0])) {
+            sibarum.pontif.net.ProgramLauncher.main(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
+        if (args.length >= 1 && RUN_GUI_FLAG.equals(args[0])) {
+            sibarum.pontif.gui.GuiLauncher.main(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
+
         // The editor compiles in-process, so install the windowed extensions up front — otherwise
         // the live compiler reports a false "unknown module 'pontif.plot'/'pontif.gui'". This only
         // makes those modules RESOLVABLE; GUI programs still RUN in a separate process
@@ -536,8 +557,8 @@ public final class App {
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
         // Resolve sibling `requires` from the open file's directory; captured on the
         // main thread (the click handler) so the worker doesn't race a file change.
-        launchProgram("sibarum.pontif.net.ProgramLauncher", sourceName, code, resolveDir(),
-                sourceName + " finished");
+        launchProgram("sibarum.pontif.net.ProgramLauncher", RUN_HEADLESS_FLAG, sourceName, code,
+                resolveDir(), sourceName + " finished");
     }
 
     /**
@@ -550,7 +571,7 @@ public final class App {
     private static void onRunGuiClicked() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "editor.ptf";
-        launchProgram("sibarum.pontif.gui.GuiLauncher", sourceName, code, resolveDir(),
+        launchProgram("sibarum.pontif.gui.GuiLauncher", RUN_GUI_FLAG, sourceName, code, resolveDir(),
                 "GUI window closed (" + sourceName + ")");
     }
 
@@ -567,8 +588,8 @@ public final class App {
      * launchers resolve. {@code resolveDir} is captured by the caller on the main thread so the
      * worker can't race a file change.
      */
-    private static void launchProgram(String mainClass, String sourceName, String code,
-                                      Path resolveDir, String successMessage) {
+    private static void launchProgram(String jvmMainClass, String nativeFlag, String sourceName,
+                                      String code, Path resolveDir, String successMessage) {
         String resolveArg = resolveDir != null ? resolveDir.toString() : "";
         Status.info("launching " + sourceName + " ...");
         Thread worker = new Thread(() -> {
@@ -582,15 +603,8 @@ public final class App {
                 // Stand up the debug port BEFORE spawning so we can hand the child its port; if it
                 // can't open, run untapped rather than block the launch.
                 debug = startDebugServer(sourceName);
-                String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
                 ProcessBuilder pb = new ProcessBuilder(
-                        javaBin,
-                        "--enable-native-access=ALL-UNNAMED",
-                        "-cp", System.getProperty("java.class.path"),
-                        mainClass,
-                        tmp.toString(),
-                        resolveArg,
-                        sourceName);
+                        childCommand(jvmMainClass, nativeFlag, tmp.toString(), resolveArg, sourceName));
                 if (debug != null) {
                     pb.environment().put(DebugSession.PORT_ENV, Integer.toString(debug.port()));
                 }
@@ -631,6 +645,42 @@ public final class App {
         }, "pontif-runner");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Builds the child process command to run a program out-of-process. Two shapes:
+     * <ul>
+     *   <li><b>JVM editor</b> — {@code java --enable-native-access=ALL-UNNAMED -cp <inherited cp>
+     *       <jvmMainClass> <args>}. The editor's classpath (pontif-builtin-gui → -net) resolves
+     *       both launchers.</li>
+     *   <li><b>Native-image editor</b> — {@code <this-exe> <nativeFlag> <args>}. A native image has
+     *       no bundled {@code java} and no classpath of {@code .class} files, so it re-executes
+     *       itself; {@code main} routes {@code nativeFlag} to the same launcher (compiled into the
+     *       image). The self path comes from {@link ProcessHandle}.</li>
+     * </ul>
+     */
+    private static List<String> childCommand(String jvmMainClass, String nativeFlag,
+                                             String program, String resolveArg, String sourceName) {
+        if (isNativeImage()) {
+            String self = ProcessHandle.current().info().command().orElseThrow(() ->
+                    new IllegalStateException("cannot determine the editor executable to launch a program"));
+            return List.of(self, nativeFlag, program, resolveArg, sourceName);
+        }
+        String javaBin = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        return List.of(
+                javaBin,
+                "--enable-native-access=ALL-UNNAMED",
+                "-cp", System.getProperty("java.class.path"),
+                jvmMainClass,
+                program,
+                resolveArg,
+                sourceName);
+    }
+
+    /** True when this editor is itself a GraalVM native image (set to {@code "runtime"} while a
+     *  built image runs; absent on the JVM). Decides how {@link #childCommand} spawns a program. */
+    private static boolean isNativeImage() {
+        return System.getProperty("org.graalvm.nativeimage.imagecode") != null;
     }
 
     /**
