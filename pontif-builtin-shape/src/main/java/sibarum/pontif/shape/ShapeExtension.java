@@ -36,7 +36,8 @@ public final class ShapeExtension implements Extension {
                 requires pontif.plot.{Volume, scene}
                 exports @.{SdfShape, Sphere, preview, distanceAt,
                            translate, scale, rotateX, rotateY, rotateZ,
-                           union, difference, intersect, smoothUnion}
+                           union, difference, intersect, smoothUnion,
+                           ScalarField, Attributed, attr, shapeOf, attrName, attrAt}
 
                 # An implicit-surface shape: the SIGNED DISTANCE to its surface at any point
                 # (negative inside, zero on the surface, positive outside), plus an axis-aligned
@@ -284,6 +285,40 @@ public final class ShapeExtension implements Extension {
                   )
                 }
                 function smoothUnion(a:[SdfShape], b:[SdfShape], k:Decimal):[SdfShape] -> SmoothUnion(a, b, k)
+
+                # --- Attribute fields (docs/shapes.md S4, requirement 2) --------------------------
+                # "Vertex data" that is NOT per-vertex: a named FIELD over the domain (a value at
+                # every point in space), not an array indexed by vertex — because no vertices exist
+                # until topologize (S6) creates them. A field is defined by a method, exactly like a
+                # shape's distance; you attach it to a shape by name, and it rides along (geometry
+                # unchanged) until topologize samples it onto the vertices it makes. There is
+                # deliberately NO indexed / per-vertex operation here: you cannot address data on
+                # points that do not exist yet (the no-lie law, docs/shapes.md §The spine).
+
+                # A scalar field: a value at each point. Assign it to your type and implement valueAt
+                # (a weight, a temperature, one colour channel, a uv coordinate, …).
+                trait ScalarField{ valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal }
+
+                # An attributed shape: the geometry bundled with one named attribute field. The
+                # geometry is untouched — `shapeOf` gives it back (for preview/topologize) and
+                # `attrAt` samples the field. (A bundle rather than an SdfShape wrapper so the shape
+                # stays a plain [SdfShape] at every call site.)
+                struct Attributed(shape:[SdfShape], name:String, field:[ScalarField])
+
+                # Route the field's trait-method call through a top-level function (as distanceAt does).
+                function fieldValue(f:[ScalarField], x:Decimal, y:Decimal, z:Decimal):Decimal -> f.valueAt(x, y, z)
+
+                # Attach a named attribute field to a shape, producing the bundle.
+                function attr(shape:[SdfShape], name:String, field:[ScalarField]):Attributed ->
+                  Attributed(shape, name, field)
+
+                # The bundled geometry (unchanged — preview/topologize it like any shape).
+                function shapeOf(a:Attributed):[SdfShape] -> a.shape
+
+                # Query the attached field: its name, and its value at a point (what topologize will
+                # sample onto each generated vertex in S6).
+                function attrName(a:Attributed):String -> a.name
+                function attrAt(a:Attributed, x:Decimal, y:Decimal, z:Decimal):Decimal -> fieldValue(a.field, x, y, z)
 
                 0
                 """;

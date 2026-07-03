@@ -1,8 +1,8 @@
 # Shapes — SDF composition, field-attributes, topologize, export
 
-Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1–S3 LANDED** (module + `SdfShape` +
-`Sphere` + live preview; transforms + adjustable anchor; boolean CSG modifiers; see Slices).
-Originally net-new; scoped
+Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1–S4 LANDED** (module + `SdfShape` +
+`Sphere` + live preview; transforms + adjustable anchor; boolean CSG modifiers; attribute fields;
+see Slices). Originally net-new; scoped
 against master by reading the extension API, `PlotExtension`/`DasumBridge`, the dasum-vis
 engine, and the type substrate. Sibling front to docs/plotting.md — plotting *renders* shapes;
 this *authors, meshes, and exports* them. No collisions with existing modules: it lands as a new
@@ -104,23 +104,42 @@ Refined param sorts (`[Decimal:@>0.0]`) are the construction gate keeping a dege
 primitive uninstantiable ([[project_construction_gate]]). The starter set is PROPOSED; the exact
 roster is James's call.
 
-### (2) Attribute fields — the "vertex data" that isn't per-vertex yet
+### (2) Attribute fields — the "vertex data" that isn't per-vertex yet  *(LANDED, S4)*
 
-A shape carries a set of **named fields**, each a function of position (or of surface point).
-Set them by wrapping the shape; nothing is indexed, nothing is an array.
+A shape carries **named fields**, each a value at every point in space — a *function*, not an
+array indexed by vertex. You attach one; nothing is indexed.
 
+**Shipped (S4):** a field is a `ScalarField` — a value defined by a method, exactly like a shape's
+distance. `attr` bundles a shape with a named field; `shapeOf` gives the geometry back (for
+preview/topologize) and `attrAt` samples the field.
 ```
-let s = Sphere(1.0)
-   ; attr("color",  (p:{Decimal,Decimal,Decimal}) -> heat(p.z))     # a field, not values
-   ; attr("weight", (p) -> 1.0 - length(p))
+trait ScalarField{ valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal }
+struct Height() ; assign trait Height:ScalarField { valueAt(x,y,z) -> z }
+
+let a = attr(Sphere(1.0), "height", Height())   # bundle: geometry + one named field
+preview(shapeOf(a))                              # geometry, unchanged
+attrAt(a, 0.0, 0.0, 5.0)                         # 5.0 — the field, evaluated on demand
 ```
-An attribute is `{name, field}` where `field` is a `[Method({Decimal,Decimal,Decimal}):V]`
-producing any value sort `V` (a scalar, a color tuple, a uv `{Decimal,Decimal}`). This is
-literally "arbitrary data" (any `V`) and literally "not per-vertex" (a function over the domain).
-The naming "vertex data" is retained from the request as the *intent*, but see **Naming** — the
-value in hand pre-topologize is an **attribute field**, and calling it per-vertex would be the
-lie the design avoids. PROPOSED: surface-parameterized fields (`field` taking a surface uv rather
-than a space point) as a later refinement; space-fields first because the SDF gives them for free.
+A field is defined by a method (a `ScalarField`), not a first-class function value, to stay on the
+proven trait / trait-typed-field mechanics (a `[Method(…):V]` field-value form is a later
+ergonomic). It's a **bundle**, not an `SdfShape` wrapper, because the call gate rejects a concrete
+wrapper used *directly* as `[SdfShape]` (a `Sphere` widens fine, a same-shaped wrapper does not —
+noted as a gate inconsistency); `shapeOf` returns `[SdfShape]` via a return-widening, which works.
+
+**The no-lie point.** The API offers only *attach a field* and *evaluate at a point* — there is no
+vertex-index operation, because no vertices exist until `topologize` (S6). "Not per-vertex" isn't a
+restriction to work around; it's structural. `topologize` samples each field at the vertices it
+makes — that's when, and only when, per-vertex data becomes honest ([[project_pontif_no_lie]]).
+
+**Color (James's example: "setting the color of the object sets the vertex colors on its
+surfaces").** Exactly this model — color is a field over the object, sampled onto the vertices
+`topologize` creates. Concretely, color is **multi-channel** (red/green/blue), which is three named
+scalar channels — the same form PLY stores per-vertex (`property … red/green/blue`). S4 ships the
+single-channel `ScalarField`; the multi-channel/color form (and multiple named fields per shape)
+lands with its consumers — S6 (sample onto vertices) and S7 (write PLY channels). **OPEN:** color as
+a dedicated `ColorField` (`colorAt → {r,g,b}`) vs. three named scalar channels (PLY-aligned) —
+leaning the latter. PROPOSED too: surface-parameterized (uv) fields, and a `[Method(…):V]`
+field-value form so a field can be written inline instead of as a named trait impl.
 
 ### (3) Anchor — the pivot transforms compose about  *(LANDED, S2)*
 
@@ -348,9 +367,13 @@ previewed field is a caught lie).
   as min/max over signed distances, each a composable wrapper returning `[SdfShape]` and nesting
   into a CSG tree (see §(4)). Witness: `BooleanTest` (field values at known points for all four) +
   the first non-symmetric preview `examples/csg.ptf` (a sphere with a bite).
-- **S4** — **attribute fields** (`attr(shape, name, field)`); fields carried through transforms
-  and booleans (union of named fields, clash rule). Witness: field evaluates at query points; no
-  per-vertex spelling is expressible (the no-lie check).
+- **S4 — LANDED 2026-07-03.** Attribute fields (requirement 2): a field is a `ScalarField` (value
+  by method); `attr(shape, name, field)` bundles them, `shapeOf` returns the geometry, `attrAt`
+  samples the field (see §(2)). Proves data-as-field-not-per-vertex — the API has no vertex-index
+  op. Witness: `AttributeTest` — the field evaluates at query points, the name is kept, the geometry
+  is unchanged. Deferred to consumers (S6/S7): multiple named fields per shape, multi-channel
+  **color** (red/green/blue), carrying fields through transforms/booleans (clash rule), and an
+  inline `[Method(…):V]` field-value form.
 - **S5** — **topologize** → indexed `Mesh` via marching cubes (sample-grid, geometry only, no
   attributes). Witness: sphere meshes to a closed manifold; triangle/vertex counts + a spot-check
   position.
