@@ -183,16 +183,10 @@
       "glob": "natives/windows-x64/glfw3.dll"
     },
     {
-      "glob": "shaders/msdf-text.frag"
+      "glob": "shaders/*.frag"
     },
     {
-      "glob": "shaders/msdf-text.vert"
-    },
-    {
-      "glob": "shaders/solid-fill.frag"
-    },
-    {
-      "glob": "shaders/solid-fill.vert"
+      "glob": "shaders/*.vert"
     }
   ],
   "foreign": {
