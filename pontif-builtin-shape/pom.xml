@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-builtin-shape</artifactId>
+
+    <!--
+      SDF shape composition (docs/shapes.md). S1: parameterized primitives + the `SdfShape` trait
+      + live preview. The preview reuses pontif.plot's volumetric renderer (no new native code),
+      so this module depends on pontif-builtin-gui ONLY to borrow that render path — core stays
+      shape-free. Meshing, attributes, and PLY export are later slices.
+    -->
+    <properties>
+        <main.class>sibarum.pontif.shape.ShapeLauncher</main.class>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ast</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <!-- Borrow the plot render path (PlotExtension / DasumBridge) for the live preview. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-gui</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Launch a shape .ptf (opens a preview window; GLFW needs native access):
+                 mvn -pl pontif-builtin-shape -am exec:exec -Dptf=examples/sphere.ptf -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <executable>${java.home}/bin/java</executable>
+                    <arguments>
+                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${main.class}</argument>
+                        <argument>${ptf}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
