@@ -1,7 +1,8 @@
 # Shapes — SDF composition, field-attributes, topologize, export
 
-Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1 + S2 LANDED** (module + `SdfShape` +
-`Sphere` + live preview; transforms + adjustable anchor; see Slices). Originally net-new; scoped
+Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1–S3 LANDED** (module + `SdfShape` +
+`Sphere` + live preview; transforms + adjustable anchor; boolean CSG modifiers; see Slices).
+Originally net-new; scoped
 against master by reading the extension API, `PlotExtension`/`DasumBridge`, the dasum-vis
 engine, and the type substrate. Sibling front to docs/plotting.md — plotting *renders* shapes;
 this *authors, meshes, and exports* them. No collisions with existing modules: it lands as a new
@@ -150,19 +151,28 @@ translate(rotateY(scale(Sphere(1.0), 1.5, {0.0,0.0,0.0}), 45.0, {0.0,0.0,0.0}), 
 - Math note: dasum ships `Vec3`/`Vec4`/`CameraMath` but **no `Mat4`**; S2 does the rotation with
   `sin`/`cos`/`radians` from `pontif.math` directly (no matrix type needed for principal axes).
 
-### (4) Boolean modifiers — CSG over distances
+### (4) Boolean modifiers — CSG over distances  *(LANDED, S3)*
 
 ```
-union(a, b)         -> min(distance_a, distance_b)          # OR
-difference(a, b)    -> max(distance_a, -distance_b)          # a minus b
-intersect(a, b)     -> max(distance_a, distance_b)          # AND
-smoothUnion(a, b, k)-> soft-min                              # filleted blend
+union(a, b)          -> min(da, db)          # OR
+intersect(a, b)      -> max(da, db)          # AND
+difference(a, b)     -> max(da, 0.0 - db)    # a minus b
+smoothUnion(a, b, k) -> polynomial smin      # k-radius filleted blend
 ```
-Each combinator is itself an `SdfShape`, so booleans nest arbitrarily and compose with transforms
-and attributes uniformly (this is the CSG *tree*). **DERIVED** — `min`/`max` are not bijective
-(they forget the losing branch), so a boolean is not `Reversible`; the attribute fields of both
-operands survive as the combined shape's fields (a union of named fields; name clash = a declared
-resolution, PROPOSED: last-wins with a warning, or require rename).
+Each combinator is itself an `SdfShape` holding two inners (returned as `[SdfShape]`, like the S2
+transforms), so booleans nest arbitrarily and compose with transforms uniformly — the CSG *tree*.
+Bounds: union/smoothUnion take the combined box; intersect/difference take `a`'s box (the result
+is ⊆ `a`, conservative). **DERIVED** — `min`/`max` are not bijective (they forget the losing
+branch), so a boolean is not `Reversible`. Away from the seam `smoothUnion` is exactly `union` (the
+blend factor saturates); the fillet only appears within `k` of the crossing. (Note: a `max`-based
+result is a *bound*, not an exact SDF, in the carved region — fine near the surface, which is all the
+sampled preview and, later, marching cubes read.)
+
+Witness: `BooleanTest` (pure SDF-algebra) checks union takes the nearer surface, intersect is inside
+both, difference carves the second out of the first, and `smoothUnion` reduces to `union` away from
+the seam. This is also the first *non-symmetric* preview — `examples/csg.ptf` renders a sphere with
+a bite. **DEFERRED to the attribute slices:** the attribute fields of both operands surviving as the
+combined shape's fields (name-clash rule) waits for S4.
 
 ### (5) SDF surfaces — the escape hatch, same trait
 
@@ -334,8 +344,10 @@ previewed field is a caught lie).
   moves the centre, scale grows about the anchor (distance × factor), rotation is rigid on a sphere,
   and `rotateY(translate(Sphere,{2,0,0}),90,origin)` lands the centre at `(0,0,-2)` (real rotation +
   composition). Stateful `anchor()` sugar + arbitrary-axis rotation deferred.
-- **S3** — **boolean modifiers** (`union`/`difference`/`intersect`/`smoothUnion`), nesting into a
-  CSG tree. Witness: `difference(Box, Sphere)` field values at known points.
+- **S3 — LANDED 2026-07-03.** **Boolean modifiers** `union`/`intersect`/`difference`/`smoothUnion`
+  as min/max over signed distances, each a composable wrapper returning `[SdfShape]` and nesting
+  into a CSG tree (see §(4)). Witness: `BooleanTest` (field values at known points for all four) +
+  the first non-symmetric preview `examples/csg.ptf` (a sphere with a bite).
 - **S4** — **attribute fields** (`attr(shape, name, field)`); fields carried through transforms
   and booleans (union of named fields, clash rule). Witness: field evaluates at query points; no
   per-vertex spelling is expressible (the no-lie check).

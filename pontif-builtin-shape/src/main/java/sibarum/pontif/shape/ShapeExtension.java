@@ -32,10 +32,11 @@ public final class ShapeExtension implements Extension {
     public String pontifSource() {
         return """
                 requires pontif.core.{Stream}
-                requires pontif.math.{sqrt, clamp, sin, cos, radians}
+                requires pontif.math.{sqrt, clamp, sin, cos, radians, min, max, mix}
                 requires pontif.plot.{Volume, scene}
                 exports @.{SdfShape, Sphere, preview, distanceAt,
-                           translate, scale, rotateX, rotateY, rotateZ}
+                           translate, scale, rotateX, rotateY, rotateZ,
+                           union, difference, intersect, smoothUnion}
 
                 # An implicit-surface shape: the SIGNED DISTANCE to its surface at any point
                 # (negative inside, zero on the surface, positive outside), plus an axis-aligned
@@ -221,6 +222,68 @@ public final class ShapeExtension implements Extension {
                   let [{ax, ay, az}] = about
                   RotatedZ(s, degrees, ax, ay, az)
                 )
+
+                # --- Boolean modifiers / CSG (docs/shapes.md S4[sic §(4)]) ------------------------
+                # Constructive solid geometry as min/max over the two operands' signed distances.
+                # Each combinator is itself an SdfShape holding two inners, so booleans nest and
+                # compose with transforms uniformly. min/max discard the losing operand's distance —
+                # non-bijective, and honest about it (docs/shapes.md).
+
+                # The combined axis-aligned box of two shapes (for union-like results).
+                function unionBounds(axlo:Decimal, axhi:Decimal, aylo:Decimal, ayhi:Decimal, azlo:Decimal, azhi:Decimal,
+                                     bxlo:Decimal, bxhi:Decimal, bylo:Decimal, byhi:Decimal, bzlo:Decimal, bzhi:Decimal
+                                     ):[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+                  {min(axlo, bxlo), max(axhi, bxhi), min(aylo, bylo), max(ayhi, byhi), min(azlo, bzlo), max(azhi, bzhi)}
+
+                # Union (OR): the nearer surface wins — min of the two distances. Bounds = both boxes.
+                struct Union(a:[SdfShape], b:[SdfShape])
+                assign trait Union:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal ->
+                    min(distanceAt(this.a, x, y, z), distanceAt(this.b, x, y, z))
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let [{axlo, axhi, aylo, ayhi, azlo, azhi}] = boundsOf(this.a)
+                    let [{bxlo, bxhi, bylo, byhi, bzlo, bzhi}] = boundsOf(this.b)
+                    unionBounds(axlo, axhi, aylo, ayhi, azlo, azhi, bxlo, bxhi, bylo, byhi, bzlo, bzhi)
+                  )
+                }
+                function union(a:[SdfShape], b:[SdfShape]):[SdfShape] -> Union(a, b)
+
+                # Intersection (AND): inside both — max of the two distances. Bounds ⊆ a (conservative).
+                struct Intersect(a:[SdfShape], b:[SdfShape])
+                assign trait Intersect:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal ->
+                    max(distanceAt(this.a, x, y, z), distanceAt(this.b, x, y, z))
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> boundsOf(this.a)
+                }
+                function intersect(a:[SdfShape], b:[SdfShape]):[SdfShape] -> Intersect(a, b)
+
+                # Difference (a minus b): inside a AND outside b — max(da, -db). Bounds ⊆ a.
+                struct Difference(a:[SdfShape], b:[SdfShape])
+                assign trait Difference:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal ->
+                    max(distanceAt(this.a, x, y, z), 0.0 - distanceAt(this.b, x, y, z))
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> boundsOf(this.a)
+                }
+                function difference(a:[SdfShape], b:[SdfShape]):[SdfShape] -> Difference(a, b)
+
+                # Smooth union: a filleted blend of a and b over radius k (the polynomial smin). Away
+                # from the seam it is exactly the union (h saturates to 0/1); near it, the surfaces
+                # merge with a k-sized fillet instead of a crease.
+                struct SmoothUnion(a:[SdfShape], b:[SdfShape], k:Decimal)
+                assign trait SmoothUnion:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let da = distanceAt(this.a, x, y, z)
+                    let db = distanceAt(this.b, x, y, z)
+                    let h = clamp(0.5 + 0.5 * (db - da) / this.k, 0.0, 1.0)
+                    mix(db, da, h) - this.k * h * (1.0 - h)
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let [{axlo, axhi, aylo, ayhi, azlo, azhi}] = boundsOf(this.a)
+                    let [{bxlo, bxhi, bylo, byhi, bzlo, bzhi}] = boundsOf(this.b)
+                    unionBounds(axlo, axhi, aylo, ayhi, azlo, azhi, bxlo, bxhi, bylo, byhi, bzlo, bzhi)
+                  )
+                }
+                function smoothUnion(a:[SdfShape], b:[SdfShape], k:Decimal):[SdfShape] -> SmoothUnion(a, b, k)
 
                 0
                 """;
