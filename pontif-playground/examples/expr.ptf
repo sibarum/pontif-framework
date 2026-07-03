@@ -1,32 +1,15 @@
-trait Expr{
-  simplify:[Method():Expr],
-  evaluate:[Method():Expr],
-  copy:[Method():this.type]
+module examples.expr
+
+requires pontif.core.{Stream}
+
+trait Expr{
+  walkExprTree:[Method():[Stream[Expr]]]
 }
 
-trait Literal[type T]{
-		  value:T
+trait ValueLiteral[type T]{
+  value:[Method():T]
 }
 
-struct IntLit(value:Int)
-
-assign trait IntLit:Literal[Int]{}
-
-assign trait IntLit:Expr{
-  simplify():Expr -> this
-  evaluate():Expr -> this
-  copy():IntLit -> this
+trait Operation{
+  operate:[Method():Expr]
 }
-
-struct AddOp(left:Expr, right:Expr)
-
-assign trait AddOp:Expr{
-  simplify():Expr -> match this {
-    [AddOp(l, r)] -> IntLit(l.value + r.value)
-    [_]                         -> this
-  }
-  evaluate():Expr -> this
-  copy():AddOp -> this
-}
-
-AddOp(IntLit(2), IntLit(3)).simplify()

@@ -3,7 +3,9 @@ package sibarum.pontif.runtime;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A trait may reference itself in its own member sorts (a recursive trait — an
@@ -42,6 +44,44 @@ class RecursiveTraitTest {
         assertEquals("0", run("""
                 trait Ping{ toPong:[Method():Pong] }
                 trait Pong{ toPing:[Method():Ping] }
+                0
+                """));
+    }
+
+    @Test
+    void selfRefNestedInStream_withoutImport_pointsAtTheRealCause() {
+        // A self-referential trait nested in a parametric type — the existential
+        // `Stream[Expr]` (a stream of *some* Expr, vs the type-preserving
+        // `Stream[this.type]`). Without importing Stream its head isn't an alias,
+        // so AliasResolver never descends to shell the inner `Expr`, and it reaches
+        // SortChecker as a bare Named. The diagnostic must NOT mislabel the declared
+        // trait as a missing struct — it must point at the unresolved parametric
+        // head / missing import.
+        PontifCompiler.CompileResult r = compiler.compileAlt("""
+                trait Expr{
+                  walkExprTree:[Method():[Stream[Expr]]]
+                }
+                0
+                """, "rec.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
+                () -> "expected failure without the Stream import; got: " + r);
+        String msg = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(msg.contains("'Expr' is a declared trait")
+                        && msg.contains("requires pontif.core.{Stream}"),
+                () -> "diagnostic should name the trait and the missing import; got: " + msg);
+        assertFalse(msg.contains("struct Expr"),
+                () -> "diagnostic must not suggest declaring a struct for a trait; got: " + msg);
+    }
+
+    @Test
+    void selfRefNestedInStream_withImport_compiles() {
+        // With Stream imported, the existential Stream[Expr] resolves and the inner
+        // self-reference shells correctly.
+        assertEquals("0", run("""
+                requires pontif.core.{Stream}
+                trait Expr{
+                  walkExprTree:[Method():[Stream[Expr]]]
+                }
                 0
                 """));
     }

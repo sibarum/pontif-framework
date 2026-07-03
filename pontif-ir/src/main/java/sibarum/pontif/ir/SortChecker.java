@@ -115,10 +115,10 @@ public final class SortChecker {
                 // own type params.
                 Set<String> fnTypeVars = fd.typeParams().keySet();
                 for (IrParam p : fd.params()) {
-                    validateSortNames(p.sort(), structDefs, fnTypeVars);
+                    validateSortNames(p.sort(), structDefs, fnTypeVars, traitContracts.keySet());
                     typeEnv.put(p.name(), p.sort());
                 }
-                validateSortNames(fd.returnSort(), structDefs, fnTypeVars);
+                validateSortNames(fd.returnSort(), structDefs, fnTypeVars, traitContracts.keySet());
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs, fnTypeVars);
                 // Operator bound propagation (dispatch-unification B1): an operator
                 // applied to a value of a trait-bounded type parameter is checked
@@ -135,7 +135,7 @@ public final class SortChecker {
                 // trait's own `type X` associated types (scoped by the Trait case
                 // of validateSortNames). Catches `[Method():Undeclared]` while
                 // admitting `[Method():T]` for a declared `type T`.
-                validateSortNames(tr, structDefs);
+                validateSortNames(tr, structDefs, Set.of(), traitContracts.keySet());
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs);
@@ -744,7 +744,13 @@ public final class SortChecker {
 
     private static void validateSortNames(IrSort sort, Map<String, IrSort.Structural> structDefs)
             throws CompileException {
-        validateSortNames(sort, structDefs, Set.of());
+        validateSortNames(sort, structDefs, Set.of(), Set.of());
+    }
+
+    private static void validateSortNames(
+            IrSort sort, Map<String, IrSort.Structural> structDefs, Set<String> typeVars)
+            throws CompileException {
+        validateSortNames(sort, structDefs, typeVars, Set.of());
     }
 
     /**
@@ -753,9 +759,18 @@ public final class SortChecker {
      *     is a bound type variable, not an unknown sort. Empty at the top level;
      *     extended by the {@link IrSort.Trait} case as it descends into a
      *     trait's own member sorts.
+     * @param traitNames every trait declared or imported in the module (from
+     *     {@link #collectTraitContracts}). Used ONLY to sharpen the "unknown
+     *     sort" diagnostic: a name matching a trait is reported as an unresolved
+     *     trait reference — the usual cause being a self-referential trait nested
+     *     in a parametric type whose head is not in scope (e.g. {@code Stream[Expr]}
+     *     without {@code requires pontif.core.{Stream}}) — instead of being
+     *     mislabelled a missing struct. Empty from callers that don't thread the
+     *     set; the diagnostic then falls back to the generic wording.
      */
     private static void validateSortNames(
-            IrSort sort, Map<String, IrSort.Structural> structDefs, Set<String> typeVars)
+            IrSort sort, Map<String, IrSort.Structural> structDefs, Set<String> typeVars,
+            Set<String> traitNames)
             throws CompileException {
         switch (sort) {
             case IrSort.Named n -> {
@@ -769,23 +784,41 @@ public final class SortChecker {
                         && !BUILTIN_PARAMETRIC_TYPES.contains(n.name())
                         && !structDefs.containsKey(n.name())
                         && !typeVars.contains(n.name())) {
+                    // A name that IS a declared trait but survived as a bare
+                    // reference is not "unknown" — it's an unresolved trait
+                    // reference. The usual cause: a self-referential trait nested
+                    // in a parametric type whose head isn't in scope, so
+                    // AliasResolver never descended into the type-argument to
+                    // shell the self-reference (e.g. `Stream[Expr]` inside `Expr`
+                    // without importing Stream). Point at that, not at a missing
+                    // struct.
+                    if (traitNames.contains(n.name())) {
+                        throw new CompileException(
+                                "Sort '" + n.name() + "' is a declared trait, but here it "
+                                        + "appears as an unresolved bare reference. A "
+                                        + "self-referential trait used inside a parametric "
+                                        + "type (e.g. `Stream[" + n.name() + "]`) resolves "
+                                        + "only when that outer type is in scope — for the "
+                                        + "builtin Stream, add `requires pontif.core.{Stream}`.",
+                                n.origin());
+                    }
                     throw new CompileException(
-                            "Unknown sort '" + n.name() + "' — not a primitive "
-                                    + "and not a declared type (did you forget a "
-                                    + "'struct " + n.name() + "(...)' declaration?)",
+                            "Unknown sort '" + n.name() + "' — not a primitive, a declared "
+                                    + "struct or trait, or a type parameter in scope. Did you "
+                                    + "misspell it, or forget to declare or import it?",
                             n.origin());
                 }
                 // Type arguments of a parametric application (`Element[Int]`,
                 // `Element[T]`) are themselves sorts — validate each in scope.
                 for (IrSort arg : n.typeArgs()) {
-                    validateSortNames(arg, structDefs, typeVars);
+                    validateSortNames(arg, structDefs, typeVars, traitNames);
                 }
             }
             case IrSort.Refined r -> {
                 // A parametric base's type arguments (`[Literal[Int]:…]`) are
                 // sorts — validate each in scope, like a Named application.
                 for (IrSort arg : r.typeArgs()) {
-                    validateSortNames(arg, structDefs, typeVars);
+                    validateSortNames(arg, structDefs, typeVars, traitNames);
                 }
                 if (r.name().equals("Decimal")) {
                     // Decimal's refinement vocabulary is exactly three narrows —
@@ -825,19 +858,19 @@ public final class SortChecker {
                     inner.addAll(s.typeParams().keySet());
                 }
                 for (IrSort bound : s.typeParams().values()) {
-                    if (bound != null) validateSortNames(bound, structDefs, inner);
+                    if (bound != null) validateSortNames(bound, structDefs, inner, traitNames);
                 }
                 for (IrSort member : s.members().values()) {
-                    validateSortNames(member, structDefs, inner);
+                    validateSortNames(member, structDefs, inner, traitNames);
                 }
             }
             case IrSort.Method f -> {
-                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs, typeVars);
-                validateSortNames(f.returnSort(), structDefs, typeVars);
+                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs, typeVars, traitNames);
+                validateSortNames(f.returnSort(), structDefs, typeVars, traitNames);
             }
             case IrSort.Dispatch d -> {
-                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs, typeVars);
-                validateSortNames(d.returnSort(), structDefs, typeVars);
+                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs, typeVars, traitNames);
+                validateSortNames(d.returnSort(), structDefs, typeVars, traitNames);
             }
             case IrSort.Trait t -> {
                 // The trait's name identifies the trait — not a reference to
@@ -854,15 +887,15 @@ public final class SortChecker {
                 inner.addAll(t.associatedTypes().keySet());
                 inner.addAll(t.typeParams().keySet());
                 for (IrSort bound : t.associatedTypes().values()) {
-                    if (bound != null) validateSortNames(bound, structDefs, inner);
+                    if (bound != null) validateSortNames(bound, structDefs, inner, traitNames);
                 }
-                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs, inner);
+                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs, inner, traitNames);
             }
             case IrSort.Union u -> {
-                for (IrSort b : u.branches()) validateSortNames(b, structDefs, typeVars);
+                for (IrSort b : u.branches()) validateSortNames(b, structDefs, typeVars, traitNames);
             }
             case IrSort.Intersection i -> {
-                for (IrSort b : i.branches()) validateSortNames(b, structDefs, typeVars);
+                for (IrSort b : i.branches()) validateSortNames(b, structDefs, typeVars, traitNames);
             }
         }
     }
