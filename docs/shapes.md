@@ -1,7 +1,7 @@
 # Shapes — SDF composition, field-attributes, topologize, export
 
-Status: **BUILDING (2026-07-02).** Scoped, ratified, and **S1 LANDED** (module + `SdfShape` + `Sphere`
-+ live preview; see Slices). Originally net-new; scoped
+Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1 + S2 LANDED** (module + `SdfShape` +
+`Sphere` + live preview; transforms + adjustable anchor; see Slices). Originally net-new; scoped
 against master by reading the extension API, `PlotExtension`/`DasumBridge`, the dasum-vis
 engine, and the type substrate. Sibling front to docs/plotting.md — plotting *renders* shapes;
 this *authors, meshes, and exports* them. No collisions with existing modules: it lands as a new
@@ -121,19 +121,34 @@ value in hand pre-topologize is an **attribute field**, and calling it per-verte
 lie the design avoids. PROPOSED: surface-parameterized fields (`field` taking a surface uv rather
 than a space point) as a later refinement; space-fields first because the SDF gives them for free.
 
-### (3) Anchor — the pivot transforms compose about
+### (3) Anchor — the pivot transforms compose about  *(LANDED, S2)*
 
 An **anchor** is a point; a transform (translate / rotate / scale) is applied *about* it.
 - **DERIVED** — transforming an `SdfShape` is **inverse-transforming the query point** about the
   anchor: `distance_T(p) = distance(T⁻¹ · (p − anchor) + anchor) · uniformScale`. This keeps the
-  SDF metric honest (non-uniform scale distorts distance — flagged, not silently accepted).
-- Anchor defaults to the primitive's natural center (RULED-worthy default: `{0,0,0}` in local
-  space). `anchor(shape, {x,y,z})` re-pivots; subsequent `rotate`/`scale` turn about it.
+  SDF metric honest (a uniform scale multiplies the distance by the factor; non-uniform scale would
+  distort it and is deliberately not offered).
+- **Shipped (S2):** each transform is a function returning a new `SdfShape`, so they compose and
+  preview like any shape; the anchor is an **explicit pivot argument** (which *is* the adjustable
+  anchor point):
 ```
-let s = Sphere(1.0) ; anchor({0.0, 1.0, 0.0}) ; rotate(Y, 45.0) ; translate({2.0,0,0})
+translate(s, {dx,dy,dz})            # rigid shift; distances unchanged
+scale(s, factor, {ax,ay,az})        # uniform scale about the anchor; distance × factor
+rotateX(s, degrees, {ax,ay,az})     # rigid rotation about the axis through the anchor
+rotateY(s, degrees, {ax,ay,az})
+rotateZ(s, degrees, {ax,ay,az})
+# compose freely, inside-out:
+translate(rotateY(scale(Sphere(1.0), 1.5, {0.0,0.0,0.0}), 45.0, {0.0,0.0,0.0}), {2.0,0.0,0.0})
 ```
-Needs `Vec3`/`Mat`-style helpers — dasum ships `Vec3`/`Vec4`/`CameraMath` but **no `Mat4`**, so a
-small transform value (compose to a 3×4 affine) is net-new, kept Pontif-side or in the bridge.
+  Internally each is a small wrapper struct holding `inner:[SdfShape]` + params; the function's
+  declared return `[SdfShape]` keeps the wrapper's trait-satisfaction module-internal (callers never
+  name it). Translate/scale bounds are exact; rotation bounds are a conservative anchor-centred cube
+  (rotation preserves distance-from-anchor) — containment is all the sampled preview needs.
+- **DEFERRED:** the stateful `anchor(shape, p); rotate(Y, deg)` sugar (a settable anchor property
+  carried on the shape), a default anchor = the primitive's natural centre, and arbitrary-axis
+  rotation. The explicit-pivot form above delivers the requirement without them.
+- Math note: dasum ships `Vec3`/`Vec4`/`CameraMath` but **no `Mat4`**; S2 does the rotation with
+  `sin`/`cos`/`radians` from `pontif.math` directly (no matrix type needed for principal axes).
 
 ### (4) Boolean modifiers — CSG over distances
 
@@ -312,8 +327,13 @@ previewed field is a caught lie).
   voxel carrying the exact `√(x²+y²+z²)−r`, plus one 24³ `VolumeLayer` built. Example:
   `pontif-builtin-shape/examples/sphere.ptf`. (Build with `-am`; the render path lives in
   `pontif-builtin-gui`.)
-- **S2** — transforms + adjustable **anchor** (query-point inverse-transform). Witness: rotated,
-  re-pivoted primitive renders/samples correctly.
+- **S2 — LANDED 2026-07-03.** Transforms + adjustable **anchor**: `translate`, `scale`, and
+  `rotateX/Y/Z`, each a composable wrapper returning `[SdfShape]` with the anchor as an explicit
+  pivot argument (query-point inverse-transform; see §(3)). Confirmed trait-typed struct fields
+  (`inner:[SdfShape]`) work. Witness: `TransformTest` (pure SDF-algebra, no rendering) — translate
+  moves the centre, scale grows about the anchor (distance × factor), rotation is rigid on a sphere,
+  and `rotateY(translate(Sphere,{2,0,0}),90,origin)` lands the centre at `(0,0,-2)` (real rotation +
+  composition). Stateful `anchor()` sugar + arbitrary-axis rotation deferred.
 - **S3** — **boolean modifiers** (`union`/`difference`/`intersect`/`smoothUnion`), nesting into a
   CSG tree. Witness: `difference(Box, Sphere)` field values at known points.
 - **S4** — **attribute fields** (`attr(shape, name, field)`); fields carried through transforms
