@@ -37,11 +37,19 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-parser</artifactId>
         </dependency>
-        <!-- The GUI extension: the editor's "Window" action launches its GuiLauncher in a
-             subprocess, so it must be on the editor's classpath (docs/extensions.md). -->
+        <!-- The builtin extensions must be on the editor's classpath: the live in-process compiler
+             resolves their modules, and the "Run" subprocess inherits this classpath (App spawns
+             `java -cp <inherited> …`). They then self-register via ServiceLoader (docs/extensions.md)
+             — adding a new extension is just a new dependency here, no code wiring. pontif-builtin-gui
+             pulls -net transitively; -shape reuses the plot render path. -->
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-builtin-gui</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-shape</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -92,6 +100,11 @@
                                         implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>${main.class}</mainClass>
                                 </transformer>
+                                <!-- Merge each module's META-INF/services/…Extension provider file
+                                     so ServiceLoader discovery finds ALL extensions in the fat jar
+                                     (without this, shade keeps only one, silently dropping the rest). -->
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
                         </configuration>
                     </execution>

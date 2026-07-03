@@ -60,17 +60,32 @@ extension's module.
 
 ## How to write an extension
 
-1. Implement `Extension`: a `moduleName`, a `pontifSource` declaring your types/events/native
-   signatures (placeholder bodies), and `effects()`/`calls()` maps of Java objects keyed by the
-   bare declaration names.
-2. Install it (`Extensions.install`) before compiling a program that `requires` your module —
-   either by default (a builtin like IO) or from a launcher (an external one like the GUI).
-3. A program drives your effects with the event substrate: `emit YourEvent(…)` hits your sink,
+1. Implement `Extension` (a **public no-arg constructor** — ServiceLoader needs it): a
+   `moduleName`, a `pontifSource` declaring your types/events/native signatures (placeholder
+   bodies), and `effects()`/`calls()` maps of Java objects keyed by the bare declaration names.
+2. Ship a provider file `META-INF/services/sibarum.pontif.runtime.module.Extension` in your module
+   (one implementation class per line). That's the *only* wiring — no launcher/editor edits.
+3. Make sure your module is on the runtime's classpath where it should be usable (e.g. add it as a
+   dependency of `pontif-playground` for the editor). It then self-registers.
+4. A program drives your effects with the event substrate: `emit YourEvent(…)` hits your sink,
    `action onYourEvent(e:YourEvent) -> …` reacts, your native functions are called directly.
+
+## Auto-discovery (ServiceLoader)
+
+`Extensions.installDiscovered()` loads every `Extension` on the classpath via `ServiceLoader` and
+installs it; it runs once from `BuiltinModules`' static initializer, **before any module
+resolution**, on every path (editor in-process compile, the spawned run subprocesses, the CLI,
+tests). So an extension present on the classpath is always resolvable with **no entry-point
+wiring** — the launchers and the editor no longer name individual extensions. A context whose
+classpath omits an extension module (the lean CLI) simply doesn't find it, so it stays lean. A
+provider that fails to load/parse is logged and skipped, so one broken extension can't take down
+the runtime. The pure builtins (`IoExtension`, math) are still installed directly by
+`BuiltinModules` (they live in `pontif-runtime` itself). The shaded editor fat-jar merges the
+per-module provider files via the shade `ServicesResourceTransformer`; native-image picks up
+`ServiceLoader.load(Extension.class)` providers on the build classpath automatically.
 
 ## Deferred
 
-`ServiceLoader` auto-discovery of extensions on the classpath (install is explicit today);
-making the pure builtins extensions too (with empty Java maps); the GUI's richer surface
+Making the pure builtins extensions too (with empty Java maps); the GUI's richer surface
 (text/widgets, font atlases) and interactivity (click → `emit` → `action` → mutate a dasum
 `Property`).

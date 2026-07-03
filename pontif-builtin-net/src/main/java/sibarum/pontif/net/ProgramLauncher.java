@@ -34,10 +34,11 @@ public final class ProgramLauncher {
             System.exit(2);
             return;
         }
-        // The builtin IO extension is installed by default; Net makes `requires pontif.net`
-        // resolvable. No GUI/Plot extension — a program that needs a window is routed to
-        // GuiLauncher by the editor, not here.
-        sibarum.pontif.runtime.module.Extensions.install(new NetExtension());
+        // Extensions on the classpath (pontif.net etc.) self-register via ServiceLoader discovery
+        // (BuiltinModules → installDiscovered) before the compile below resolves any module — no
+        // per-extension wiring here. This launcher differs from GuiLauncher only in that it runs on
+        // an ordinary thread (no GLFW root-thread affinity); the editor routes window-opening
+        // programs to GuiLauncher and everything else here.
 
         Path target = Path.of(args[0]);
         Path resolveDir = args.length > 1 && !args[1].isBlank() ? Path.of(args[1]) : null;

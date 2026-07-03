@@ -3,7 +3,6 @@ package sibarum.pontif.gui;
 import sibarum.pontif.net.debug.DebugSession;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
-import sibarum.pontif.runtime.module.Extensions;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,9 +27,9 @@ public final class GuiLauncher {
             System.exit(2);
             return;
         }
-        Extensions.install(new GuiExtension());
-        Extensions.install(new PlotExtension());
-        Extensions.install(new sibarum.pontif.net.NetExtension());
+        // pontif.gui / pontif.plot / pontif.net / pontif.shape and any other extension on the
+        // classpath self-register via ServiceLoader discovery (BuiltinModules → installDiscovered),
+        // which runs before the compile below resolves any module — no per-extension wiring here.
 
         Path target = Path.of(args[0]);
         Path resolveDir = args.length > 1 && !args[1].isBlank() ? Path.of(args[1]) : null;

@@ -1,18 +1,17 @@
 package sibarum.pontif.shape;
 
-import sibarum.pontif.gui.PlotExtension;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
-import sibarum.pontif.runtime.module.Extensions;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Runs a shape Pontif program (docs/shapes.md). Installs the {@link PlotExtension} (whose
- * volumetric renderer the preview reuses) and the {@link ShapeExtension}, then compiles and runs
- * the given {@code .ptf} <b>on the main thread</b> — so a {@code preview(...)} call's blocking
- * GLFW loop owns the root thread, satisfying GLFW's thread affinity (mirrors {@code GuiLauncher}).
+ * Runs a shape Pontif program (docs/shapes.md). Extensions on the classpath ({@code pontif.shape}
+ * and the {@code pontif.plot} render path its preview reuses) self-register via ServiceLoader
+ * discovery, so this just compiles and runs the given {@code .ptf} <b>on the main thread</b> — so a
+ * {@code preview(...)} call's blocking GLFW loop owns the root thread, satisfying GLFW's thread
+ * affinity (mirrors {@code GuiLauncher}).
  *
  * <p>Args: {@code <program.ptf> [resolveDir] [displayName]} — {@code resolveDir} is where sibling
  * {@code requires} modules live (the editor passes the original file's directory when running an
@@ -26,8 +25,8 @@ public final class ShapeLauncher {
             System.exit(2);
             return;
         }
-        Extensions.install(new PlotExtension());
-        Extensions.install(new ShapeExtension());
+        // pontif.shape (and the pontif.plot render path it reuses) self-register via ServiceLoader
+        // discovery (BuiltinModules → installDiscovered) before the compile below — no wiring here.
 
         Path target = Path.of(args[0]);
         Path resolveDir = args.length > 1 && !args[1].isBlank() ? Path.of(args[1]) : null;

@@ -54,14 +54,11 @@ import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.playground.generated.Icons;
-import sibarum.pontif.gui.GuiExtension;
-import sibarum.pontif.gui.PlotExtension;
 import sibarum.pontif.net.debug.DebugServer;
 import sibarum.pontif.net.debug.DebugSession;
 import sibarum.pontif.runtime.ConservationReport;
 import sibarum.pontif.runtime.IrAstReport;
 import sibarum.pontif.runtime.PontifCompiler;
-import sibarum.pontif.runtime.module.Extensions;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
@@ -258,12 +255,12 @@ public final class App {
             return;
         }
 
-        // The editor compiles in-process, so install the windowed extensions up front — otherwise
-        // the live compiler reports a false "unknown module 'pontif.plot'/'pontif.gui'". This only
-        // makes those modules RESOLVABLE; GUI programs still RUN in a separate process
+        // The editor compiles in-process, so every extension module on the classpath must be
+        // RESOLVABLE here. They self-register via ServiceLoader discovery (BuiltinModules →
+        // Extensions.installDiscovered, which runs before any module resolution), so this needs no
+        // per-extension wiring — adding a new pontif-builtin-* dependency to the editor is enough.
+        // This only makes those modules RESOLVABLE; GUI programs still RUN in a separate process
         // (see onRunGuiClicked / isGuiProgram), so nothing windowed executes in the editor.
-        Extensions.install(new GuiExtension());
-        Extensions.install(new PlotExtension());
 
         // An optional file argument (the CLI's `pontif editor <file>`): open it
         // at startup instead of restoring the last session's file.

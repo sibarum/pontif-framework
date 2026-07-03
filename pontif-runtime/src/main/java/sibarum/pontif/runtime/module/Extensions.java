@@ -7,6 +7,7 @@ import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
 
 import java.util.Map;
+import java.util.ServiceLoader;
 
 /**
  * Installs {@link Extension}s into the runtime (docs/extensions.md). Install wires three things,
@@ -29,6 +30,36 @@ import java.util.Map;
 public final class Extensions {
 
     private Extensions() {}
+
+    private static boolean discovered = false;
+
+    /**
+     * Installs every {@link Extension} found on the classpath via {@link ServiceLoader} — each
+     * builtin extension module ships a {@code META-INF/services/sibarum.pontif.runtime.module.Extension}
+     * provider file listing its implementations. This is the <b>automatic</b> path: dropping a new
+     * extension module on the classpath self-registers it, so no launcher, editor, or other entry
+     * point needs editing to teach the runtime about a new module (docs/extensions.md).
+     *
+     * <p>Runs once (idempotent). A provider that fails to load, parse, or install is logged and
+     * skipped, so one broken extension can't take down the whole runtime. Called from
+     * {@link BuiltinModules}'s static initializer, so it happens before any module resolution on
+     * every path; a context whose classpath has no extension modules (the lean CLI) simply finds
+     * none.
+     */
+    public static synchronized void installDiscovered() {
+        if (discovered) return;
+        discovered = true;
+        ServiceLoader.load(Extension.class, Extensions.class.getClassLoader())
+                .stream()
+                .forEach(provider -> {
+                    try {
+                        install(provider.get());
+                    } catch (Throwable t) {
+                        System.err.println("[pontif] extension provider "
+                                + provider.type().getName() + " failed to install: " + t);
+                    }
+                });
+    }
 
     /** Wires {@code ext}'s module + Java objects into the builtin set and the native registries. */
     public static void install(Extension ext) {
