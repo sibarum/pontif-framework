@@ -28,6 +28,7 @@ allowed to lie.
 - [Actions and events](#actions-and-events)
 - [The GUI framework](#the-gui-framework)
 - [Plotting](#plotting)
+- [3D shapes — SDF composition](#3d-shapes--sdf-composition-pontifshape)
 - [One inference engine, every stage](#one-inference-engine-every-stage)
 - [The compiler](#the-compiler)
 - [Source code explained](#source-code-explained)
@@ -841,6 +842,64 @@ and are illustrative here rather than pinned by `ReadmeSnippetTest`. Everything 
 [math](#the-math-library) and [actions/events](#actions-and-events) sections *is* pinned:
 those modules are built in.
 
+## 3D shapes — SDF composition (`pontif.shape`)
+
+`pontif.shape` composes 3D geometry as **signed distance fields**: a shape is a function
+giving the signed distance to its surface (negative inside, zero on it, positive outside).
+Primitives, boolean modifiers, and transforms are all one `SdfShape`, so they nest freely,
+and `preview` ray-marches whatever you build into a window. Start with a primitive:
+
+```pontif
+requires pontif.shape.{Sphere, preview}
+
+main ( preview(Sphere(1.0)) )   # ray-marches the sphere's distance field into a window
+```
+
+Because every operator returns another `SdfShape`, **constructive solid geometry** and
+**transforms compose inside-out** — here a sphere with a smaller sphere bitten out of it
+(`difference` is `max(dₐ, −d_b)` over the distances), tilted 30° about the Y axis through
+the origin (the third argument is the anchor — the adjustable pivot):
+
+```pontif
+requires pontif.shape.{Sphere, translate, rotateY, difference, preview}
+
+main ( preview(rotateY(
+  difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
+  30.0, {0.0, 0.0, 0.0})) )
+```
+
+The full set: `translate` / `scale` / `rotateX`/`rotateY`/`rotateZ` (each about an anchor),
+`union` / `intersect` / `difference` / `smoothUnion` (a filleted blend), and `distanceAt`
+to query the field at any point.
+
+You can also attach **arbitrary data** to a shape — but as a *field* (a value defined at
+every point), not a per-vertex array, because no vertices exist yet: they're only born
+when the shape is meshed (*topologized*), at which point each field is sampled onto them.
+"You can't address data on points that don't exist" is the design working, not a
+limitation. A field is a `ScalarField` — a value defined by a method, just like a shape's
+distance — and `attr` bundles it with a shape by name:
+
+```pontif
+requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, preview}
+
+# a "height" field: defined at every point (here, the z coordinate), NOT stored per vertex
+struct Height()
+assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
+
+# attach the field to the sphere; shapeOf hands the geometry back to preview, and attrAt
+# samples the field on demand — attrAt(attr(Sphere(1.0), "height", Height()), 0.0, 0.0, 0.5) is 0.5
+main ( preview(shapeOf(attr(Sphere(1.0), "height", Height()))) )
+```
+
+Setting an object's *color* works the same way — a colour field over the object becomes
+per-vertex colours on its surfaces once meshed (and, ultimately, `red`/`green`/`blue`
+columns in an exported PLY mesh — the geometry-and-attributes format `pontif.shape` targets).
+The full design, and the incremental slices, live in [docs/shapes.md](docs/shapes.md).
+
+`pontif.shape` lives in the `pontif-builtin-shape` package (it reuses `pontif.plot`'s
+volumetric renderer for `preview`), so like the GUI/plot snippets these open a real window
+and are illustrative rather than pinned by `ReadmeSnippetTest`.
+
 ## One inference engine, every stage
 
 Everything above — refinement, dispatch, match, the return gate — rests on one
@@ -939,12 +998,13 @@ parse → link modules → resolve aliases → promote literals → construction
 
 Every ` ```pontif ` snippet above — except the illustrative fragments in the
 [Streams](#streams) section and the window-opening snippets in the
-[GUI](#the-gui-framework) and [Plotting](#plotting) sections (whose `pontif.gui` /
-`pontif.plot` modules live in `pontif-builtin-gui`, out of `pontif-runtime`'s reach)
-— is pinned by `ReadmeSnippetTest`: the README compiles, or the build fails. (The
-stream operations carry their own dedicated tests — `StreamMapTest`,
-`StreamGeneratorTest`, `StreamTakeWhileTest`, and siblings; the GUI and plot snippets
-are pinned by `GuiExtensionTest` / `PlotExtensionTest` in that package.) See
+[GUI](#the-gui-framework), [Plotting](#plotting), and [3D shapes](#3d-shapes--sdf-composition-pontifshape)
+sections (whose `pontif.gui` / `pontif.plot` / `pontif.shape` modules live in the
+`pontif-builtin-*` packages, out of `pontif-runtime`'s reach) — is pinned by
+`ReadmeSnippetTest`: the README compiles, or the build fails. (The stream operations
+carry their own dedicated tests — `StreamMapTest`, `StreamGeneratorTest`,
+`StreamTakeWhileTest`, and siblings; the GUI, plot, and shape snippets are pinned by
+`GuiExtensionTest` / `PlotExtensionTest` / `ShapeExtensionTest` in those packages.) See
 `docs/alternative-syntax.ptf` for the canonical
 reference, `docs/glossary.md` for terms, and `docs/backward-language-design.md`
 for the method that produced all of this (the theory is layer zero; the whole
@@ -963,7 +1023,8 @@ language is one big syntactic sugar for it).
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), and `MathExtExtension` (`pontif.math.ext`). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
-| `pontif-builtin-gui` | The GUI + plotting extensions — `GuiExtension` (`pontif.gui`: `window`, `Label`/`Button`/`Column`, `Clickable`) and `PlotExtension` (`pontif.plot`: `Curve2D`/`HeightMap3D`/`Cloud3D` → `plotLine`/`plotSurface`/`plotCloud`), bridged onto the author's dasum flexbox/OpenGL toolkit via `DasumBridge` and installed by `GuiLauncher`. The one module that depends on dasum for rendering. |
+| `pontif-builtin-gui` | The GUI + plotting extensions — `GuiExtension` (`pontif.gui`: `window`, `Label`/`Button`/`Column`, `Clickable`) and `PlotExtension` (`pontif.plot`: `Curve2D`/`HeightMap3D`/`Cloud3D` → `plotLine`/`plotSurface`/`plotCloud`), bridged onto the author's dasum flexbox/OpenGL toolkit via `DasumBridge`. The one module that depends on dasum for rendering. |
+| `pontif-builtin-shape` | The 3D-shape extension — `ShapeExtension` (`pontif.shape`): SDF primitives (`Sphere`) + transforms (`translate`/`scale`/`rotate*` about an anchor) + boolean CSG (`union`/`intersect`/`difference`/`smoothUnion`) + attribute fields (`ScalarField`/`attr`), all one `SdfShape`, `preview`ed by reusing `pontif.plot`'s volumetric renderer. Meshing (*topologize*) and PLY export are in progress ([docs/shapes.md](docs/shapes.md)). |
 | `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit; its **Run GUI** launches a program through `pontif-builtin-gui`'s `GuiLauncher`. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
 | `pontif-cli` | The **`pontif`** command-line tool — `run`, `pack`, `console`, `new`, `editor` — over the `pontif-runtime` compile/run surface. picocli-based; runs on the JVM and as a GraalVM native image. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, match. |

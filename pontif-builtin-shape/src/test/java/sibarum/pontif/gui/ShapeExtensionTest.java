@@ -84,4 +84,48 @@ class ShapeExtensionTest {
         assertInstanceOf(VolumeLayer.class, build.layers().get(0));
         assertEquals(24, ((VolumeLayer) build.layers().get(0)).nx(), "24^3 sampling grid");
     }
+
+    /** Installs the extensions and runs {@code src} with {@code renderScene} stubbed (no window). */
+    private static PontifRunner.RunResult runNoWindow(String src, String name) {
+        Extensions.install(new PlotExtension());
+        Extensions.install(new ShapeExtension());
+        NativeCalls.NativeCall stub = (args, ctx) -> new IrInterpreter.DriveResult();
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+        return new PontifRunner().run(
+                new PontifCompiler().compileAlt(src, name), PontifRunner.Engine.INTERPRETER);
+    }
+
+    /** Pins the README "3D shapes" CSG + transforms snippet (verbatim, minus the comments). */
+    @Test
+    void readmeSnippet_csgComposePreviews() {
+        PontifRunner.RunResult r = runNoWindow("""
+                requires pontif.shape.{Sphere, translate, rotateY, difference, preview}
+
+                main ( preview(rotateY(
+                  difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
+                  30.0, {0.0, 0.0, 0.0})) )""", "readme-csg.ptf");
+        assertFalse(r.isError(), () -> "README CSG snippet should run; got " + r.text());
+    }
+
+    /** Pins the README "3D shapes" attribute-field snippet, plus the value its comment claims. */
+    @Test
+    void readmeSnippet_attributeField() {
+        PontifRunner.RunResult r = runNoWindow("""
+                requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, preview}
+
+                struct Height()
+                assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
+
+                main ( preview(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
+        assertFalse(r.isError(), () -> "README attribute snippet should run; got " + r.text());
+
+        // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it.
+        PontifRunner.RunResult v = runNoWindow("""
+                requires pontif.shape.{Sphere, ScalarField, attr, attrAt}
+                struct Height()
+                assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
+                attrAt(attr(Sphere(1.0), "height", Height()), 0.0, 0.0, 0.5) == 0.5""", "readme-attr-val.ptf");
+        assertEquals("true", v.text(), () -> "attrAt should sample the field; got " + v.text());
+    }
 }
