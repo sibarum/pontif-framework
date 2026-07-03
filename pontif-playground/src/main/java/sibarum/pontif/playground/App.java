@@ -63,6 +63,7 @@ import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
 import sibarum.pontif.runtime.ReflectionReport;
+import sibarum.pontif.runtime.module.Extensions;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -256,11 +257,13 @@ public final class App {
         }
 
         // The editor compiles in-process, so every extension module on the classpath must be
-        // RESOLVABLE here. They self-register via ServiceLoader discovery (BuiltinModules →
-        // Extensions.installDiscovered, which runs before any module resolution), so this needs no
-        // per-extension wiring — adding a new pontif-builtin-* dependency to the editor is enough.
-        // This only makes those modules RESOLVABLE; GUI programs still RUN in a separate process
-        // (see onRunGuiClicked / isGuiProgram), so nothing windowed executes in the editor.
+        // RESOLVABLE here. Trigger ServiceLoader discovery UP FRONT so the live compiler has them
+        // all before its first pass (and no transient "unknown module" underline on startup). This
+        // is generic — no per-extension wiring; a new pontif-builtin-* dependency on the editor,
+        // shipping its META-INF/services provider file, is picked up automatically. It only makes
+        // the modules RESOLVABLE; GUI programs still RUN in a separate process (see onRunGuiClicked
+        // / isGuiProgram), so nothing windowed executes in the editor.
+        Extensions.installDiscovered();
 
         // An optional file argument (the CLI's `pontif editor <file>`): open it
         // at startup instead of restoring the last session's file.
