@@ -34,6 +34,7 @@ final class SessionState {
     int windowWidth = UNSET;
     int windowHeight = UNSET;
     boolean maximized = false;
+    boolean openMostRecent = false;  // setting: reopen openFile + boot into Editor tab on launch
 
     boolean hasGeometry() {
         return windowWidth > 0 && windowHeight > 0;
@@ -67,6 +68,7 @@ final class SessionState {
         s.windowWidth = parseInt(kv.get("window.width"));
         s.windowHeight = parseInt(kv.get("window.height"));
         s.maximized = Boolean.parseBoolean(kv.get("window.maximized"));
+        s.openMostRecent = Boolean.parseBoolean(kv.get("open.mostRecent"));
         return Optional.of(s);
     }
 
@@ -80,6 +82,7 @@ final class SessionState {
         sb.append("window.width=").append(windowWidth).append('\n');
         sb.append("window.height=").append(windowHeight).append('\n');
         sb.append("window.maximized=").append(maximized).append('\n');
+        sb.append("open.mostRecent=").append(openMostRecent).append('\n');
         try {
             Files.writeString(file, sb.toString(), StandardCharsets.UTF_8);
         } catch (IOException e) {
@@ -90,7 +93,7 @@ final class SessionState {
     /** A stable serialized form used to skip rewriting an unchanged session. */
     String fingerprint() {
         return openFile + "|" + windowX + "|" + windowY + "|"
-                + windowWidth + "|" + windowHeight + "|" + maximized;
+                + windowWidth + "|" + windowHeight + "|" + maximized + "|" + openMostRecent;
     }
 
     private static int parseInt(String v) {

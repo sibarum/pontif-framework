@@ -1,0 +1,12 @@
+requires pontif.plot.{HeightMap3D, plotSurface}
+
+# A paraboloid bowl z = x^2 + y^2, made plottable by satisfying the HeightMap3D shape:
+# at(x,y) is the height projection. plotSurface samples a grid and renders the 3D surface
+# (drag orbits, scroll zooms).
+struct Bowl()
+assign trait Bowl:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+main ( plotSurface(Bowl()) )

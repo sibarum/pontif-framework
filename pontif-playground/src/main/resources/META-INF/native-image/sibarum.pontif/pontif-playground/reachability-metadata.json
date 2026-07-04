@@ -187,6 +187,12 @@
     },
     {
       "glob": "shaders/*.vert"
+    },
+    {
+      "glob": "welcome/samples/*.ptf"
+    },
+    {
+      "glob": "welcome/shots/*.png"
     }
   ],
   "foreign": {

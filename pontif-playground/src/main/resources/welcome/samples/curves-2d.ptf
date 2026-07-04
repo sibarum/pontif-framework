@@ -1,0 +1,21 @@
+requires pontif.plot.{Curve2D, curve, chart}
+
+# Overlaying several 2D curves in one chart, with auto axes, gridlines, and tick labels
+# (each curve gets its own palette colour). The 2D sibling of scene(...).
+
+struct Parabola()
+assign trait Parabola:Curve2D {
+  at(x:Decimal):Decimal -> x * x
+  domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+}
+
+struct Line()
+assign trait Line:Curve2D {
+  at(x:Decimal):Decimal -> 5.0 * x + 10.0
+  domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+}
+
+main ( chart({title = "y = x^2  vs  y = 5x + 10"}, {
+  curve(Parabola()),
+  curve(Line())
+}) )

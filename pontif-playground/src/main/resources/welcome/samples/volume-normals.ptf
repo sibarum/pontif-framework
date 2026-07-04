@@ -1,0 +1,17 @@
+requires pontif.plot.{Volume3D, volume, fade, normals, scene}
+
+# The gradient-lit volume, plus a lattice of gradient-direction glyphs. The glow shows where the
+# field concentrates; the little neutral segments show which way it changes at each sampled voxel,
+# their length tracking the (normalized) steepness — flat regions draw nothing. `normals(v, k)`
+# places a glyph every k-th voxel of the 24^3 grid.
+
+# A radial field r^2 = x^2 + y^2 + z^2: its gradient points outward from the origin, so the glyphs
+# fan out radially, longer near the edges where the field steepens.
+struct Radial()
+assign trait Radial:Volume3D {
+  at(x:Decimal, y:Decimal, z:Decimal):Decimal -> x * x + y * y + z * z
+  domain():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+    {-3.0, 3.0, -3.0, 3.0, -3.0, 3.0}
+}
+
+main ( scene({title = "gradient normals  r = x^2+y^2+z^2"}, { normals(fade(volume(Radial()), 0.02), 3) }) )

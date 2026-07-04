@@ -1,0 +1,18 @@
+requires pontif.plot.{Volume3D, volume, fade, scene}
+
+# Volumetric rendering of a scalar field, coloured by gradient direction: at each voxel the
+# field's gradient decomposes per axis — x-change lights red, y green, z blue — and brightness
+# tracks steepness, summed additively along the view ray. Flat regions stay dark, so the
+# field's changing structure glows, tinted by which way it changes.
+
+# A radial field r^2 = x^2 + y^2 + z^2: its gradient points outward, so the glow is coloured
+# by direction from the origin (+x face red, +y green, +z blue, corners mixing).
+struct Radial()
+assign trait Radial:Volume3D {
+  at(x:Decimal, y:Decimal, z:Decimal):Decimal -> x * x + y * y + z * z
+  domain():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+    {-3.0, 3.0, -3.0, 3.0, -3.0, 3.0}
+}
+
+# `fade` sets the glow opacity (additive alpha) — lower is subtler. Default is 0.3.
+main ( scene({title = "gradient-lit volume  r = x^2+y^2+z^2"}, { fade(volume(Radial()), 0.3) }) )

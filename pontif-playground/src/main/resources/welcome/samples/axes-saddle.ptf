@@ -1,0 +1,15 @@
+requires pontif.plot.{HeightMap3D, surface, scene}
+
+# 3D graduations: scene(...) draws a labeled, tick-marked bounding box and a floor grid by
+# default (axis positions are nice numbers from the same tick engine the 2D charts use).
+# Turn them off with {axes = false} / {grid = false}.
+
+struct Saddle()
+assign trait Saddle:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * x - y * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+main ( scene({title = "z = x^2 - y^2", axes = true, grid = true}, {
+  surface(Saddle())
+}) )

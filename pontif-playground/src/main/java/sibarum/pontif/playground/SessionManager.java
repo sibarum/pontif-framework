@@ -39,6 +39,7 @@ final class SessionManager {
     private volatile int winWidth = SessionState.UNSET;
     private volatile int winHeight = SessionState.UNSET;
     private volatile boolean winMaximized = false;
+    private volatile boolean openMostRecent = false;  // "Always open most recent file" setting
 
     // --- guarded by lock: recovery bookkeeping ---
     private final Object lock = new Object();
@@ -112,6 +113,11 @@ final class SessionManager {
         }
     }
 
+    /** Record the "Always open most recent file" setting so it round-trips through the session file. */
+    void setOpenMostRecent(boolean value) {
+        this.openMostRecent = value;
+    }
+
     /** Sample the window rect (screen coordinates). Maximized geometry is not
      *  recorded as the floating size, so un-maximizing restores the prior box. */
     void updateGeometry(int x, int y, int width, int height, boolean maximized) {
@@ -170,6 +176,7 @@ final class SessionManager {
         s.windowWidth = winWidth;
         s.windowHeight = winHeight;
         s.maximized = winMaximized;
+        s.openMostRecent = openMostRecent;
         String fingerprint = s.fingerprint();
         if (fingerprint.equals(lastSessionFingerprint)) return;
         s.write(AppPaths.sessionFile());

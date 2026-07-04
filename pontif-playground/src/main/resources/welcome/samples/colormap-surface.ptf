@@ -1,0 +1,13 @@
+requires pontif.plot.{HeightMap3D, surface, cmap, scene}
+
+# Named colormaps + a colorbar key. cmap picks the height colormap
+# ("cool" | "viridis" | "turbo" | "grayscale"); the scene shows a colorbar beside it,
+# labeled with the surface's height range.
+
+struct Ripple()
+assign trait Ripple:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> x * x + y * y
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+}
+
+main ( scene({title = "viridis bowl"}, { cmap(surface(Ripple()), "viridis") }) )

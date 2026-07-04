@@ -49,6 +49,7 @@ import sibarum.dasum.gui.core.theme.Theme;
 import sibarum.dasum.gui.core.theme.Themed;
 import sibarum.dasum.gui.core.theme.Variant;
 import sibarum.dasum.gui.core.window.Window;
+import sibarum.dasum.gui.vis.DasumVis;
 import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
@@ -116,11 +117,14 @@ public final class App {
             FileDialog.Filter.of("All files", "*"));
 
     /** Tab indices in the main tab strip (Editor = 0). */
+    private static final int EDITOR_TAB = 0;
     private static final int IR_AST_TAB = 1;
     private static final int REPORT_TAB = 2;
     private static final int NARROWINGS_TAB = 3;
     /** Read-only "go to definition" view, populated on Ctrl+click (see {@link #openDefinition}). */
     private static final int DEFINITION_TAB = 4;
+    /** Welcome / samples landing page; auto-selected at startup unless "open most recent" is on. */
+    private static final int INFO_TAB = 5;
 
     // Ctrl+click navigation palette: the IntelliJ-style "this is a link" affordance.
     private static final Color LINK_UNDERLINE = new Color(0.40f, 0.62f, 1.00f, 1f);
@@ -168,6 +172,10 @@ public final class App {
     private static Property<Integer> activeTab;
     private static int committedTab = 0;
     private static String narrowingsEntry = null;
+    // Settings menu: "Always open most recent file". When true the editor restores the last
+    // open file and boots into the Editor tab; when false (default) it opens the Info/Welcome
+    // tab with an untitled buffer. Persisted through SessionState.openMostRecent.
+    private static Property<Boolean> openMostRecentSetting;
     // Last-published cursor string, so the per-frame refresh only writes the
     // ribbon's docked field when the caret actually moved.
     private static String lastCursorText = null;
@@ -288,11 +296,23 @@ public final class App {
 
             Gl.load();
             batcher.init();
+            // Register the dasum-vis SceneView renderer so the Welcome page's screenshot
+            // thumbnails (Component.SceneView + ImageLayer) draw in the editor's render pass.
+            // Idempotent; must run after Gl.load(). Harmless when no SceneView is on screen.
+            DasumVis.init();
             cursors.init();
             EmContext.setDpiScale(win.contentScaleX());
             applyTheme();
             restoreWindowGeometry(win, restored);
             session = new SessionManager(stateEnabled);
+
+            // "Always open most recent file" setting, restored from the session file. Seed the
+            // manager with the restored value first so the next autosave tick preserves it, then
+            // mirror later toggles (from the System menu checkbox) back into the manager.
+            boolean openRecent = restored != null && restored.openMostRecent;
+            openMostRecentSetting = new Property<>(openRecent);
+            session.setOpenMostRecent(openRecent);
+            openMostRecentSetting.subscribe(v -> { if (v != null) session.setOpenMostRecent(v); });
 
             try (Texture primaryTexture = Texture.fromPngResource("/dasum/atlas/primary.png");
                  Texture monoTexture    = Texture.fromPngResource("/dasum/atlas/mono.png");
@@ -488,6 +508,12 @@ public final class App {
 
         Component definitionPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, definitionText, false, 1);
 
+        // Info tab: the Welcome page — a gallery of sample programs. Clicking a card loads
+        // that sample into the editor as a fresh untitled buffer (see loadSample). Wrapped in
+        // a Scroll like the other panes so the card grid scrolls when it overflows.
+        Component welcomePane = new Component.Scroll(
+                null, null, Em.ZERO, EDITOR_BG, WelcomePage.build(App::loadSample), false, 1);
+
         activeTab = new Property<>(0);
         activeTab.subscribe(i -> {
             if (i == null) return;
@@ -507,7 +533,8 @@ public final class App {
                 new Component.Tabs.TabPanel("IR / AST", irAstPane),
                 new Component.Tabs.TabPanel("Receipts", reportPane),
                 new Component.Tabs.TabPanel("Narrowings", narrowingsPane),
-                new Component.Tabs.TabPanel("Definition", definitionPane)),
+                new Component.Tabs.TabPanel("Definition", definitionPane),
+                new Component.Tabs.TabPanel("Info", welcomePane)),
             activeTab,
             Variant.PRIMARY
         ).withOnTabPressed(App::onTabPressed).withFlexGrow(1);
@@ -904,6 +931,20 @@ public final class App {
         FileDialog.open(window, PTF_FILTERS, dialogStartPath()).ifPresent(path -> loadFile(path, true));
     }
 
+    /** Load a Welcome-page sample into the editor as a fresh untitled buffer and switch to the
+     *  Editor tab. Mirrors {@link #onNewClicked} + the content push in {@link #loadFile}: detach
+     *  the document before setContent (which fires the autosave synchronously), so nothing on disk
+     *  is touched. Save As keeps it. */
+    static void loadSample(Samples.Sample sample) {
+        String src = Samples.source(sample);
+        currentFile = null;
+        updateFilenameLabel();
+        if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), src, null);
+        TextStates.setContent(codeText, src);
+        activeTab.set(EDITOR_TAB);
+        Status.success("Loaded sample: " + sample.title());
+    }
+
     /** Read {@code path} into the editor and adopt it as the current document.
      *  Shared by the Open button and startup session restore; {@code announce}
      *  controls whether success/failure flashes in the status ribbon (startup
@@ -1006,19 +1047,25 @@ public final class App {
         if (restored.maximized) win.maximize();
     }
 
-    /** Adopt the startup document: the untitled default, or the file from the
-     *  last session if it still exists, then flag any recovery available for
-     *  whichever document ended up active. */
+    /** Adopt the startup document and choose the opening tab. A file named on the command
+     *  line always wins and opens in the Editor. Otherwise, when "Always open most recent
+     *  file" is on, the last session file is restored into the Editor (the classic behavior);
+     *  when it's off (the default), the last file is left closed and the Info/Welcome tab is
+     *  shown over the untitled buffer. Finally flag any recovery for whichever document is
+     *  active. */
     private static void initializeDocument(SessionState restored) {
         // The editor currently holds DEFAULT_CODE as an untitled buffer.
         if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), DEFAULT_CODE, null);
 
-        // A file named on the command line wins over the restored session file.
+        boolean openRecent = openMostRecentSetting != null && Boolean.TRUE.equals(openMostRecentSetting.get());
         if (startupFile != null) {
             loadFile(startupFile, true);
-        } else if (restored != null && restored.openFile != null) {
+        } else if (openRecent && restored != null && restored.openFile != null) {
             Path path = Path.of(restored.openFile);
             if (Files.isReadable(path)) loadFile(path, false);
+        } else {
+            // Default: no most-recent restore — land on the Welcome page instead of the Editor.
+            activeTab.set(INFO_TAB);
         }
 
         String activeKey = RecoveryStore.keyFor(currentFile);
@@ -1043,6 +1090,17 @@ public final class App {
 
         java.util.List<Component> rows = new java.util.ArrayList<>();
         rows.add(new Component.Text("System", Em.of(1.15f), MENU_TITLE_FG));
+
+        // Setting: "Always open most recent file". Bound to openMostRecentSetting, whose
+        // subscription (wired in main) mirrors it into the session file. When on, the next
+        // launch restores the last file into the Editor tab; when off, it opens the Info tab.
+        rows.add(new Component.Flex(
+                null, null, Em.ZERO, Color.TRANSPARENT,
+                Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
+                java.util.List.of(
+                        Themed.checkbox(Em.of(1.1f), openMostRecentSetting, Variant.PRIMARY),
+                        new Component.Text("Always open most recent file", Em.of(0.95f), MENU_TITLE_FG)),
+                false, 0));
 
         if (hasRecovery) {
             rows.add(new Component.Text(

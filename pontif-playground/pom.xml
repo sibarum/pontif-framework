@@ -57,6 +57,14 @@
             <artifactId>dasum-core</artifactId>
             <version>${dasum.version}</version>
         </dependency>
+        <!-- Raster-image + scene rendering (Component.SceneView / ImageLayer) for the
+             Welcome-page screenshot thumbnails. Also arrives transitively via
+             pontif-builtin-gui; declared explicitly since the editor imports it directly. -->
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-vis</artifactId>
+            <version>${dasum.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-glfw</artifactId>
@@ -143,7 +151,9 @@
                         <atlas>
                             <name>primary</name>
                             <font>${project.basedir}/fonts/Noto_Sans/NotoSans-Regular.ttf</font>
-                            <charset>ascii</charset>
+                            <!-- latin-1 (not ascii): adds the [0xA0,0xFF] block so UI text can use
+                                 superscripts/math typography like ² (U+00B2, x²) and × (U+00D7). -->
+                            <charset>latin-1</charset>
                             <atlasSize>1024</atlasSize>
                             <fontSize>32</fontSize>
                             <pxRange>4</pxRange>
