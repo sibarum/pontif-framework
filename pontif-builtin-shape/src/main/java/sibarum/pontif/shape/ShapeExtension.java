@@ -77,7 +77,16 @@ public final class ShapeExtension implements Extension {
                 # surface shell (gradient 1 → lit), so what glows IS the surface, tinted by its
                 # normal direction. No meshing (a crisp analytic trace is a later slice); only the
                 # sampled numbers cross to the native renderer.
-                function preview(s:[SdfShape]):Stream[String] -> (
+                #
+                # `opacity` is the shell's glow intensity (the Volume layer's additive alpha); lower
+                # is subtler. The one-arg form uses a sensible default; pass a second argument to tune
+                # it, e.g. preview(Sphere(1.0), 0.05).
+                function preview(s:[SdfShape]):Stream[String] -> previewGlow(s, 0.1)
+
+                function preview(s:[SdfShape], opacity:Decimal):Stream[String] -> previewGlow(s, opacity)
+
+                # (internal) shared preview body: sample + clamp the SDF shell, render at `opacity`.
+                function previewGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
                   let [{xlo, xhi, ylo, yhi, zlo, zhi}] = s.bounds()
                   let dx = (xhi - xlo) / 23.0
                   let dy = (yhi - ylo) / 23.0
@@ -86,7 +95,7 @@ public final class ShapeExtension implements Extension {
                   let vs = &sdfIndices:[ (i:Int) ->
                     clamp(distanceAt(s, xlo + (i % 24) * dx, ylo + ((i / 24) % 24) * dy, zlo + (i / 576) * dz),
                           0.0 - band, band) ]
-                  scene({title = "shape"}, {Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, 0.3, false, 3)})
+                  scene({title = "shape"}, {Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, opacity, false, 3)})
                 )
 
                 # --- Transforms (docs/shapes.md S2) ------------------------------------------------
