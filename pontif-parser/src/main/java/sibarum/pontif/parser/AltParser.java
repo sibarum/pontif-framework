@@ -4724,35 +4724,43 @@ public final class AltParser {
                 && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
             return lowerSpreadFanout(source, frag, st, o);
         }
-        // takeWhile (RULED Option A): a domain-refined element binder IS the guard —
-        // emit while the element is in-domain, STOP at the first that isn't (the stop
-        // disposition, docs/stream-war.md §3). The source-driven dual of the generator's
-        // domain-refinement halt (§7.9). filter keeps the body-`null` drop; a refined
-        // binder is takeWhile.
+        // Guard-filter (docs/stream-war.md §3, RULED 2026-07-04): a domain-refined element
+        // binder is a PER-ELEMENT ADMITTANCE FILTER — emit while the element is in-domain,
+        // DROP (skip and continue) the ones that aren't. This is the "subscribe" semantic:
+        // an element that fails the refinement (wrong type or out of range) is never
+        // iterated, and downstream iterators never see it. It is NOT stream-ending — a
+        // later in-domain element still appears. Terminating the stream is a returned
+        // `Break` value (§3, slice 2b), never an input guard. The refinement is a CONSUMER
+        // semantic here; the generator's `(from,to)` refinement is a PRODUCER/synthesis
+        // semantic (§7.9), a different role — nothing to unify.
         if (frag.params().size() == 1 && frag.params().get(0).sort() instanceof IrSort.Refined) {
-            return lowerTakeWhile(source, frag, o);
+            return lowerGuardFilter(source, frag, o);
         }
         return lowerSpreadCall(List.of(spread),
                 a -> new IrExpr.Apply(frag, a, o), o);
     }
 
     /**
-     * Lowers a takeWhile (docs/stream-war.md §3, RULED Option A): {@code &s:[ (el:[G])
+     * Lowers a guard-filter (docs/stream-war.md §3, RULED 2026-07-04): {@code &s:[ (el:[G])
      * -> body ]}. The binder's domain refinement {@code G} becomes the guard arm
-     * (in-domain → emit {@code body}); a catch-all stop arm halts the iteration at the
-     * first out-of-domain element (the {@link IrExpr.Write#STOP} disposition). The
-     * triggering element is not emitted. Reuses the source-driven {@code Iterate} engine
-     * + arm-matching; only the stop write is new.
+     * (in-domain → emit {@code body}); a catch-all arm with NO writes DROPS the
+     * out-of-domain element and continues (a bare drop, allowed because the default stream
+     * accounts for the channel — {@code SortChecker.checkIterationConservation}). Skip and
+     * continue, NOT halt: an in-domain element after an out-of-domain one is still emitted.
+     * (Contrast the {@link IrExpr.Write#STOP} halt, now reached only via a returned
+     * {@code Break} value.) Needs no {@code Nothing} value, so no {@code requires}. Reuses
+     * the source-driven {@code Iterate} engine + arm-matching; the refinement flowing into
+     * the output element sort ({@code Stream[T:G]}) is a follow-up (§8.6 imprecision, honest
+     * — the elements ARE {@code T}, just not narrowed).
      */
-    private IrExpr lowerTakeWhile(IrExpr source, IrExpr.Lambda frag, Origin o) {
+    private IrExpr lowerGuardFilter(IrExpr source, IrExpr.Lambda frag, Origin o) {
         String element = "$e" + (syntheticCounter++);
         IrSort guard = frag.params().get(0).sort();
         IrExpr body = new IrExpr.Apply(frag, List.of(new IrExpr.Var(element, o)), o);
         IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
         IrExpr.Arm emit = new IrExpr.Arm(guard, List.of(new IrExpr.Write("default", null, body)));
-        IrExpr.Arm stop = new IrExpr.Arm(IrSort.named("_"),
-                List.of(new IrExpr.Write(IrExpr.Write.STOP, null, new IrExpr.Var(element, o))));
-        return new IrExpr.Iterate(source, element, List.of(out), List.of(emit, stop), o);
+        IrExpr.Arm drop = new IrExpr.Arm(IrSort.named("_"), List.of());  // no writes → skip, continue
+        return new IrExpr.Iterate(source, element, List.of(out), List.of(emit, drop), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */

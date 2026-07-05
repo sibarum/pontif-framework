@@ -173,9 +173,21 @@ Each tuple position is a **channel**; input position *i* ↔ output position *i*
   return value at that position threads to the next iteration's input there, sealing
   to the final scalar `T`.
 
-`Nothing`/`null` is the **universal omission value** (RULED — `requires
-pontif.core.{Nothing}`, `let null:Nothing = Nothing()`), not a Stream-special
-disposition.
+**Stream control is expressed as returned values, in the `Nothing` family (RULED
+2026-07-04, James).** A fragment body signals per-element control by *returning* a value
+of a purpose-built control type (there is no language `null` — `Nothing` is a real type):
+- **`Nothing`** → **drop** this element, keep iterating (`requires pontif.core.{Nothing}`,
+  `let null:Nothing = Nothing()`). The lossy filter's omission.
+- **`Break`** → **terminate** the stream; the triggering element is not emitted
+  (`requires pontif.core.{Break}`). This is how `takeWhile` is spelled and how an
+  infinite/unbounded stream is given a finite cutoff.
+- The family is **open** (`Restart`, … are future members). Both `Nothing` and `Break`
+  are **consumed by the iteration machinery and never appear in the output stream** — so a
+  body returning `[T|Nothing|Break]` produces a `Stream[T]`.
+
+These are **returned values, not guard-fail dispositions** — the disposition is chosen by
+*what the body returns*, not by an input-guard outcome (see the reframed guard subsection
+below).
 
 **The output channel shape is declared explicitly** on the application —
 `expr:[Shape]` — and is **required** when the fragment + args don't fix it
@@ -205,63 +217,62 @@ an accumulator via its `Int` output position. **OPEN detail:** whether `f(&s)` o
 `Stream[T|Nothing]` (keep) — the explicit `:[Stream[T]]` appears to be what chooses to
 strip.)
 
-### Domain refinement is the universal per-channel guard (RULED 2026-06-22, James)
+### Input refinement is a per-element FILTER; termination is a returned value (RULED 2026-07-04, James — REVERSES the earlier takeWhile reading)
 
-The generator's standout — *"the domain refinement is the base case"* (§7.9) — is
-**not generator-specific**. A domain refinement is a **per-step applicability guard
-on an input channel**: the fragment runs at a step only if every input channel's
-refinement holds at the value flowing into that channel. Every iterator is one point
-in a 2-axis space:
+**An input argument refinement is a per-element admittance filter, never a
+stream-ending semantic.** `&s:[ (el:[Int:@<5]) -> el ]` is the **subscribe** semantic:
+an element that fails the refinement (wrong type *or* out of range) is **dropped**
+(skipped), and iteration **continues** — a later in-domain element still appears. It
+narrows the downstream element type and, crucially, **branches nowhere in the body**
+(GPU-friendly — the equal-power alternative, `match el { [@>2] -> el; [_] -> Nothing() }`,
+branches in the kernel; the guard sidesteps that). So `(1,2,9,3)` with `[Int:@<5]` →
+`(1,2,3)` — the 9 is dropped, the 3 kept.
 
-1. **Which channel is guarded** — a *source/element* channel (fed by `&s`) vs. an
-   *accumulator/threaded* channel (fed by the previous step's output).
-2. **What disposition fires when the guard fails** — **drop** / **stop** / **hazard**
-   (`[!!]`) / **compile-error**.
+**Terminating the stream is a returned `Break` value** (the control-value family above),
+**not** an input guard: `&s:[ (el:Int) -> match el { [@<5] -> el; [_] -> Break() } ]` →
+`(1,2)`. The disposition is chosen by *what the body returns*, not by a guard outcome:
 
-| iterator | guarded channel | value source | guard-fail disposition |
-|---|---|---|---|
-| `map` | (none — element trivially in domain) | source | — (vacuous / identity) |
-| `filter` | source element | source | **drop** (lossy) |
-| `takeWhile` | source element | source | **stop** |
-| `fold` / `scan` | accumulator | prev step | (source-bounded ⇒ guard trivial) |
-| **generator/unfold** (2f) | accumulator (threaded state) | prev step | **stop** (terminate) |
+| operation | how it's spelled | disposition |
+|---|---|---|
+| `map` | `&s:[ (el) -> body ]` | emit every element |
+| `filter` (guard form) | `&s:[ (el:[T:pred]) -> body ]` | **drop** out-of-domain, continue (subscribe) |
+| `filter` (body form) | body returns `Nothing` | **drop** that element, continue |
+| `takeWhile` | body returns `Break` | **terminate**, element not emitted |
+| `fold` / `scan` | value-arg accumulator channel | absorb / thread |
 
-Two consequences:
+**Consumer vs producer refinement — they do NOT unify (RULED, James).** The input guard
+is a **consumer** semantic (per-element admittance on a passing stream). The generator's
+`(from, to)` refinement (§7.9) is a **producer / synthesis** semantic — it defines the
+*extent of the emitted stream*, and its base case (`to:[@>=from]` going false) genuinely
+*is* the sole halting condition because there is no source to skip-and-continue against.
+They look alike but play opposite roles; there is nothing to unify. The generator keeps
+its refinement-as-base-case (slice 2f, unchanged).
 
-- **The generator is `takeWhile` with the source removed.** Source-driven iterators
-  halt when the *source* is exhausted; the generator has no source, so the domain
-  refinement on the *accumulator* becomes the only thing that can halt it. It's the
-  same guard `filter`/`takeWhile` apply to source elements, relocated to the threaded
-  channel (and for `count` it's *relational* — `to:[@>=from]` across two accumulators,
-  tripping when `from+1` overruns `to`).
-- **`filter` and the generator's halt are one operation under two dispositions.**
-  out-of-domain element → *drop* is filter; out-of-domain next-state → *stop* is the
-  generator; no declared disposition → the `[!!]` runtime hazard; provably-always-out
-  → dead-fragment compile error; provably-always-in → the identity no-op (membership).
-  This **is** the three-valued no-lie gate (provably-in / provably-disjoint /
-  residual), reused as the iteration guard.
+**`Break` / filter LANDED (2026-07-04).** The guard-filter (`AltParser.lowerGuardFilter`):
+a domain-refined element binder lowers to a guard arm (in-domain → emit) plus a catch-all
+arm with **no writes** — a bare drop, allowed because the default stream accounts for the
+channel (`SortChecker.checkIterationConservation`), needing no `Nothing` value and hence no
+`requires`. `Break` (`struct Break()` in `pontif.core`): `IrInterpreter.isBreak` (sibling of
+`isNothing`) is checked before every stream/FAN write in `iterateStep`; a returned `Break`
+halts the loop (reusing the existing `Write.STOP` signal), so it never leaks into the
+output. `StreamGuardFilterTest`, `StreamBreakTest`. (Inline `&s:[…]` face only; the named
+call form is a follow-up — it needs the callee's param sort, which isn't local at the call
+site.)
 
-**Honest scope.** This is the **frame the generator reveals**, not how the iterators
-are built today: current `filter` is null-omission (above), *not* a refinement-guarded
-drop — re-expressing it as one is a future unification, not a present fact.
+**WAR breadcrumb — the reversal.** This exact refined-binder syntax previously lowered to
+takeWhile (STOP at the first out-of-domain element; `lowerTakeWhile`, `StreamTakeWhileTest`,
+`IrExpr.Write.STOP` reached via a catch-all arm). James ruled the input refinement is
+per-element (a filter), not stream-ending — so the semantics were reversed: `(1,2,9,3)` +
+`[Int:@<5]` went from `(1,2)` (stop) to `(1,2,3)` (drop-and-continue), `lowerTakeWhile` →
+`lowerGuardFilter`, and stream termination moved to the returned `Break` value. The
+`Write.STOP` machinery stays as the internal halt signal, now triggered by a returned
+`Break` rather than a parse-time catch-all arm.
 
-**`takeWhile` LANDED (2026-06-22) — the predicted entry, now built.** The frame
-predicted it (filter's stop-disposition sibling) and it was the table's empty cell;
-building it confirmed the generalization is real rather than retrofitted. **RULED
-(Option A, James):** a **domain-refined element binder is the guard** —
-`&s:[ (el:[Int:@<5]) -> el ]` emits while the element is in-domain and **stops** at the
-first that isn't (`(1,2,9,3) → (1,2)`, *not* `(1,2,3)` — it halts, doesn't skip).
-filter keeps the body-`null` drop; a refined binder is takeWhile. It reuses the whole
-stack — spread lowering, the source-driven `Iterate` engine, per-element arm-matching
-via `Refinements.satisfies`, and the dependent-sorts discharge (provably-in ⇒ identity
-map, provably-disjoint ⇒ empty, residual ⇒ the runtime guard). The **only** new
-mechanism is the `IrExpr.Write.STOP` disposition: `evalIterate` breaks the element loop
-after sealing what's emitted (`SortChecker` skips it like `FAN`; `AltParser.lowerTakeWhile`
-builds the guard arm + catch-all stop arm). This is exactly the generator's
-domain-refinement halt (§7.9) with a `&s` source instead of threaded accumulators —
-*"takeWhile is the generator with the source added back."* `StreamTakeWhileTest`.
-(Inline `&s:[…]` face only; the named call form `tw(&s)` is a follow-up — like the
-generator, it needs the callee's param sort, which isn't local at the call site.)
+**Not yet done (honest).** The guard-filter does not yet flow its refinement into the
+output element sort (`Stream[T:pred]`) — the inferred sort stays the broader `Stream[T]`
+(§8.6 imprecision; honest, since the elements *are* `T`, just not narrowed). The
+disposition family (`Restart`, `[!!]` hazard, compile-error-on-dead-fragment) beyond
+`Nothing`/`Break` is future work.
 
 ### Canonical example (the final prototype, 2026-06-21)
 
@@ -493,10 +504,14 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    The standout: **the domain refinement is the base case** — the unfold halts exactly
    when its next state would be ill-typed (`to>=from` goes false; here `from` strictly
    increases toward a fixed `to`). A **new execution driver** ("step until the guard
-   fails"), NOT sugar over the source-driven `Iterate`. **This guard is the universal
-   per-channel applicability guard (§3):** the generator is `takeWhile` with the source
-   removed — same guard, relocated from a source element to the threaded accumulator,
-   with the **stop** disposition.
+   fails"), NOT sugar over the source-driven `Iterate`. **This refinement is a PRODUCER /
+   synthesis semantic (RULED 2026-07-04, James), categorically distinct from the
+   consumer-side input filter (§3).** It defines the *extent of the emitted stream*, and
+   its base case genuinely *is* the sole halting condition — there is no source to
+   skip-and-continue against. (An earlier reading called the generator "`takeWhile` with
+   the source removed"; that is retired — a consumer's input refinement is now a
+   per-element *filter*, and stream termination is a returned `Break` value, neither of
+   which is what the generator's producer refinement does.)
    - **How it landed.** A fragment whose codomain is a tuple mixing `Stream[T]`
      channel(s) with bare accumulator channel(s) is the generator signal
      (`IrInterpreter.isGeneratorCodomain`); `Closure.invoke` routes such an

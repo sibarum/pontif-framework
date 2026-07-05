@@ -430,7 +430,11 @@ public final class IrInterpreter {
                                     it.origin());
                         }
                         for (IrExpr.OutputSpec os : it.outputs()) {
-                            routeWrite(os.name(), rv.members().get(os.name()), kinds,
+                            Object cv = rv.members().get(os.name());
+                            // A `Break` in any channel terminates the stream (§3) —
+                            // triggering element not emitted, like the STOP disposition.
+                            if (isBreak(cv)) return true;
+                            routeWrite(os.name(), cv, kinds,
                                     streams, accumulators, it.origin(), forEffect);
                         }
                         continue;
@@ -438,7 +442,12 @@ public final class IrInterpreter {
                     IrExpr.OutputKind k = kinds.get(w.output());
                     if (k == null) throw new RuntimeCheckException(
                             "Iterate: write to unknown output '" + w.output() + "'", it.origin());
-                    routeWrite(w.output(), eval(w.value(), frame, module), kinds,
+                    Object v = eval(w.value(), frame, module);
+                    // A returned `Break` value halts the stream (docs/stream-war.md §3,
+                    // the takeWhile / infinite-cutoff shape) — the triggering element is
+                    // not emitted. This is the returned-value face of the STOP disposition.
+                    if (isBreak(v)) return true;
+                    routeWrite(w.output(), v, kinds,
                             streams, accumulators, it.origin(), forEffect);
                 }
                 return false;
@@ -487,6 +496,19 @@ public final class IrInterpreter {
         // Cross-module construction qualifies the nominal ("pontif.core/Nothing");
         // a same-module use is bare ("Nothing"). Match either.
         return n.equals("Nothing") || n.endsWith("/Nothing");
+    }
+
+    /**
+     * Whether {@code v} is the {@code Break} termination value (pontif.core) — the sibling
+     * of {@link #isNothing} in the stream control-value family (docs/stream-war.md §3).
+     * Returning {@code Break} at a stream channel <b>halts</b> the stream (the takeWhile
+     * shape / infinite-stream cutoff), where {@code Nothing} only drops the one element.
+     * Same bare-or-{@code pontif.core/}-qualified nominal match as {@code isNothing}.
+     */
+    private static boolean isBreak(Object v) {
+        if (!(v instanceof RecordValue rv) || rv.typeName() == null) return false;
+        String n = rv.typeName();
+        return n.equals("Break") || n.endsWith("/Break");
     }
 
     /**

@@ -438,30 +438,51 @@ IntLit(9).value                          # → 9
 
 A `Stream[T]` is the pure, conservation-checked membrane over a sequence (and,
 ultimately, over messy stateful sources). It is a **trait** in `pontif.core` — a tuple
-literal autoboxes into one, element-checked. Omission during iteration is signalled with
-the **`Nothing`** value (imported alongside `Stream`); there is **no built-in `null`
-keyword** — `null` is just a conventional name bound to `Nothing`'s sole value, for
-readability. The setup the rest of this section builds on:
+literal autoboxes into one, element-checked. Per-element control during iteration is
+signalled by **returning a control value** from the fragment body — the `Nothing` family
+(there is **no built-in `null` keyword**; `null` is just a conventional name for
+`Nothing`'s sole value):
+
+- **`Nothing`** → **drop** this element, keep going (the lossy filter's omission).
+- **`Break`** → **terminate** the stream; the triggering element is not emitted
+  (`takeWhile`, and the cutoff for an infinite stream).
+
+Both are consumed by the machinery and never appear in the output — a body returning
+`[T|Nothing|Break]` produces a `Stream[T]`. The setup the rest of this section builds on:
 
 ```pontif
-requires pontif.core.{Stream, Nothing}
+requires pontif.core.{Stream, Nothing, Break}
 let s:Stream[Int] = {1, 2, 3, 4}
 let null:Nothing = Nothing()                  # `null` is a name for Nothing's only value
+let stop:Break = Break()
 ```
 
 There is **no `map`/`filter`/`fold` primitive**. There is one construct — the **synthesis
-fragment**, a per-element transform applied to a stream by **spread** (`&`). A fragment
-that returns `null` for an element **drops** it (that is all `filter` is) — with `s` and
-`null` bound as above:
+fragment**, a per-element transform applied to a stream by **spread** (`&`). filter has
+two faces: a **body that returns `null`** drops an element, or — equivalently, with no
+branch in the body (GPU-friendly) — a **domain-refined binder** `(el:[T:pred])` admits
+only in-domain elements (the *subscribe* semantic). Either way it **drops and continues**;
+terminating is the separate `Break` return:
 
 ```pontif
 &s:[ (el:Int) -> el * 2 ]                     # map  → {2, 4, 6, 8}
 
-&s:[ (el:Int) ->                              # filter — `null` drops the element
+&s:[ (el:[Int:@>2]) -> el ]                   # filter (guard) — drops ≤2, continues → {3, 4}
+
+&s:[ (el:Int) ->                              # filter (body) — `null` drops the element
        match el
          [@>2] -> el
          [_]   -> null ]                      # → {3, 4}
+
+&s:[ (el:Int) ->                              # takeWhile — `Break` halts the stream
+       match el
+         [@<3] -> el
+         [_]   -> stop ]                      # → {1, 2}  (not {1, 2, ...}: it stops, not skips)
 ```
+
+Note the difference: a domain-refined binder `(el:[Int:@<3])` would yield `{1, 2, ...}`
+(**dropping** off-domain elements and continuing), whereas returning `Break` **stops** at
+the first — a filter and a takeWhile, the two dispositions kept distinct.
 
 Every classic combinator is a configuration of this one idea — the *positional channel*
 model, where each tuple position is a channel and `&` distributes a transform over it:
@@ -469,11 +490,11 @@ model, where each tuple position is a channel and `&` distributes a transform ov
 | operation | shape |
 |-----------|-------|
 | **map** | one stream channel, single return |
-| **filter** | one stream channel, `null` drops (lossy) |
-| **fold / scan** | a stream channel + an accumulator seed (`fold(&s, 0)`) |
+| **filter** | one stream channel; a `null` return **or** a domain-refined binder drops (lossy), continues |
+| **takeWhile** | body returns **`Break`** → halts the stream (element not emitted) |
+| **fold / scan** | a stream channel + an accumulator seed (`fold(&s, 0)`); one fragment can map *and* fold at once |
 | **fork** | one stream in, a *tuple of stream channels* out (conservative split) |
 | **zip** | several `&` streams walked in lockstep (`(&a, &b):[ (x:Int, y:Int) -> x+y ]`) |
-| **takeWhile** | a *domain-refined* binder is the guard; off-domain **stops** the stream |
 
 A **generator** is the dual of fold — a stream *source* with no `&` input, where **the
 domain refinement is the base case** (it halts exactly when the next state would be
@@ -1003,7 +1024,7 @@ sections (whose `pontif.gui` / `pontif.plot` / `pontif.shape` modules live in th
 `pontif-builtin-*` packages, out of `pontif-runtime`'s reach) — is pinned by
 `ReadmeSnippetTest`: the README compiles, or the build fails. (The stream operations
 carry their own dedicated tests — `StreamMapTest`, `StreamGeneratorTest`,
-`StreamTakeWhileTest`, and siblings; the GUI, plot, and shape snippets are pinned by
+`StreamGuardFilterTest`, `StreamBreakTest`, and siblings; the GUI, plot, and shape snippets are pinned by
 `GuiExtensionTest` / `PlotExtensionTest` / `ShapeExtensionTest` in those packages.) See
 `docs/alternative-syntax.ptf` for the canonical
 reference, `docs/glossary.md` for terms, and `docs/backward-language-design.md`
@@ -1077,10 +1098,14 @@ Capabilities that work end-to-end in the Pontif surface syntax:
 - **Streams — a pure membrane over sequences** (`docs/stream-war.md`): a `Stream[T]`
   trait in `pontif.core` (a tuple literal autoboxes, element-checked); **one iteration
   primitive, the synthesis fragment** — a per-element transform applied by spread
-  `&s:[…]`, from which **map / filter (null-drop) / fold / scan / fork / zip** all fall
-  out (no separate combinators); **`takeWhile`** via a domain-refined binder (the *stop*
-  disposition); **generators / unfold** (`count(0,5)` — *the domain refinement is the
-  base case*); **finite ranges synthesized from a membership refinement**
+  `&s:[…]`, from which **map / filter / fold / scan / fork / zip** all fall out (no
+  separate combinators; one fragment can map *and* fold at once); **filter** drops via a
+  returned `Nothing` *or* a domain-refined binder (the *subscribe* semantic, no branch);
+  **stream control is returned values in the `Nothing` family** — `Nothing` drops one
+  element, **`Break`** terminates (this is **`takeWhile`** and the infinite-stream cutoff);
+  **generators / unfold** (`count(0,5)` — *the domain refinement is the base case*, a
+  producer/synthesis refinement distinct from the consumer filter); **finite ranges
+  synthesized from a membership refinement**
   (`Stream[Int:0 <= @ < 10]`, direction read from the comparison chain); **concatenation
   `+`** (lifts to `String +`); and **computed streams are
   element-type-checked** (no-lie, via a parametric-trait carrier). Fragments are

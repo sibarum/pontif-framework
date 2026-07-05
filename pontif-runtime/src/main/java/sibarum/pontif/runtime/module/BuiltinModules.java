@@ -62,11 +62,13 @@ public final class BuiltinModules {
     private static final Map<String, String> SOURCES = new LinkedHashMap<>();
 
     private static final String PONTIF_CORE_SOURCE = """
-            exports @.{Stream, Nothing}
+            exports @.{Stream, Nothing, Break}
 
             trait Stream[type E]{}
 
             struct Nothing()
+
+            struct Break()
 
             0
             """;
@@ -126,10 +128,14 @@ public final class BuiltinModules {
      * external {@code next()} to expose; the Source-obligation shape is deferred
      * until builtin streams are exercised). Sub-traits ({@code IndexedStream}) and a
      * real backing arrive in later slices; for now a tuple literal autoboxes into
-     * {@code Stream[E]}. Also home to {@code Nothing} (slice 2b) — the universal
-     * omission value ({@code let null:Nothing = Nothing()}); a fragment that returns
-     * {@code Nothing} at a stream channel drops that element (the lossy filter shape,
-     * docs/stream-war.md §3). Written in Pontif source, like {@code std.stream}.
+     * {@code Stream[E]}. Also home to the stream control values (docs/stream-war.md §3):
+     * {@code Nothing} — the omission value ({@code let null:Nothing = Nothing()}); a
+     * fragment that returns {@code Nothing} at a stream channel <b>drops</b> that element
+     * (the lossy filter shape) — and {@code Break} — the termination value; a fragment
+     * that returns {@code Break} <b>halts</b> the stream (the takeWhile shape / infinite-
+     * stream cutoff, the triggering element not emitted). Both are consumed by the
+     * iteration machinery and never appear in the output stream. Written in Pontif source,
+     * like {@code std.stream}.
      */
     private static IrModule pontifCore() {
         try {

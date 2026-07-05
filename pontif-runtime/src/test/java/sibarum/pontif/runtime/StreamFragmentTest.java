@@ -96,6 +96,24 @@ class StreamFragmentTest {
     }
 
     @Test
+    void mapAndFold_simultaneousDistinctChannels() {
+        // The raw multi-channel model's reason to exist (James's ruling): ONE fragment
+        // maps AND folds at once, with the stream channel emitting something DIFFERENT
+        // from the accumulator. Unlike scan (which emits the running total = the
+        // accumulator), here the stream channel is el*2 while the accumulator is the sum.
+        CompileResult r = compiler.compileAlt("""
+                requires pontif.core.{Stream}
+                let mapAndFold:[ (el:Int, total:Int) -> {el * 2, el + total} ]
+                let s:Stream[Int] = {1, 2, 3, 4}
+                mapAndFold(&s, 0)""", "m.ptf");
+        CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "map+fold should compile; got " + r);
+        Object val = new IrInterpreter(c.program().simplifier()).eval(c.program().module());
+        // _0 = the mapped stream (el*2), _1 = the folded accumulator (sum) — one pass.
+        assertEquals("{{2, 4, 6, 8}, 10}", String.valueOf(val));
+    }
+
+    @Test
     void scan_emitsRunningTotalAndThreads() throws Exception {
         // scan emits the running accumulator at the stream channel AND threads it:
         // the stream position is the running totals, the accumulator the final.
