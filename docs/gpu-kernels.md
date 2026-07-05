@@ -133,9 +133,13 @@ not a later reconciliation.
   program uses. **Blocking** (no async yet — isolates the compute path from the pivotal question).
   Differential **CPU==GPU verify** wired in so the integration proves itself. Example `.ptf` in the
   playground. *This is the beachhead and does not depend on the async ruling.*
-  - Sub-cuts: (1a) revive + build + green tests on master; (1b) the `pontif.gpu` extension +
-    native dispatch through `Accelerator`; (1c) the `… on Gpu` surface parsing + lowering trigger
-    (compile-time eligibility error if not lowerable); (1d) end-to-end `.ptf` + differential verify.
+  - Sub-cuts: **(1a) LANDED** — revived onto master (one fail-closed `default`), 20/20 green incl.
+    a real GPU run. **(1b) LANDED** — new opt-in `pontif-gpu` module (ServiceLoader-discovered),
+    concrete `gpuVectorAdd` native dispatches through `KernelLowering` → `Accelerator` → Vulkan; a
+    `.ptf` runs it end-to-end (`{1,2,3,4}`+`{10,20,30,40}` → `{11,22,33,44}`; 64-bit survives).
+    **(1c)** the general `… on Gpu` surface over an arbitrary fragment (reach the iteration IR via
+    the fragment value; compile-time eligibility error if not lowerable). **(1d)** playground
+    example + `handle.verify` CPU==GPU differential.
 - **Slice 2 — async delivery on the event substrate.** Resolve the pivotal OPEN, then: worker-thread
   dispatch, completion surfaced through the events substrate (`Context.fireEvent` is the existing
   seam), the Future/handle type per the ruling. GPU becomes the first real **async event source** —
