@@ -1295,6 +1295,10 @@ public final class IrInterpreter {
                         @Override public Object invoke(RecordValue value, String methodName) {
                             return invokeMethod(value, methodName, module);
                         }
+                        @Override public CompiledModule.CompiledFunction methodImpl(
+                                RecordValue value, String methodName) {
+                            return resolveMethodImpl(value, methodName, module);
+                        }
                     };
                     return nativeCall.call(argValues, ctx);
                 }
@@ -1383,6 +1387,27 @@ public final class IrInterpreter {
         }
         throw new RuntimeCheckException(
                 "no method '" + methodName + "' on '" + value.typeName() + "'", Origin.NONE);
+    }
+
+    /**
+     * Resolves the {@link CompiledModule.CompiledFunction} for a trait-impl instance method on
+     * {@code value}'s type, or null — the {@code NativeCalls.Context.methodImpl} seam (a code
+     * generator READS the body rather than evaluating it, docs/sdf-glsl.md). A trait-impl method
+     * compiles to a {@link CompiledModule.CompiledFunction} whose decl is named
+     * {@code "<qualified-type>.<method>"} (e.g. {@code "pontif.shape/Sphere.distance"}), so the
+     * lookup is a scan of {@link CompiledModule#functions()} by decl-name suffix — the receiver's
+     * bare type plus the method name. (Distinct from {@link #invokeMethod}'s dispatch-based path,
+     * which resolves an overload against argument types; here we want the definition itself.)
+     */
+    private CompiledModule.CompiledFunction resolveMethodImpl(
+            RecordValue value, String methodName, CompiledModule module) {
+        if (value == null || value.typeName() == null) return null;
+        String suffix = bareName(value.typeName()) + "." + methodName;   // e.g. "Sphere.distance"
+        for (Map.Entry<FunctionDecl, CompiledModule.CompiledFunction> e : module.functions().entrySet()) {
+            String n = e.getKey().name();
+            if (n.equals(suffix) || n.endsWith("/" + suffix)) return e.getValue();
+        }
+        return null;
     }
 
     private static SymExpr toSymExpr(Object value) {

@@ -79,11 +79,18 @@ and a point expression `p`, emit a GLSL expression for its distance:
   to move bytes). Pontif `render(shape)`; `DasumBridge` `case "Raymarch"` →
   `RaymarchLayer.standard`. Verify a sphere actually raymarches in the editor. De-risks the
   whole pipe (boundary, bounds→center/halfExtent, scene hosting) independent of the compiler.
-- **Slice 1 — the general body-inlining lowerer.** Extend `NativeCalls.Context` to reach
-  `distance` method IR; build the IR→GLSL lowerer (the algorithm above), fail-closed. All
-  built-in composites (union/intersect/difference/smoothUnion, translate/scale/rotate) AND
-  user `assign trait X:SdfShape` render. Replaces the spike's hardcoded Sphere. Dissolves the
-  docs/shapes.md "user SDF can only be sampled" blocker (we ship GLSL text, not a function).
+- **Slice 1 — the general body-inlining lowerer. LANDED 2026-07-05.** Extended
+  `NativeCalls.Context` with `methodImpl(value, methodName)` (default null; backed in
+  `IrInterpreter.resolveMethodImpl` by a scan of `functions()` for the decl named
+  `<type>.distance` — the interpreter rewrites `MethodCall` away, so a "Type.method" dispatch
+  key doesn't resolve trait impls, but the compiled `functions()` map keys them by that decl
+  name). `SdfGlsl` now inlines each shape's real `distance` IR (the algorithm above),
+  fail-closed via `SdfGlsl.Unsupported`. Verified: Sphere lowers to its true
+  `sqrt((p.x*p.x)+…) - r` (not a hand-written `length`), union→`min`, transforms inline the
+  point, smoothUnion/rotateY use `mix`/`clamp`/`sin`/`cos`/`radians`, and a **user-defined
+  `assign trait Slab:SdfShape` renders** (`p.y - 0.5`) — dissolving the docs/shapes.md "user
+  SDF can only be sampled" blocker (we ship GLSL text, not a function). `ShapeExtensionTest`
+  (7), examples `render-sphere.ptf` / `render-csg.ptf`.
 - **Slice 2 — polish (deferred detail).** Attribute fields → surface color (lower a
   `ScalarField` the same way); view modes; more primitives; keep `preview` as the CPU
   fallback. OPEN.

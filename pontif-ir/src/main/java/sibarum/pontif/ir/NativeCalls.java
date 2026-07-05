@@ -53,6 +53,17 @@ public final class NativeCalls {
         boolean satisfies(RecordValue value, String traitName);
 
         Object invoke(RecordValue value, String methodName);
+
+        /**
+         * The IR of an instance-method impl for {@code value}'s type — its parameters and body —
+         * or {@code null} if none resolves. The seam a code generator uses to <b>read</b> a
+         * method's definition instead of evaluating it: the SDF→GLSL lowerer inlines each shape's
+         * {@code distance} body into a shader (docs/sdf-glsl.md). Default {@code null} — only a
+         * context backed by a {@link CompiledModule} (the {@code IrInterpreter}) can supply it.
+         */
+        default CompiledModule.CompiledFunction methodImpl(RecordValue value, String methodName) {
+            return null;
+        }
     }
 
     private static final Map<String, NativeCall> ENTRIES = new LinkedHashMap<>();

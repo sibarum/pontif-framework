@@ -111,9 +111,11 @@ class ShapeExtensionTest {
         // AABB from bounds() (radius 1 → box [-2,2]^3 → center 0, half-extent 2).
         RecordValue tuple = (RecordValue) capturedLayers[0];
         RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
-        assertEquals("float map(vec3 p){ return length(p) - 1.0; }",
+        // The general lowerer inlines the SHAPE's OWN distance body (sqrt(x²+y²+z²) - r), so it
+        // can't drift from the Pontif formula — not a hand-written `length(p) - r`.
+        assertEquals("float map(vec3 p){ return (sqrt((((p.x * p.x) + (p.y * p.y)) + (p.z * p.z))) - 1.0); }",
                 ((sibarum.pontif.core.types.StringValue) ray.members().get("map")).content(),
-                "Sphere SDF lowered to a GLSL map");
+                "Sphere SDF lowered from its real distance body");
         assertEquals(0.0, ((java.math.BigDecimal) ray.members().get("cx")).doubleValue(), 1e-9, "box center x");
         assertEquals(2.0, ((java.math.BigDecimal) ray.members().get("hx")).doubleValue(), 1e-9, "box half-extent x");
 
@@ -122,9 +124,82 @@ class ShapeExtensionTest {
         assertEquals(1, build.layers().size(), "one raymarch layer");
         sibarum.dasum.gui.vis.scene.RaymarchLayer layer =
                 assertInstanceOf(sibarum.dasum.gui.vis.scene.RaymarchLayer.class, build.layers().get(0));
-        assertTrue(layer.fragmentSource().contains("length(p) - 1.0"),
+        assertTrue(layer.fragmentSource().contains("(p.x * p.x)"),
                 "the SDF map is spliced into the raymarch harness");
         assertEquals(2.0f, layer.halfExtent().x(), 1e-6f, "half-extent carried to the layer");
+    }
+
+    /** The general lowerer inlines each shape's real `distance` IR: composites + transforms. */
+    @Test
+    void render_lowersCsgAndTransforms() {
+        // union(Sphere, translate(Sphere)) → min over the two children, the translate inlined as
+        // a back-shifted point. Proves distanceAt recursion + this.<field> literals + math calls.
+        String map = renderMap("""
+                requires pontif.shape.{Sphere, translate, union, render}
+                render(union(Sphere(1.0), translate(Sphere(0.8), {0.9, 0.0, 0.0})))""");
+        // union → min; sphere A at p; sphere B at p - (0.9,0,0); radii 1.0 and 0.8 inlined.
+        assertTrue(map.startsWith("float map(vec3 p){ return min("), () -> "union → min: " + map);
+        assertTrue(map.contains("- 1.0"), () -> "sphere A radius inlined: " + map);
+        assertTrue(map.contains("- 0.8"), () -> "sphere B radius inlined: " + map);
+        assertTrue(map.contains("0.9"), () -> "translate offset inlined: " + map);
+        // No unresolved Pontif residue leaked into the shader.
+        assertFalse(map.contains("distanceAt") || map.contains("this."),
+                () -> "no Pontif residue in the GLSL: " + map);
+    }
+
+    /** The render-csg.ptf example: difference + smoothUnion + rotateY + translate all lower. */
+    @Test
+    void render_lowersTheFullCsgExample() {
+        String map = renderMap("""
+                requires pontif.shape.{Sphere, translate, rotateY, difference, smoothUnion, render}
+                render(rotateY(
+                  smoothUnion(
+                    difference(Sphere(1.2), translate(Sphere(0.9), {0.8, 0.4, 0.4})),
+                    translate(Sphere(0.6), {0.0, 0.0 - 1.1, 0.0}),
+                    0.3),
+                  25.0, {0.0, 0.0, 0.0}))""");
+        // Every operator/intrinsic present, no unlowered Pontif residue.
+        assertTrue(map.contains("max(") && map.contains("mix(") && map.contains("clamp(")
+                && map.contains("cos(") && map.contains("sin(") && map.contains("radians("),
+                () -> "CSG + transform intrinsics present: " + map);
+        assertFalse(map.contains("distanceAt") || map.contains("this.") || map.contains("pontif."),
+                () -> "no Pontif residue in the GLSL: " + map);
+    }
+
+    /** THE payoff: a user-defined SdfShape lowers to GLSL (no built-in special-casing). */
+    @Test
+    void render_lowersUserDefinedShape() {
+        // A ground plane at height 0: distance = y. Entirely user code, no built-in node.
+        String map = renderMap("""
+                requires pontif.shape.{SdfShape, render}
+                struct Slab(h:Decimal)
+                assign trait Slab:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> y - this.h
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+                    {0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0}
+                }
+                render(Slab(0.5))""");
+        assertEquals("float map(vec3 p){ return (p.y - 0.5); }", map,
+                "user shape's own distance body lowered to GLSL");
+    }
+
+    /** Runs {@code src} with renderScene stubbed and returns the emitted `float map(...)` string. */
+    private static String renderMap(String src) {
+        Extensions.install(new PlotExtension());
+        Extensions.install(new ShapeExtension());
+        Object[] captured = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt(src, "render.ptf"), PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "render program should run; got " + r.text());
+        RecordValue tuple = (RecordValue) captured[0];
+        RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
+        return ((sibarum.pontif.core.types.StringValue) ray.members().get("map")).content();
     }
 
     /** Installs the extensions and runs {@code src} with {@code renderScene} stubbed (no window). */
