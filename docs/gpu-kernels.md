@@ -229,6 +229,17 @@ end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules.
     one field); the parser gap on `main ( &spread:… )` (bare spread inside the `main` paren — use the
     trailing form); `!!` recovery via `match [!!]`; a real worker/mailbox scheduler for the general
     event substrate (2a builds only the GPU-needed minimum); concurrent in-flight ordering guarantees.
+    - **SuperVast enablers LANDED (2026-07-05, upstream `~/IdeaProjects/supirvast`).** Two primitives
+      Pontif's kernel-reuse / destroy / concurrency slices will consume, verified on a Vulkan device:
+      (1) **per-handle release** — `Accelerator.release(KernelHandle)` / `KernelHandle.close()` frees
+      one kernel's pipeline without dropping the whole context (degraded-not-dead: a released handle
+      still runs on the equal CPU path); the primitive behind a Pontif `destroy(kernel)`. (2) **async
+      concurrent dispatch** — `KernelHandle.submitAsync(...)` → `Submission` → `await(...)`, with the
+      context now holding several compute queues (round-robined), so N distinct kernels run in flight
+      and are awaited together; the primitive behind the forward-only "launch 2, join both" pattern.
+      A handle has one descriptor set, so only one in-flight submission per handle (submitAsync throws
+      otherwise — distinct handles are free). **NOT yet wired into Pontif:** the user-facing kernel
+      handle + `destroy` + concurrent `on Gpu` await the handle-surface naming/design rulings below.
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident
