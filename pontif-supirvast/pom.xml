@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-supirvast</artifactId>
+
+    <!--
+        Lowers a restricted (Int-only, v1) slice of Pontif's IR onto SuperVast's target-neutral `core` IR
+        and runs it on the GPU via the Accelerator facade. The act of lowering IS the eligibility check:
+        the first unsupported construct produces a precise, source-located LoweringError.
+
+        Prerequisite: SuperVast (~/IdeaProjects/supirvast) must be `mvn install`-ed into the local .m2 so
+        dev.supirvast:vastir / vastir-tools resolve; they live in a separate Maven reactor.
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-core</artifactId>
+        </dependency>
+        <!-- SuperVast is a separate Maven reactor (~/IdeaProjects/supirvast); its
+             coordinates are not managed by the pontif parent, so pin them here. -->
+        <dependency>
+            <groupId>dev.supirvast</groupId>
+            <artifactId>vastir</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.supirvast</groupId>
+            <artifactId>vastir-tools</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>
