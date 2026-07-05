@@ -1,6 +1,9 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.module.Extension;
+
+import java.util.Map;
 
 /**
  * The shape-composition extension (docs/shapes.md), slice <b>S1</b> — SDF shape primitives + a
@@ -34,7 +37,7 @@ public final class ShapeExtension implements Extension {
                 requires pontif.core.{Stream}
                 requires pontif.math.{sqrt, clamp, sin, cos, radians, min, max, mix}
                 requires pontif.plot.{Volume, scene}
-                exports @.{SdfShape, Sphere, preview, distanceAt,
+                exports @.{SdfShape, Sphere, preview, render, distanceAt,
                            translate, scale, rotateX, rotateY, rotateZ,
                            union, difference, intersect, smoothUnion,
                            ScalarField, Attributed, attr, shapeOf, attrName, attrAt}
@@ -96,6 +99,31 @@ public final class ShapeExtension implements Extension {
                     clamp(distanceAt(s, xlo + (i % 24) * dx, ylo + ((i / 24) % 24) * dy, zlo + (i / 576) * dz),
                           0.0 - band, band) ]
                   scene({title = "shape"}, {Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, opacity, false, 3)})
+                )
+
+                # --- GPU render (docs/sdf-glsl.md) -------------------------------------------------
+                # `render` lowers the shape's signed-distance function to a GLSL `float map(vec3 p)`
+                # (native `sdfMap`, generated interpreter-side) and hands it to Dasum's raymarch
+                # layer with the shape's world-space bounding box — a real sphere-traced surface,
+                # not the sampled glow of `preview`. The GLSL crosses the boundary as inert text.
+
+                # A raymarch layer: a GLSL `map` shader + the world AABB (center ± half-extent).
+                struct Raymarch(map:String,
+                                cx:Decimal, cy:Decimal, cz:Decimal,
+                                hx:Decimal, hy:Decimal, hz:Decimal)
+
+                # (native) Lower a shape to GLSL `float map(vec3 p){…}`. Backed by SdfGlsl::map.
+                function sdfMap(s:[SdfShape]):String -> ""
+
+                function render(s:[SdfShape]):Stream[String] -> (
+                  let [{xlo, xhi, ylo, yhi, zlo, zhi}] = s.bounds()
+                  let cx = (xlo + xhi) / 2.0
+                  let cy = (ylo + yhi) / 2.0
+                  let cz = (zlo + zhi) / 2.0
+                  let hx = (xhi - xlo) / 2.0
+                  let hy = (yhi - ylo) / 2.0
+                  let hz = (zhi - zlo) / 2.0
+                  scene({title = "shape"}, {Raymarch(sdfMap(s), cx, cy, cz, hx, hy, hz)})
                 )
 
                 # --- Transforms (docs/shapes.md S2) ------------------------------------------------
@@ -331,5 +359,12 @@ public final class ShapeExtension implements Extension {
 
                 0
                 """;
+    }
+
+    @Override
+    public Map<String, NativeCalls.NativeCall> calls() {
+        // The one native: lower a shape's SDF to a GLSL `float map`. Generated interpreter-side
+        // (it needs the shape value); only the resulting string crosses to dasum (docs/sdf-glsl.md).
+        return Map.of("sdfMap", SdfGlsl::map);
     }
 }

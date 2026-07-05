@@ -85,6 +85,48 @@ class ShapeExtensionTest {
         assertEquals(24, ((VolumeLayer) build.layers().get(0)).nx(), "24^3 sampling grid");
     }
 
+    @Test
+    void render_lowersSphereSdfToGlslMap_andBuildsRaymarchLayer() {
+        Extensions.install(new PlotExtension());
+        Extensions.install(new ShapeExtension());
+
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.shape.{Sphere, render}
+                        render(Sphere(1.0))""", "render.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "render program should run; got " + r.text());
+        assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
+
+        // The single Raymarch layer carries the GLSL `map` (Sphere → length(p) - r) + the world
+        // AABB from bounds() (radius 1 → box [-2,2]^3 → center 0, half-extent 2).
+        RecordValue tuple = (RecordValue) capturedLayers[0];
+        RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
+        assertEquals("float map(vec3 p){ return length(p) - 1.0; }",
+                ((sibarum.pontif.core.types.StringValue) ray.members().get("map")).content(),
+                "Sphere SDF lowered to a GLSL map");
+        assertEquals(0.0, ((java.math.BigDecimal) ray.members().get("cx")).doubleValue(), 1e-9, "box center x");
+        assertEquals(2.0, ((java.math.BigDecimal) ray.members().get("hx")).doubleValue(), 1e-9, "box half-extent x");
+
+        // The same layers build into one dasum RaymarchLayer with the spliced shader + AABB.
+        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        assertEquals(1, build.layers().size(), "one raymarch layer");
+        sibarum.dasum.gui.vis.scene.RaymarchLayer layer =
+                assertInstanceOf(sibarum.dasum.gui.vis.scene.RaymarchLayer.class, build.layers().get(0));
+        assertTrue(layer.fragmentSource().contains("length(p) - 1.0"),
+                "the SDF map is spliced into the raymarch harness");
+        assertEquals(2.0f, layer.halfExtent().x(), 1e-6f, "half-extent carried to the layer");
+    }
+
     /** Installs the extensions and runs {@code src} with {@code renderScene} stubbed (no window). */
     private static PontifRunner.RunResult runNoWindow(String src, String name) {
         Extensions.install(new PlotExtension());

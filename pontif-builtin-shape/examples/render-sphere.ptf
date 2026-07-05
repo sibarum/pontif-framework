@@ -1,0 +1,6 @@
+requires pontif.shape.{Sphere, render}
+
+# docs/sdf-glsl.md slice 0 — the same sphere as sphere.ptf, but `render` lowers its
+# signed-distance function to a GLSL `float map(vec3 p)` and hands it to Dasum's raymarch
+# layer: a real GPU sphere-traced surface (crisp, lit), not the sampled glow of `preview`.
+main ( render(Sphere(1.0)) )

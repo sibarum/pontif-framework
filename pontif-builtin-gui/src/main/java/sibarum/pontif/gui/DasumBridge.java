@@ -47,6 +47,7 @@ import sibarum.dasum.gui.vis.scene.InteractionSpec;
 import sibarum.dasum.gui.vis.scene.Layer;
 import sibarum.dasum.gui.vis.scene.LineLayer;
 import sibarum.dasum.gui.vis.scene.PointLayer;
+import sibarum.dasum.gui.vis.scene.RaymarchLayer;
 import sibarum.dasum.gui.vis.scene.SceneSnapshot;
 import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.dasum.gui.vis.scene.TextLayer;
@@ -553,6 +554,10 @@ public final class DasumBridge {
                             }
                         }
                     }
+                    case "Raymarch" -> {
+                        Layer l = raymarchLayer(rv, b);
+                        if (l != null) geometry.add(l);
+                    }
                     case "Text3D" -> { texts.add(rv); addText3dBounds(rv, b); }
                     default -> { /* skip unknown layer kinds rather than fail the whole scene */ }
                 }
@@ -562,6 +567,24 @@ public final class DasumBridge {
         float textHeight = 0.06f * b.span();   // legible relative to the scene, not a fixed world size
         for (RecordValue rv : texts) layers.add(text3dLayer(rv, textHeight));
         return new SceneBuild(layers, b.min(), b.max(), bar);
+    }
+
+    /**
+     * A caller-supplied SDF shader (pontif.shape {@code render}): a GLSL {@code float map(vec3 p)}
+     * plus a world-space AABB (center ± half-extent). The shape's signed-distance function is
+     * lowered to GLSL interpreter-side (docs/sdf-glsl.md); only the inert {@code map} string
+     * crosses the boundary. Rendered by Dasum's {@link RaymarchLayer} sphere-tracer, which
+     * depth-composes with the rest of the scene.
+     */
+    private static Layer raymarchLayer(RecordValue rv, Bounds b) {
+        if (!(rv.members().get("map") instanceof StringValue map) || map.content().isBlank()) return null;
+        double cx = memberD(rv, "cx"), cy = memberD(rv, "cy"), cz = memberD(rv, "cz");
+        double hx = memberD(rv, "hx"), hy = memberD(rv, "hy"), hz = memberD(rv, "hz");
+        b.add(cx - hx, cy - hy, cz - hz);
+        b.add(cx + hx, cy + hy, cz + hz);
+        Vec3 center = new Vec3((float) cx, (float) cy, (float) cz);
+        Vec3 half = new Vec3((float) hx, (float) hy, (float) hz);
+        return RaymarchLayer.standard(map.content(), center, half, Color.rgb(0.62f, 0.71f, 0.92f));
     }
 
     /** The colorbar key for a {@code Surface} record: its colormap name over its height range. */
