@@ -112,6 +112,35 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_repeatedDispatch_lowersTheKernelOnlyOnce() {
+        // The spec cache (docs/gpu-kernels.md): registration was already cached, but lowering (SPIR-V
+        // generation) used to re-run every dispatch. Now the lowered KernelSpec is cached by the same
+        // structural key, so re-running the same fragment lowers zero extra times. Uses arithmetic no
+        // other test shares (x*5 + y) so its cache key is fresh regardless of test order; the assertion
+        // is on the delta, so a prior population can't mask a regression.
+        String src = """
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut, Event}
+                struct ScaledSumEvent(r:Int)
+                assign trait ScaledSumEvent:Event{}
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                function scaledSumOnGpu(x:Int, y:Int):Int ->
+                  let r = x * 5 + y
+                  emit ScaledSumEvent(r)
+                  r
+                action log(e:ScaledSumEvent) ->
+                  emit StdOut("" + e.r + " ")
+                  e
+                main ( (&a, &b):[ (x:Int, y:Int) -> scaledSumOnGpu(x, y) ] on Gpu )""";
+        int before = GpuKernelRunner.loweringCount();
+        assertEquals("15 30 45 60 ", runCapturingStdout(src));
+        assertEquals("15 30 45 60 ", runCapturingStdout(src));
+        assertEquals(1, GpuKernelRunner.loweringCount() - before,
+                "the kernel should lower exactly once, then hit the spec cache on the second dispatch");
+    }
+
+    @Test
     void onGpu_withoutAWovenEmit_isARejectedError() {
         // Delivery is the woven emit; a kernel that emits nothing produces nothing observable, so it's
         // an honest error rather than a silent no-op. GPU-independent (rejected before dispatch).

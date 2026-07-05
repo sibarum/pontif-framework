@@ -217,6 +217,14 @@ end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules.
       context + pipeline at **~2 ms**; a new kernel is **~44 ms**; the ~1.9 s cold init is paid once per
       JVM. (The legacy `gpuVectorAdd` native still uses a per-call Accelerator — it's the slice-1 spike,
       not the `on Gpu` path.)
+    - **Spec cache (2026-07-05).** The handle cache skipped *registration* (the ~580 ms build) but
+      SPIR-V *lowering* still re-ran every dispatch (on the calling thread, unconditionally). Now the
+      lowered `KernelSpec` is cached by the same structural key (`SPEC_CACHE`, a `ConcurrentHashMap` —
+      the calling thread may be one of several live editor interpreters). `computeIfAbsent` keeps
+      lowering synchronous, so a shape-ineligible kernel is still an immediate `LoweringError`, not a
+      deferred `!!`. Pinned by `onGpu_repeatedDispatch_lowersTheKernelOnlyOnce` (asserts a repeat lowers
+      zero extra times). So a re-run now pays neither lowering nor registration — only marshalling +
+      the device round trip.
     **Deferred to 2b+:** multi-field / multi-emit events (need multi-output kernels — v1 is one emit,
     one field); the parser gap on `main ( &spread:… )` (bare spread inside the `main` paren — use the
     trailing form); `!!` recovery via `match [!!]`; a real worker/mailbox scheduler for the general

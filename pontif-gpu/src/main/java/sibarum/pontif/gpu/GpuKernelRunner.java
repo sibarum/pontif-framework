@@ -72,6 +72,25 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
     private static Accelerator accelerator;
     private static final Map<String, KernelHandle> HANDLE_CACHE = new HashMap<>();
 
+    /**
+     * Lowered-spec cache, keyed by the same structural key as {@link #HANDLE_CACHE}. Registration
+     * (the ~580 ms pipeline build) was already cached on the worker thread; this caches the SPIR-V
+     * <em>lowering</em> too, so a repeated {@code on Gpu} pays neither. Touched on the calling
+     * (interpreter) thread — concurrent because the editor can hold several live interpreters — hence
+     * a concurrent map; {@code computeIfAbsent} keeps lowering synchronous there, so a shape-ineligible
+     * kernel is still an immediate {@code LoweringError}, never a deferred {@code !!} hazard.
+     */
+    private static final Map<String, KernelSpec> SPEC_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Test seam: how many kernels have actually been lowered (a cache hit does not increment). */
+    private static final java.util.concurrent.atomic.AtomicInteger LOWERINGS =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Count of distinct kernels lowered so far (spec-cache misses) — for the repeated-dispatch test. */
+    static int loweringCount() {
+        return LOWERINGS.get();
+    }
+
     @Override
     public Object run(IrExpr.Iterate iterate, List<Object> sourceValues,
             KernelRunners.FunctionResolver functions) {
@@ -95,7 +114,10 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         // pipeline. Only the device round trip runs on the worker.
         IrExpr.Iterate kernel = mapWrite(inlined, v -> emit.kernelWrite());
         String cacheKey = kernel.toString();
-        KernelSpec spec = new KernelLowering().lower(kernel);
+        KernelSpec spec = SPEC_CACHE.computeIfAbsent(cacheKey, k -> {
+            LOWERINGS.incrementAndGet();
+            return new KernelLowering().lower(kernel);
+        });
 
         long[][] inputs = new long[sourceValues.size()][];
         int n = Integer.MAX_VALUE;
