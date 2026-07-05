@@ -1,0 +1,11 @@
+requires pontif.core.{Stream}
+
+# docs/gpu-kernels.md — element-wise a + b, compiled to a SPIR-V compute kernel and run on the
+# GPU (Vulkan) via the `on Gpu` directive. The value is identical to the CPU stream; `on Gpu` only
+# changes WHERE it runs. Zip stops at the shortest; inputs must be finite (a GPU batch is materialized).
+#
+# Runs when the opt-in GPU modules are on the classpath:
+#   mvn -f pontif-gpu/pom.xml exec:exec -Dptf=examples/vector-add.ptf
+let a:Stream[Int] = {1, 2, 3, 4}
+let b:Stream[Int] = {10, 20, 30, 40}
+main ( (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu )

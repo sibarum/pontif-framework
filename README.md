@@ -29,6 +29,7 @@ allowed to lie.
 - [The GUI framework](#the-gui-framework)
 - [Plotting](#plotting)
 - [3D shapes — SDF composition](#3d-shapes--sdf-composition-pontifshape)
+- [GPU compute kernels](#gpu-compute-kernels-on-gpu)
 - [One inference engine, every stage](#one-inference-engine-every-stage)
 - [The compiler](#the-compiler)
 - [Source code explained](#source-code-explained)
@@ -921,6 +922,37 @@ The full design, and the incremental slices, live in [docs/shapes.md](docs/shape
 volumetric renderer for `preview`), so like the GUI/plot snippets these open a real window
 and are illustrative rather than pinned by `ReadmeSnippetTest`.
 
+## GPU compute kernels (`on Gpu`)
+
+A data-parallel iteration can be run as a **compute kernel on the GPU** by marking it with the
+**`on Gpu`** directive. The iteration lowers to SuperVast's target-neutral `core` IR →
+**SPIR-V** → **Vulkan**; the result is identical to running it on the CPU — `on Gpu` changes
+*where* it runs, never *what* it computes (proven by SuperVast's CPU-vs-GPU differential oracle):
+
+```pontif
+requires pontif.core.{Stream}
+
+let a:Stream[Int] = {1, 2, 3, 4}
+let b:Stream[Int] = {10, 20, 30, 40}
+
+(&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu     # vector-add on the GPU → {11, 22, 33, 44}
+&a:[ (x:Int) -> x * x ] on Gpu                  # a map (squares) on the GPU → {1, 4, 9, 16}
+```
+
+The map/zip fragment is compiled to the canonical `out[gid] = f(in0[gid], …)` kernel. **Lowering
+is the eligibility check** (the guiding law): a shape with no data-parallel form — a fold/scan,
+a fork, a guarded/`Break` body — is a source-located compile error, never a silently-wrong
+kernel. `on Gpu` is a **materialization boundary**: inputs must be finite (a GPU batch is
+uploaded whole), so infinite/lazy streams are honestly ineligible. v1 is `Int` (honest `int64`
+columns — values past 2³² survive); floats/`vec3` (the shader on-ramp) and an async **`Promise`**
+result (built on the event substrate) are the next slices ([docs/gpu-kernels.md](docs/gpu-kernels.md)).
+
+GPU support is **opt-in**: `pontif.gpu` (and `pontif-supirvast`, which owns the Vulkan/SuperVast
+dependencies) live outside the core build and are discovered only when on the classpath — so
+`on Gpu` lights up where GPU support is present and is an honest "not loaded" error where it
+isn't. These snippets need that classpath, so like the GUI/plot/shape examples they are
+illustrative here rather than pinned by `ReadmeSnippetTest`.
+
 ## One inference engine, every stage
 
 Everything above — refinement, dispatch, match, the return gate — rests on one
@@ -1012,16 +1044,18 @@ parse → link modules → resolve aliases → promote literals → construction
   just-in-time compilation; a direct IR interpreter is the alternative execution
   path (and the two are cross-checked).
 - **The IR is the stable seam.** Lowering is a *separate* phase from everything
-  above it, and nothing in the IR is Truffle-specific. Today exactly one backend
-  consumes the IR; a second target — a SPIR-V or C transpilation path, say — would
-  be a contained addition rather than a rewrite. That's a direction, not a
-  shipped feature.
+  above it, and nothing in the IR is Truffle-specific. That decoupling has already
+  paid off: alongside the Truffle/interpreter backend, the IR now lowers to **GLSL**
+  (SDF shapes → a raymarch shader) and to **SPIR-V / Vulkan** (an `on Gpu` iteration →
+  a SuperVast compute kernel) — each a contained addition in its own opt-in module, not
+  a rewrite. What began as "a direction" is now two shipped GPU backends.
 
 Every ` ```pontif ` snippet above — except the illustrative fragments in the
-[Streams](#streams) section and the window-opening snippets in the
-[GUI](#the-gui-framework), [Plotting](#plotting), and [3D shapes](#3d-shapes--sdf-composition-pontifshape)
-sections (whose `pontif.gui` / `pontif.plot` / `pontif.shape` modules live in the
-`pontif-builtin-*` packages, out of `pontif-runtime`'s reach) — is pinned by
+[Streams](#streams) section and the window-opening / GPU snippets in the
+[GUI](#the-gui-framework), [Plotting](#plotting), [3D shapes](#3d-shapes--sdf-composition-pontifshape),
+and [GPU compute kernels](#gpu-compute-kernels-on-gpu) sections (whose `pontif.gui` /
+`pontif.plot` / `pontif.shape` / `pontif.gpu` modules live in the `pontif-builtin-*` and
+`pontif-gpu` packages, out of `pontif-runtime`'s reach) — is pinned by
 `ReadmeSnippetTest`: the README compiles, or the build fails. (The stream operations
 carry their own dedicated tests — `StreamMapTest`, `StreamGeneratorTest`,
 `StreamGuardFilterTest`, `StreamBreakTest`, and siblings; the GUI, plot, and shape snippets are pinned by

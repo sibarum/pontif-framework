@@ -146,7 +146,14 @@ not a later reconciliation.
     reuses `KernelLowering`; relaxed `inputColumnName` (source may be any expr — data binds
     positionally). `(&a,&b):[(x,y)->x+y] on Gpu` → `{11,22,33,44}`, `&s:[(x)->x*x] on Gpu` →
     `{1,4,9,16}`, both on Vulkan. 931 core + 20 supirvast + 4 gpu green.
-    **(1d)** playground example + `handle.verify` CPU==GPU differential.
+    **(1d) LANDED** — `handle.verify` differential-oracle test (CPU==GPU agree; `skipped`→pass
+    when no GPU, so it holds on any machine) + `pontif-gpu/examples/vector-add.ptf`. README gains
+    a "GPU compute kernels" section (the stale "SPIR-V is only a direction" note corrected — GLSL
+    and SPIR-V are now two shipped IR backends).
+
+**SLICE 1 COMPLETE (2026-07-05):** `… on Gpu` runs Int map/zip compute kernels on Vulkan
+end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules. Next: Slice 2
+(async `Promise` on the event substrate).
 - **Slice 2 — async delivery on the event substrate.** Resolve the pivotal OPEN, then: worker-thread
   dispatch, completion surfaced through the events substrate (`Context.fireEvent` is the existing
   seam), the Future/handle type per the ruling. GPU becomes the first real **async event source** —

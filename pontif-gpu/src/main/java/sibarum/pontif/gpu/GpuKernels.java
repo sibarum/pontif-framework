@@ -63,7 +63,7 @@ public final class GpuKernels {
      * the real {@code KernelLowering} path is exercised (the source var names are placeholders —
      * data is supplied positionally as columns at {@code run}).
      */
-    private static IrExpr.Iterate vectorAddIterate() {
+    static IrExpr.Iterate vectorAddIterate() {
         String e = "$e0";
         IrExpr body = new IrExpr.BinOp(IrExpr.Op.ADD,
                 new IrExpr.FieldAccess(new IrExpr.Var(e, O), "_0", O),

@@ -1,12 +1,19 @@
 package sibarum.pontif.gpu;
 
+import dev.supirvast.vastir.tools.Accelerator;
+import dev.supirvast.vastir.tools.KernelHandle;
+import dev.supirvast.vastir.tools.Registration;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
+import sibarum.pontif.supirvast.KernelLowering;
+import sibarum.pontif.supirvast.ValueMarshaller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end proof that a Pontif program dispatches a real compute kernel to the GPU
@@ -55,6 +62,27 @@ class GpuKernelTest {
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "on-Gpu map should run; got " + r.text());
         assertEquals("{1, 4, 9, 16}", r.text());
+    }
+
+    @Test
+    void differentialOracle_cpuAndGpuAgree() {
+        // The integration proves itself: run the vector-add kernel on BOTH backends and assert they
+        // agree (SuperVast's differential guarantee). With no GPU present this reports "skipped"
+        // (matches = true), so the assertion holds on any machine; where a GPU is present it is a
+        // real CPU-vs-GPU equivalence check.
+        int n = 4;
+        try (Accelerator accelerator = new Accelerator()) {
+            Registration registration = accelerator.register(
+                    new KernelLowering().lower(GpuKernels.vectorAddIterate()));
+            KernelHandle handle = assertInstanceOf(KernelHandle.class, registration,
+                    () -> "kernel registration should succeed; got " + registration);
+            int[][] columns = {
+                    ValueMarshaller.outputColumn(n),
+                    ValueMarshaller.toColumn(new long[]{1, 2, 3, 4}),
+                    ValueMarshaller.toColumn(new long[]{10, 20, 30, 40})};
+            KernelHandle.VerificationResult v = handle.verify(columns, n);
+            assertTrue(v.matches(), () -> "CPU and GPU disagree: " + v.detail());
+        }
     }
 
     @Test
