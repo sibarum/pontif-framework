@@ -407,7 +407,7 @@ public final class AliasResolver {
                 for (IrExpr cs : it.coSources()) coSources.add(rewriteExpr(cs, resolved));
                 yield new IrExpr.Iterate(
                         rewriteExpr(it.source(), resolved), coSources, it.element(),
-                        outs, arms, it.origin());
+                        outs, arms, it.origin(), it.gpu());
             }
             case IrExpr.Emit em -> new IrExpr.Emit(
                     rewriteExpr(em.event(), resolved), rewriteExpr(em.body(), resolved), em.origin());

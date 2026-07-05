@@ -298,7 +298,8 @@ public sealed interface IrExpr
      * the body destructures. Empty for the ordinary single-source iteration.
      */
     record Iterate(IrExpr source, List<IrExpr> coSources, String element,
-                   List<OutputSpec> outputs, List<Arm> arms, Origin origin) implements IrExpr {
+                   List<OutputSpec> outputs, List<Arm> arms, Origin origin, boolean gpu)
+            implements IrExpr {
         public Iterate {
             if (source == null) {
                 throw new IllegalArgumentException("Iterate source must be non-null");
@@ -311,10 +312,27 @@ public sealed interface IrExpr
             arms = List.copyOf(arms);
         }
 
-        /** Single-source iteration (no zip) — the common case; co-sources empty. */
+        /** Canonical CPU iteration (the {@code gpu} marker defaults off). */
+        public Iterate(IrExpr source, List<IrExpr> coSources, String element,
+                       List<OutputSpec> outputs, List<Arm> arms, Origin origin) {
+            this(source, coSources, element, outputs, arms, origin, false);
+        }
+
+        /** Single-source iteration (no zip) — the common case; co-sources empty, CPU. */
         public Iterate(IrExpr source, String element, List<OutputSpec> outputs,
                        List<Arm> arms, Origin origin) {
-            this(source, List.of(), element, outputs, arms, origin);
+            this(source, List.of(), element, outputs, arms, origin, false);
+        }
+
+        /**
+         * A copy marked to run on the GPU (docs/gpu-kernels.md, the {@code … on Gpu} directive).
+         * The marker is a GPU-agnostic execution hint: the interpreter routes a gpu-marked Iterate
+         * to a registered {@link KernelRunners.KernelRunner} (injected by the opt-in {@code
+         * pontif-gpu} module), and it is an honest error if none is loaded. It changes <em>where</em>
+         * the iteration runs, never <em>what</em> it computes. Reconstructing passes must preserve it.
+         */
+        public Iterate withGpu() {
+            return new Iterate(source, coSources, element, outputs, arms, origin, true);
         }
     }
 

@@ -311,6 +311,24 @@ public final class IrInterpreter {
      * placed.
      */
     private Object evalIterate(IrExpr.Iterate it, Environment env, CompiledModule module) {
+        // `… on Gpu` (docs/gpu-kernels.md): a gpu-marked iteration runs as a compute kernel on the
+        // GPU instead of the CPU drive below. The runner is injected by the opt-in pontif-gpu module;
+        // with none loaded this is an honest error, never a silent CPU fallback. The sources are
+        // evaluated to their (finite, materialized) stream values and handed to the runner, which
+        // lowers the iteration to a SuperVast kernel and dispatches it.
+        if (it.gpu()) {
+            KernelRunners.KernelRunner runner = KernelRunners.get();
+            if (runner == null) {
+                throw new RuntimeCheckException(
+                        "`… on Gpu` needs GPU support on the classpath (the pontif-gpu module); "
+                                + "none is loaded", it.origin());
+            }
+            List<Object> sourceValues = new ArrayList<>(1 + it.coSources().size());
+            sourceValues.add(eval(it.source(), env, module));
+            for (IrExpr cs : it.coSources()) sourceValues.add(eval(cs, env, module));
+            return runner.run(it, sourceValues);
+        }
+
         java.util.Map<String, java.util.List<Object>> streams = new LinkedHashMap<>();
         java.util.Map<String, Object> accumulators = new LinkedHashMap<>();
         java.util.Map<String, IrExpr.OutputKind> kinds = new LinkedHashMap<>();

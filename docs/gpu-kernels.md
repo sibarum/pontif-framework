@@ -137,9 +137,16 @@ not a later reconciliation.
     a real GPU run. **(1b) LANDED** — new opt-in `pontif-gpu` module (ServiceLoader-discovered),
     concrete `gpuVectorAdd` native dispatches through `KernelLowering` → `Accelerator` → Vulkan; a
     `.ptf` runs it end-to-end (`{1,2,3,4}`+`{10,20,30,40}` → `{11,22,33,44}`; 64-bit survives).
-    **(1c)** the general `… on Gpu` surface over an arbitrary fragment (reach the iteration IR via
-    the fragment value; compile-time eligibility error if not lowerable). **(1d)** playground
-    example + `handle.verify` CPU==GPU differential.
+    **(1c) LANDED** — the general `… on Gpu` directive over an arbitrary map/zip fragment. Core:
+    a GPU-agnostic `gpu` marker on `IrExpr.Iterate` (threaded through the 4 reconstructors) + a
+    `KernelRunners` seam (interface in pontif-ir; impl injected by pontif-gpu); the interpreter
+    routes a gpu-marked Iterate to the runner (honest error if pontif-gpu absent); parser `on Gpu`
+    postfix (`maybeOnGpu`, contextual — no reserved word). Runner beta-reduces the applied fragment
+    (`Apply(λ,args)` → inlined body — the bridge the hand-built KernelLowering tests skipped) then
+    reuses `KernelLowering`; relaxed `inputColumnName` (source may be any expr — data binds
+    positionally). `(&a,&b):[(x,y)->x+y] on Gpu` → `{11,22,33,44}`, `&s:[(x)->x*x] on Gpu` →
+    `{1,4,9,16}`, both on Vulkan. 931 core + 20 supirvast + 4 gpu green.
+    **(1d)** playground example + `handle.verify` CPU==GPU differential.
 - **Slice 2 — async delivery on the event substrate.** Resolve the pivotal OPEN, then: worker-thread
   dispatch, completion surfaced through the events substrate (`Context.fireEvent` is the existing
   seam), the Future/handle type per the ruling. GPU becomes the first real **async event source** —

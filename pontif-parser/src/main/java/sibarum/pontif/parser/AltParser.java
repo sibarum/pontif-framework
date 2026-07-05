@@ -1692,7 +1692,7 @@ public final class AltParser {
                             a.writes().stream().map(w -> new IrExpr.Write(w.output(),
                                     w.key() == null ? null : substituteSelf(w.key(), with),
                                     substituteSelf(w.value(), with))).toList())).toList(),
-                    it.origin());
+                    it.origin(), it.gpu());
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     substituteSelf(cast.value(), with), cast.origin());
             case IrExpr.Emit em -> new IrExpr.Emit(
@@ -4711,7 +4711,7 @@ public final class AltParser {
             }
             List<IrExpr> markers = new ArrayList<>(sources.size());
             for (IrExpr s : sources) markers.add(new IrExpr.Call(SPREAD_SENTINEL, List.of(s), o));
-            return lowerSpreadCall(markers, a -> new IrExpr.Apply(frag, a, o), o);
+            return maybeOnGpu(lowerSpreadCall(markers, a -> new IrExpr.Apply(frag, a, o), o), o);
         }
         IrExpr source = sources.get(0);
         IrExpr spread = new IrExpr.Call(SPREAD_SENTINEL, List.of(source), o);
@@ -4722,7 +4722,7 @@ public final class AltParser {
         if (frag.returnSort() instanceof IrSort.Structural st
                 && TUPLE_SENTINEL.equals(st.name())
                 && st.members().values().stream().allMatch(this::isStreamChannelSort)) {
-            return lowerSpreadFanout(source, frag, st, o);
+            return maybeOnGpu(lowerSpreadFanout(source, frag, st, o), o);
         }
         // Guard-filter (docs/stream-war.md §3, RULED 2026-07-04): a domain-refined element
         // binder is a PER-ELEMENT ADMITTANCE FILTER — emit while the element is in-domain,
@@ -4734,10 +4734,10 @@ public final class AltParser {
         // semantic here; the generator's `(from,to)` refinement is a PRODUCER/synthesis
         // semantic (§7.9), a different role — nothing to unify.
         if (frag.params().size() == 1 && frag.params().get(0).sort() instanceof IrSort.Refined) {
-            return lowerGuardFilter(source, frag, o);
+            return maybeOnGpu(lowerGuardFilter(source, frag, o), o);
         }
-        return lowerSpreadCall(List.of(spread),
-                a -> new IrExpr.Apply(frag, a, o), o);
+        return maybeOnGpu(lowerSpreadCall(List.of(spread),
+                a -> new IrExpr.Apply(frag, a, o), o), o);
     }
 
     /**
@@ -4753,6 +4753,30 @@ public final class AltParser {
      * the output element sort ({@code Stream[T:G]}) is a follow-up (§8.6 imprecision, honest
      * — the elements ARE {@code T}, just not narrowed).
      */
+    /**
+     * The {@code … on Gpu} execution directive (docs/gpu-kernels.md): a postfix on a spread
+     * iteration that marks it to run as a GPU compute kernel instead of on the CPU. It changes
+     * <em>where</em> the iteration runs, not <em>what</em> it computes (identical value; the GPU is
+     * a strategy). {@code on}/{@code Gpu} are contextual — recognized only in this postfix position,
+     * so neither is a reserved word. Only a data-parallel iteration (a spread) can carry it; anything
+     * else is a parse error. (Kernel-shape eligibility — map/zip vs fold/fork — is checked when the
+     * kernel is lowered at dispatch, failing closed with a LoweringError, never a silent CPU run.)
+     */
+    private IrExpr maybeOnGpu(IrExpr result, Origin o) throws ParseException {
+        if (peek().kind() == AltToken.Kind.IDENT && "on".equals(peek().text())
+                && peek(1).kind() == AltToken.Kind.IDENT && "Gpu".equals(peek(1).text())) {
+            consume();  // `on`
+            consume();  // `Gpu`
+            if (!(result instanceof IrExpr.Iterate it)) {
+                throw new ParseException(
+                        "`on Gpu` requires a data-parallel iteration (a `&s:[…]` or `(&a, &b):[…]` "
+                                + "spread); got " + result.getClass().getSimpleName(), o);
+            }
+            return it.withGpu();
+        }
+        return result;
+    }
+
     private IrExpr lowerGuardFilter(IrExpr source, IrExpr.Lambda frag, Origin o) {
         String element = "$e" + (syntheticCounter++);
         IrSort guard = frag.params().get(0).sort();

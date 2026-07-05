@@ -29,6 +29,35 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_directive_runsZipOnTheGpu() {
+        // The general surface: an ordinary zip iteration, marked `on Gpu`, runs as a kernel.
+        Extensions.install(new GpuExtension());
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.core.{Stream}
+                        let a:Stream[Int] = {1, 2, 3, 4}
+                        let b:Stream[Int] = {10, 20, 30, 40}
+                        (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu""", "ongpu.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "on-Gpu program should run; got " + r.text());
+        assertEquals("{11, 22, 33, 44}", r.text());
+    }
+
+    @Test
+    void onGpu_directive_runsMapOnTheGpu() {
+        // Single-source map: squares, on the GPU.
+        Extensions.install(new GpuExtension());
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.core.{Stream}
+                        let s:Stream[Int] = {1, 2, 3, 4}
+                        &s:[ (x:Int) -> x * x ] on Gpu""", "ongpu.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "on-Gpu map should run; got " + r.text());
+        assertEquals("{1, 4, 9, 16}", r.text());
+    }
+
+    @Test
     void gpuVectorAdd_survives64BitOperands() {
         // Proof the boundary is honest int64, not a narrowed int32 (values > 2^32 survive).
         Extensions.install(new GpuExtension());

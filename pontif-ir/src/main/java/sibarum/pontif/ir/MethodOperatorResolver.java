@@ -269,7 +269,7 @@ public final class MethodOperatorResolver {
                 }
                 List<IrExpr> coSources = new ArrayList<>(it.coSources().size());
                 for (IrExpr cs : it.coSources()) coSources.add(rewriteExpr(cs, ctx));
-                yield new IrExpr.Iterate(rewriteExpr(it.source(), ctx), coSources, it.element(), outs, arms, it.origin());
+                yield new IrExpr.Iterate(rewriteExpr(it.source(), ctx), coSources, it.element(), outs, arms, it.origin(), it.gpu());
             }
             case IrExpr.Emit em -> new IrExpr.Emit(
                     rewriteExpr(em.event(), ctx), rewriteExpr(em.body(), ctx), em.origin());

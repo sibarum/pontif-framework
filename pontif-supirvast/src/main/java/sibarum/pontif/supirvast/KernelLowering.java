@@ -37,8 +37,9 @@ import java.util.List;
  * <p><b>Honest scope (v1).</b> Pontif {@code Int} lowers to {@code int64} columns (two words on the wire,
  * {@link ValueMarshaller}) — no narrowing to {@code int32}, so a value can never silently overflow the
  * boundary. Anything outside the map/zip shape fails closed with a source-located {@link LoweringError}: an
- * accumulator/fan output (fold/scan/fork), a guarded/multi-arm body (filter/takeWhile), a {@code STOP}/{@code FAN}
- * write, or a source that is not a named stream. The act of lowering is the eligibility check.
+ * accumulator/fan output (fold/scan/fork), a guarded/multi-arm body (filter/takeWhile), or a {@code STOP}/{@code FAN}
+ * write. The act of lowering is the eligibility check. (Sources may be any expression — the runner supplies
+ * their data positionally as columns; the source's identity is not part of the kernel.)
  */
 public final class KernelLowering {
 
@@ -144,14 +145,15 @@ public final class KernelLowering {
     }
 
     private static String inputColumnName(IrExpr source, int index) {
-        // A kernel input must be a named stream — its name labels the column. A computed/literal stream
-        // source has no column identity in v1.
+        // The name is only the column's LABEL — data binds positionally (the column's slot + the
+        // synthetic columnVar the body's element-refs are rewritten to), and the source expression is
+        // never lowered (only counted). So a named stream labels its column with its name for
+        // readability; any other source (a let-bound or literal stream — the common real-program case)
+        // gets a positional label. The source's identity is immaterial to the kernel.
         if (source instanceof IrExpr.Var v) {
             return v.name();
         }
-        throw LoweringError.unsupportedExpr(source, "Kernel input",
-                "a GPU kernel input must be a named stream (a variable); a computed or literal stream "
-                        + "source is not a column in v1");
+        return "in" + index;
     }
 
     /**

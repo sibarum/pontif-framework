@@ -391,7 +391,7 @@ public final class NameResolver {
                 for (IrExpr cs : it.coSources()) coSources.add(rewrite(cs, m, table));
                 yield new IrExpr.Iterate(
                         rewrite(it.source(), m, table), coSources, it.element(),
-                        outs, arms, it.origin());
+                        outs, arms, it.origin(), it.gpu());
             }
             case IrExpr.Emit em -> new IrExpr.Emit(
                     rewrite(em.event(), m, table), rewrite(em.body(), m, table), em.origin());

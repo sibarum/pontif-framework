@@ -1,5 +1,6 @@
 package sibarum.pontif.gpu;
 
+import sibarum.pontif.ir.KernelRunners;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.module.Extension;
 
@@ -19,6 +20,15 @@ import java.util.Map;
  * general {@code … on Gpu} directive.
  */
 public final class GpuExtension implements Extension {
+
+    /**
+     * Installing the extension injects the GPU kernel runner into the core {@link KernelRunners}
+     * seam, so a {@code … on Gpu} iteration has a runner to dispatch to. Absent this module (the
+     * opt-in case), the seam stays empty and {@code … on Gpu} is an honest "GPU not loaded" error.
+     */
+    public GpuExtension() {
+        KernelRunners.register(new GpuKernelRunner());
+    }
 
     @Override
     public String moduleName() {

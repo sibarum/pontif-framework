@@ -75,7 +75,7 @@ public final class GpuKernels {
     }
 
     /** A Pontif {@code Stream[Int]} value's elements as {@code long}s (its members are Int scalars). */
-    private static long[] longs(Object streamValue, String which) {
+    static long[] longs(Object streamValue, String which) {
         if (!(streamValue instanceof RecordValue rv)) {
             throw new RuntimeException("gpuVectorAdd: argument '" + which + "' must be a Stream[Int]; got "
                     + (streamValue == null ? "null" : streamValue.getClass().getSimpleName()));
@@ -91,14 +91,14 @@ public final class GpuKernels {
         return out;
     }
 
-    private static long[] prefix(long[] a, int n) {
+    static long[] prefix(long[] a, int n) {
         long[] out = new long[n];
         System.arraycopy(a, 0, out, 0, n);
         return out;
     }
 
     /** Wraps a result array as a Pontif stream value (a {@code _tuple} of {@code _0.._n-1} → Long). */
-    private static RecordValue stream(long[] xs) {
+    static RecordValue stream(long[] xs) {
         Map<String, Object> members = new LinkedHashMap<>();
         for (int i = 0; i < xs.length; i++) members.put("_" + i, xs[i]);
         return new RecordValue("_tuple", members);
