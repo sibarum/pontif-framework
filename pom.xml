@@ -25,6 +25,13 @@
         <module>pontif-builtin-gui</module>
         <module>pontif-builtin-net</module>
         <module>pontif-builtin-shape</module>
+        <!-- GPU compute (docs/gpu-kernels.md): now reactor modules so the editor can bundle
+             `pontif.gpu` like the other builtin extensions. They depend on SuperVast
+             (dev.supirvast:*, pinned in pontif-supirvast/pom.xml), which must be `mvn install`-ed
+             in ~/.m2 for the reactor to build; SuperVast has a CPU fallback, so `… on Gpu` runs
+             even without a Vulkan device. -->
+        <module>pontif-supirvast</module>
+        <module>pontif-gpu</module>
     </modules>
 
     <properties>

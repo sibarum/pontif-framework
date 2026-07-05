@@ -927,16 +927,35 @@ and are illustrative rather than pinned by `ReadmeSnippetTest`.
 A data-parallel iteration can be run as a **compute kernel on the GPU** by marking it with the
 **`on Gpu`** directive. The iteration lowers to SuperVast's target-neutral `core` IR →
 **SPIR-V** → **Vulkan**; the result is identical to running it on the CPU — `on Gpu` changes
-*where* it runs, never *what* it computes (proven by SuperVast's CPU-vs-GPU differential oracle):
+*where* it runs, never *what* it computes (proven by SuperVast's CPU-vs-GPU differential oracle).
+
+`on Gpu` is **async**, and it delivers its results **forward-only** — Pontif has no `await`.
+The kernel function carries a **woven `emit`** of an event *you* define; a GPU can't fire events,
+so that emit is *sugar*: the GPU computes the emit's **argument** (one value per element), and once
+the batch resolves the emit is replayed on the host, per element, for an ordinary `action` to react
+to — the same `emit`/`action` substrate that powers IO, nothing GPU-specific. `main` stays live
+until every dispatch resolves, then exits:
 
 ```pontif
 requires pontif.core.{Stream}
+requires pontif.events.{StdOut, Event}
+
+struct AddSamplesEvent(r:Int)
+assign trait AddSamplesEvent:Event{}
 
 let a:Stream[Int] = {1, 2, 3, 4}
 let b:Stream[Int] = {10, 20, 30, 40}
 
-(&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu     # vector-add on the GPU → {11, 22, 33, 44}
-&a:[ (x:Int) -> x * x ] on Gpu                  # a map (squares) on the GPU → {1, 4, 9, 16}
+function thisRunsOnGpu(x:Int, y:Int):Int ->   # the GPU computes r; the emit is deferred to the host
+  let r = x + y
+  emit AddSamplesEvent(r)
+  r
+
+action log(e:AddSamplesEvent) ->              # reacts per element once the batch resolves
+  emit StdOut("" + e.r + " ")
+  e
+
+main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )   # → prints "11 22 33 44 "
 ```
 
 The map/zip fragment is compiled to the canonical `out[gid] = f(in0[gid], …)` kernel. **Lowering
@@ -944,8 +963,9 @@ is the eligibility check** (the guiding law): a shape with no data-parallel form
 a fork, a guarded/`Break` body — is a source-located compile error, never a silently-wrong
 kernel. `on Gpu` is a **materialization boundary**: inputs must be finite (a GPU batch is
 uploaded whole), so infinite/lazy streams are honestly ineligible. v1 is `Int` (honest `int64`
-columns — values past 2³² survive); floats/`vec3` (the shader on-ramp) and an async **`Promise`**
-result (built on the event substrate) are the next slices ([docs/gpu-kernels.md](docs/gpu-kernels.md)).
+columns — values past 2³² survive) with a single woven `emit` per kernel; floats/`vec3` (the
+shader on-ramp) and multi-field / multi-emit delivery are the next slices
+([docs/gpu-kernels.md](docs/gpu-kernels.md)).
 
 GPU support is **opt-in**: `pontif.gpu` (and `pontif-supirvast`, which owns the Vulkan/SuperVast
 dependencies) live outside the core build and are discovered only when on the classpath — so

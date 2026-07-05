@@ -5,36 +5,97 @@ import dev.supirvast.vastir.tools.KernelHandle;
 import dev.supirvast.vastir.tools.KernelSpec;
 import dev.supirvast.vastir.tools.Registration;
 import dev.supirvast.vastir.tools.Rejection;
+import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.KernelRunners;
+import sibarum.pontif.ir.Pending;
 import sibarum.pontif.supirvast.KernelLowering;
 import sibarum.pontif.supirvast.ValueMarshaller;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
- * The general GPU kernel runner behind the {@code … on Gpu} directive (docs/gpu-kernels.md).
+ * The general GPU kernel runner behind the {@code … on Gpu} directive (docs/gpu-kernels.md, slice 2).
  * Registered into the core {@link KernelRunners} seam by {@link GpuExtension} when the opt-in
- * {@code pontif-gpu} module is loaded; the interpreter hands it any {@code gpu}-marked
- * {@link IrExpr.Iterate} plus the evaluated source stream values.
+ * {@code pontif-gpu} module is loaded.
  *
- * <p>It reuses {@link KernelLowering} for arbitrary map/zip iterations (fold/fork and guarded
- * shapes fail closed there with a source-located {@code LoweringError} — the eligibility check),
- * marshals the sources to honest {@code i64} columns, dispatches on the GPU via {@link Accelerator}
- * (SPIR-V / Vulkan), and un-marshals the result to a Pontif {@code Stream[Int]}.
+ * <p><b>Delivery is a woven, deferred {@code emit}.</b> The kernel's per-element body emits a
+ * user-defined event — the ordinary {@code emit}/{@code action} substrate, nothing GPU-specific.
+ * A GPU can't fire events, so the emit is <b>sugar</b>: the runner splits the body into the pure
+ * value the emit carries (which the GPU computes, one per element) and the event construction (which
+ * the interpreter fires per element on completion, forward-only — no {@code await}). Concretely the
+ * runner:
+ * <ol>
+ *   <li>inlines the fragment lambda and the user function it calls (the {@code emit} lives inside),</li>
+ *   <li>extracts the single woven {@code emit}: its argument becomes the kernel's output, and its
+ *       event construction (argument replaced by a placeholder) becomes the {@link Pending}'s
+ *       completion template,</li>
+ *   <li>lowers + marshals synchronously (so a shape-ineligible kernel errors immediately), then
+ *       dispatches only the device round trip on a worker thread.</li>
+ * </ol>
+ * On resolve the interpreter binds each computed value to the placeholder, evaluates the template
+ * (so it routes exactly like an author-written {@code emit}), and fires it.
+ *
+ * <p>v1 supports exactly one woven {@code emit} of a single-field event; multi-field / multi-emit
+ * (needing multi-output kernels) fail closed with a source-located error.
  */
 public final class GpuKernelRunner implements KernelRunners.KernelRunner {
 
+    /** Placeholder the completion template reads the GPU-computed value from (bound per element). */
+    private static final String ARG_VAR = "$gpu0";
+
+    /**
+     * A <b>single</b> off-main-thread worker for all GPU dispatch. One thread — not a pool — because
+     * the whole point is to build the Vulkan context (instance/device/queue) and each kernel's
+     * pipeline <em>once</em> and reuse them ({@link Accelerator} is explicitly designed for this:
+     * "repeated runs re-marshal only data"). Creating a fresh {@code Accelerator} per dispatch cost
+     * ~580 ms (context create + SPIR-V lowering + {@code spirv-val} + pipeline build + teardown) vs.
+     * ~2 ms for a cached re-run — measured. A single worker owns the context (thread-affinity, like
+     * the GL root thread; SuperVast's queue isn't free-threaded), and the GPU serializes dispatch
+     * anyway. Daemon so it never blocks JVM exit; the context is held for the JVM's life (not closed —
+     * teardown is ~90 ms and process exit reclaims it).
+     */
+    private static final ExecutorService GPU_WORKER = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "pontif-gpu-worker");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** The long-lived accelerator, and per-kernel handle cache — touched ONLY on the GPU worker thread. */
+    private static Accelerator accelerator;
+    private static final Map<String, KernelHandle> HANDLE_CACHE = new HashMap<>();
+
     @Override
-    public Object run(IrExpr.Iterate iterate, List<Object> sourceValues) {
-        // The parser leaves the fragment APPLIED in the body — `Apply(λ, [element._0, element._1])`
-        // for a zip, `Apply(λ, [element])` for a map. KernelLowering/ExprLowering expect it already
-        // INLINED (`element._0 + element._1`), so beta-reduce the applied fragment first. (KernelLowering's
-        // own tests hand-built the inlined shape; real parser output needs this bridge.)
-        KernelSpec spec = new KernelLowering().lower(betaReduce(iterate));
+    public Object run(IrExpr.Iterate iterate, List<Object> sourceValues,
+            KernelRunners.FunctionResolver functions) {
+        // Inline the fragment lambda (parser leaves it APPLIED) then the user function it calls, so
+        // the per-element body is self-contained (ExprLowering can't lower a Call). The woven `emit`
+        // then sits in the body ready to extract.
+        IrExpr.Iterate inlined = mapWrite(betaReduce(iterate), v -> inlineCalls(v, functions));
+
+        IrExpr body = soleWriteValue(inlined);
+        Extracted emit = extractEmit(body);
+        if (emit == null) {
+            throw new RuntimeCheckException(
+                    "`… on Gpu` delivers its results by emitting an event per element (docs/gpu-kernels.md), "
+                            + "but this kernel body has no `emit` — nothing would be observable.",
+                    iterate.origin());
+        }
+
+        // The kernel computes the emit's ARGUMENT (a pure value per element); the emit's effect is
+        // deferred to the host. Lower now (a shape-ineligible kernel is an immediate LoweringError);
+        // the cache key is the pure kernel's structure, so a repeated `on Gpu` reuses its registered
+        // pipeline. Only the device round trip runs on the worker.
+        IrExpr.Iterate kernel = mapWrite(inlined, v -> emit.kernelWrite());
+        String cacheKey = kernel.toString();
+        KernelSpec spec = new KernelLowering().lower(kernel);
 
         long[][] inputs = new long[sourceValues.size()][];
         int n = Integer.MAX_VALUE;
@@ -43,22 +104,87 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
             n = Math.min(n, inputs[i].length);            // zip stops at the shortest
         }
         if (n == Integer.MAX_VALUE) n = 0;
+        final int count = n;
 
-        try (Accelerator accelerator = new Accelerator()) {
-            Registration registration = accelerator.register(spec);
-            if (!(registration instanceof KernelHandle handle)) {
-                Rejection rejection = (Rejection) registration;
-                throw new RuntimeException("`… on Gpu`: the GPU rejected the kernel — "
-                        + rejection.reason() + ": " + rejection.detail());
-            }
+        Future<List<Object>> values = GPU_WORKER.submit(() -> {
+            KernelHandle handle = registerCached(cacheKey, spec);
             int[][] columns = new int[inputs.length + 1][];
-            columns[0] = ValueMarshaller.outputColumn(n);         // slot 0 = output
+            columns[0] = ValueMarshaller.outputColumn(count);         // slot 0 = output
             for (int i = 0; i < inputs.length; i++) {
-                columns[i + 1] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], n));
+                columns[i + 1] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], count));
             }
-            int[][] result = handle.run(columns, n);
-            return GpuKernels.stream(ValueMarshaller.fromColumn(result[0], n));
+            int[][] result = handle.run(columns, count);
+            long[] out = ValueMarshaller.fromColumn(result[0], count);
+            List<Object> boxed = new ArrayList<>(out.length);
+            for (long v : out) boxed.add(v);                          // Pontif Int = Long at runtime
+            return boxed;
+        });
+        return new Pending(values, emit.eventTemplate(), ARG_VAR, iterate.origin());
+    }
+
+    /**
+     * Returns the registered handle for {@code spec}, building it once and caching it (keyed by the
+     * kernel's structure). Runs only on the GPU worker thread, so the shared {@link #accelerator} and
+     * {@link #HANDLE_CACHE} need no synchronization. A device/validation {@link Rejection} throws —
+     * the interpreter surfaces it as the {@code !!} hazard when it drains the {@link Pending}.
+     */
+    private static KernelHandle registerCached(String cacheKey, KernelSpec spec) {
+        KernelHandle cached = HANDLE_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
+        if (accelerator == null) {
+            accelerator = new Accelerator();          // one-time Vulkan context (~1.9 s cold), then reused
+        }
+        Registration registration = accelerator.register(spec);
+        if (!(registration instanceof KernelHandle handle)) {
+            Rejection rejection = (Rejection) registration;
+            throw new RuntimeException("`… on Gpu`: the GPU rejected the kernel — "
+                    + rejection.reason() + ": " + rejection.detail());
+        }
+        HANDLE_CACHE.put(cacheKey, handle);
+        return handle;
+    }
+
+    /** A split woven emit: the pure value the GPU computes, and the event to fire per element. */
+    private record Extracted(IrExpr kernelWrite, IrExpr eventTemplate) {}
+
+    /**
+     * Splits the woven {@code emit} out of a kernel body. Walks the enclosing {@code let}s to the
+     * (single) {@code emit}, replaces it with the value its event carries (→ the kernel output), and
+     * rebuilds the event construction with that value replaced by {@link #ARG_VAR} (→ the completion
+     * template). Returns {@code null} if there is no {@code emit}; fails closed on shapes v1 can't
+     * lower (multi-field events need multi-output kernels).
+     */
+    private static Extracted extractEmit(IrExpr e) {
+        return switch (e) {
+            case IrExpr.Emit em -> {
+                if (!(em.event() instanceof IrExpr.Record rec) || rec.typeName() == null) {
+                    throw new RuntimeCheckException(
+                            "`… on Gpu`: the woven `emit` must construct a named event struct", em.origin());
+                }
+                if (rec.members().size() != 1) {
+                    throw new RuntimeCheckException(
+                            "`… on Gpu`: v1 supports a single-field event (the GPU computes one value "
+                                    + "per element); '" + rec.typeName() + "' has " + rec.members().size()
+                                    + " fields — multi-field events (multi-output kernels) are a later slice.",
+                            em.origin());
+                }
+                Map.Entry<String, IrExpr> field = rec.members().entrySet().iterator().next();
+                IrExpr template = new IrExpr.Record(rec.typeName(),
+                        Map.of(field.getKey(), new IrExpr.Var(ARG_VAR, em.origin())),
+                        rec.runtimeChecks(), rec.origin());
+                yield new Extracted(field.getValue(), template);   // kernel output = the emitted value
+            }
+            case IrExpr.LetIn let -> {
+                Extracted inner = extractEmit(let.body());
+                yield inner == null ? null : new Extracted(
+                        new IrExpr.LetIn(let.name(), let.declaredSort(), let.value(),
+                                inner.kernelWrite(), let.origin()),
+                        inner.eventTemplate());
+            }
+            default -> null;
+        };
     }
 
     /**
@@ -67,16 +193,26 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
      * {@code KernelLowering}/{@code ExprLowering} lower directly.
      */
     private static IrExpr.Iterate betaReduce(IrExpr.Iterate it) {
+        return mapWrite(it, GpuKernelRunner::inlineApplied);
+    }
+
+    /** Rebuilds {@code it} with {@code f} applied to every arm write value. */
+    private static IrExpr.Iterate mapWrite(IrExpr.Iterate it, java.util.function.UnaryOperator<IrExpr> f) {
         List<IrExpr.Arm> arms = new ArrayList<>(it.arms().size());
         for (IrExpr.Arm arm : it.arms()) {
             List<IrExpr.Write> writes = new ArrayList<>(arm.writes().size());
             for (IrExpr.Write w : arm.writes()) {
-                writes.add(new IrExpr.Write(w.output(), w.key(), inlineApplied(w.value())));
+                writes.add(new IrExpr.Write(w.output(), w.key(), f.apply(w.value())));
             }
             arms.add(new IrExpr.Arm(arm.pattern(), writes));
         }
         return new IrExpr.Iterate(it.source(), it.coSources(), it.element(),
                 it.outputs(), arms, it.origin(), it.gpu());
+    }
+
+    /** The single arm's single write value (map/zip shape); the fuller shape check is KernelLowering's. */
+    private static IrExpr soleWriteValue(IrExpr.Iterate it) {
+        return it.arms().get(0).writes().get(0).value();
     }
 
     private static IrExpr inlineApplied(IrExpr e) {
@@ -91,7 +227,43 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         return e;
     }
 
-    /** Capture-free enough for fragment bodies (arithmetic + math calls + field access + let). */
+    /**
+     * Inlines user-function calls: {@code Call(f, args)} → {@code f}'s body with its params bound to
+     * {@code args} (recursively, so a chain of calls flattens). A call the resolver doesn't recognise
+     * (a native/builtin) is left as-is — {@code KernelLowering} then accepts or rejects it.
+     */
+    private static IrExpr inlineCalls(IrExpr e, KernelRunners.FunctionResolver functions) {
+        return switch (e) {
+            case IrExpr.Call c -> {
+                List<IrExpr> args = c.args().stream().map(a -> inlineCalls(a, functions)).toList();
+                KernelRunners.ResolvedFunction fn = functions.resolve(c.functionName(), args.size());
+                if (fn == null) {
+                    yield new IrExpr.Call(c.functionName(), args, c.origin());
+                }
+                Map<String, IrExpr> env = new HashMap<>();
+                for (int i = 0; i < fn.paramNames().size(); i++) env.put(fn.paramNames().get(i), args.get(i));
+                yield inlineCalls(subst(fn.body(), env), functions);
+            }
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    inlineCalls(op.left(), functions), inlineCalls(op.right(), functions), op.origin());
+            case IrExpr.LetIn let -> new IrExpr.LetIn(let.name(), let.declaredSort(),
+                    inlineCalls(let.value(), functions), inlineCalls(let.body(), functions), let.origin());
+            case IrExpr.FieldAccess fa ->
+                    new IrExpr.FieldAccess(inlineCalls(fa.base(), functions), fa.fieldName(), fa.origin());
+            case IrExpr.Emit em -> new IrExpr.Emit(
+                    inlineCalls(em.event(), functions), inlineCalls(em.body(), functions), em.origin());
+            case IrExpr.Record rec -> {
+                Map<String, IrExpr> members = new LinkedHashMap<>();
+                rec.members().forEach((k, v) -> members.put(k, inlineCalls(v, functions)));
+                yield new IrExpr.Record(rec.typeName(), members, rec.runtimeChecks(), rec.origin());
+            }
+            case IrExpr.Apply ap -> new IrExpr.Apply(inlineCalls(ap.fn(), functions),
+                    ap.args().stream().map(a -> inlineCalls(a, functions)).toList(), ap.origin());
+            default -> e;
+        };
+    }
+
+    /** Capture-free enough for fragment + function bodies (arithmetic, field access, let, emit, record). */
     private static IrExpr subst(IrExpr e, Map<String, IrExpr> env) {
         return switch (e) {
             case IrExpr.Var v -> env.getOrDefault(v.name(), v);
@@ -101,10 +273,15 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
                     c.args().stream().map(a -> subst(a, env)).toList(), c.origin());
             case IrExpr.LetIn let -> new IrExpr.LetIn(let.name(), let.declaredSort(),
                     subst(let.value(), env), subst(let.body(), env), let.origin());
+            case IrExpr.Emit em -> new IrExpr.Emit(subst(em.event(), env), subst(em.body(), env), em.origin());
+            case IrExpr.Record rec -> {
+                Map<String, IrExpr> members = new LinkedHashMap<>();
+                rec.members().forEach((k, v) -> members.put(k, subst(v, env)));
+                yield new IrExpr.Record(rec.typeName(), members, rec.runtimeChecks(), rec.origin());
+            }
             case IrExpr.Apply ap -> new IrExpr.Apply(subst(ap.fn(), env),
                     ap.args().stream().map(a -> subst(a, env)).toList(), ap.origin());
             default -> e;   // Lit/Dec/Bool/etc. carry no vars; unsupported nodes fail closed in lowering
         };
     }
 }
-

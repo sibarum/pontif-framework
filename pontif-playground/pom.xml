@@ -52,6 +52,15 @@
             <artifactId>pontif-builtin-shape</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- GPU compute (`… on Gpu`, docs/gpu-kernels.md): self-registers via ServiceLoader like the
+             other builtin extensions, so the editor's live compiler + the "Run" subprocess resolve
+             `pontif.gpu`. Pulls SuperVast (dev.supirvast:*, via pontif-supirvast) onto the classpath;
+             SuperVast has a CPU fallback, so this works with or without a Vulkan device. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-gpu</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-core</artifactId>

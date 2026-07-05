@@ -64,6 +64,15 @@ public final class IrInterpreter {
     private final EventListener eventListener;
     private final java.util.concurrent.atomic.AtomicLong emitSeq = new java.util.concurrent.atomic.AtomicLong();
 
+    /**
+     * Async work dispatched but not yet delivered — the {@link Pending} handles a {@code … on Gpu}
+     * iteration produces (docs/gpu-kernels.md, slice 2). The program stays live until every one
+     * resolves; {@link #eval(CompiledModule)} drains them after {@code main} (drive-to-quiescence),
+     * awaiting each on the main thread and firing its completion event through the substrate. Not
+     * shared across runs — one interpreter per program.
+     */
+    private final List<Pending> outstanding = new ArrayList<>();
+
     public IrInterpreter(Simplifier simplifier) {
         this.simplifier = simplifier;
         this.eventListener = globalListener;
@@ -80,7 +89,52 @@ public final class IrInterpreter {
         for (String let : module.topLevelLets()) {
             eval(new IrExpr.Call(let, List.of(), Origin.NONE), Environment.empty(), module);
         }
-        return eval(module.main(), Environment.empty(), module);
+        Object mainValue = eval(module.main(), Environment.empty(), module);
+
+        // Drive to quiescence (docs/gpu-kernels.md, slice 2): the program is not done until every
+        // async GPU dispatch resolves. For each, await its per-element results on THIS thread — the
+        // event substrate's single thread — and fire the woven completion emit once per element: bind
+        // the kernel-computed value to the emit's placeholder, evaluate the event construction (so it
+        // routes exactly like an author-written `emit`), and fire it. The result is thus consumed by a
+        // reacting `action` (forward only; no `await` reads it back — RULED James 2026-07-05). A device
+        // Rejection surfaces here as the !! hazard (Pending.values). `… on Gpu` is for-effect — its
+        // value went to the reactions — so it renders as a DriveResult (no output), like `main echo`.
+        for (int i = 0; i < outstanding.size(); i++) {  // indexed: a reaction may itself dispatch more
+            Pending p = outstanding.get(i);
+            for (Object value : p.values()) {
+                Object event = eval(p.eventTemplate(),
+                        Environment.empty().extend(p.argVar(), value), module);
+                if (!(event instanceof RecordValue rec)) {
+                    throw new RuntimeCheckException(
+                            "`… on Gpu` completion event must construct an event struct, got "
+                                    + (event == null ? "null" : event.getClass().getSimpleName()),
+                            p.origin());
+                }
+                fireEvent(rec, module, p.origin());
+            }
+        }
+        outstanding.clear();
+        return mainValue instanceof Pending ? DRIVE_RAN : mainValue;
+    }
+
+    /**
+     * A resolver the GPU kernel runner uses to inline a user-function call in a kernel body
+     * (docs/gpu-kernels.md, slice 2): the woven {@code emit} lives inside such a function, and
+     * {@code ExprLowering} can't lower a {@code Call}, so the runner substitutes the function's body
+     * in first. Matches by bare name + arity (kernel fragments are monomorphic in v1); returns
+     * {@code null} for anything that isn't a user function (a native/builtin call, left as-is).
+     */
+    private static KernelRunners.FunctionResolver gpuFunctionResolver(CompiledModule module) {
+        return (name, arity) -> {
+            String bare = bareName(name);
+            for (CompiledModule.CompiledFunction fn : module.functions().values()) {
+                if (fn.params().size() == arity && bareName(fn.decl().name()).equals(bare)) {
+                    return new KernelRunners.ResolvedFunction(
+                            fn.params().stream().map(IrParam::name).toList(), fn.body());
+                }
+            }
+            return null;
+        };
     }
 
     /**
@@ -326,7 +380,14 @@ public final class IrInterpreter {
             List<Object> sourceValues = new ArrayList<>(1 + it.coSources().size());
             sourceValues.add(eval(it.source(), env, module));
             for (IrExpr cs : it.coSources()) sourceValues.add(eval(cs, env, module));
-            return runner.run(it, sourceValues);
+            // Async (docs/gpu-kernels.md, slice 2): the runner dispatches on a worker thread and
+            // returns a Pending immediately — it never blocks eval. Registering it here lets the
+            // drive-to-quiescence loop (see eval(CompiledModule)) fire the deferred completion emits
+            // on THIS (the main) thread, so all event firing stays single-threaded. The resolver lets
+            // the runner inline the user function the kernel body calls (the woven emit lives inside).
+            Object dispatched = runner.run(it, sourceValues, gpuFunctionResolver(module));
+            if (dispatched instanceof Pending p) outstanding.add(p);
+            return dispatched;
         }
 
         java.util.Map<String, java.util.List<Object>> streams = new LinkedHashMap<>();

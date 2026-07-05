@@ -79,6 +79,36 @@ for (B) is real. **James's ruling gates Slice 2's design; Slice 1 is independent
 **RULED (A), 2026-07-05 (James)** — pure-async Future, *conditioned on Future and Action being
 interchangeable* (a Future wrappable as an Action, an Action convertible to a Future). See below.
 
+**REFINED 2026-07-05 (James) — NO `await`; delivery is a woven `emit`.** *"I don't think Pontif
+should ever have a concept like `await`."* A backward pull (block here, hand me the value) is exactly
+what the forward-only membrane forbids. And there is **no built-in result type** either — an early
+attempt shipped a `GpuResult(values:Stream[Int])` completion event, but that *assumes* the payload
+shape; the moment the payload is user-defined, the existing `emit`/`action` substrate already does
+everything cleanly (James: *"Why are we reinventing systems that have already been defined?"*).
+
+So the model is: the kernel's per-element function carries a **woven `emit` of a user-defined event**
+(exactly the stdin-echo shape — `emit` threaded through a map). That emit is **sugar, not a live
+per-element fire** (a GPU can't emit): the GPU computes the emit's **argument** (a pure value, one
+per element), and once the batch resolves the interpreter replays the emit on the host — per element,
+in order, single-threaded — so an ordinary `action` reacts. The GPU does the computation; only the
+*effect* is deferred. Example:
+
+```
+struct AddSamplesEvent(r:Int)
+assign trait AddSamplesEvent:Event{}
+function thisRunsOnGpu(x:Int, y:Int):Int ->
+  let r = x + y
+  emit AddSamplesEvent(r)   # sugar — the GPU computes r; the emit is deferred to the host
+  r
+action log(e:AddSamplesEvent) -> emit StdOut("" + e.r + " ")  e
+main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )   # prints "11 22 33 44 "
+```
+
+`Pending` survives only as an **internal** handle (the interpreter tracks outstanding dispatches to
+drive to quiescence — no user-facing type, no `await`). `main` stays live until every dispatch
+resolves, then exits — the same lifecycle as `main echo(&stdin())`. Failure is the `!!` hazard
+(a device `Rejection`).
+
 ## Future ↔ Action interchangeability (RULED condition; built in Slice 2, documented now)
 
 The condition is satisfiable without a second async model because **`Future` and `Action` are
@@ -155,9 +185,42 @@ not a later reconciliation.
 end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules. Next: Slice 2
 (async `Promise` on the event substrate).
 - **Slice 2 — async delivery on the event substrate.** Resolve the pivotal OPEN, then: worker-thread
-  dispatch, completion surfaced through the events substrate (`Context.fireEvent` is the existing
-  seam), the Future/handle type per the ruling. GPU becomes the first real **async event source** —
-  drives the minimal async-events capability.
+  dispatch, completion surfaced through the events substrate (`fireEvent` is the existing seam), the
+  `Pending` handle type per the ruling. GPU becomes the first real **async event source** — drives
+  the minimal async-events capability.
+  - **2a — worker-thread dispatch + woven-emit delivery (LANDED 2026-07-05).** `… on Gpu` no longer
+    blocks the interpreter: `GpuKernelRunner` inlines the fragment lambda + the user function it calls,
+    **splits the woven `emit`** (its argument → the kernel output; its event construction, argument
+    replaced by a `$gpu0` placeholder → the completion template), lowers + marshals synchronously (so
+    a shape-ineligible kernel still errors immediately), and submits only the device round trip to a
+    daemon worker pool — returning a `Pending` (internal; new `sibarum.pontif.ir.Pending`) at once. The
+    interpreter registers each Pending and, after `main`, **drives to quiescence**
+    (`IrInterpreter.eval(CompiledModule)`): for each per-element GPU-computed value it binds `$gpu0`,
+    **evaluates the event template** (so the event routes exactly like an author-written `emit` —
+    nominal identity comes for free from the normal construction path, no by-hand qualification), and
+    `fireEvent`s it on the main thread. Consumption is **forward-only, no `await`, no built-in result
+    type** (RULED): the user defines the event and reacts with the landed `action` leg. `KernelRunners`
+    gained a `FunctionResolver` so the runner can inline the user function (`ExprLowering` can't lower a
+    `Call`); the resolver is built from `module.functions()` in `IrInterpreter.gpuFunctionResolver`. A
+    device `Rejection` surfaces as the `!!` hazard (`Pending.values`). `… on Gpu` is for-effect →
+    `DriveResult` (renders nothing), like `main echo`. Tests: `GpuKernelTest` (zip + map woven-emit
+    runs on Vulkan/CPU-fallback via a reacting action + repeated-dispatch cache hit + no-emit
+    rejection). 931 core + 7 gpu green.
+    - **Latency fix (2026-07-05).** Measured: a fresh `Accelerator` per dispatch cost **~580 ms**
+      (Vulkan context create + SPIR-V lowering + `spirv-val` + pipeline build + ~90 ms teardown), and
+      **~1.9 s** the very first GPU touch in a JVM — while the actual compute is **~2 ms**. Slice 1 and
+      the first 2a cut both did `new Accelerator()` per `… on Gpu`, throwing away the context SuperVast
+      is designed to hold ("repeated runs re-marshal only data"). Fixed: a **single GPU worker thread**
+      owns **one long-lived `Accelerator`** (thread-affinity — SuperVast's queue isn't free-threaded,
+      and the GPU serializes anyway) plus a **per-kernel `KernelHandle` cache** (keyed by the pure
+      kernel's structure). A repeated kernel (e.g. the editor re-compiling on each edit) now reuses the
+      context + pipeline at **~2 ms**; a new kernel is **~44 ms**; the ~1.9 s cold init is paid once per
+      JVM. (The legacy `gpuVectorAdd` native still uses a per-call Accelerator — it's the slice-1 spike,
+      not the `on Gpu` path.)
+    **Deferred to 2b+:** multi-field / multi-emit events (need multi-output kernels — v1 is one emit,
+    one field); the parser gap on `main ( &spread:… )` (bare spread inside the `main` paren — use the
+    trailing form); `!!` recovery via `match [!!]`; a real worker/mailbox scheduler for the general
+    event substrate (2a builds only the GPU-needed minimum); concurrent in-flight ordering guarantees.
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident
@@ -168,6 +231,9 @@ end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules.
 
 ## Naming (OPEN — offer candidates, James rules)
 
-- The async handle: `Future[T]` / `Promise[T]` / `Async[T]` / `Pending[T]` (`Pending` reads well
-  against the `!!` failure arm). Settle when Slice 2 lands.
+- The async handle: **`Pending`** — internal only (the interpreter's outstanding-work handle), not a
+  user-facing type. `await` was **rejected outright** (James); results are consumed by reacting to a
+  woven `emit`. (Earlier candidates `Future`/`Promise`/`Async` and a user-facing `Pending[T]` are moot.)
+- The completion event: **user-defined** — the program declares its own event struct and weaves an
+  `emit` of it into the kernel (no built-in result type). v1 = one `emit`, one field.
 - The directive target: `on Gpu` (current), vs `on Vulkan` / `@gpu` / a named device.

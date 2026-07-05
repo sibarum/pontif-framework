@@ -15,17 +15,36 @@ import java.util.List;
  */
 public final class KernelRunners {
 
-    /** Runs a {@code gpu}-marked iteration on the GPU, returning its result stream value. */
+    /** Runs a {@code gpu}-marked iteration on the GPU (docs/gpu-kernels.md, slice 2). */
     @FunctionalInterface
     public interface KernelRunner {
         /**
+         * Dispatches the kernel on a worker thread and returns a {@link Pending} immediately (async).
+         * The kernel's per-element body carries a woven {@code emit} of a user event (the delivery
+         * mechanism — forward-only, no {@code await}); the GPU computes the emit's <em>argument</em>,
+         * and the returned {@link Pending} carries the completion-event template so the interpreter
+         * can fire it per element once the batch resolves.
+         *
          * @param iterate      the (gpu-marked) iteration IR — lowered to a kernel by the runner
          * @param sourceValues the evaluated source stream values, in order: the primary source
          *                     then each co-source (the zip inputs)
-         * @return the result as a Pontif stream value
+         * @param functions    resolves a user-function call in the kernel body to its (params, body)
+         *                     so the runner can inline it (the {@code emit} lives inside such a
+         *                     function); returns {@code null} for non-user calls
+         * @return a {@link Pending} tracking the async dispatch and its deferred completion emits
          */
-        Object run(IrExpr.Iterate iterate, List<Object> sourceValues);
+        Object run(IrExpr.Iterate iterate, List<Object> sourceValues, FunctionResolver functions);
     }
+
+    /** Resolves a user-function call in a kernel body to its parameters and body, for inlining. */
+    @FunctionalInterface
+    public interface FunctionResolver {
+        /** The function matching {@code name}/{@code arity}, or {@code null} if it is not a user function. */
+        ResolvedFunction resolve(String name, int arity);
+    }
+
+    /** A user function's parameter names and body — enough to inline a call by substitution. */
+    public record ResolvedFunction(List<String> paramNames, IrExpr body) {}
 
     private static volatile KernelRunner runner;
 

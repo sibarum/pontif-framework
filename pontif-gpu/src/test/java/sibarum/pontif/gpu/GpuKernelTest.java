@@ -5,10 +5,15 @@ import dev.supirvast.vastir.tools.KernelHandle;
 import dev.supirvast.vastir.tools.Registration;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifCompiler;
+import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
 import sibarum.pontif.supirvast.KernelLowering;
 import sibarum.pontif.supirvast.ValueMarshaller;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,32 +41,88 @@ class GpuKernelTest {
     }
 
     @Test
-    void onGpu_directive_runsZipOnTheGpu() {
-        // The general surface: an ordinary zip iteration, marked `on Gpu`, runs as a kernel.
-        Extensions.install(new GpuExtension());
-        PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
-                        requires pontif.core.{Stream}
-                        let a:Stream[Int] = {1, 2, 3, 4}
-                        let b:Stream[Int] = {10, 20, 30, 40}
-                        (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu""", "ongpu.ptf"),
-                PontifRunner.Engine.INTERPRETER);
-        assertFalse(r.isError(), () -> "on-Gpu program should run; got " + r.text());
-        assertEquals("{11, 22, 33, 44}", r.text());
+    void onGpu_zip_wovenEmitDeliversEachResultToAnAction() {
+        // The general surface (docs/gpu-kernels.md, slice 2): the kernel function carries a woven
+        // `emit` of a USER event. The GPU computes the emit's argument (x+y per element); the emit is
+        // deferred (sugar, not a live per-element fire) and replayed on the host after the batch — an
+        // `action` reacts per element. Forward-only: no `await`, no built-in result type. main renders
+        // nothing (for-effect); the proof is what the action wrote to stdout.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut, Event}
+                struct AddSamplesEvent(r:Int)
+                assign trait AddSamplesEvent:Event{}
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                function thisRunsOnGpu(x:Int, y:Int):Int ->
+                  let r = x + y
+                  emit AddSamplesEvent(r)
+                  r
+                action log(e:AddSamplesEvent) ->
+                  emit StdOut("" + e.r + " ")
+                  e
+                main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )""");
+        assertEquals("11 22 33 44 ", out);
     }
 
     @Test
-    void onGpu_directive_runsMapOnTheGpu() {
-        // Single-source map: squares, on the GPU.
+    void onGpu_map_wovenEmitDeliversEachResult() {
+        // Single-source map (squares); same woven-emit delivery.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut, Event}
+                struct SquareEvent(r:Int)
+                assign trait SquareEvent:Event{}
+                let c:Stream[Int] = {1, 2, 3, 4}
+                function squareOnGpu(x:Int):Int ->
+                  let s = x * x
+                  emit SquareEvent(s)
+                  s
+                action log(e:SquareEvent) ->
+                  emit StdOut("" + e.r + " ")
+                  e
+                &c:[ (x:Int) -> squareOnGpu(x) ] on Gpu""");
+        assertEquals("1 4 9 16 ", out);
+    }
+
+    @Test
+    void onGpu_repeatedDispatch_reusesTheCachedKernel() {
+        // The latency fix (docs/gpu-kernels.md): one long-lived Accelerator + per-kernel handle cache,
+        // so re-running the same `on Gpu` (e.g. the editor re-compiling on each edit) reuses the built
+        // Vulkan context + pipeline (~2 ms) instead of rebuilding them (~580 ms). Correctness check:
+        // the same program run twice in one JVM produces the same output both times (the second hits
+        // the cache).
+        String src = """
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut, Event}
+                struct AddSamplesEvent(r:Int)
+                assign trait AddSamplesEvent:Event{}
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                function thisRunsOnGpu(x:Int, y:Int):Int ->
+                  let r = x + y
+                  emit AddSamplesEvent(r)
+                  r
+                action log(e:AddSamplesEvent) ->
+                  emit StdOut("" + e.r + " ")
+                  e
+                main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )""";
+        assertEquals("11 22 33 44 ", runCapturingStdout(src));
+        assertEquals("11 22 33 44 ", runCapturingStdout(src));   // second run: cache hit, same result
+    }
+
+    @Test
+    void onGpu_withoutAWovenEmit_isARejectedError() {
+        // Delivery is the woven emit; a kernel that emits nothing produces nothing observable, so it's
+        // an honest error rather than a silent no-op. GPU-independent (rejected before dispatch).
         Extensions.install(new GpuExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
                 new PontifCompiler().compileAlt("""
                         requires pontif.core.{Stream}
-                        let s:Stream[Int] = {1, 2, 3, 4}
-                        &s:[ (x:Int) -> x * x ] on Gpu""", "ongpu.ptf"),
+                        let c:Stream[Int] = {1, 2, 3, 4}
+                        main ( &c:[ (x:Int) -> x * x ] on Gpu )""", "ongpu.ptf"),
                 PontifRunner.Engine.INTERPRETER);
-        assertFalse(r.isError(), () -> "on-Gpu map should run; got " + r.text());
-        assertEquals("{1, 4, 9, 16}", r.text());
+        assertTrue(r.isError(), () -> "a kernel with no woven emit should error; got " + r.text());
     }
 
     @Test
@@ -96,5 +157,21 @@ class GpuKernelTest {
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "gpu program should run; got " + r.text());
         assertEquals("{10000000000, 3}", r.text());
+    }
+
+    /** Runs {@code src} on the interpreter, returning what it wrote to stdout (the async result path). */
+    private static String runCapturingStdout(String src) {
+        Extensions.install(new GpuExtension());
+        PrintStream oldOut = System.out;
+        ByteArrayOutputStream cap = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(cap, true, StandardCharsets.UTF_8));
+            PontifRunner.RunResult r = new PontifRunner().run(
+                    new PontifCompiler().compileAlt(src, "ongpu.ptf"), PontifRunner.Engine.INTERPRETER);
+            assertFalse(r.isError(), () -> "on-Gpu program should run; got " + r.text());
+        } finally {
+            System.setOut(oldOut);
+        }
+        return cap.toString(StandardCharsets.UTF_8);
     }
 }
