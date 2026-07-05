@@ -18,7 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class BooleanTest {
 
     private static final String IMPORTS =
-            "requires pontif.shape.{Sphere, translate, union, intersect, difference, smoothUnion, distanceAt}\n";
+            "requires pontif.shape.{Sphere, translate, union, intersect, difference,"
+            + " smoothUnion, smoothIntersect, smoothDifference, distanceAt}\n";
 
     private static String eval(String expr) {
         PontifRunner.RunResult r = new PontifRunner().run(
@@ -64,5 +65,21 @@ class BooleanTest {
         Extensions.install(new ShapeExtension());
         // Deep inside A, far from B, the smin saturates to the plain min → -1 exactly.
         assertEquals("true", eval("(distanceAt(smoothUnion(" + A + ", " + B + ", 0.5), 0.0, 0.0, 0.0) + 1.0) == 0.0"));
+    }
+
+    @Test
+    void smoothIntersect_reducesToIntersectAwayFromTheSeam() {
+        Extensions.install(new ShapeExtension());
+        // At the origin (outside D, well past the seam) the smax saturates to the plain max → 0.5.
+        assertEquals("true", eval("distanceAt(smoothIntersect(" + C + ", " + D + ", 0.5), 0.0, 0.0, 0.0) == 0.5"));
+    }
+
+    @Test
+    void smoothDifference_reducesToDifferenceAwayFromTheSeam() {
+        Extensions.install(new ShapeExtension());
+        // Away from the groove, smoothDifference matches difference: origin kept (-0.5),
+        // (1,0,0) carved (0.5).
+        assertEquals("true", eval("(distanceAt(smoothDifference(" + C + ", " + D + ", 0.5), 0.0, 0.0, 0.0) + 0.5) == 0.0"));
+        assertEquals("true", eval("distanceAt(smoothDifference(" + C + ", " + D + ", 0.5), 1.0, 0.0, 0.0) == 0.5"));
     }
 }

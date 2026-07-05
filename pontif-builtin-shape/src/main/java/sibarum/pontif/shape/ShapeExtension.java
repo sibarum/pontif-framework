@@ -35,11 +35,13 @@ public final class ShapeExtension implements Extension {
     public String pontifSource() {
         return """
                 requires pontif.core.{Stream}
-                requires pontif.math.{sqrt, clamp, sin, cos, radians, min, max, mix}
+                requires pontif.math.{sqrt, abs, clamp, sin, cos, radians, min, max, mix}
                 requires pontif.plot.{Volume, scene}
-                exports @.{SdfShape, Sphere, preview, render, distanceAt,
+                exports @.{SdfShape, Sphere, Box, Torus, Cylinder, Capsule, Plane,
+                           preview, render, distanceAt,
                            translate, scale, rotateX, rotateY, rotateZ,
-                           union, difference, intersect, smoothUnion,
+                           union, difference, intersect,
+                           smoothUnion, smoothIntersect, smoothDifference,
                            ScalarField, Attributed, attr, shapeOf, attrName, attrAt}
 
                 # An implicit-surface shape: the SIGNED DISTANCE to its surface at any point
@@ -61,6 +63,88 @@ public final class ShapeExtension implements Extension {
                     let e = 2.0 * this.radius
                     {0.0 - e, e, 0.0 - e, e, 0.0 - e, e}
                   )
+                }
+
+                # --- More primitives (docs/shapes.md) --------------------------------------------
+                # Each is a struct of SCALAR fields (so `this.<field>` inlines as a GLSL literal),
+                # with the analytic SDF written in scalar form (no vec type — Pontif shapes take
+                # x,y,z scalars). All render on the GPU for free: the general lowerer reads these
+                # very distance bodies (docs/sdf-glsl.md). Centred at the origin; axis-aligned.
+
+                # An axis-aligned box of half-extents (hx,hy,hz): the exact exterior+interior SDF.
+                struct Box(hx:Decimal, hy:Decimal, hz:Decimal)
+                assign trait Box:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let qx = abs(x) - this.hx
+                    let qy = abs(y) - this.hy
+                    let qz = abs(z) - this.hz
+                    let ex = max(qx, 0.0)
+                    let ey = max(qy, 0.0)
+                    let ez = max(qz, 0.0)
+                    sqrt(ex * ex + ey * ey + ez * ez) + min(max(qx, max(qy, qz)), 0.0)
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let ex = 2.0 * this.hx
+                    let ey = 2.0 * this.hy
+                    let ez = 2.0 * this.hz
+                    {0.0 - ex, ex, 0.0 - ey, ey, 0.0 - ez, ez}
+                  )
+                }
+
+                # A torus in the XZ plane: major radius (ring), minor radius (tube).
+                struct Torus(major:Decimal, minor:Decimal)
+                assign trait Torus:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let q = sqrt(x * x + z * z) - this.major
+                    sqrt(q * q + y * y) - this.minor
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let r = this.major + this.minor
+                    let e = 2.0 * r
+                    {0.0 - e, e, 0.0 - e, e, 0.0 - e, e}
+                  )
+                }
+
+                # A capped cylinder along Y: `radius` across, `height` = half-height (so it spans
+                # [-height, height]).
+                struct Cylinder(radius:Decimal, height:Decimal)
+                assign trait Cylinder:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let dr = sqrt(x * x + z * z) - this.radius
+                    let dy = abs(y) - this.height
+                    let er = max(dr, 0.0)
+                    let ey = max(dy, 0.0)
+                    min(max(dr, dy), 0.0) + sqrt(er * er + ey * ey)
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let er = 2.0 * this.radius
+                    let ey = 2.0 * this.height
+                    {0.0 - er, er, 0.0 - ey, ey, 0.0 - er, er}
+                  )
+                }
+
+                # A capsule along Y: a segment from -height to +height, inflated by `radius`.
+                struct Capsule(radius:Decimal, height:Decimal)
+                assign trait Capsule:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let cy = y - clamp(y, 0.0 - this.height, this.height)
+                    sqrt(x * x + cy * cy + z * z) - this.radius
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> (
+                    let er = 2.0 * this.radius
+                    let ey = 2.0 * (this.height + this.radius)
+                    {0.0 - er, er, 0.0 - ey, ey, 0.0 - er, er}
+                  )
+                }
+
+                # A plane with (assumed-unit) normal (nx,ny,nz) at signed `offset` from the origin.
+                # Infinite in extent; the sample box is a generous finite slab for preview/render.
+                struct Plane(nx:Decimal, ny:Decimal, nz:Decimal, offset:Decimal)
+                assign trait Plane:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal ->
+                    x * this.nx + y * this.ny + z * this.nz + this.offset
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
+                    {0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0}
                 }
 
                 # 24*24*24 grid indices for the sampled preview (x = i%24, y = (i/24)%24, z = i/576).
@@ -322,6 +406,34 @@ public final class ShapeExtension implements Extension {
                   )
                 }
                 function smoothUnion(a:[SdfShape], b:[SdfShape], k:Decimal):[SdfShape] -> SmoothUnion(a, b, k)
+
+                # Smooth intersection: the filleted dual of smoothUnion (the polynomial smax). Away
+                # from the seam it is exactly the intersection; near it, a k-sized rounded valley.
+                struct SmoothIntersect(a:[SdfShape], b:[SdfShape], k:Decimal)
+                assign trait SmoothIntersect:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let da = distanceAt(this.a, x, y, z)
+                    let db = distanceAt(this.b, x, y, z)
+                    let h = clamp(0.5 - 0.5 * (db - da) / this.k, 0.0, 1.0)
+                    mix(db, da, h) + this.k * h * (1.0 - h)
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> boundsOf(this.a)
+                }
+                function smoothIntersect(a:[SdfShape], b:[SdfShape], k:Decimal):[SdfShape] -> SmoothIntersect(a, b, k)
+
+                # Smooth difference (a minus b): the filleted subtraction — a k-sized rounded groove
+                # where b is carved out of a, instead of difference's sharp lip.
+                struct SmoothDifference(a:[SdfShape], b:[SdfShape], k:Decimal)
+                assign trait SmoothDifference:SdfShape {
+                  distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> (
+                    let da = distanceAt(this.a, x, y, z)
+                    let db = distanceAt(this.b, x, y, z)
+                    let h = clamp(0.5 - 0.5 * (da + db) / this.k, 0.0, 1.0)
+                    mix(da, 0.0 - db, h) + this.k * h * (1.0 - h)
+                  )
+                  bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] -> boundsOf(this.a)
+                }
+                function smoothDifference(a:[SdfShape], b:[SdfShape], k:Decimal):[SdfShape] -> SmoothDifference(a, b, k)
 
                 # --- Attribute fields (docs/shapes.md S4, requirement 2) --------------------------
                 # "Vertex data" that is NOT per-vertex: a named FIELD over the domain (a value at

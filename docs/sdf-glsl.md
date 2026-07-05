@@ -91,9 +91,27 @@ and a point expression `p`, emit a GLSL expression for its distance:
   `assign trait Slab:SdfShape` renders** (`p.y - 0.5`) — dissolving the docs/shapes.md "user
   SDF can only be sampled" blocker (we ship GLSL text, not a function). `ShapeExtensionTest`
   (7), examples `render-sphere.ptf` / `render-csg.ptf`.
-- **Slice 2 — polish (deferred detail).** Attribute fields → surface color (lower a
-  `ScalarField` the same way); view modes; more primitives; keep `preview` as the CPU
-  fallback. OPEN.
+- **Slice 2 — SDF library. LANDED 2026-07-05.** Since the lowerer reads each shape's real
+  `distance` IR, growing the library is pure Pontif source in `ShapeExtension` — no Java
+  change, and every addition renders on the GPU for free. Added primitives `Box`, `Torus`,
+  `Cylinder`, `Capsule`, `Plane` (scalar analytic SDFs) and smooth boolean modifiers
+  `smoothIntersect`, `smoothDifference` (rounding out `smoothUnion`). `PrimitiveTest` (5,
+  numeric SDF checks), `BooleanTest` (+smooth), `ShapeExtensionTest` render-for-free checks;
+  examples `render-primitives.ptf`. `Cone` deferred (fiddly SDF). RULED (James): this was the
+  chosen next step over generalizing the macro (concept 1/2 below) or iteration/fractals.
+
+**Concept axis (James, ShaderLab-inspired — for later):** GLSL generation has two modes —
+(1) a full vertex/fragment *program* from Pontif (general, further off), vs (2) a *component*
+spliced into a pre-built shader (a typed macro; what `//@SDF@` + this lowerer already do). We
+are in mode 2. NOTE: GLSL (like SPIR-V) has **no recursion** — slice 1 works by compile-time
+inlining a *finite* shape tree into straight-line GLSL; fractals want iteration-as-geometry,
+"a different thing," out of scope. Bounded-iteration → GLSL `for` loop (fold over a finite
+`Stream[SdfShape]`) is a possible future capability of the snippet compiler, echoing the
+supirvast `Iterate → kernel` work retargeted to GLSL.
+
+- **Deferred:** attribute fields (`ScalarField`) → surface color; view modes; refined
+  `[Decimal:@>0.0]` primitive params; `Cone`; the macro generalization (mode 1); bounded
+  iteration → GLSL loop. `preview` (sampled glow) stays as the CPU fallback.
 
 ## Module placement (OPEN — lean)
 

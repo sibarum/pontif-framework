@@ -98,8 +98,12 @@ assign trait Sphere:SdfShape {                           # shipped in S1 (radius
   bounds()          -> ( let e = 2.0 * this.radius   {0.0 - e, e, 0.0 - e, e, 0.0 - e, e} )
 }
 ```
-(S1 ships the `Sphere` above with a plain `radius:Decimal`; the refined `[Decimal:@>0.0]` params
-and the rest of the primitive roster are follow-on. The other structs here are design sketches.)
+(SHIPPED 2026-07-05: `Sphere`, `Box(hx,hy,hz)`, `Torus(major,minor)`, `Cylinder(radius,height)`,
+`Capsule(radius,height)`, `Plane(nx,ny,nz,offset)` — each an `assign trait X:SdfShape` with a
+scalar analytic distance body, exercised by `PrimitiveTest`, and each renders on the GPU for free
+via the SDF→GLSL lowerer (docs/sdf-glsl.md — the lowerer reads these very bodies). Fields are still
+plain `Decimal` (the refined `[Decimal:@>0.0]` construction-gate params remain follow-on); `Cone`
+is deferred — its exact SDF is fiddly and not worth shipping approximate.)
 Refined param sorts (`[Decimal:@>0.0]`) are the construction gate keeping a degenerate
 primitive uninstantiable ([[project_construction_gate]]). The starter set is PROPOSED; the exact
 roster is James's call.

@@ -183,6 +183,45 @@ class ShapeExtensionTest {
                 "user shape's own distance body lowered to GLSL");
     }
 
+    /** The library primitives render for free — the lowerer reads their real distance IR. */
+    @Test
+    void render_lowersNewPrimitivesWithNoJavaChange() {
+        // Box: abs + max/min + sqrt, no residue. Torus: nested sqrt. Neither has a hand-written
+        // GLSL template — both come straight from the Pontif distance bodies.
+        String box = renderMap("requires pontif.shape.{Box, render}\nrender(Box(1.0, 0.5, 2.0))");
+        assertTrue(box.contains("abs(p.x)") && box.contains("sqrt(") && box.contains("max("),
+                () -> "box lowered from its distance body: " + box);
+        assertFalse(box.contains("distanceAt") || box.contains("this.") || box.contains("pontif."),
+                () -> "no Pontif residue: " + box);
+
+        String torus = renderMap("requires pontif.shape.{Torus, render}\nrender(Torus(2.0, 0.5))");
+        assertTrue(torus.contains("sqrt(") && torus.contains("- 2.0") && torus.contains("- 0.5"),
+                () -> "torus major/minor inlined: " + torus);
+
+        // The render-primitives.ptf example: Box+Cylinder+Torus+difference+smoothUnion+rotateX
+        // all lower together, no residue.
+        String combo = renderMap("""
+                requires pontif.shape.{Box, Cylinder, Torus, difference, smoothUnion, rotateX, render}
+                render(smoothUnion(
+                  difference(Box(1.0, 1.0, 1.0), Cylinder(0.55, 2.0)),
+                  rotateX(Torus(1.15, 0.18), 90.0, {0.0, 0.0, 0.0}),
+                  0.1))""");
+        assertFalse(combo.contains("distanceAt") || combo.contains("this.") || combo.contains("pontif."),
+                () -> "render-primitives example lowers with no residue: " + combo);
+    }
+
+    /** Smooth boolean modifiers lower too (clamp/mix over the two children). */
+    @Test
+    void render_lowersSmoothBooleans() {
+        String map = renderMap("""
+                requires pontif.shape.{Sphere, translate, smoothDifference, render}
+                render(smoothDifference(Sphere(1.2), translate(Sphere(0.8), {0.7, 0.0, 0.0}), 0.3))""");
+        assertTrue(map.contains("clamp(") && map.contains("mix("),
+                () -> "smoothDifference uses clamp/mix: " + map);
+        assertFalse(map.contains("distanceAt") || map.contains("this."),
+                () -> "no Pontif residue: " + map);
+    }
+
     /** Runs {@code src} with renderScene stubbed and returns the emitted `float map(...)` string. */
     private static String renderMap(String src) {
         Extensions.install(new PlotExtension());
