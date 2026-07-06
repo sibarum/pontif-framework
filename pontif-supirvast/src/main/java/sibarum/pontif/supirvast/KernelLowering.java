@@ -43,16 +43,21 @@ import java.util.List;
  */
 public final class KernelLowering {
 
-    private final ExprLowering exprLowering = new ExprLowering();
-
-    /** Pontif {@code Int} is 64-bit; honest columns are {@code int64} (two words per element). */
-    private static final Type ELEMENT = Type.int64();
-
     private static final String OUTPUT_COLUMN = "out";
 
-    /** Lowers a stream {@code Iterate} to a registrable kernel, or throws {@link LoweringError}. */
+    /** Lowers an Int kernel ({@code int64} columns) — the backward-compatible default. */
     public KernelSpec lower(IrExpr.Iterate it) {
+        return lower(it, Type.int64());
+    }
+
+    /**
+     * Lowers a stream {@code Iterate} to a registrable kernel over {@code element}-typed columns
+     * ({@code int64} for an Int kernel, {@code float32} for a Decimal kernel — the ruled lossy cast), or
+     * throws {@link LoweringError}. v1 kernels are homogeneous: every column shares {@code element}.
+     */
+    public KernelSpec lower(IrExpr.Iterate it, Type element) {
         requireMapOrZipShape(it);
+        ExprLowering exprLowering = new ExprLowering(element);
 
         List<IrExpr> sources = new ArrayList<>();
         sources.add(it.source());
@@ -71,8 +76,8 @@ public final class KernelLowering {
         List<Buffer> outBuffers = new ArrayList<>();
         for (int k = 0; k < nOut; k++) {
             String name = nOut == 1 ? OUTPUT_COLUMN : OUTPUT_COLUMN + k;
-            columns.add(KernelColumn.output(name, k, ELEMENT));
-            outBuffers.add(new Buffer(name, k, ELEMENT));
+            columns.add(KernelColumn.output(name, k, element));
+            outBuffers.add(new Buffer(name, k, element));
         }
 
         Expr gid = new Expr.InvocationId();
@@ -80,8 +85,8 @@ public final class KernelLowering {
         for (int i = 0; i < sources.size(); i++) {
             String name = inputColumnName(sources.get(i), i);
             int slot = nOut + i;
-            columns.add(KernelColumn.input(name, slot, ELEMENT));
-            Buffer in = new Buffer(name, slot, ELEMENT);
+            columns.add(KernelColumn.input(name, slot, element));
+            Buffer in = new Buffer(name, slot, element);
             // Each element reference resolves to a load of its column at the current invocation.
             scope = scope.with(columnVar(i), new Expr.BufferLoad(in, gid));
         }

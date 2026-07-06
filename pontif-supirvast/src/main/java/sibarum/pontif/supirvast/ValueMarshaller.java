@@ -34,4 +34,32 @@ public final class ValueMarshaller {
         }
         return values;
     }
+
+    // --- f32 columns (Pontif Decimal on the GPU) ---------------------------------------------------------
+    // A Pontif Decimal lowers to IEEE f32 for GPU compute — a lossy cast, ruled acceptable (Decimal is the
+    // generic real type, James 2026-07-06). One word per element (std430 f32 layout); the bit pattern
+    // crosses, decoded back to a Decimal at f32 precision.
+
+    /** A column of {@code values.length} f32 elements (one word each), from Pontif Decimals (lossy). */
+    public static int[] toColumnF32(double[] values) {
+        int[] words = new int[values.length];
+        for (int i = 0; i < values.length; i++) {
+            words[i] = Float.floatToRawIntBits((float) values[i]);
+        }
+        return words;
+    }
+
+    /** A zeroed output column sized for {@code n} f32 elements. */
+    public static int[] outputColumnF32(int n) {
+        return new int[n];
+    }
+
+    /** Decodes the first {@code n} f32 elements from a column's words (as doubles at f32 precision). */
+    public static double[] fromColumnF32(int[] words, int n) {
+        double[] values = new double[n];
+        for (int i = 0; i < n; i++) {
+            values[i] = Float.intBitsToFloat(words[i]);
+        }
+        return values;
+    }
 }

@@ -91,8 +91,37 @@ public final class GpuKernels {
         return out;
     }
 
+    /** Whether {@code streamValue}'s elements are Decimals (a float kernel) rather than Ints. Empty ⇒ false. */
+    static boolean isDecimalStream(Object streamValue) {
+        return streamValue instanceof RecordValue rv
+                && rv.members().values().stream().findFirst().orElse(null) instanceof java.math.BigDecimal;
+    }
+
+    /** A Pontif {@code Stream[Decimal]} value's elements as doubles (lowered to f32 downstream — lossy). */
+    static double[] decimals(Object streamValue, String which) {
+        if (!(streamValue instanceof RecordValue rv)) {
+            throw new RuntimeException("`… on Gpu`: source '" + which + "' must be a Stream[Decimal]; got "
+                    + (streamValue == null ? "null" : streamValue.getClass().getSimpleName()));
+        }
+        List<Double> xs = new ArrayList<>();
+        for (Object m : rv.members().values()) {
+            if (m instanceof java.math.BigDecimal d) xs.add(d.doubleValue());
+            else if (m instanceof Long l) xs.add((double) l);       // an Int promotes into a Decimal kernel
+            else throw new RuntimeException("`… on Gpu`: stream '" + which + "' has a non-Decimal element " + m);
+        }
+        double[] out = new double[xs.size()];
+        for (int i = 0; i < out.length; i++) out[i] = xs.get(i);
+        return out;
+    }
+
     static long[] prefix(long[] a, int n) {
         long[] out = new long[n];
+        System.arraycopy(a, 0, out, 0, n);
+        return out;
+    }
+
+    static double[] prefix(double[] a, int n) {
+        double[] out = new double[n];
         System.arraycopy(a, 0, out, 0, n);
         return out;
     }

@@ -6,6 +6,7 @@ import dev.supirvast.vastir.tools.KernelSpec;
 import dev.supirvast.vastir.tools.Registration;
 import dev.supirvast.vastir.tools.Rejection;
 import dev.supirvast.vastir.tools.Submission;
+import dev.supirvast.vastir.type.Type;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ast.record.RecordValue;
@@ -115,20 +116,38 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         // Lower now (a shape-ineligible kernel is an immediate LoweringError); the cache key is the pure
         // kernel's structure, so a repeated `on Gpu` reuses its registered pipeline. Only the device round
         // trip runs on the worker.
-        String cacheKey = kernel.toString();
+        // Homogeneous element type: a Decimal source is a FLOAT kernel (f32 columns — the ruled lossy
+        // Decimal→f32 cast), else an Int kernel (int64). The mode is part of the cache key: the same
+        // fragment structure over Int vs Decimal data is a different kernel.
+        final boolean floats = !sourceValues.isEmpty() && GpuKernels.isDecimalStream(sourceValues.get(0));
+        Type element = floats ? Type.float32() : Type.int64();
+        String cacheKey = kernel + (floats ? ":f32" : ":i64");
         KernelSpec spec = SPEC_CACHE.computeIfAbsent(cacheKey, k -> {
             LOWERINGS.incrementAndGet();
-            return new KernelLowering().lower(kernel);
+            return new KernelLowering().lower(kernel, element);
         });
 
-        long[][] inputs = new long[sourceValues.size()][];
+        // Marshal each source to its input column (f32 bits, or i64 words); zip stops at the shortest.
+        long[][] iIn = floats ? null : new long[sourceValues.size()][];
+        double[][] fIn = floats ? new double[sourceValues.size()][] : null;
         int n = Integer.MAX_VALUE;
         for (int i = 0; i < sourceValues.size(); i++) {
-            inputs[i] = GpuKernels.longs(sourceValues.get(i), "source " + i);
-            n = Math.min(n, inputs[i].length);            // zip stops at the shortest
+            if (floats) {
+                fIn[i] = GpuKernels.decimals(sourceValues.get(i), "source " + i);
+                n = Math.min(n, fIn[i].length);
+            } else {
+                iIn[i] = GpuKernels.longs(sourceValues.get(i), "source " + i);
+                n = Math.min(n, iIn[i].length);
+            }
         }
         if (n == Integer.MAX_VALUE) n = 0;
         final int count = n;
+        final int[][] inputColumns = new int[sourceValues.size()][];
+        for (int i = 0; i < sourceValues.size(); i++) {
+            inputColumns[i] = floats
+                    ? ValueMarshaller.toColumnF32(GpuKernels.prefix(fIn[i], count))
+                    : ValueMarshaller.toColumn(GpuKernels.prefix(iIn[i], count));
+        }
 
         // A tuple return (`… -> {a, b}`) is a MULTI-OUTPUT kernel: nOut output columns (SoA), reassembled
         // into a Stream[{…}] below. A scalar return is nOut == 1. Same detection KernelLowering used, so the
@@ -142,19 +161,19 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         // CPU path (no overlap to have). This submit task returns a Submission (GPU) or the results (CPU).
         Future<Object> submitted = GPU_WORKER.submit(() -> {
             KernelHandle handle = registerCached(cacheKey, spec);
-            int[][] columns = new int[nOut + inputs.length][];
-            for (int k = 0; k < nOut; k++) columns[k] = ValueMarshaller.outputColumn(count);   // slots 0..nOut-1
-            for (int i = 0; i < inputs.length; i++) {
-                columns[nOut + i] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], count));
+            int[][] columns = new int[nOut + inputColumns.length][];
+            for (int k = 0; k < nOut; k++) {                          // slots 0..nOut-1 = outputs
+                columns[k] = floats ? ValueMarshaller.outputColumnF32(count) : ValueMarshaller.outputColumn(count);
             }
+            for (int i = 0; i < inputColumns.length; i++) columns[nOut + i] = inputColumns[i];
             return handle.preferredBackend() == KernelHandle.Backend.GPU
                     ? handle.submitAsync(columns, count)              // in flight — awaited at the spread
                     : handle.run(columns, count);                     // CPU fallback — synchronous
         });
 
-        // The synchronization point (a spread, or the async drive): await on the worker, then box. A
-        // single output boxes to scalars; a multi-output kernel boxes each element into a `_tuple` record
-        // (columns are struct-of-arrays; row j is the tuple {out0[j], …, out{nOut-1}[j]}).
+        // The synchronization point (a spread, or the async drive): await on the worker, then box. Each row
+        // is a scalar (Long for an Int kernel, Decimal for a float kernel) or, for a multi-output kernel, a
+        // `_tuple` record over the nOut columns (struct-of-arrays: row j = {out0[j], …, out{nOut-1}[j]}).
         // Deferred so all eager submits are launched before the first await — that is what overlaps them.
         java.util.function.Supplier<List<Object>> await = () -> {
             try {
@@ -163,15 +182,21 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
                     int[][] result = (s instanceof Submission sub)
                             ? registerCached(cacheKey, spec).await(sub)
                             : (int[][]) s;
-                    long[][] outs = new long[nOut][];
-                    for (int k = 0; k < nOut; k++) outs[k] = ValueMarshaller.fromColumn(result[k], count);
+                    long[][] li = floats ? null : new long[nOut][];
+                    double[][] df = floats ? new double[nOut][] : null;
+                    for (int k = 0; k < nOut; k++) {
+                        if (floats) df[k] = ValueMarshaller.fromColumnF32(result[k], count);
+                        else li[k] = ValueMarshaller.fromColumn(result[k], count);
+                    }
                     List<Object> boxed = new ArrayList<>(count);
                     for (int j = 0; j < count; j++) {
                         if (nOut == 1) {
-                            boxed.add(outs[0][j]);                    // Pontif Int = Long at runtime
+                            boxed.add(floats ? java.math.BigDecimal.valueOf(df[0][j]) : Long.valueOf(li[0][j]));
                         } else {
                             LinkedHashMap<String, Object> tuple = new LinkedHashMap<>();
-                            for (int k = 0; k < nOut; k++) tuple.put("_" + k, outs[k][j]);
+                            for (int k = 0; k < nOut; k++) {
+                                tuple.put("_" + k, floats ? java.math.BigDecimal.valueOf(df[k][j]) : Long.valueOf(li[k][j]));
+                            }
                             boxed.add(new RecordValue("_tuple", tuple));
                         }
                     }

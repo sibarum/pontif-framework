@@ -23,6 +23,32 @@ import java.util.List;
  */
 public final class ExprLowering {
 
+    /**
+     * The numeric type scalar literals lower to: {@code int64} (an Int kernel) or {@code float32} (a Decimal
+     * kernel — the ruled lossy Decimal→f32 cast). In a float kernel an Int literal promotes to f32 too, so
+     * {@code x * 2} beside a Decimal reads as float. Arithmetic type is inferred from operands by SuperVast,
+     * so only the leaves (literals + column loads) need the right type.
+     */
+    private final dev.supirvast.vastir.type.Type numericType;
+
+    /** An Int-kernel lowerer (literals → {@code int64}) — the default and backward-compatible form. */
+    public ExprLowering() {
+        this(dev.supirvast.vastir.type.Type.int64());
+    }
+
+    public ExprLowering(dev.supirvast.vastir.type.Type numericType) {
+        this.numericType = numericType;
+    }
+
+    private boolean isFloat() {
+        return numericType instanceof dev.supirvast.vastir.type.Type.Float;
+    }
+
+    /** {@code numericType} as a {@code Type.Float} — call only under {@link #isFloat()}. */
+    private dev.supirvast.vastir.type.Type.Float floatType() {
+        return (dev.supirvast.vastir.type.Type.Float) numericType;
+    }
+
     /** A lowered expression: the statements that must precede it, then the value it produces. */
     public record Block(List<Statement> statements, Expr value) {
         public Block {
@@ -37,7 +63,18 @@ public final class ExprLowering {
     /** Lowers {@code expr} under {@code scope}, throwing {@link LoweringError} on the first unsupported node. */
     public Block lower(IrExpr expr, Scope scope) {
         return switch (expr) {
-            case IrExpr.Lit lit -> Block.value(new Expr.ConstInt(dev.supirvast.vastir.type.Type.int64(), lit.value()));
+            // A whole-number literal: f32 in a Decimal kernel (promotion), else i64.
+            case IrExpr.Lit lit -> Block.value(isFloat()
+                    ? new Expr.ConstFloat(floatType(), (double) lit.value())
+                    : new Expr.ConstInt(dev.supirvast.vastir.type.Type.int64(), lit.value()));
+            // A Decimal literal → f32 (lossy). Only valid in a Decimal kernel; in an Int kernel this fails
+            // closed (a mixed Int/Decimal kernel is a later slice).
+            case IrExpr.Dec dec -> {
+                if (!isFloat()) {
+                    throw LoweringError.decimalLiteral(dec);
+                }
+                yield Block.value(new Expr.ConstFloat(floatType(), dec.value().doubleValue()));
+            }
             case IrExpr.Bool bool -> Block.value(new Expr.ConstBool(bool.value()));
             case IrExpr.Var var -> {
                 Expr bound = scope.lookup(var.name());
@@ -50,7 +87,6 @@ public final class ExprLowering {
             case IrExpr.LetIn let -> lowerLet(let, scope);
 
             // --- unsupported in v1: each fails closed with a source-located witness ---
-            case IrExpr.Dec dec -> throw LoweringError.decimalLiteral(dec);
             case IrExpr.Chr chr -> throw LoweringError.charLiteral(chr);
             case IrExpr.Str str -> throw LoweringError.stringLiteral(str);
             case IrExpr.SelfRef self -> throw LoweringError.selfRef(self);

@@ -145,6 +145,23 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_decimalKernel_computesInFloat() {
+        // Slice 5a — the float foundation: a Decimal kernel lowers to f32 columns (the ruled lossy
+        // Decimal→f32 cast). Vector-add over Decimals; `log` (spread) prints each result.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut}
+                function log(d:Decimal):Decimal -> emit StdOut("" + d + " ")  d
+                let a:Stream[Decimal] = {1.0, 2.0, 3.0, 4.0}
+                let b:Stream[Decimal] = {10.0, 20.0, 30.0, 40.0}
+                main (
+                  let r:Stream[Decimal] = (&a, &b):[ (x:Decimal, y:Decimal) -> x + y ] on Gpu
+                  log(&r)
+                )""");
+        assertEquals("11.0 22.0 33.0 44.0 ", out);
+    }
+
+    @Test
     void onGpu_multiOutput_tupleReturnBecomesAStreamOfTuples() {
         // Multi-output: a tuple return `{x+y, x*y}` lowers to one output column PER member (struct-of-
         // arrays), reassembled into a Stream[{Int,Int}]. A trailing spread consumes each tuple and sums
