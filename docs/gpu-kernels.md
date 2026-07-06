@@ -313,9 +313,26 @@ g(&r2)                            # synchronize on B
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident
   between passes, one host readback).
-- **Slice 5 — float/vec3 lowering.** Extend `ExprLowering`/`SortLowering` past Int; the on-ramp to
-  shaders + the graphics/Dasum path (SuperVast → spirv-cross → GLSL), folding `docs/sdf-glsl.md`
-  onto the substrate.
+- **Slice 5a — Decimal (float) scalar kernels (LANDED 2026-07-06).** The Int-only lowerer is now
+  type-aware: a Decimal kernel lowers to IEEE **f32** columns — the **ruled lossy Decimal→f32 cast**
+  (Decimal is the generic real type, James 2026-07-06). `ValueMarshaller` gained an f32 codec;
+  `ExprLowering` takes a numeric element type (Decimal literal → `ConstFloat`, Int literal promotes to f32
+  in a Decimal kernel; arithmetic type is inferred from operands, so only leaves need typing);
+  `KernelLowering.lower(it, element)` lowers over int64 OR float32 (the no-arg overload stays the int64
+  default); `GpuKernelRunner` detects the mode from the source data (a Decimal source ⇒ a float kernel),
+  threads it into lowering (mode is in the cache key), marshals f32 in/out, boxes back to Decimal. v1
+  kernels are **homogeneous** (all-Int or all-Decimal; a mixed kernel is later). Test: Decimal vector-add
+  → `11.0 22.0 33.0 44.0`. This is the foundation for vec3/mat4.
+- **Slice 5b/5c — vec3 / mat4 (OPEN — needs a surface-design ruling).** The float foundation + multi-output
+  (tuple return → N f32 columns) already give the *output* half. What remains, and needs James's call on
+  the Pontif **surface**: (1) how vec3/mat4 and their operations are spelled — a first-class `vec3`/`mat4`
+  type with operator overloads lowered to SuperVast's native `Type.Vector`/`Matrix` ops (cleanest, real
+  vector opcodes), vs. tuples-of-Decimals with a vec/mat *function* library lowered component-wise; (2)
+  multi-component **input** columns (a `Stream[vec3]` source = 3 f32 columns, nested `element._i._j` →
+  column) — inputs are scalar today; (3) the op set (dot/cross/normalize, mat*vec, mat*mat). SuperVast has
+  `Type.Vector(component, n)` / `Type.Matrix(col, n)` and its shader tests use vector ops, so the lowering
+  target exists.
+- **Graphics/Dasum path.** SuperVast → spirv-cross → GLSL, folding `docs/sdf-glsl.md` onto the substrate.
 
 ## Naming (OPEN — offer candidates, James rules)
 
