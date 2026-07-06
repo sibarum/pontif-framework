@@ -54,41 +54,82 @@ public final class KernelLowering {
     public KernelSpec lower(IrExpr.Iterate it) {
         requireMapOrZipShape(it);
 
-        // Sources become input columns; the output stream becomes the output column at slot 0.
         List<IrExpr> sources = new ArrayList<>();
         sources.add(it.source());
         sources.addAll(it.coSources());
 
+        // The single write's value is the per-element body. A tuple return (`… -> {a, b}`) is a
+        // MULTI-OUTPUT kernel: one output column per tuple member (struct-of-arrays), reassembled into a
+        // Stream[{…}] by the runner. A scalar return is the single-output case. Element references
+        // (Var(element) for map, element._i for zip) are rewritten to the synthetic column vars.
+        IrExpr body = bindElementRefs(it.arms().get(0).writes().get(0).value(), it.element(), sources.size());
+        List<IrExpr> outputs = outputExprs(body);
+        int nOut = outputs.size();
+
+        // Outputs occupy slots 0..nOut-1; inputs follow at nOut..nOut+sources-1 (bindings stay contiguous).
         List<KernelColumn> columns = new ArrayList<>();
-        columns.add(KernelColumn.output(OUTPUT_COLUMN, 0, ELEMENT));
-        Buffer outBuffer = new Buffer(OUTPUT_COLUMN, 0, ELEMENT);
+        List<Buffer> outBuffers = new ArrayList<>();
+        for (int k = 0; k < nOut; k++) {
+            String name = nOut == 1 ? OUTPUT_COLUMN : OUTPUT_COLUMN + k;
+            columns.add(KernelColumn.output(name, k, ELEMENT));
+            outBuffers.add(new Buffer(name, k, ELEMENT));
+        }
 
         Expr gid = new Expr.InvocationId();
         Scope scope = Scope.empty();
         for (int i = 0; i < sources.size(); i++) {
             String name = inputColumnName(sources.get(i), i);
-            int slot = i + 1;                                   // slot 0 is the output
+            int slot = nOut + i;
             columns.add(KernelColumn.input(name, slot, ELEMENT));
             Buffer in = new Buffer(name, slot, ELEMENT);
             // Each element reference resolves to a load of its column at the current invocation.
             scope = scope.with(columnVar(i), new Expr.BufferLoad(in, gid));
         }
 
-        // The single arm's single write carries the per-element body. Rewrite element references
-        // (Var(element) for map, element._i for zip) to the synthetic column vars bound above, then
-        // hand the now-scalar body to ExprLowering.
-        IrExpr body = it.arms().get(0).writes().get(0).value();
-        IrExpr scalarBody = bindElementRefs(body, it.element(), sources.size());
-        ExprLowering.Block lowered = exprLowering.lower(scalarBody, scope);
-
-        List<Statement> statements = new ArrayList<>(lowered.statements());
-        statements.add(new Statement.BufferStore(outBuffer, gid, lowered.value()));
+        // Lower each output expression and store it to its column (out_k[gid] = f_k(in…[gid])).
+        List<Statement> statements = new ArrayList<>();
+        for (int k = 0; k < nOut; k++) {
+            ExprLowering.Block lowered = exprLowering.lower(outputs.get(k), scope);
+            statements.addAll(lowered.statements());
+            statements.add(new Statement.BufferStore(outBuffers.get(k), gid, lowered.value()));
+        }
         statements.add(new Statement.ReturnVoid());
 
         Function kernel = new Function("main",
                 new Type.FunctionType(Type.VOID, List.of()),
                 Region.of(statements.toArray(new Statement[0])));
         return new KernelSpec(kernel, columns);
+    }
+
+    /**
+     * The kernel's output expressions: the members of a tuple return ({@code -> {a, b}}), else the
+     * scalar body as a single output. Shared with {@code GpuKernelRunner} (via {@link #outputArity}) so
+     * the runner marshals exactly the columns this produces.
+     */
+    private static List<IrExpr> outputExprs(IrExpr body) {
+        if (body instanceof IrExpr.Record rec && isPositionalTuple(rec)) {
+            return new ArrayList<>(rec.members().values());
+        }
+        return List.of(body);
+    }
+
+    /** How many output columns {@code body} lowers to: a tuple's arity, else 1 (a scalar). */
+    public static int outputArity(IrExpr body) {
+        return body instanceof IrExpr.Record rec && isPositionalTuple(rec) ? rec.members().size() : 1;
+    }
+
+    /** A Record whose keys are exactly {@code _0.._{n-1}} in order — a positional tuple, not a named struct. */
+    private static boolean isPositionalTuple(IrExpr.Record rec) {
+        if (rec.members().isEmpty()) {
+            return false;
+        }
+        int i = 0;
+        for (String key : rec.members().keySet()) {
+            if (!("_" + i++).equals(key)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // --- shape validation (fail-closed) ----------------------------------------------------------------
@@ -183,6 +224,12 @@ public final class KernelLowering {
             case IrExpr.LetIn let -> new IrExpr.LetIn(let.name(), let.declaredSort(),
                     bindElementRefs(let.value(), element, sourceCount),
                     bindElementRefs(let.body(), element, sourceCount), let.origin(), let.claim());
+            // A tuple return (multi-output): rewrite element refs inside each member.
+            case IrExpr.Record rec -> {
+                java.util.LinkedHashMap<String, IrExpr> members = new java.util.LinkedHashMap<>();
+                rec.members().forEach((key, v) -> members.put(key, bindElementRefs(v, element, sourceCount)));
+                yield new IrExpr.Record(rec.typeName(), members, rec.runtimeChecks(), rec.origin());
+            }
             default -> e;
         };
     }

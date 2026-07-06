@@ -8,6 +8,7 @@ import dev.supirvast.vastir.tools.Rejection;
 import dev.supirvast.vastir.tools.Submission;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrExpr;
+import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.ir.KernelRunners;
 import sibarum.pontif.ir.Pending;
 import sibarum.pontif.supirvast.KernelLowering;
@@ -129,6 +130,11 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         if (n == Integer.MAX_VALUE) n = 0;
         final int count = n;
 
+        // A tuple return (`… -> {a, b}`) is a MULTI-OUTPUT kernel: nOut output columns (SoA), reassembled
+        // into a Stream[{…}] below. A scalar return is nOut == 1. Same detection KernelLowering used, so the
+        // column layout matches: outputs at slots 0..nOut-1, inputs after.
+        final int nOut = KernelLowering.outputArity(soleWriteValue(kernel));
+
         // EAGER dispatch (docs/gpu-kernels.md, "eager dispatch, synchronize on spread"): kick the work
         // off now, at the bind. On the GPU this is a non-blocking `submitAsync` (record + submit, no
         // wait) so the worker frees immediately and the NEXT `on Gpu` bind can submit too — two eager
@@ -136,17 +142,19 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         // CPU path (no overlap to have). This submit task returns a Submission (GPU) or the results (CPU).
         Future<Object> submitted = GPU_WORKER.submit(() -> {
             KernelHandle handle = registerCached(cacheKey, spec);
-            int[][] columns = new int[inputs.length + 1][];
-            columns[0] = ValueMarshaller.outputColumn(count);         // slot 0 = output
+            int[][] columns = new int[nOut + inputs.length][];
+            for (int k = 0; k < nOut; k++) columns[k] = ValueMarshaller.outputColumn(count);   // slots 0..nOut-1
             for (int i = 0; i < inputs.length; i++) {
-                columns[i + 1] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], count));
+                columns[nOut + i] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], count));
             }
             return handle.preferredBackend() == KernelHandle.Backend.GPU
                     ? handle.submitAsync(columns, count)              // in flight — awaited at the spread
                     : handle.run(columns, count);                     // CPU fallback — synchronous
         });
 
-        // The synchronization point (a spread, or the async drive): await on the worker, then box.
+        // The synchronization point (a spread, or the async drive): await on the worker, then box. A
+        // single output boxes to scalars; a multi-output kernel boxes each element into a `_tuple` record
+        // (columns are struct-of-arrays; row j is the tuple {out0[j], …, out{nOut-1}[j]}).
         // Deferred so all eager submits are launched before the first await — that is what overlaps them.
         java.util.function.Supplier<List<Object>> await = () -> {
             try {
@@ -155,9 +163,18 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
                     int[][] result = (s instanceof Submission sub)
                             ? registerCached(cacheKey, spec).await(sub)
                             : (int[][]) s;
-                    long[] out = ValueMarshaller.fromColumn(result[0], count);
-                    List<Object> boxed = new ArrayList<>(out.length);
-                    for (long v : out) boxed.add(v);                  // Pontif Int = Long at runtime
+                    long[][] outs = new long[nOut][];
+                    for (int k = 0; k < nOut; k++) outs[k] = ValueMarshaller.fromColumn(result[k], count);
+                    List<Object> boxed = new ArrayList<>(count);
+                    for (int j = 0; j < count; j++) {
+                        if (nOut == 1) {
+                            boxed.add(outs[0][j]);                    // Pontif Int = Long at runtime
+                        } else {
+                            LinkedHashMap<String, Object> tuple = new LinkedHashMap<>();
+                            for (int k = 0; k < nOut; k++) tuple.put("_" + k, outs[k][j]);
+                            boxed.add(new RecordValue("_tuple", tuple));
+                        }
+                    }
                     return boxed;
                 }).get();
             } catch (java.util.concurrent.ExecutionException e) {

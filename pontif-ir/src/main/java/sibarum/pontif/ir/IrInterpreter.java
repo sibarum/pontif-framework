@@ -445,7 +445,18 @@ public final class IrInterpreter {
         // returns the inert DriveResult instead of a sealed tuple. (A bounded prefix —
         // takeWhile over a live source, collected to a value — is not yet supported; it
         // would materialise a finite tuple and ride the eager path below.)
-        if (it.coSources().isEmpty() && eval(it.source(), env, module) instanceof LiveSource live) {
+        // Evaluate every source EXACTLY ONCE — re-evaluating a source expression would re-run its
+        // effects (a source that emits, or an eager `… on Gpu` dispatch: a second eval = a second GPU
+        // batch, orphaning the first). The single-source live-source check reads this one evaluation.
+        List<IrExpr> sourceExprs = new ArrayList<>();
+        sourceExprs.add(it.source());
+        sourceExprs.addAll(it.coSources());
+        List<Object> sourceValues = new ArrayList<>(sourceExprs.size());
+        for (IrExpr se : sourceExprs) {
+            sourceValues.add(eval(se, env, module));
+        }
+
+        if (it.coSources().isEmpty() && sourceValues.get(0) instanceof LiveSource live) {
             java.util.Optional<Object> next;
             while ((next = live.pull()).isPresent()) {
                 if (iterateStep(it, next.get(), env, module, kinds, streams, accumulators, true)) {
@@ -455,13 +466,10 @@ public final class IrInterpreter {
             return DRIVE_RAN;  // for-effect: discard, never seal
         }
 
-        List<IrExpr> sourceExprs = new ArrayList<>();
-        sourceExprs.add(it.source());
-        sourceExprs.addAll(it.coSources());
         List<List<Object>> columns = new ArrayList<>(sourceExprs.size());
         int steps = Integer.MAX_VALUE;
-        for (IrExpr se : sourceExprs) {
-            Object sv = eval(se, env, module);
+        for (Object sourceValue : sourceValues) {
+            Object sv = sourceValue;
             // A GPU stream (an eager `… on Gpu` dispatch) is synchronized HERE — the spread is the join
             // point (docs/gpu-kernels.md, "eager dispatch, synchronize on spread"): mark it consumed so
             // drive-to-quiescence won't also replay it, and await its per-element results (blocks; a device

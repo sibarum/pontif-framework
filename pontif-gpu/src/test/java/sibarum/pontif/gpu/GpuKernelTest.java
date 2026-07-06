@@ -145,6 +145,24 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_multiOutput_tupleReturnBecomesAStreamOfTuples() {
+        // Multi-output: a tuple return `{x+y, x*y}` lowers to one output column PER member (struct-of-
+        // arrays), reassembled into a Stream[{Int,Int}]. A trailing spread consumes each tuple and sums
+        // its fields (`t._0 + t._1`), which verifies BOTH output columns: {11+10, 22+40, 33+90, 44+160}.
+        Extensions.install(new GpuExtension());
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.core.{Stream}
+                        let a:Stream[Int] = {1, 2, 3, 4}
+                        let b:Stream[Int] = {10, 20, 30, 40}
+                        &( (&a, &b):[ (x:Int, y:Int) -> {x + y, x * y} ] on Gpu ):[ (t:{Int, Int}) -> t._0 + t._1 ]""",
+                        "gpu.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "multi-output gpu program should run; got " + r.text());
+        assertEquals("{21, 62, 123, 204}", r.text());
+    }
+
+    @Test
     void onGpu_repeatedDispatch_reusesTheCachedKernel() {
         // The latency fix (docs/gpu-kernels.md): one long-lived Accelerator + per-kernel handle cache,
         // so re-running the same `on Gpu` (e.g. the editor re-compiling on each edit) reuses the built
