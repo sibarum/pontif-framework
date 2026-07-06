@@ -178,91 +178,91 @@ class ReadmeSnippetTest {
     // --- Traits: methods (the primary example) -------------------------------
 
     @Test
-    void readmeTraitMethodSnippet_evaluatesTo107() {
-        assertEquals("107", runGated("""
-                trait Greeter{ greet:[Method():Int] }
+    void readmeTraitMethodSnippet_evaluatesTo1350() {
+        assertEquals("1350", runGated("""
+                trait Payable{ weeklyPay:[Method():Int] }
 
-                struct Formal(rank:Int)
-                struct Casual(mood:Int)
+                struct Hourly(rate:Int, hours:Int)
+                struct Commissioned(base:Int, sales:Int, cut:Int)
 
-                assign trait Formal:Greeter {
-                  greet():Int -> this.rank + 100
+                assign trait Hourly:Payable {
+                  weeklyPay():Int -> this.rate * this.hours
                 }
-                assign trait Casual:Greeter {
-                  greet():Int -> this.mood
+                assign trait Commissioned:Payable {
+                  weeklyPay():Int -> this.base + this.sales * this.cut
                 }
 
-                function announce(g:Greeter):Int -> g.greet()
+                function payroll(w:Payable):Int -> w.weeklyPay()
 
-                announce(Formal(5)) + announce(Casual(2))
+                payroll(Hourly(20, 40)) + payroll(Commissioned(300, 10, 25))
                 """));
     }
 
     // --- Traits: DATA attributes + bidirectional coercion --------------------
 
     @Test
-    void readmeTraitProducerSnippet_evaluatesTo1() {
-        assertEquals("1", runGated("""
-                trait Heavyish{ weight:[Int:@>0] }
+    void readmeTraitProducerSnippet_evaluatesTo12() {
+        assertEquals("12", runGated("""
+                trait Boxed{ area:[Int:@>0] }
 
-                struct Ipsum(name:Int)
+                struct Rect(w:[Int:@>0], h:[Int:@>0])
 
-                assign trait Ipsum:Heavyish {
-                  weight:Int -> 1
+                assign trait Rect:Boxed {
+                  area:Int -> this.w * this.h
                 }
 
-                let i = Ipsum(5)
-                i.weight
+                let r = Rect(4, 3)
+                r.area
                 """));
     }
 
     @Test
-    void readmeTraitCoercionSnippet_roundTripsTo5() {
-        assertEquals("5", runGated("""
-                trait Heavyish{ weight:[Int:@>0] }
+    void readmeTraitCoercionSnippet_roundTripsTo4() {
+        assertEquals("4", runGated("""
+                trait Boxed{ area:[Int:@>0] }
 
-                struct Ipsum(name:Int)
+                struct Rect(w:[Int:@>0], h:[Int:@>0])
 
-                assign trait Ipsum:Heavyish {
-                  weight:Int -> 1
+                assign trait Rect:Boxed {
+                  area:Int -> this.w * this.h
                 }
 
-                let i = Ipsum(5)
-                let h:Heavyish = i
-                let back:Ipsum = h
-                back.name
+                let r = Rect(4, 3)
+                let b:Boxed = r
+                let back:Rect = b
+                back.w
                 """));
     }
 
     // --- Traits: logic in the sorts (return shell + function arg/return) ------
 
     @Test
-    void readmeTraitReturnShellSnippet_evaluatesTo50() {
-        assertEquals("50", runGated("""
-                trait Scaled{ compute(n:Int):[Int -> @ * 10 -> Int] }
+    void readmeTraitReturnShellSnippet_evaluatesTo1800() {
+        assertEquals("1800", runGated("""
+                trait Billed{ charge(qty:Int):[Int -> @ * 100 -> Int] }
 
-                struct Cents(base:Int)
+                struct Plan(price:Int)
 
-                assign trait Cents:Scaled {
-                  compute(n:Int):Int -> this.base + n
+                assign trait Plan:Billed {
+                  charge(qty:Int):Int -> this.price * qty
                 }
 
-                Cents(2).compute(3)
+                Plan(9).charge(2)
                 """));
     }
 
     @Test
-    void readmeTraitArgAndReturnShellSnippet_evaluatesTo150() {
-        assertEquals("150", runGated("""
-                trait Both{ go(n:[Int -> @ + 1 -> Int]):[Int -> @ * 10 -> Int] }
+    void readmeTraitArgAndReturnShellSnippet_evaluatesTo2400() {
+        assertEquals("2400", runGated("""
+                trait Ordered{ bill(order:[Int -> @ * 12 -> Int]):[Int -> @ * 100 -> Int] }
 
-                struct Base(b:Int)
+                struct Bakery(unitPrice:Int)
 
-                assign trait Base:Both {
-                  go(n:Int):Int -> this.b + n
+                assign trait Bakery:Ordered {
+                  bill(order:Int):Int -> this.unitPrice * order
                 }
 
-                Base(10).go(4)
+                Bakery(2).bill(1)
                 """));
     }
 

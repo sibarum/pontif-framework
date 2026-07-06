@@ -206,68 +206,72 @@ and a function written against the trait dispatches to whichever implementation 
 runtime value carries:
 
 ```pontif
-trait Greeter{ greet:[Method():Int] }
+trait Payable{ weeklyPay:[Method():Int] }
 
-struct Formal(rank:Int)
-struct Casual(mood:Int)
+struct Hourly(rate:Int, hours:Int)
+struct Commissioned(base:Int, sales:Int, cut:Int)
 
-assign trait Formal:Greeter {
-  greet():Int -> this.rank + 100
+assign trait Hourly:Payable {
+  weeklyPay():Int -> this.rate * this.hours
 }
-assign trait Casual:Greeter {
-  greet():Int -> this.mood
+assign trait Commissioned:Payable {
+  weeklyPay():Int -> this.base + this.sales * this.cut
 }
 
-function announce(g:Greeter):Int -> g.greet()
+function payroll(w:Payable):Int -> w.weeklyPay()
 
-announce(Formal(5)) + announce(Casual(2))   # → 107
+payroll(Hourly(20, 40)) + payroll(Commissioned(300, 10, 25))   # → 1350
 ```
 
-`greet:[Method():Int]` is the contract — a method from the receiver alone to `Int`,
-with the `this` parameter implicit. Each `assign trait` block supplies that one
-type's `greet`, and `announce(g:Greeter)` accepts *any* satisfier: the call
-`g.greet()` resolves to `Formal.greet` or `Casual.greet` by the concrete type the
-value carries. There is no inheritance and no vtable — trait dispatch is the same
-module-coherent multi-dispatch the rest of the language uses, keyed on the receiver.
+Two kinds of worker are paid by genuinely different formulas, but a payroll run
+shouldn't care which is which. `weeklyPay:[Method():Int]` is the contract — a method
+from the receiver alone to `Int`, with the `this` parameter implicit. Each
+`assign trait` block supplies that one type's `weeklyPay`, and `payroll(w:Payable)`
+accepts *any* satisfier: the call `w.weeklyPay()` resolves to `Hourly.weeklyPay`
+(`20 * 40 = 800`) or `Commissioned.weeklyPay` (`300 + 10 * 25 = 550`) by the concrete
+type the value carries. There is no inheritance and no vtable — trait dispatch is the
+same module-coherent multi-dispatch the rest of the language uses, keyed on the receiver.
 
 Members can also be typed **data attributes** — a pure projection of the struct:
 
 ```pontif
-trait Heavyish{ weight:[Int:@>0] }
+trait Boxed{ area:[Int:@>0] }
 
-struct Ipsum(name:Int)
+struct Rect(w:[Int:@>0], h:[Int:@>0])
 
-assign trait Ipsum:Heavyish {
-  weight:Int -> 1
+assign trait Rect:Boxed {
+  area:Int -> this.w * this.h
 }
 
-let i = Ipsum(5)
-i.weight   # → 1
+let r = Rect(4, 3)
+r.area   # → 12
 ```
 
-`Ipsum` has no `weight` field, so the impl *produces* one with a `->` arrow
-(`weight:Int -> 1`) — the metaprogramming that writes the member. An attribute
-must be supplied **exactly once**: by a matching field *xor* a producer. The
-producer is itself checked against the contract `[Int:@>0]` — a producer of `0`
-is rejected, fail-closed.
+`Rect` has no `area` field, so the impl *produces* one with a `->` arrow
+(`area:Int -> this.w * this.h`) — the metaprogramming that writes the member. An
+attribute must be supplied **exactly once**: by a matching field *xor* a producer.
+The producer is itself checked against the contract `[Int:@>0]`, and here it *passes*
+only because the sides are themselves positive (`w > 0` and `h > 0` ⟹ `w * h > 0`).
+Give `Rect` unconstrained `Int` sides and the very same producer is **rejected**,
+fail-closed: a rectangle of negative width has no positive area to promise.
 
 Because every trait attribute is a pure projection of the underlying struct — no
 independent information is added — a struct coerces to a trait it satisfies, and
 back, **freely in both directions**:
 
 ```pontif
-trait Heavyish{ weight:[Int:@>0] }
+trait Boxed{ area:[Int:@>0] }
 
-struct Ipsum(name:Int)
+struct Rect(w:[Int:@>0], h:[Int:@>0])
 
-assign trait Ipsum:Heavyish {
-  weight:Int -> 1
+assign trait Rect:Boxed {
+  area:Int -> this.w * this.h
 }
 
-let i = Ipsum(5)
-let h:Heavyish = i      # upcast — free: weight is computed, nothing is lost
-let back:Ipsum = h      # downcast — free: the concrete identity was never erased
-back.name               # → 5
+let r = Rect(4, 3)
+let b:Boxed = r         # upcast — free: area is computed, nothing is lost
+let back:Rect = b       # downcast — free: the concrete identity was never erased
+back.w                  # → 4
 ```
 
 This is the conservation principle lifted to polymorphism: a trait gives a type an
@@ -285,46 +289,51 @@ implementation is wrapped by it and **cannot opt out** — the impl writes only 
 inner kernel.
 
 ```pontif
-trait Scaled{ compute(n:Int):[Int -> @ * 10 -> Int] }
+trait Billed{ charge(qty:Int):[Int -> @ * 100 -> Int] }
 
-struct Cents(base:Int)
+struct Plan(price:Int)
 
-assign trait Cents:Scaled {
-  compute(n:Int):Int -> this.base + n
+assign trait Plan:Billed {
+  charge(qty:Int):Int -> this.price * qty
 }
 
-Cents(2).compute(3)   # kernel: this.base + n = 5; the trait's return shell ×10 → 50
+Plan(9).charge(2)   # kernel: this.price * qty = 18 dollars; the return shell ×100 → 1800 cents
 ```
 
-The kernel `Cents` writes returns the shell's *domain* (`Int`, here `5`); the trait's
-return shell maps it to the *terminus* the caller sees — so the `×10` belongs to the
-contract, not to `Cents`. This is how a trait injects behaviour through a *sort*
-rather than a body: the satisfier supplies the core, the trait wraps the edges.
+A `Billed` type reports what it charges in whole dollars, but the billing ledger
+insists everything be booked in cents. The kernel `Plan` writes returns the shell's
+*domain* (`Int` dollars, here `18`); the trait's return shell maps it to the
+*terminus* the caller sees (`1800` cents) — so the dollars→cents conversion belongs
+to the contract, not to `Plan`. No satisfier of `Billed` can hand back a raw dollar
+figure by mistake. This is how a trait injects behaviour through a *sort* rather than
+a body: the satisfier supplies the core, the trait wraps the edges.
 
 The **argument** side is symmetric, and a trait can own **both** shells at once — so
 the caller faces the outer ends of a method while the impl's kernel faces the inner
 ends, and the trait owns the conversion between:
 
 ```pontif
-trait Both{ go(n:[Int -> @ + 1 -> Int]):[Int -> @ * 10 -> Int] }
+trait Ordered{ bill(order:[Int -> @ * 12 -> Int]):[Int -> @ * 100 -> Int] }
 
-struct Base(b:Int)
+struct Bakery(unitPrice:Int)
 
-assign trait Base:Both {
-  go(n:Int):Int -> this.b + n
+assign trait Bakery:Ordered {
+  bill(order:Int):Int -> this.unitPrice * order
 }
 
-Base(10).go(4)   # arg shell 4+1=5; kernel 10+5=15; return shell ×10 → 150
+Bakery(2).bill(1)   # arg shell: 1 dozen → 12 units; kernel: 2 * 12 = 24 dollars; return shell ×100 → 2400 cents
 ```
 
-The impl writes only `this.b + n` over the inner faces (`n:Int` in, `Int` out); the
-trait owns the `+1` on the way in and the `×10` on the way out, and no satisfier can
-opt out. (The same `[A -> B]` shells work on an ordinary function's parameters and
-return — there they are the author's own, not a contract's. See
-`docs/sort-transforms.md`.)
+The customer orders in *dozens* and reads a price in *cents*; the baker only ever
+thinks in individual units priced in whole dollars. The impl writes only
+`this.unitPrice * order` over the inner faces (`order:Int` in — already counted in
+units — and `Int` dollars out); the trait owns the dozens→units expansion on the way
+in and the dollars→cents conversion on the way out, and no satisfier can opt out.
+(The same `[A -> B]` shells work on an ordinary function's parameters and return —
+there they are the author's own, not a contract's. See `docs/sort-transforms.md`.)
 
 Two receivers to keep distinct: **`this`** is a method's injected instance
-(`this.weight`); **`@`** is the value in flight inside a `[...]` — the one under a
+(`this.area`); **`@`** is the value in flight inside a `[...]` — the one under a
 refinement predicate, or the one a transform-chain is mid-converting. They are
 orthogonal. (Effects live in the event substrate — the write-only `emit`
 primitive and `action` reactions — its own section below:
