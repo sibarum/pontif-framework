@@ -3263,12 +3263,29 @@ public final class AltParser {
                         renames.put(key, binder.text());
                     }
                 }
-            } else if (peek().kind() == AltToken.Kind.LBRACE) {
-                // A nested tuple TYPE ([{{Int, Int}, Int}]) — parseSort routes a
-                // leading '{' here too, but recurse directly for parity.
-                members.put(key, parseTupleSortBody(peek()));
             } else {
-                members.put(key, parseSort());        // type position: a real sort
+                // Type position: a member sort, optionally REPEATED as `T*N` or `N*T`
+                // (e.g. {Decimal*3}, {2*{2*Decimal}}) — expands to N positional members. The
+                // count is whichever operand is the integer, so the order is free and unambiguous.
+                int repeat = 1;
+                IrSort memberSort;
+                if (peek().kind() == AltToken.Kind.INTEGER && isStar(peek(1))) {
+                    repeat = repeatCount(consume());
+                    consume();  // '*'
+                    memberSort = memberSort();
+                } else {
+                    memberSort = memberSort();
+                    if (isStar(peek()) && peek(1).kind() == AltToken.Kind.INTEGER) {
+                        consume();  // '*'
+                        repeat = repeatCount(consume());
+                    }
+                }
+                for (int r = 0; r < repeat; r++) {
+                    members.put("_" + index, memberSort);
+                    index++;
+                }
+                first = false;
+                continue;
             }
             index++;
             first = false;
@@ -3305,6 +3322,33 @@ public final class AltParser {
         if (!discards.isEmpty()) literalConstrainedFields.put(tuple, discards);
         if (!renames.isEmpty()) destructureRenames.put(tuple, renames);
         return tuple;
+    }
+
+    /** A tuple member sort in type position: a nested tuple ({@code {…}}) or any other sort. */
+    private IrSort memberSort() throws ParseException {
+        return peek().kind() == AltToken.Kind.LBRACE ? parseTupleSortBody(peek()) : parseSort();
+    }
+
+    /** Whether {@code t} is the {@code *} operator (the tuple-repetition marker). */
+    private static boolean isStar(AltToken t) {
+        return t.kind() == AltToken.Kind.OP && "*".equals(t.text());
+    }
+
+    /** Parses a tuple-repetition count ({@code N} in {@code {T*N}}) — an integer literal ≥ 1. */
+    private int repeatCount(AltToken intTok) throws ParseException {
+        int n;
+        try {
+            n = Integer.parseInt(intTok.text());
+        } catch (NumberFormatException e) {
+            throw new ParseException(
+                    "A tuple repetition count must be an integer literal, got '" + intTok.text() + "'",
+                    intTok.origin());
+        }
+        if (n < 1) {
+            throw new ParseException(
+                    "A tuple repetition count must be at least 1, got " + n, intTok.origin());
+        }
+        return n;
     }
 
     /**
