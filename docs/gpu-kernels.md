@@ -240,6 +240,46 @@ end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules.
       A handle has one descriptor set, so only one in-flight submission per handle (submitAsync throws
       otherwise — distinct handles are free). **NOT yet wired into Pontif:** the user-facing kernel
       handle + `destroy` + concurrent `on Gpu` await the handle-surface naming/design rulings below.
+
+### Execution model — eager dispatch, synchronize on spread (RULED 2026-07-05, James)
+
+The sync/async split is **not** a GPU concept and **not** about map-vs-reduce (that analogy was a
+stretch). It is the general **stream/effect duality**, and `… on Gpu` merely inherits both legs like any
+other stream producer:
+
+- **Spread `someFunction(&stream)` is synchronous — always** (map or fold, CPU or GPU). Binding a stream
+  and spreading it into a function iterates it and blocks until done.
+- **The emit/action pattern is the asynchronous model** — fire-and-forward, delivered through the event
+  substrate; never synchronized by a spread.
+
+And critically, **nothing is lazy — a stream is eager**. So for `… on Gpu`:
+
+- **`let r:Stream[Int] = frag on Gpu` dispatches eagerly** (`submitAsync`): the GPU work starts *at the
+  bind*. The bind does not block; `r` is a stream over the in-flight batch.
+- **`&r` synchronizes it** (`await`): the spread is the join — it blocks until that dispatch completes,
+  then iterates.
+
+Because binds are eager, concurrency needs **no new syntax** — bind N kernels (all in flight, round-robined
+across the compute queues) and then spread each to join it:
+
+```pontif
+let r1:Stream[Int] = A on Gpu     # eager — A dispatched now
+let r2:Stream[Int] = B on Gpu     # eager — B dispatched now; both in flight concurrently
+f(&r1)                            # synchronize on A
+g(&r2)                            # synchronize on B
+```
+
+- **Slice 2b — `… on Gpu` as an eager stream (the sync leg).** Make the gpu-marked `Iterate` evaluate to
+  a `Stream[Int]` value backed by an eager `submitAsync` (kick the dispatch at the bind, don't block).
+  Introduce a GPU-backed stream source the interpreter's spread-drive **awaits** when it iterates it — so
+  `f(&r)` synchronizes and materializes. The kernel output becomes the **fragment's return value** (not
+  the woven emit's argument), and the woven `emit` becomes **optional** — observability relaxes from
+  "must emit" to "**must be observed**": spread-consumed *or* woven-emit(+action). The async (emit/action)
+  leg is exactly slice 2a, unchanged. Concurrency (multiple eager binds) rides the multi-queue
+  `submitAsync`/`await` primitives already upstream. v1 stays single-output (return only; a distinct
+  emit-arg = the deferred multi-output kernel). Guardrail: a `Stream[Int]` used where an `Int` is wanted
+  is an ordinary type error (no bespoke "can't materialize" rule needed — collapsing to a scalar is just
+  `fold`, and `fold(&r, 0)` synchronizes like any other spread).
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident
