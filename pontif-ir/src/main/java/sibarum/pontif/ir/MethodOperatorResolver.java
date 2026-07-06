@@ -50,6 +50,8 @@ public final class MethodOperatorResolver {
     /** every name a {@code MethodCall} may resolve to (Type.method / Trait.method keys). */
     private final Set<String> methodKeys;
     private final Map<String, IrSort.Structural> structs;
+    /** Sort inference goes through the type-system facade (the single answerer), not a direct call. */
+    private final sibarum.pontif.types.TypeSystem types = sibarum.pontif.types.TypeSystem.standard();
     /** Visibility view used to gate operator/method routing. The whole-module
      *  {@code resolve(...)} entry points leave it {@linkplain ModuleScope#unrestricted()
      *  unrestricted} (single-file, or an already-gated no-op re-run); only the
@@ -187,8 +189,8 @@ public final class MethodOperatorResolver {
                 IrExpr left = rewriteExpr(op.left(), ctx);
                 IrExpr right = rewriteExpr(op.right(), ctx);
                 if (routeOperators) {
-                    IrSort leftSort = NarrowingInference.infer(left, ctx);
-                    IrSort rightSort = NarrowingInference.infer(right, ctx);
+                    IrSort leftSort = types.infer(left, ctx);
+                    IrSort rightSort = types.infer(right, ctx);
                     String sym = dispatchSymbol(op.op());
                     String resolved = sym == null ? null
                             : resolveOverload(sym, leftSort, rightSort, op.origin());
@@ -206,7 +208,7 @@ public final class MethodOperatorResolver {
             }
             case IrExpr.LetIn let -> {
                 IrExpr value = rewriteExpr(let.value(), ctx);
-                IrSort bound = NarrowingInference.infer(value, ctx);
+                IrSort bound = types.infer(value, ctx);
                 if (bound == null) bound = let.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(let.name(), bound) : ctx;
                 yield new IrExpr.LetIn(let.name(), let.declaredSort(), value,
@@ -223,8 +225,8 @@ public final class MethodOperatorResolver {
                     String sym = QualifiedName.memberOf(c.functionName());
                     if (isOperatorSymbol(sym) && args.size() == 2) {
                         String resolved = resolveOverload(sym,
-                                NarrowingInference.infer(args.get(0), ctx),
-                                NarrowingInference.infer(args.get(1), ctx), c.origin());
+                                types.infer(args.get(0), ctx),
+                                types.infer(args.get(1), ctx), c.origin());
                         if (resolved != null) yield new IrExpr.Call(resolved, args, c.origin());
                     }
                 }
@@ -288,7 +290,7 @@ public final class MethodOperatorResolver {
             // (unused) operators-only preset — keep the call symbolic.
             throw MethodResolver.unresolved(mc, "MethodOperatorResolver(routeOperators-only)");
         }
-        String typeName = baseName(NarrowingInference.infer(receiver, ctx));
+        String typeName = baseName(types.infer(receiver, ctx));
         if (typeName != null) {
             String key = typeName + "." + mc.methodName();
             if (methodKeys.contains(key)) {
