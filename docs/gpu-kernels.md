@@ -280,10 +280,22 @@ g(&r2)                            # synchronize on B
   r:Stream[Int] = <gpu>` skips the runtime claim (a `Pending` can't be inspected without awaiting, and the
   bind must not block — element type is fixed at lowering, Int v1). Concurrency needs **no new syntax**:
   bind N kernels (all eager), spread each to join. Tests: `onGpu_boundStream_isConsumedSynchronouslyByASpread`,
-  `onGpu_twoEagerStreams_eachSynchronizedByItsSpread`; 931 core + 10 gpu green. **Deferred:** true device
-  *overlap* — the runner still funnels dispatch through one worker + synchronous `handle.run`, so two eager
-  binds run back-to-back; moving to the upstream `submitAsync`/`await` (submit both, then await both across
-  the multi-queue) is slice 2c. Also still single-output (return only; a divergent emit-arg = multi-output).
+  `onGpu_twoEagerStreams_eachSynchronizedByItsSpread`. Still single-output (return only; a divergent
+  emit-arg = multi-output).
+- **Slice 2c — true device overlap (LANDED 2026-07-05).** The 2b runner funneled each dispatch through one
+  worker + synchronous `handle.run`, so two eager binds ran back-to-back. Split onto the upstream
+  `submitAsync`/`await`: `run()` enqueues only the fast, non-blocking submit and returns at once, so a
+  second `on Gpu` bind submits too — both kernels are in flight (round-robined over the compute queues)
+  before either is awaited; the await is deferred to the spread (`Pending` holds a memoized value-supplier
+  that awaits on the worker). CPU fallback preserved (submit task uses `submitAsync` only when the handle
+  has a GPU pipeline, else synchronous `handle.run`). No deadlock — `values()` is only called from the
+  interpreter thread, and submits are FIFO-enqueued before their awaits. Required an **upstream SuperVast
+  change**: per-submission descriptor sets (`GpuContext` allocates a set + pool + buffers per
+  `submitAsync`, freed in `await`; the pipeline/layouts stay shared), so even the *same* cached pipeline
+  can have several dispatches in flight — the old one-in-flight-per-handle limit is gone. Test:
+  `onGpu_twoEagerStreamsOfTheSameKernel_bothConcurrentAndCorrect` (same `x+y` structure → shared pipeline,
+  two concurrent). 931 core + 11 gpu green; 46 vastir-tools green on a Vulkan device. (Wall-clock overlap
+  is device-dependent; correctness of concurrent dispatch is what the tests pin.)
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident

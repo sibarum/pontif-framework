@@ -979,8 +979,9 @@ is the eligibility check** (the guiding law): a shape with no data-parallel form
 a fork, a guarded/`Break` body — is a source-located compile error, never a silently-wrong
 kernel. `on Gpu` is a **materialization boundary**: inputs must be finite (a GPU batch is
 uploaded whole), so infinite/lazy streams are honestly ineligible. v1 is `Int` (honest `int64`
-columns — values past 2³² survive), single-output per kernel; floats/`vec3` (the shader on-ramp),
-multi-output delivery, and true device-concurrent dispatch are the next slices
+columns — values past 2³² survive), single-output per kernel; eagerly-bound kernels dispatch
+concurrently (across the device's compute queues) and synchronize at their spreads. floats/`vec3`
+(the shader on-ramp) and multi-output delivery are the next slices
 ([docs/gpu-kernels.md](docs/gpu-kernels.md)).
 
 GPU support is **opt-in**: `pontif.gpu` (and `pontif-supirvast`, which owns the Vulkan/SuperVast
