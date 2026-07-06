@@ -225,10 +225,10 @@ end-to-end from a `.ptf`, synchronous, wired into Pontif via two opt-in modules.
       deferred `!!`. Pinned by `onGpu_repeatedDispatch_lowersTheKernelOnlyOnce` (asserts a repeat lowers
       zero extra times). So a re-run now pays neither lowering nor registration — only marshalling +
       the device round trip.
-    **Deferred to 2b+:** multi-field / multi-emit events (need multi-output kernels — v1 is one emit,
-    one field); the parser gap on `main ( &spread:… )` (bare spread inside the `main` paren — use the
-    trailing form); `!!` recovery via `match [!!]`; a real worker/mailbox scheduler for the general
-    event substrate (2a builds only the GPU-needed minimum); concurrent in-flight ordering guarantees.
+    **Deferred to 2b+:** multi-field / multi-emit *events* (the async leg — the sync tuple-return
+    multi-output LANDED, see below; multi-field emit still needs the emit-split generalized); the parser
+    gap on `main ( &spread:… )` (bare spread inside the `main` paren — use the trailing form); `!!`
+    recovery via `match [!!]`; a real worker/mailbox scheduler for the general event substrate.
     - **SuperVast enablers LANDED (2026-07-05, upstream `~/IdeaProjects/supirvast`).** Two primitives
       Pontif's kernel-reuse / destroy / concurrency slices will consume, verified on a Vulkan device:
       (1) **per-handle release** — `Accelerator.release(KernelHandle)` / `KernelHandle.close()` frees
@@ -296,6 +296,19 @@ g(&r2)                            # synchronize on B
   `onGpu_twoEagerStreamsOfTheSameKernel_bothConcurrentAndCorrect` (same `x+y` structure → shared pipeline,
   two concurrent). 931 core + 11 gpu green; 46 vastir-tools green on a Vulkan device. (Wall-clock overlap
   is device-dependent; correctness of concurrent dispatch is what the tests pin.)
+- **Multi-output kernels (LANDED 2026-07-06).** A fragment returning a tuple (`… -> {x+y, x*y}`) is a
+  multi-output kernel: **one output column per tuple member** (struct-of-arrays), reassembled per element
+  into a `_tuple` record → `Stream[{Int,Int}]`. `KernelLowering` derives the output expressions from the
+  body (a positional-tuple `Record` → its members, else the scalar body as one output), emits one column +
+  `BufferStore` each (outputs at slots 0..nOut-1, inputs after — bindings stay contiguous), and
+  `bindElementRefs` recurses into the tuple; `GpuKernelRunner` marshals the nOut columns back into tuples
+  (static `KernelLowering.outputArity` keeps the two in lockstep). A scalar return is the nOut==1 case,
+  unchanged. Also fixed a latent bug this surfaced: `evalIterate` evaluated each stream source *twice*
+  (the live-source pre-check + the materialize loop) — harmless for a `let`-bound `&r` (idempotent Var
+  lookup) but a **second orphaned GPU dispatch** for an inline `on Gpu` source; sources are now evaluated
+  exactly once (also correct for any effectful source). Test: `{x+y, x*y}` consumed via `t._0 + t._1` =
+  {21, 62, 123, 204}. **Still deferred:** multi-output via a multi-*field* woven emit (the async leg —
+  needs the emit-split to produce N outputs); v1 multi-output is the sync tuple-return.
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident
