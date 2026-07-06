@@ -5,6 +5,7 @@ import dev.supirvast.vastir.tools.KernelHandle;
 import dev.supirvast.vastir.tools.KernelSpec;
 import dev.supirvast.vastir.tools.Registration;
 import dev.supirvast.vastir.tools.Rejection;
+import dev.supirvast.vastir.tools.Submission;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.KernelRunners;
@@ -128,20 +129,46 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         if (n == Integer.MAX_VALUE) n = 0;
         final int count = n;
 
-        Future<List<Object>> values = GPU_WORKER.submit(() -> {
+        // EAGER dispatch (docs/gpu-kernels.md, "eager dispatch, synchronize on spread"): kick the work
+        // off now, at the bind. On the GPU this is a non-blocking `submitAsync` (record + submit, no
+        // wait) so the worker frees immediately and the NEXT `on Gpu` bind can submit too — two eager
+        // binds run concurrently on separate queues. Without a device it falls back to the synchronous
+        // CPU path (no overlap to have). This submit task returns a Submission (GPU) or the results (CPU).
+        Future<Object> submitted = GPU_WORKER.submit(() -> {
             KernelHandle handle = registerCached(cacheKey, spec);
             int[][] columns = new int[inputs.length + 1][];
             columns[0] = ValueMarshaller.outputColumn(count);         // slot 0 = output
             for (int i = 0; i < inputs.length; i++) {
                 columns[i + 1] = ValueMarshaller.toColumn(GpuKernels.prefix(inputs[i], count));
             }
-            int[][] result = handle.run(columns, count);
-            long[] out = ValueMarshaller.fromColumn(result[0], count);
-            List<Object> boxed = new ArrayList<>(out.length);
-            for (long v : out) boxed.add(v);                          // Pontif Int = Long at runtime
-            return boxed;
+            return handle.preferredBackend() == KernelHandle.Backend.GPU
+                    ? handle.submitAsync(columns, count)              // in flight — awaited at the spread
+                    : handle.run(columns, count);                     // CPU fallback — synchronous
         });
-        return new Pending(values, emit == null ? null : emit.eventTemplate(),
+
+        // The synchronization point (a spread, or the async drive): await on the worker, then box.
+        // Deferred so all eager submits are launched before the first await — that is what overlaps them.
+        java.util.function.Supplier<List<Object>> await = () -> {
+            try {
+                return GPU_WORKER.submit(() -> {
+                    Object s = submitted.get();
+                    int[][] result = (s instanceof Submission sub)
+                            ? registerCached(cacheKey, spec).await(sub)
+                            : (int[][]) s;
+                    long[] out = ValueMarshaller.fromColumn(result[0], count);
+                    List<Object> boxed = new ArrayList<>(out.length);
+                    for (long v : out) boxed.add(v);                  // Pontif Int = Long at runtime
+                    return boxed;
+                }).get();
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause() == null ? e : e.getCause();
+                throw new RuntimeException(cause.getMessage(), cause);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("`… on Gpu` was interrupted while pending", e);
+            }
+        };
+        return new Pending(await, emit == null ? null : emit.eventTemplate(),
                 emit == null ? null : ARG_VAR, iterate.origin());
     }
 

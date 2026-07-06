@@ -124,6 +124,27 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_twoEagerStreamsOfTheSameKernel_bothConcurrentAndCorrect() {
+        // Both dispatches share the SAME fragment structure (x+y) → the same cached pipeline. Before
+        // per-submission descriptor sets (2c, upstream) a second concurrent dispatch of one pipeline
+        // collided; now each has its own set, so both are eagerly in flight and synchronize correctly.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut}
+                function log(i:Int):Int -> emit StdOut("" + i + " ")  i
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                let c:Stream[Int] = {100, 200, 300, 400}
+                main (
+                  let r1:Stream[Int] = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu
+                  let r2:Stream[Int] = (&a, &c):[ (x:Int, y:Int) -> x + y ] on Gpu
+                  let s1 = log(&r1)
+                  log(&r2)
+                )""");
+        assertEquals("11 22 33 44 101 202 303 404 ", out);
+    }
+
+    @Test
     void onGpu_repeatedDispatch_reusesTheCachedKernel() {
         // The latency fix (docs/gpu-kernels.md): one long-lived Accelerator + per-kernel handle cache,
         // so re-running the same `on Gpu` (e.g. the editor re-compiling on each edit) reuses the built

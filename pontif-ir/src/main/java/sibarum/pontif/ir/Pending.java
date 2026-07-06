@@ -4,8 +4,7 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
+import java.util.function.Supplier;
 
 /**
  * An eager {@code … on Gpu} dispatch (docs/gpu-kernels.md, slice 2). The GPU work is kicked off when
@@ -36,21 +35,25 @@ import java.util.concurrent.Future;
  */
 public final class Pending {
 
-    private final Future<List<Object>> values;
+    private final Supplier<List<Object>> valueSupplier;   // deferred: awaits the batch on first call
+    private List<Object> memo;
+    private boolean drained;
     private final IrExpr eventTemplate;   // null when the kernel weaves no emit (sync-only delivery)
     private final String argVar;          // null iff eventTemplate is null
     private final Origin origin;
     private boolean consumed;             // set once a spread has synchronized on this handle
 
     /**
-     * @param values        the per-element GPU-computed values (the fragment's return; resolves when the
-     *                      batch runs). The single output — also the emit's argument when one is woven.
+     * @param valueSupplier awaits the (eagerly dispatched) batch and returns the per-element computed
+     *                      values — invoked lazily on the first {@link #values()} so that all eager
+     *                      dispatches are launched before the first synchronization (enabling overlap).
+     *                      The single output — also the emit's argument when one is woven.
      * @param eventTemplate the woven completion event's construction with the emitted value replaced by a
      *                      reference to {@code argVar}, or {@code null} when the kernel weaves no emit
      * @param argVar        the placeholder {@code eventTemplate} reads the computed value from, or null
      */
-    public Pending(Future<List<Object>> values, IrExpr eventTemplate, String argVar, Origin origin) {
-        this.values = values;
+    public Pending(Supplier<List<Object>> valueSupplier, IrExpr eventTemplate, String argVar, Origin origin) {
+        this.valueSupplier = valueSupplier;
         this.eventTemplate = eventTemplate;
         this.argVar = argVar;
         this.origin = origin;
@@ -72,21 +75,26 @@ public final class Pending {
     }
 
     /**
-     * Blocks until the GPU batch resolves, returning the per-element computed emit arguments (in
-     * element order). A worker failure (a device {@code Rejection}) is rethrown as the {@code !!}
-     * runtime hazard. Called by the interpreter's drive-to-quiescence loop on the main thread.
+     * Awaits the batch (once, memoized) and returns the per-element computed values in element order.
+     * This is the synchronization point — called by a spread that consumes the stream, or by the
+     * drive-to-quiescence loop for the async (emit) leg. A device {@code Rejection} (or any worker
+     * failure) surfaces as the {@code !!} runtime hazard.
      */
     public List<Object> values() {
+        if (drained) {
+            return memo;
+        }
         try {
-            return values.get();
-        } catch (ExecutionException e) {
+            memo = valueSupplier.get();
+        } catch (RuntimeCheckException e) {
+            throw e;   // already a runtime hazard / check — surface as-is
+        } catch (RuntimeException e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             throw new RuntimeCheckException(
                     "`… on Gpu` failed on the device (the !! hazard): " + cause.getMessage(), origin);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeCheckException("`… on Gpu` was interrupted while pending", origin);
         }
+        drained = true;
+        return memo;
     }
 
     /** The completion event's construction, with the emit argument replaced by {@link #argVar()}. */
