@@ -26,7 +26,7 @@ math."* Investigation showed that math is not where it was assumed to be:
   `DasumBridge.volumeLayer` (`pontif-builtin-gui`), which computes per-voxel central differences
   (`gx,gy,gz,mag`), bakes the **unit gradient direction into RGB** and **magnitude into A**, and
   uploads that as the `GL_RGBA32F` 3D texture. The shader only displays what the CPU encoded.
-- The only **GPU** gradient-from-a-field estimator in dasum is `normalAt()` in `vexelray.frag`
+- The only **GPU** gradient-from-a-field estimator in dasum is `normalAt()` in `sdf.frag`
   — but that is the SDF sphere-tracer, differentiating an *analytic* SDF, not the 3D texture.
   Reusing it on the volume means *porting* it to sample `u_volume` (replace `sdf(p+off)` with
   `texture(u_volume, uvw+texel).a`). It is not sitting ready in the volume path.
@@ -130,7 +130,7 @@ main ( scene({title = "…"}, { normals(fade(volume(Radial()), 0.02), 3) }) )
 ## Deferred: the GPU alternative
 
 If a *continuous* normal-shaded volume mode is wanted later: add a new `Layer` record + `Kind` +
-Material/shader pair (model on `VexelRayLayer`/`VexelRayMaterial`, which already carry
-`u_lightDir`/`u_viewMode` and include a NORMALS view mode), port `vexelray.frag`'s `normalAt()`
+Material/shader pair (model on `SdfLayer`/`SdfMaterial`, which already carry
+`u_lightDir`/`u_viewMode` and include a NORMALS view mode), port `sdf.frag`'s `normalAt()`
 to sample `u_volume` at one-texel offsets, and thread new uniforms through all four Pontif seams
 above. Separate slice; does not block the glyph layer.

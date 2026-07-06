@@ -281,7 +281,7 @@ natively + is indexed; glTF does too but adds a rendering/PBR ecosystem; FBX can
   for fields ([[project_stream_substrate]]), traits + dispatch for the `SdfShape` contract,
   aggregates as the mesh/attr containers ([[project_aggregate_unification]]).
 - **dasum already ships an SDF engine** — `ScalarField`, `CsgField`, `CsgBox`, `SurfaceSampler`,
-  a `VexelRayLayer` sphere-tracer with a NORMALS mode, plus CPU-side gradients. This gives a
+  a `SdfLayer` sphere-tracer with a NORMALS mode, plus CPU-side gradients. This gives a
   **live preview for free** (S1 renders the SDF before any meshing exists) and hands dual
   contouring its gradients.
 - `Vec3`/`Vec4`/`CameraMath` for the transform math.
@@ -317,7 +317,7 @@ An SDF needs no triangles to be drawn: march a ray per pixel until `distance` re
 shade. So the whole authoring front end (primitive struct → `SdfShape` → `distance` runs → render)
 can be witnessed **before any meshing or export exists**. dasum already ships the machinery — a
 `VolumeLayer` dense-voxel raymarcher (already wired on master, what `volume.ptf` renders) and a
-currently-*dark* `VexelRayLayer`/`CsgField`/`CsgBox` analytic sphere-tracer.
+currently-*dark* `SdfLayer`/`CsgField`/`CsgBox` analytic sphere-tracer.
 
 Two flavors — and they are the A-vs-B crossing decision (§6a) showing up early:
 
@@ -332,7 +332,7 @@ Two flavors — and they are the A-vs-B crossing decision (§6a) showing up earl
   crisp. This is resolution **A**.
 - **(b) Analytic preview — a later crispness upgrade.** Ship the shape as a serialized CSG tree to
   dasum's `CsgField`/`CsgBox` so the GPU marches the *exact* field (crisp surfaces, NORMALS shading
-  for free). Requires lighting up the dark vexelray classes. This is resolution **B**.
+  for free). Requires lighting up the dark SDF classes. This is resolution **B**.
 
 **DERIVED honesty constraint:** arbitrary user SDF surfaces (§(5), requirement 5) can be previewed
 **only** via (a). Their `distance` is Pontif code, and the no-function-passing boundary rule
