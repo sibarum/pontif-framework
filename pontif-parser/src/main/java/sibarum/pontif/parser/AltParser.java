@@ -70,7 +70,7 @@ public final class AltParser {
     public static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
-            "assign", "trait", "Type",
+            "assign", "trait", "Type", "type",
             "match", "proof", "main", "emit", "action",
             "true", "false");
 
