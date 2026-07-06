@@ -37,6 +37,9 @@ import java.util.Set;
  */
 public final class AliasResolver {
 
+    /** The anonymous-tuple structural name — a tuple alias is a pure abbreviation, so it inlines. */
+    private static final String TUPLE_SENTINEL = "_tuple";
+
     private AliasResolver() {}
 
     public static IrModule resolve(IrModule module) throws CompileException {
@@ -60,14 +63,16 @@ public final class AliasResolver {
                             "Duplicate type alias '" + ta.name() + "'",
                             ta.origin());
                 }
-                // Struct definitions are nominal — kept by-reference, never
-                // entered into the inlining table — so abbreviations inline but
-                // struct references (incl. self-references) stay IrSort.Named.
-                // Traits ARE inlined (the common, non-recursive case relies on
-                // it for coercion/dispatch), but a trait that references ITSELF
-                // resolves the self-occurrence to a nominal trait shell rather
-                // than expanding forever — see resolveSort's cycle handling.
-                if (!(ta.sort() instanceof IrSort.Structural)) {
+                // DECLARED structs are nominal — kept by-reference, never entered into the inlining
+                // table — so abbreviations inline but struct references (incl. self-references) stay
+                // IrSort.Named. An ANONYMOUS tuple (`_tuple`, e.g. `type ThreeTuple:[{3*Decimal}]`) is a
+                // pure abbreviation, not a nominal type, so it DOES inline. Traits ARE inlined (the
+                // common, non-recursive case relies on it for coercion/dispatch), but a trait that
+                // references ITSELF resolves the self-occurrence to a nominal trait shell rather than
+                // expanding forever — see resolveSort's cycle handling.
+                boolean nominalStruct = ta.sort() instanceof IrSort.Structural s
+                        && !TUPLE_SENTINEL.equals(s.name());
+                if (!nominalStruct) {
                     aliases.put(ta.name(), ta.sort());
                 }
             }
