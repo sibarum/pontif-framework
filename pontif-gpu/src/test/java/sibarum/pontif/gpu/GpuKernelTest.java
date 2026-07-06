@@ -86,6 +86,44 @@ class GpuKernelTest {
     }
 
     @Test
+    void onGpu_boundStream_isConsumedSynchronouslyByASpread() {
+        // Slice 2b — the SYNCHRONOUS leg: `… on Gpu` returns a Stream[Int] (dispatched eagerly at the
+        // bind), and a spread `log(&r)` synchronizes it — no woven emit needed, delivery IS the spread.
+        // The fragment just returns Int; `log` (a plain function that emits StdOut) is spread over it.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut}
+                function log(i:Int):Int -> emit StdOut("" + i + " ")  i
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                main (
+                  let r:Stream[Int] = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu
+                  log(&r)
+                )""");
+        assertEquals("11 22 33 44 ", out);
+    }
+
+    @Test
+    void onGpu_twoEagerStreams_eachSynchronizedByItsSpread() {
+        // Eager dispatch means concurrency needs no new syntax: bind two kernels (both dispatched), then
+        // spread each to synchronize it. Sequential spreads ⇒ deterministic order: sum then product.
+        String out = runCapturingStdout("""
+                requires pontif.core.{Stream}
+                requires pontif.events.{StdOut}
+                function log(i:Int):Int -> emit StdOut("" + i + " ")  i
+                let a:Stream[Int] = {1, 2, 3, 4}
+                let b:Stream[Int] = {10, 20, 30, 40}
+                let c:Stream[Int] = {2, 3, 4, 5}
+                main (
+                  let sum:Stream[Int]  = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu
+                  let prod:Stream[Int] = (&a, &c):[ (x:Int, y:Int) -> x * y ] on Gpu
+                  let s1 = log(&sum)
+                  log(&prod)
+                )""");
+        assertEquals("11 22 33 44 2 6 12 20 ", out);
+    }
+
+    @Test
     void onGpu_repeatedDispatch_reusesTheCachedKernel() {
         // The latency fix (docs/gpu-kernels.md): one long-lived Accelerator + per-kernel handle cache,
         // so re-running the same `on Gpu` (e.g. the editor re-compiling on each edit) reuses the built

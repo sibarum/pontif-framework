@@ -101,6 +101,20 @@ public final class IrInterpreter {
         // value went to the reactions — so it renders as a DriveResult (no output), like `main echo`.
         for (int i = 0; i < outstanding.size(); i++) {  // indexed: a reaction may itself dispatch more
             Pending p = outstanding.get(i);
+            // A spread already synchronized this handle and delivered its results (the sync leg) —
+            // nothing to drive.
+            if (p.consumed()) {
+                continue;
+            }
+            // Never observed: not spread into a consumer, and no woven emit to replay. Fail closed —
+            // observability is "spread-consumed OR emitted" (docs/gpu-kernels.md, the execution model).
+            if (!p.hasEmit()) {
+                throw new RuntimeCheckException(
+                        "`… on Gpu` produced a result that is never observed — spread it into a consumer "
+                                + "(synchronous) or weave an `emit` for an `action` (asynchronous).",
+                        p.origin());
+            }
+            // The asynchronous leg: replay the woven emit per element on the host (forward-only).
             for (Object value : p.values()) {
                 Object event = eval(p.eventTemplate(),
                         Environment.empty().extend(p.argVar(), value), module);
@@ -177,7 +191,12 @@ public final class IrInterpreter {
                 // the declared sort whose fit was undecidable at compile time
                 // is judged here, where the value is concrete. Fail-closed,
                 // mirroring construction checks.
-                if (l.claim() != null) {
+                // A GPU stream (an eager `… on Gpu` dispatch) can't be inspected without awaiting it, and
+                // the bind must not block — the spread synchronizes, not the bind (docs/gpu-kernels.md).
+                // Its element type is fixed at lowering (Int-only in v1) and the claim's element type was
+                // reconciled against the iteration's compile-time type, so the claim is discharged
+                // structurally here rather than by materializing the not-yet-computed batch.
+                if (l.claim() != null && !(value instanceof Pending)) {
                     Sort claim = module.sortFor(l.claim());
                     ProofResult pr = Refinements.satisfies(toSymExpr(value), claim, checker(module));
                     if (!(pr instanceof ProofResult.Passed)) {
@@ -443,6 +462,17 @@ public final class IrInterpreter {
         int steps = Integer.MAX_VALUE;
         for (IrExpr se : sourceExprs) {
             Object sv = eval(se, env, module);
+            // A GPU stream (an eager `… on Gpu` dispatch) is synchronized HERE — the spread is the join
+            // point (docs/gpu-kernels.md, "eager dispatch, synchronize on spread"): mark it consumed so
+            // drive-to-quiescence won't also replay it, and await its per-element results (blocks; a device
+            // failure surfaces as the !! hazard). The awaited values then iterate like any other stream.
+            if (sv instanceof Pending gpu) {
+                gpu.markConsumed();
+                List<Object> awaited = gpu.values();
+                java.util.Map<String, Object> members = new LinkedHashMap<>();
+                for (int i = 0; i < awaited.size(); i++) members.put("_" + i, awaited.get(i));
+                sv = new RecordValue("_stream", members);
+            }
             if (!(sv instanceof RecordValue rec)) {
                 throw new RuntimeCheckException(
                         "Iterate: source must be a stream (a positional record / tuple), got "

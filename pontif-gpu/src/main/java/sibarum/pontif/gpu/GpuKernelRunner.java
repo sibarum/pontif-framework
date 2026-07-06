@@ -100,19 +100,19 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
         IrExpr.Iterate inlined = mapWrite(betaReduce(iterate), v -> inlineCalls(v, functions));
 
         IrExpr body = soleWriteValue(inlined);
+        // The GPU computes the fragment's RETURN value (one per element) — the stream a spread consumes.
+        // A woven `emit` is OPTIONAL (the async delivery leg): when present it is stripped to the pure
+        // return for the kernel, and its event construction becomes the completion template. v1 is
+        // single-output, so `extractEmit` also checks the emitted value IS the returned value (a divergent
+        // emit argument is a second output — deferred multi-output kernel). No emit ⇒ the body is already
+        // the pure return; delivery is by spreading the produced stream (drive-to-quiescence errors only
+        // if the result is neither spread nor emitted).
         Extracted emit = extractEmit(body);
-        if (emit == null) {
-            throw new RuntimeCheckException(
-                    "`… on Gpu` delivers its results by emitting an event per element (docs/gpu-kernels.md), "
-                            + "but this kernel body has no `emit` — nothing would be observable.",
-                    iterate.origin());
-        }
+        IrExpr.Iterate kernel = (emit == null) ? inlined : mapWrite(inlined, v -> emit.kernelWrite());
 
-        // The kernel computes the emit's ARGUMENT (a pure value per element); the emit's effect is
-        // deferred to the host. Lower now (a shape-ineligible kernel is an immediate LoweringError);
-        // the cache key is the pure kernel's structure, so a repeated `on Gpu` reuses its registered
-        // pipeline. Only the device round trip runs on the worker.
-        IrExpr.Iterate kernel = mapWrite(inlined, v -> emit.kernelWrite());
+        // Lower now (a shape-ineligible kernel is an immediate LoweringError); the cache key is the pure
+        // kernel's structure, so a repeated `on Gpu` reuses its registered pipeline. Only the device round
+        // trip runs on the worker.
         String cacheKey = kernel.toString();
         KernelSpec spec = SPEC_CACHE.computeIfAbsent(cacheKey, k -> {
             LOWERINGS.incrementAndGet();
@@ -141,7 +141,8 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
             for (long v : out) boxed.add(v);                          // Pontif Int = Long at runtime
             return boxed;
         });
-        return new Pending(values, emit.eventTemplate(), ARG_VAR, iterate.origin());
+        return new Pending(values, emit == null ? null : emit.eventTemplate(),
+                emit == null ? null : ARG_VAR, iterate.origin());
     }
 
     /**
@@ -193,6 +194,10 @@ public final class GpuKernelRunner implements KernelRunners.KernelRunner {
                             em.origin());
                 }
                 Map.Entry<String, IrExpr> field = rec.members().entrySet().iterator().next();
+                // v1 is single-output: the GPU computes ONE value per element, delivered both as the
+                // stream element (a spread) and as the emit's argument (an action). The emitted value is
+                // that single output; the emit's continuation (the fragment's textual return) is not a
+                // second output in v1 — a genuinely divergent return is the deferred multi-output kernel.
                 IrExpr template = new IrExpr.Record(rec.typeName(),
                         Map.of(field.getKey(), new IrExpr.Var(ARG_VAR, em.origin())),
                         rec.runtimeChecks(), rec.origin());

@@ -8,19 +8,27 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
 /**
- * A GPU dispatch in flight — the async, <b>internal</b> handle for a {@code … on Gpu} iteration
- * (docs/gpu-kernels.md, slice 2). Not user-facing: a program never names or holds a {@code Pending}
- * (there is no {@code await} — RULED, James 2026-07-05); it exists so the interpreter's
- * drive-to-quiescence loop knows there is outstanding work to wait for and deliver.
+ * An eager {@code … on Gpu} dispatch (docs/gpu-kernels.md, slice 2). The GPU work is kicked off when
+ * the iteration is evaluated ("nothing is lazy — it's always eager", James 2026-07-05); this is the
+ * <b>internal</b> handle to that in-flight batch. It backs both consumption legs of the stream/effect
+ * duality:
  *
- * <p><b>Delivery is a woven, deferred {@code emit}.</b> The kernel's per-element body emits a
- * user-defined event (the same {@code emit}/{@code action} machinery as the rest of the event
- * substrate — nothing GPU-specific). That emit is <b>sugar, not a live per-element fire</b> (a GPU
- * cannot emit): the GPU computes the emit's <em>argument</em> (a pure value, one per element), and
- * once the batch resolves the interpreter fires the emit on the main thread — for each computed
- * value, it evaluates {@link #eventTemplate()} with {@link #argVar()} bound to that value and routes
- * the resulting event through {@code fireEvent}. So the GPU does the computation; only the effect is
- * deferred to the host, in element order, single-threaded.
+ * <ul>
+ *   <li><b>Synchronous (spread).</b> When the produced {@code Stream[Int]} is spread into a consumer
+ *       ({@code someFunction(&r)}), the spread is the <em>synchronization point</em>: the interpreter
+ *       {@link #markConsumed() marks} this handle and {@link #values() awaits} the batch, then iterates
+ *       the per-element results. No {@code await} keyword is involved — a spread over a stream is simply
+ *       synchronous, exactly as it is for a CPU stream.</li>
+ *   <li><b>Asynchronous (emit/action).</b> If the kernel weaves an {@code emit} and the result is
+ *       <em>not</em> spread, the interpreter's drive-to-quiescence loop replays that emit per element
+ *       on the host — the same forward-only {@code emit}/{@code action} substrate. A GPU cannot emit, so
+ *       the emit is sugar: the GPU computes the value and the effect is deferred.</li>
+ * </ul>
+ *
+ * A program never names or holds a {@code Pending} — it holds a {@code Stream[Int]}; this is the runtime
+ * backing. The woven emit is <b>optional</b>: a kernel that only returns a value is observed by spreading
+ * its stream. A handle that is <em>neither</em> spread nor carries an emit is never observed — a
+ * fail-closed error at drive-to-quiescence.
  *
  * <p>Failure is the {@code !!} hazard: a device {@code Rejection} (or any worker failure) surfaces
  * when {@link #values()} is drained, rethrown as a {@link RuntimeCheckException} (crashes by default;
@@ -29,21 +37,38 @@ import java.util.concurrent.Future;
 public final class Pending {
 
     private final Future<List<Object>> values;
-    private final IrExpr eventTemplate;
-    private final String argVar;
+    private final IrExpr eventTemplate;   // null when the kernel weaves no emit (sync-only delivery)
+    private final String argVar;          // null iff eventTemplate is null
     private final Origin origin;
+    private boolean consumed;             // set once a spread has synchronized on this handle
 
     /**
-     * @param values        the per-element GPU-computed emit arguments (resolves when the batch runs)
-     * @param eventTemplate the completion event's construction, with the emit argument replaced by a
-     *                      reference to {@code argVar} (so the interpreter re-binds it per element)
-     * @param argVar        the placeholder variable {@code eventTemplate} reads the computed value from
+     * @param values        the per-element GPU-computed values (the fragment's return; resolves when the
+     *                      batch runs). The single output — also the emit's argument when one is woven.
+     * @param eventTemplate the woven completion event's construction with the emitted value replaced by a
+     *                      reference to {@code argVar}, or {@code null} when the kernel weaves no emit
+     * @param argVar        the placeholder {@code eventTemplate} reads the computed value from, or null
      */
     public Pending(Future<List<Object>> values, IrExpr eventTemplate, String argVar, Origin origin) {
         this.values = values;
         this.eventTemplate = eventTemplate;
         this.argVar = argVar;
         this.origin = origin;
+    }
+
+    /** Whether this kernel wove an {@code emit} (the asynchronous delivery leg is available). */
+    public boolean hasEmit() {
+        return eventTemplate != null;
+    }
+
+    /** Marks this handle as synchronized-by-a-spread, so drive-to-quiescence won't also replay it. */
+    public void markConsumed() {
+        consumed = true;
+    }
+
+    /** Whether a spread has already synchronized (and delivered) this handle's results. */
+    public boolean consumed() {
+        return consumed;
     }
 
     /**
