@@ -1,34 +1,24 @@
 requires pontif.core.{Stream}
-requires pontif.events.{StdOut, Event}
+requires pontif.events.{StdOut}
 
 # docs/gpu-kernels.md — element-wise a + b, compiled to a SPIR-V compute kernel and run on the
 # GPU (Vulkan) via the `on Gpu` directive. The value is identical to the CPU version; `on Gpu` only
 # changes WHERE it runs. Zip stops at the shortest; inputs must be finite (a GPU batch is materialized).
 #
-# DELIVERY is a woven `emit` (slice 2): the kernel function emits a user-defined event carrying its
-# per-element result. That emit is SUGAR — a GPU can't fire events — so the GPU computes the emit's
-# argument and the effect is deferred: after the batch completes the emit is replayed on the host, per
-# element, and an `action` reacts. Forward-only — there is no `await`, and no built-in result type;
-# you define the event and consume it exactly like any other event.
+# EXECUTION MODEL (the stream/effect duality, nothing GPU-specific): `on Gpu` produces a Stream[Int].
+# A stream is EAGER — the `let` dispatches the kernel immediately (non-blocking) — and a SPREAD
+# synchronizes it: `log(&r)` awaits the batch, then iterates. The asynchronous alternative is the
+# emit/action substrate; the woven emit is optional. See docs/gpu-kernels.md.
 #
 # The editor bundles pontif.gpu (a reactor module), so open this in the Pontif editor and Run it.
 # SuperVast has a CPU fallback, so it runs with or without a Vulkan device. Prints "11 22 33 44 ".
 
-struct AddSamplesEvent(r:Int)
-assign trait AddSamplesEvent:Event{}
+function log(i:Int):Int -> emit StdOut("" + i + " ")  i
 
 let a:Stream[Int] = {1, 2, 3, 4}
 let b:Stream[Int] = {10, 20, 30, 40}
 
-# Runs on the GPU. The woven emit's argument (r) is what the GPU computes per element.
-function thisRunsOnGpu(x:Int, y:Int):Int ->
-  let r = x + y
-  emit AddSamplesEvent(r)
-  r
-
-# Reacts to each per-element result once the batch resolves.
-action log(e:AddSamplesEvent) ->
-  emit StdOut("" + e.r + " ")
-  e
-
-main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )
+main (
+  let r:Stream[Int] = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu   # dispatched eagerly
+  log(&r)                                                            # the spread synchronizes
+)

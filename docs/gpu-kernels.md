@@ -269,17 +269,21 @@ f(&r1)                            # synchronize on A
 g(&r2)                            # synchronize on B
 ```
 
-- **Slice 2b — `… on Gpu` as an eager stream (the sync leg).** Make the gpu-marked `Iterate` evaluate to
-  a `Stream[Int]` value backed by an eager `submitAsync` (kick the dispatch at the bind, don't block).
-  Introduce a GPU-backed stream source the interpreter's spread-drive **awaits** when it iterates it — so
-  `f(&r)` synchronizes and materializes. The kernel output becomes the **fragment's return value** (not
-  the woven emit's argument), and the woven `emit` becomes **optional** — observability relaxes from
-  "must emit" to "**must be observed**": spread-consumed *or* woven-emit(+action). The async (emit/action)
-  leg is exactly slice 2a, unchanged. Concurrency (multiple eager binds) rides the multi-queue
-  `submitAsync`/`await` primitives already upstream. v1 stays single-output (return only; a distinct
-  emit-arg = the deferred multi-output kernel). Guardrail: a `Stream[Int]` used where an `Int` is wanted
-  is an ordinary type error (no bespoke "can't materialize" rule needed — collapsing to a scalar is just
-  `fold`, and `fold(&r, 0)` synchronizes like any other spread).
+- **Slice 2b — `… on Gpu` as an eager stream, synchronized on spread (LANDED 2026-07-05).** The
+  gpu-marked `Iterate` now evaluates to a `Stream[Int]` value (runtime-backed by `Pending`), dispatched
+  eagerly at the bind. A spread whose source is that handle **awaits** it and iterates — `f(&r)` is the
+  synchronization point (`IrInterpreter.evalIterate` marks the `Pending` consumed + drains it). The woven
+  `emit` is now **optional**: with none, the kernel computes the fragment's return and delivery is the
+  spread; with one, it's the async leg (2a). Observability relaxed from "must emit" to "**must be
+  observed**" — drive-to-quiescence skips consumed handles, replays the emit for unconsumed-with-emit, and
+  errors only when a result is neither spread nor emitted (`Pending.consumed()`/`hasEmit()`). A `let
+  r:Stream[Int] = <gpu>` skips the runtime claim (a `Pending` can't be inspected without awaiting, and the
+  bind must not block — element type is fixed at lowering, Int v1). Concurrency needs **no new syntax**:
+  bind N kernels (all eager), spread each to join. Tests: `onGpu_boundStream_isConsumedSynchronouslyByASpread`,
+  `onGpu_twoEagerStreams_eachSynchronizedByItsSpread`; 931 core + 10 gpu green. **Deferred:** true device
+  *overlap* — the runner still funnels dispatch through one worker + synchronous `handle.run`, so two eager
+  binds run back-to-back; moving to the upstream `submitAsync`/`await` (submit both, then await both across
+  the multi-queue) is slice 2c. Also still single-output (return only; a divergent emit-arg = multi-output).
 - **Slice 3 — fusion of composed pipelines.** `(…):[f]):[g] on Gpu` → one fused kernel (reuse the
   SDF inlining traversal). Guarantees pipelines stay one roundtrip.
 - **Slice 4 — reductions.** `fold`/`scan` → on-device multi-pass reduction (stays device-resident

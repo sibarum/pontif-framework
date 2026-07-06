@@ -938,42 +938,49 @@ A data-parallel iteration can be run as a **compute kernel on the GPU** by marki
 **SPIR-V** → **Vulkan**; the result is identical to running it on the CPU — `on Gpu` changes
 *where* it runs, never *what* it computes (proven by SuperVast's CPU-vs-GPU differential oracle).
 
-`on Gpu` is **async**, and it delivers its results **forward-only** — Pontif has no `await`.
-The kernel function carries a **woven `emit`** of an event *you* define; a GPU can't fire events,
-so that emit is *sugar*: the GPU computes the emit's **argument** (one value per element), and once
-the batch resolves the emit is replayed on the host, per element, for an ordinary `action` to react
-to — the same `emit`/`action` substrate that powers IO, nothing GPU-specific. `main` stays live
-until every dispatch resolves, then exits:
+`on Gpu` produces a **`Stream[Int]`**, and *how you consume it* picks synchronous or asynchronous —
+the ordinary **stream/effect duality**, nothing GPU-specific. A stream is **eager**: the `let` binding
+dispatches the kernel immediately (non-blocking), and a **spread `f(&r)` synchronizes** it — awaits the
+batch, then iterates. Here the GPU adds two vectors and `log` (spread over the result) prints each:
 
 ```pontif
 requires pontif.core.{Stream}
-requires pontif.events.{StdOut, Event}
+requires pontif.events.{StdOut}
 
-struct AddSamplesEvent(r:Int)
-assign trait AddSamplesEvent:Event{}
+function log(i:Int):Int -> emit StdOut("" + i + " ")  i
 
 let a:Stream[Int] = {1, 2, 3, 4}
 let b:Stream[Int] = {10, 20, 30, 40}
 
-function thisRunsOnGpu(x:Int, y:Int):Int ->   # the GPU computes r; the emit is deferred to the host
-  let r = x + y
-  emit AddSamplesEvent(r)
-  r
-
-action log(e:AddSamplesEvent) ->              # reacts per element once the batch resolves
-  emit StdOut("" + e.r + " ")
-  e
-
-main ( (&a, &b):[ (x:Int, y:Int) -> thisRunsOnGpu(x, y) ] on Gpu )   # → prints "11 22 33 44 "
+main (
+  let r:Stream[Int] = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu   # dispatched eagerly
+  log(&r)                                                            # the spread synchronizes → "11 22 33 44 "
+)
 ```
+
+Because binds are eager, **concurrency needs no new syntax** — bind two kernels (both in flight), then
+spread each to join it:
+
+```pontif
+main (
+  let sum:Stream[Int]  = (&a, &b):[ (x:Int, y:Int) -> x + y ] on Gpu
+  let prod:Stream[Int] = (&a, &c):[ (x:Int, y:Int) -> x * y ] on Gpu
+  let s1 = log(&sum)  log(&prod)
+)
+```
+
+The **asynchronous** alternative is the `emit`/`action` substrate — the kernel function weaves an
+`emit` of an event you define, and once the batch resolves it's replayed on the host per element for an
+`action` to react to (fire-and-forward, forward-only, no `await`). The woven `emit` is optional — it's
+just the async delivery leg.
 
 The map/zip fragment is compiled to the canonical `out[gid] = f(in0[gid], …)` kernel. **Lowering
 is the eligibility check** (the guiding law): a shape with no data-parallel form — a fold/scan,
 a fork, a guarded/`Break` body — is a source-located compile error, never a silently-wrong
 kernel. `on Gpu` is a **materialization boundary**: inputs must be finite (a GPU batch is
 uploaded whole), so infinite/lazy streams are honestly ineligible. v1 is `Int` (honest `int64`
-columns — values past 2³² survive) with a single woven `emit` per kernel; floats/`vec3` (the
-shader on-ramp) and multi-field / multi-emit delivery are the next slices
+columns — values past 2³² survive), single-output per kernel; floats/`vec3` (the shader on-ramp),
+multi-output delivery, and true device-concurrent dispatch are the next slices
 ([docs/gpu-kernels.md](docs/gpu-kernels.md)).
 
 GPU support is **opt-in**: `pontif.gpu` (and `pontif-supirvast`, which owns the Vulkan/SuperVast
