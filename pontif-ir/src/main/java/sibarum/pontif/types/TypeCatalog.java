@@ -104,6 +104,14 @@ public final class TypeCatalog {
         });
     }
 
+    /**
+     * Whether {@code name} was explicitly declared (a struct, trait, or alias registered here) — as
+     * opposed to a fallback primitive or native constructor that {@link #lookup} would still answer.
+     */
+    public boolean isDeclared(String name) {
+        return byName.containsKey(name);
+    }
+
     /** Whether {@code name} is a user-declared struct. */
     public boolean isStruct(String name) {
         return byName.get(name) instanceof TypeInfo.Struct;

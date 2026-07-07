@@ -1,32 +1,19 @@
 package sibarum.pontif.types;
 
-import java.util.Map;
-import java.util.Set;
-
-import sibarum.pontif.ir.IrSort;
-
 /**
- * The registries {@link TypeSystem#coercionFor} consults to decide a coercion — the type-level facts a
- * caller has on hand at the point of a binding, handed in rather than re-derived. Read-only.
+ * What {@link TypeSystem#coercionFor} consults to decide a coercion: the {@link TypeCatalog} — the one
+ * registry of declared types — as it stands where the binding is made. Read-only from the resolver's
+ * side. The catalog answers the three questions coercion asks:
  *
  * <ul>
- *   <li>{@code structDefs} — declared structs by name; a struct's {@code baseSort()} is what licenses a
- *       {@link Coercion.Demote} (does {@code from} demote to {@code to}?).</li>
- *   <li>{@code traitNames} — names declared as traits; either side being a trait licenses a
- *       {@link Coercion.TraitCast} (implicit both directions).</li>
- *   <li>{@code aliasNames} — names declared as sort aliases, whose real base is unknown until
- *       {@code AliasResolver} runs; a declared alias makes the type system <em>abstain</em>
- *       ({@link Coercion.None}) rather than guess a mismatch.</li>
+ *   <li>a struct's shape and its {@code baseSort()} — what licenses a {@link Coercion.Demote} (does
+ *       {@code from} demote to {@code to}?);</li>
+ *   <li>whether a name is a trait — either side being one licenses a {@link Coercion.TraitCast}
+ *       (implicit both directions);</li>
+ *   <li>whether a name is a still-unresolved alias — which makes the type system <em>abstain</em>
+ *       ({@link Coercion.None}) rather than guess a mismatch (its real base is unknown until
+ *       {@code AliasResolver} runs).</li>
  * </ul>
  */
-public record CoercionContext(
-        Map<String, IrSort.Structural> structDefs,
-        Set<String> traitNames,
-        Set<String> aliasNames) {
-
-    public CoercionContext {
-        structDefs = Map.copyOf(structDefs);
-        traitNames = Set.copyOf(traitNames);
-        aliasNames = Set.copyOf(aliasNames);
-    }
+public record CoercionContext(TypeCatalog catalog) {
 }

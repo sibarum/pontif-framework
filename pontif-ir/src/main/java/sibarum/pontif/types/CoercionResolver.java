@@ -36,7 +36,7 @@ final class CoercionResolver {
         // (can't prove a mismatch, so abstain).
         if (declaredBase != null && inferredBase != null
                 && !"_".equals(inferredBase)
-                && !ctx.aliasNames().contains(declaredBase)
+                && !ctx.catalog().isAlias(declaredBase)
                 && !declaredBase.equals(inferredBase)) {
             // A declared DEMOTION: the value's struct carries a base sort that demotes to the claimed
             // base (`struct Point3D:[Point:…]`), so `let b:Point = a` is a valid projection — the
@@ -47,7 +47,7 @@ final class CoercionResolver {
             // Trait coercion, implicit in BOTH directions: the trait's attributes are computed
             // projections (nothing fabricated upward, nothing lost downward). Satisfaction is enforced
             // by SortChecker (the impl) and dispatch (only satisfiers resolve).
-            if (ctx.traitNames().contains(declaredBase) || ctx.traitNames().contains(inferredBase)) {
+            if (ctx.catalog().isTrait(declaredBase) || ctx.catalog().isTrait(inferredBase)) {
                 return new Coercion.TraitCast();
             }
             // tuple → Stream[T]: the one-way autobox (docs/iteration.md §8.6) — a clean forget of the
@@ -65,7 +65,9 @@ final class CoercionResolver {
 
     /** Whether {@code fromBase}'s declared struct carries a base sort whose base is {@code toBase}. */
     private static boolean demotesTo(String fromBase, String toBase, CoercionContext ctx) {
-        IrSort.Structural from = ctx.structDefs().get(fromBase);
+        // User struct only — a native constructor or primitive has no demotion base.
+        IrSort.Structural from = ctx.catalog().lookup(fromBase).orElse(null)
+                instanceof TypeInfo.Struct s ? s.shape() : null;
         if (from == null || from.baseSort() == null) return false;
         return toBase.equals(baseSortName(from.baseSort()));
     }

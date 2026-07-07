@@ -15,6 +15,8 @@ import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.types.Coercion;
 import sibarum.pontif.types.CoercionContext;
+import sibarum.pontif.types.TypeCatalog;
+import sibarum.pontif.types.TypeInfo;
 import sibarum.pontif.types.TypeSystem;
 
 import java.util.ArrayDeque;
@@ -134,12 +136,23 @@ public final class AltParser {
     private final Deque<String> contextualBaseStack = new ArrayDeque<>();
 
     /**
-     * Structs declared so far in the current parse. Populated by {@code struct
-     * Name(...)}; consulted by struct-pattern parsing to resolve bare field
-     * idents (e.g., {@code [Point(x, y)]}) to declared field sorts. Required
-     * to be populated BEFORE the struct is used — slice-5 restriction.
+     * The types declared so far in the current parse — structs, traits, and sort aliases — in the
+     * consolidated {@link TypeCatalog} (the single registry shared with the IR side). Populated as each
+     * declaration is parsed; consulted to resolve struct field sorts (e.g. {@code [Point(x, y)]}),
+     * classify annotation names, and answer coercion queries. A name absent here is not (yet) declared
+     * in this file — a forward or cross-module reference, deferred to link time. Required to be populated
+     * BEFORE a struct is used by name — slice-5 restriction.
      */
-    private final Map<String, IrSort.Structural> declaredStructs = new LinkedHashMap<>();
+    private final TypeCatalog types = new TypeCatalog();
+
+    /**
+     * The user-declared struct shape for {@code name}, or null — the parser's historical
+     * {@code declaredStructs.get} semantics (a native constructor or primitive is <em>not</em> a
+     * declared struct here; {@link #patternShapeFor} is the one place that also admits natives).
+     */
+    private IrSort.Structural declaredStructShape(String name) {
+        return types.lookup(name).orElse(null) instanceof TypeInfo.Struct s ? s.shape() : null;
+    }
 
     /**
      * Struct-pattern members that were given as positional <em>literals</em>
@@ -165,7 +178,7 @@ public final class AltParser {
 
     /**
      * Identity set of {@link IrSort.Structural} patterns whose struct was NOT in
-     * {@link #declaredStructs} at parse time (cross-module / imported). Their
+     * {@link #types} at parse time (cross-module / imported). Their
      * slots are keyed positionally ({@code _0.._n}) with binder/discard roles
      * encoded in the slot sorts via {@link #DEFERRED_BIND}/{@link #DEFERRED_SKIP};
      * the post-link {@code DestructureResolver} maps slots to declared field
@@ -248,21 +261,6 @@ public final class AltParser {
      */
     private final Set<String> declaredZeroArgFunctions = new java.util.HashSet<>();
 
-    /**
-     * Names declared as reusable sort aliases via {@code let NAME:Type[...]}.
-     * Tracked so the parse-time base-sort-mismatch check defers on an alias-typed
-     * let (the alias's real base is only known after {@code AliasResolver} runs).
-     */
-    private final Set<String> declaredSortAliases = new java.util.HashSet<>();
-
-    /**
-     * Names declared as traits via {@code trait NAME{...}}. Tracked so the
-     * base-sort-mismatch check accepts a struct→trait upcast (`let h:Trait = s`):
-     * a trait coerces implicitly in both directions because its attributes are
-     * computed projections (information-conserving). Satisfaction is enforced by
-     * SortChecker (the impl) and dispatch (only satisfiers resolve).
-     */
-    private final Set<String> declaredTraits = new java.util.HashSet<>();
 
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
@@ -1351,7 +1349,7 @@ public final class AltParser {
                 List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
                 expect(AltToken.Kind.RBRACKET);
                 sort = new IrSort.Named(baseTok.text(), baseTok.origin());
-                IrSort.Structural baseStruct = declaredStructs.get(baseTok.text());
+                IrSort.Structural baseStruct = declaredStructShape(baseTok.text());
                 for (IrStmt.RequireEntry e : entries) {
                     IrSort fieldSort = baseStruct != null
                             && baseStruct.members().get(e.remoteName()) != null
@@ -1785,7 +1783,7 @@ public final class AltParser {
                                     + "sort, not a value, so it can't have '= EXPR'",
                             peek().origin());
                 }
-                declaredSortAliases.add(name);
+                types.register(name, new TypeInfo.Alias(aliased));
                 return new IrStmt.TypeAlias(name, aliased, start.origin());
             } else if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
                 // A NAMED trait uses the `trait` declarator, not `let`.
@@ -1819,12 +1817,12 @@ public final class AltParser {
         // the binding becomes the bare struct sort and the base-mismatch check
         // below sees a match.
         if (synthDirective && value != null && declaredSort instanceof IrSort.Refined ref
-                && declaredStructs.containsKey(ref.name())) {
+                && types.isStruct(ref.name())) {
             String valueBase = baseSortName(inferMaximalSort(value));
             if (!ref.name().equals(valueBase)) {
-                IrSort.Structural target = declaredStructs.get(ref.name());
+                IrSort.Structural target = declaredStructShape(ref.name());
                 IrSort.Structural valueStruct = valueBase == null
-                        ? null : declaredStructs.get(valueBase);
+                        ? null : declaredStructShape(valueBase);
                 value = mergePartialWithPin(
                         value, ref.name(), target, valueStruct, ref.predicate(), start.origin());
                 declaredSort = new IrSort.Named(ref.name(), declaredSort.origin());
@@ -1991,7 +1989,7 @@ public final class AltParser {
      *       top-level lets, else the loose {@code "_"} sort.
      *   <li>{@code Record}       → structural sort with recursively-inferred
      *       field sorts. Struct name is recovered via field-set lookup in
-     *       {@link #declaredStructs}; if no unique match, the sort is
+     *       {@link #types}; if no unique match, the sort is
      *       anonymous (still useful for field access).
      *   <li>{@code FieldAccess}  → base's sort's field sort, if base inferable.
      *   <li>{@code BinOp}        → {@code [Int:@==expr]} or {@code [Bool:@==expr]}
@@ -2050,7 +2048,7 @@ public final class AltParser {
         functionReturns.putAll(declaredFunctionReturns);  // declared returns win
         typeEnv.values().removeIf(java.util.Objects::isNull);
         functionReturns.values().removeIf(java.util.Objects::isNull);
-        return new InferenceContext(typeEnv, functionReturns, declaredStructs, Map.of(), Map.of());
+        return new InferenceContext(typeEnv, functionReturns, types.structShapes(), Map.of(), Map.of());
     }
 
     /**
@@ -2059,7 +2057,7 @@ public final class AltParser {
      * autobox / Int→Decimal / mismatch) lives behind the facade rather than in the let-lowering.
      */
     private CoercionContext coercionContext() {
-        return new CoercionContext(declaredStructs, declaredTraits, declaredSortAliases);
+        return new CoercionContext(types);
     }
 
 
@@ -2067,7 +2065,7 @@ public final class AltParser {
     // Form: `struct Name(field:Sort, field:Sort, ...)`
     //
     // Desugars to an IrStmt.TypeAlias whose aliased sort is an IrSort.Structural.
-    // The struct is also recorded in {@link #declaredStructs} so that subsequent
+    // The struct is also recorded in {@link #types} so that subsequent
     // uses (`[Name(x, y)]` destructure, `[Name(field:val)]` constraint) can
     // resolve field names without re-stating their types. Slice-5 restriction:
     // the struct must be declared before any use that omits field types.
@@ -2349,7 +2347,7 @@ public final class AltParser {
         }
         expect(AltToken.Kind.COLON);
         IrSort aliased = parseBracketSort();   // the `[…]` — unions, refinements, tuples, alias references
-        declaredSortAliases.add(nameTok.text());
+        types.register(nameTok.text(), new TypeInfo.Alias(aliased));
         return new IrStmt.TypeAlias(nameTok.text(), aliased, start.origin());
     }
 
@@ -2392,7 +2390,7 @@ public final class AltParser {
         }
         IrSort.Structural structSort =
                 new IrSort.Structural(nameTok.text(), members, baseSort, typeParams, origin);
-        declaredStructs.put(nameTok.text(), structSort);
+        types.register(nameTok.text(), new TypeInfo.Struct(structSort));
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
     }
 
@@ -2418,9 +2416,7 @@ public final class AltParser {
         for (IrSort arg : n.typeArgs()) {
             if (arg instanceof IrSort.Named an && an.typeArgs().isEmpty()
                     && !PRIMITIVE_SORTS.contains(an.name())
-                    && !declaredStructs.containsKey(an.name())
-                    && !declaredTraits.contains(an.name())
-                    && !declaredSortAliases.contains(an.name())
+                    && !types.isDeclared(an.name())
                     && !typeParams.containsKey(an.name())) {
                 typeParams.put(an.name(), null);
             }
@@ -2561,7 +2557,7 @@ public final class AltParser {
             // `Name{e1, e2, …}` — a construction-pin return sort over a declared
             // struct (S5): desugars to `[Name:@ == Name(e1, …)]`, so spec-only
             // synthesis derives the body `Name(e1, …)` via the @==EXPR path.
-            if (peek(1).kind() == AltToken.Kind.LBRACE && declaredStructs.containsKey(t.text())) {
+            if (peek(1).kind() == AltToken.Kind.LBRACE && types.isStruct(t.text())) {
                 return parseConstructionPinSort();
             }
             // `Name[arg, …]` — a parametric type application
@@ -2622,7 +2618,7 @@ public final class AltParser {
      */
     private IrSort parseConstructionPinSort() throws ParseException {
         AltToken nameTok = expect(AltToken.Kind.IDENT);
-        IrSort.Structural struct = declaredStructs.get(nameTok.text());
+        IrSort.Structural struct = declaredStructShape(nameTok.text());
         List<String> fields = new ArrayList<>(struct.members().keySet());
         expect(AltToken.Kind.LBRACE);
         List<IrExpr> values = new ArrayList<>();
@@ -2682,11 +2678,11 @@ public final class AltParser {
                     "A `trait` declaration is type-level only and cannot have a value "
                             + "(`= …`).", peek().origin());
         }
-        declaredTraits.add(name);
         IrSort.Trait named = new IrSort.Trait(
                 name, body.methods(), body.attributes(), body.associatedTypes(),
                 typeParams, body.operators(), baseTrait, List.of(),
                 body.methodDefaults(), body.returnShells(), body.argShells(), body.origin());
+        types.register(name, new TypeInfo.Trait(named));
         for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }
@@ -3423,7 +3419,7 @@ public final class AltParser {
     /**
      * Parses the comma-separated clause list inside {@code [Name(...)]}:
      *   - {@code field:Sort} — explicit per-field sort
-     *   - {@code field}      — bare ident; sort looked up from {@link #declaredStructs}
+     *   - {@code field}      — bare ident; sort looked up from {@link #types}
      *   - a <b>literal</b> ({@code 0}, {@code 1.5}, {@code true}) — positional:
      *     the i-th clause maps to the i-th declared field, constraining it to
      *     {@code [@==literal]} without binding it ({@code [Ternion(z, 0, w)]}).
@@ -3437,11 +3433,9 @@ public final class AltParser {
      * (unscaled, scale)).
      */
     private IrSort.Structural patternShapeFor(String typeName) {
-        IrSort.Structural decl = declaredStructs.get(typeName);
-        if (decl != null) return decl;
-        return sibarum.pontif.ir.NativeConstructors.has(typeName)
-                ? sibarum.pontif.ir.NativeConstructors.get(typeName).shape()
-                : null;
+        // Struct OR native constructor — the one shape query that admits built-ins (the catalog's
+        // shapeOf answers both, so the former explicit NativeConstructors fallback is subsumed).
+        return types.shapeOf(typeName).orElse(null);
     }
 
     /**
@@ -3973,7 +3967,7 @@ public final class AltParser {
             if (t.kind() == AltToken.Kind.LBRACKET
                     && expr instanceof IrExpr.Var fnVar
                     && postfixOpensOnSameLine(t)
-                    && !declaredStructs.containsKey(fnVar.name())
+                    && !types.isStruct(fnVar.name())
                     && typeApplicationAhead()) {
                 // Explicit type-application of a generic function: `map[Int, String](args)`
                 // (docs/stream-war.md §8b). The `[…]` are TYPE arguments (bracket/paren
@@ -4018,9 +4012,9 @@ public final class AltParser {
                 // struct constructs a record (positional), not a Call. Native
                 // constructors (Decimal(unscaled, scale)) route the same way —
                 // their registered shape plays the struct declaration's part.
-                if (expr instanceof IrExpr.Var v && declaredStructs.containsKey(v.name())) {
+                if (expr instanceof IrExpr.Var v && types.isStruct(v.name())) {
                     expr = parsePositionalStructLiteral(
-                            declaredStructs.get(v.name()), v.name(), open);
+                            declaredStructShape(v.name()), v.name(), open);
                     continue;
                 }
                 if (expr instanceof IrExpr.Var v
@@ -4077,16 +4071,13 @@ public final class AltParser {
             } else if (t.kind() == AltToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
                     && expr instanceof IrExpr.Var v
-                    && (declaredStructs.containsKey(v.name())
-                            || sibarum.pontif.ir.NativeConstructors.has(v.name()))) {
+                    && types.shapeOf(v.name()).isPresent()) {
                 // By-name struct literal `Foo{x=a, y=b}`. The brace form is
                 // reserved for declared-struct construction in this slice;
                 // anonymous and dotted-name forms are deferred. Native
-                // constructors take the brace form too.
+                // constructors (their shape answered by the catalog too) take it as well.
                 AltToken open = consume();
-                IrSort.Structural shape = declaredStructs.containsKey(v.name())
-                        ? declaredStructs.get(v.name())
-                        : sibarum.pontif.ir.NativeConstructors.get(v.name()).shape();
+                IrSort.Structural shape = types.shapeOf(v.name()).orElseThrow();
                 expr = parseByNameStructLiteral(shape, v.name(), open);
             } else if (t.kind() == AltToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
@@ -4975,7 +4966,7 @@ public final class AltParser {
             AltToken baseTok = expect(AltToken.Kind.IDENT);
             headDestr = parseDotBraceEntryList();
             IrSort inputSort = new IrSort.Named(baseTok.text(), baseTok.origin());
-            headDestrBase = declaredStructs.get(baseTok.text());
+            headDestrBase = declaredStructShape(baseTok.text());
             atVar = "$at" + (syntheticCounter++);
             params = List.of(new IrParam(atVar, inputSort));
             cur = new IrExpr.Var(atVar, open.origin());
@@ -5378,7 +5369,7 @@ public final class AltParser {
      */
     /**
      * Whether {@code sp} is a deferred (cross-module) positional struct pattern —
-     * its struct was not in {@link #declaredStructs} at parse time, so its slots
+     * its struct was not in {@link #types} at parse time, so its slots
      * are positional and {@code DestructureResolver} owns the post-link desugar.
      */
     private boolean isDeferredPattern(IrSort.Structural sp) {
