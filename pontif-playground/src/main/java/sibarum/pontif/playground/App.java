@@ -107,9 +107,11 @@ public final class App {
     /** Font group key for the monospace atlas (registered alongside the primary one). */
     private static final String MONO_FONT_GROUP = "mono";
 
-    /** The idle status-ribbon message; restored when the caret leaves an error. */
-    private static final String DEFAULT_STATUS =
-            "Pontif Editor — edit code, press Run; the Receipts tab shows both proof graphs.  Click here to view the event log.";
+    /** Running count of lines written to the event log — cumulative "so far" (never
+     *  decremented when old events age out of the in-memory history). Bumped by the
+     *  {@link #onLogEvent} subscriber; drives the idle ribbon message. */
+    private static final java.util.concurrent.atomic.AtomicLong logLineCount =
+            new java.util.concurrent.atomic.AtomicLong(0L);
 
     private static final String UNTITLED_LABEL = "(untitled)";
     private static final String DEFAULT_FILE_NAME = "untitled.ptf";
@@ -217,8 +219,9 @@ public final class App {
     private static volatile long editVersion = 0L;
 
     /** The error message currently parked in the ribbon's default slot, so the
-     *  per-frame caret check only republishes when it actually changes. */
-    private static String shownErrorMessage = null;
+     *  per-frame caret check only republishes when it actually changes. Volatile:
+     *  written on the GLFW thread, read by the (off-thread) log subscriber. */
+    private static volatile String shownErrorMessage = null;
 
     private static final ScheduledExecutorService COMPILE_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -338,7 +341,10 @@ public final class App {
                     Icon.DEFAULT_FONT_GROUP,
                     Icons.CHEVRON_UP, Icons.CHEVRON_DOWN, Icons.X, Icons.SEARCH));
 
-                Status.setDefaultMessage(DEFAULT_STATUS, Variant.DEFAULT);
+                // Count every log line for the idle ribbon indicator (before the first
+                // setDefaultMessage, so the count and the message stay in step).
+                Status.subscribe(App::onLogEvent);
+                Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
                 Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
                 wireInput(win, cursors);
@@ -1982,7 +1988,29 @@ public final class App {
             }
         } else if (shownErrorMessage != null) {
             shownErrorMessage = null;
-            Status.setDefaultMessage(DEFAULT_STATUS, Variant.DEFAULT);
+            Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
+        }
+    }
+
+    /** The idle ribbon message: the running count of lines written to the event log,
+     *  plus the click-to-view affordance. Shown when no flash event or error is
+     *  occupying the message slot. */
+    private static String idleStatusMessage() {
+        long n = logLineCount.get();
+        return n + (n == 1 ? " line" : " lines") + " written to the event log — click here to view.";
+    }
+
+    /** Status log subscriber: tally each event's lines (message + any detail lines,
+     *  matching how the log dialog renders it) and refresh the idle message so the new
+     *  count shows once the flash reverts. Skips the refresh while an error is parked
+     *  in the slot, so the user's error message isn't clobbered (updateErrorStatus
+     *  restores the fresh count when the caret leaves the error). Runs on the logging
+     *  thread; setDefaultMessage is thread-safe. */
+    private static void onLogEvent(sibarum.dasum.gui.core.status.StatusEvent e) {
+        int lines = 1 + (e.hasDetails() ? e.details().split("\\R").length : 0);
+        logLineCount.addAndGet(lines);
+        if (shownErrorMessage == null) {
+            Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
         }
     }
 
