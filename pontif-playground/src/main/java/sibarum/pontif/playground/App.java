@@ -218,10 +218,24 @@ public final class App {
      *  stale marks (computed against text the user has since changed) never show. */
     private static volatile long editVersion = 0L;
 
+    /** The latest {@code editVersion} whose live-compile finished while still current.
+     *  When it equals {@link #editVersion} the buffer is "settled" (no edits in flight),
+     *  which is the only time the caret hint recomputes — so its parse-backed lookups
+     *  never run mid-keystroke. */
+    private static volatile long settledVersion = -1L;
+
     /** The error message currently parked in the ribbon's default slot, so the
-     *  per-frame caret check only republishes when it actually changes. Volatile:
-     *  written on the GLFW thread, read by the (off-thread) log subscriber. */
-    private static volatile String shownErrorMessage = null;
+     *  per-frame caret check only republishes when it actually changes. */
+    private static String shownErrorMessage = null;
+    /** The idle (non-error) message last published — a contextual hint or the log-line
+     *  count — so the per-frame refresh republishes only when the text changes. */
+    private static String shownIdleMessage = null;
+
+    // Caret-hint cache: the parse-backed inScope/exporters lookups are too heavy to run
+    // every frame, but only change when the token under the caret or the buffer changes.
+    private static String hintName = null;      // token the cached hint was computed for
+    private static long   hintVersion = -1L;    // editVersion the cache is valid for
+    private static String hintResult = null;    // cached hint text (null = no hint applies)
 
     private static final ScheduledExecutorService COMPILE_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -1837,6 +1851,7 @@ public final class App {
                                        Path file, long version) {
         PontifCompiler.CompileResult result = COMPILER.compileAlt(content, sourceName, resolveDir);
         if (version != editVersion) return;   // superseded by a newer edit
+        settledVersion = version;             // buffer is stable at this version — hints may recompute
         if (result instanceof PontifCompiler.CompileResult.Failed failed) {
             errorMarks = computeMarks(content, sourceName, failed.error());
         } else {
@@ -1981,37 +1996,84 @@ public final class App {
         for (ErrorMark m : errorMarks) {
             if (caret >= m.start() && caret <= m.end()) { near = m.message(); break; }
         }
+        // The ribbon's default (idle) slot: an error at the caret wins, carrying a
+        // contextual Auto-Action hint when the token offers one (un-imported → require;
+        // resolvable-but-misused → go to definition); otherwise the log count. This
+        // method is the single author of the default message, runs each frame, and
+        // republishes only when the shown text changes.
         if (near != null) {
-            if (!near.equals(shownErrorMessage)) {
-                shownErrorMessage = near;
-                Status.setDefaultMessage(near, Variant.ERROR);
+            String hint = caretHint();
+            String full = hint != null ? near + "   " + hint : near;
+            if (!full.equals(shownErrorMessage)) {
+                shownErrorMessage = full;
+                shownIdleMessage = null;
+                Status.setDefaultMessage(full, Variant.ERROR);
             }
-        } else if (shownErrorMessage != null) {
-            shownErrorMessage = null;
-            Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
+            return;
+        }
+        shownErrorMessage = null;
+        String idle = idleStatusMessage();
+        if (!idle.equals(shownIdleMessage)) {
+            shownIdleMessage = idle;
+            Status.setDefaultMessage(idle, Variant.DEFAULT);
         }
     }
 
     /** The idle ribbon message: the running count of lines written to the event log,
-     *  plus the click-to-view affordance. Shown when no flash event or error is
-     *  occupying the message slot. */
+     *  plus the click-to-view affordance. The lowest-priority default-slot content. */
     private static String idleStatusMessage() {
         long n = logLineCount.get();
         return n + (n == 1 ? " line" : " lines") + " written to the event log — click here to view.";
     }
 
+    /**
+     * A contextual hint for the identifier at the editor caret (Slice A), or null when
+     * none applies — the Auto-Action (Ctrl+click / Ctrl+Enter) affordance, appended to a
+     * compile error on that token (its two triggers are both error conditions):
+     * <ul>
+     *   <li>a name not in scope but <b>exported by some module</b> → auto-require it
+     *       (e.g. an un-imported name);</li>
+     *   <li>any other <b>resolvable, non-primitive</b> name → go to its definition
+     *       (e.g. a builtin called with the wrong arguments).</li>
+     * </ul>
+     * Cached by (token, {@code settledVersion}) and only computed while the buffer is
+     * settled: the {@code inScope}/{@code exporters} lookups parse source and must not
+     * run every frame or mid-keystroke. Only meaningful when the editor is focused.
+     */
+    private static String caretHint() {
+        if (codeText == null || FocusState.focused() != codeText) return null;
+        // Only while the buffer is settled (debounced compile has caught up) — so the
+        // parse-backed lookups never run mid-keystroke.
+        if (editVersion != settledVersion) return null;
+        int[] w = caretIdentBounds(codeText);
+        if (w == null) return null;
+        String content = TextStates.contentOf(codeText);
+        String name = content.substring(w[0], w[1]);
+        if (name.equals(hintName) && settledVersion == hintVersion) return hintResult;
+        hintName = name;
+        hintVersion = settledVersion;
+        hintResult = computeHint(content, name);
+        return hintResult;
+    }
+
+    /** Resolve the hint for {@code name} (the parse-backed body of {@link #caretHint}). */
+    private static String computeHint(String content, String name) {
+        if (DefinitionNavigator.isPrimitive(name)) return null;
+        if (!DefinitionNavigator.inScope(content, name)) {
+            return DefinitionNavigator.exporters(content, name, resolveDir()).isEmpty()
+                    ? null   // an unknown name we can't auto-require — no hint to offer
+                    : "Hint: Ctrl+click '" + name + "' to auto-require it.";
+        }
+        return "Hint: Ctrl+click '" + name + "' to go to its definition.";
+    }
+
     /** Status log subscriber: tally each event's lines (message + any detail lines,
-     *  matching how the log dialog renders it) and refresh the idle message so the new
-     *  count shows once the flash reverts. Skips the refresh while an error is parked
-     *  in the slot, so the user's error message isn't clobbered (updateErrorStatus
-     *  restores the fresh count when the caret leaves the error). Runs on the logging
-     *  thread; setDefaultMessage is thread-safe. */
+     *  matching how the log dialog renders it). The visible message is owned by
+     *  {@link #updateErrorStatus}, which runs every frame and picks up the new count;
+     *  this only advances the counter. Runs on the logging thread — the counter is atomic. */
     private static void onLogEvent(sibarum.dasum.gui.core.status.StatusEvent e) {
         int lines = 1 + (e.hasDetails() ? e.details().split("\\R").length : 0);
         logLineCount.addAndGet(lines);
-        if (shownErrorMessage == null) {
-            Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
-        }
     }
 
     /** Red underline beneath each error's token (or its {@code requires} statement),
