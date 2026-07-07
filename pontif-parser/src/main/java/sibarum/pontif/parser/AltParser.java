@@ -4520,38 +4520,27 @@ public final class AltParser {
             value = parseExpr();
         }
         IrSort inferred = inferMaximalSort(value);
-        boolean intToDecimal = false;
-        boolean streamAutobox = false;
-        if (declaredSort != null) {
-            String declaredBase = baseSortName(declaredSort);
-            String inferredBase = baseSortName(inferred);
-            // The lossless Int→Decimal embedding is not a mismatch (see
-            // parseLet) — promoted and gate-judged at IR time.
-            intToDecimal = "Decimal".equals(declaredBase) && "Int".equals(inferredBase);
-            // "_record" against a declared name is the promotion sugar (see
-            // parseLet) — AggregatePromotion stamps and validates at IR time.
-            if (declaredBase != null && inferredBase != null
-                    && !inferredBase.equals("_record")
-                    && !inferredBase.equals("_")  // unknown floor — parser can't prove a mismatch, so abstain
-                    && !intToDecimal
-                    && !declaredBase.equals(inferredBase)) {
-                if ("Stream".equals(declaredBase) && TUPLE_SENTINEL.equals(inferredBase)) {
-                    // tuple → Stream[T] autobox (docs/iteration.md §8.6), same as parseLet.
-                    requireStreamElements(declaredSort, inferred, start.origin());
-                    streamAutobox = true;
-                } else {
-                    throw new ParseException(
-                            "let '" + name + "' is declared " + describeSort(declaredSort)
+        // Same coercion QUERY as top-level parseLet — a `let` coerces identically wherever it
+        // sits, differing only in scope (James 2026-07-07). Routing here through the facade
+        // (docs/language-inventory.md §4) unifies the decision: the local let now honours the
+        // same Demote/TraitCast the top-level one does, not just the Int→Decimal/autobox/record
+        // subset it used to. The verdict shapes the binding sort + whether the claim rides the
+        // LetIn's claim slot.
+        Coercion coercion = declaredSort == null
+                ? new Coercion.None()
+                : TypeSystem.standard().coercionFor(inferred, declaredSort, coercionContext());
+        if (coercion instanceof Coercion.Mismatch mismatch) {
+            throw new ParseException(
+                    mismatch.detail() != null ? mismatch.detail()
+                            : "let '" + name + "' is declared " + describeSort(declaredSort)
                                     + " but its value is " + describeSort(inferred)
                                     + " — these are different types.",
-                            start.origin());
-                }
-            }
+                    start.origin());
         }
-        IrSort binding = declaredSort != null
-                && ("_record".equals(baseSortName(inferred)) || intToDecimal || streamAutobox)
-                ? declaredSort
-                : inferred;
+        boolean streamAutobox = coercion instanceof Coercion.Autobox;
+        // Every coercing verdict binds at the declared sort (the claim rides the LetIn below);
+        // only a plain agreement (None) keeps the tighter inferred narrowing.
+        IrSort binding = coercion instanceof Coercion.None ? inferred : declaredSort;
         IrSort prevBinding = currentScope.get(name);
         boolean hadPrev = currentScope.containsKey(name);
         currentScope.put(name, binding);
@@ -5549,31 +5538,6 @@ public final class AltParser {
         return null;
     }
 
-    /**
-     * The figurative tuple→{@code Stream[T]} element gate (docs/iteration.md §8.6):
-     * every member of the tuple must be convertible to {@code T}. Base-level for
-     * now (exact base, plus the lossless Int→Decimal embedding); the multi-dispatch
-     * promotion path will subsume it.
-     */
-    private static void requireStreamElements(IrSort declaredStream, IrSort tupleSort, Origin o)
-            throws ParseException {
-        IrSort elemType = declaredStream instanceof IrSort.Named sn && !sn.typeArgs().isEmpty()
-                ? sn.typeArgs().get(0) : null;
-        String tBase = elemType == null ? null : baseSortName(elemType);
-        if (tBase == null || !(tupleSort instanceof IrSort.Structural st)) return;
-        int idx = 0;
-        for (IrSort m : st.members().values()) {
-            String mBase = baseSortName(m);
-            boolean ok = tBase.equals(mBase) || ("Decimal".equals(tBase) && "Int".equals(mBase));
-            if (!ok) {
-                throw new ParseException(
-                        "Cannot box this tuple as Stream[" + describeSort(elemType) + "]: element "
-                                + idx + " is " + describeSort(m) + ", not " + describeSort(elemType),
-                        o);
-            }
-            idx++;
-        }
-    }
 
     /** A compact, human-readable rendering of a sort for error messages. */
     private static String describeSort(IrSort s) {

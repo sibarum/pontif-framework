@@ -119,6 +119,28 @@ class StructExtensionTest {
     }
 
     @Test
+    void demotion_inLocalLet_projectsTheMorphism() {
+        // A `let` coerces identically wherever it sits — the demotion that works at
+        // top level (demotion_projectsTheMorphism) must work in a function-body let
+        // too (James 2026-07-07: all lets work the same way, differing only in scope).
+        // Before the coercion decision was unified behind coercionFor, the local let
+        // rejected `let b:Point = p` (Point3D→Point) as "different types".
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                function proj():Int ->
+                    let a = Point3D(2, 3, 5)
+                    let b:Point = a
+                    b.x + b.y
+                proj()""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5", r.text(), engine.toString());
+        }
+    }
+
+    @Test
     void demotion_dropsTheUnmentionedField() {
         // z is gone after demotion — b.z is an error (clean forget, no tag).
         String src = """
