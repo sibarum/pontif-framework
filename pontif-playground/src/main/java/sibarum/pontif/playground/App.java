@@ -207,7 +207,7 @@ public final class App {
      * the range then points at the offending {@code requires} statement, not a
      * foreign offset that can't be mapped into this buffer.
      */
-    private record ErrorMark(int start, int end, String message, boolean fromImport) {}
+    record ErrorMark(int start, int end, String message, boolean fromImport) {}
 
     /** Latest compile's error marks; read each frame by the underline + caret
      *  hooks. Single-writer (the debounce worker) / many-reader (GLFW thread). */
@@ -1861,24 +1861,50 @@ public final class App {
         Invalidator.invalidate();
     }
 
-    /** Translate a failed compile into editor underlines. An error located in an
-     *  imported module (a link error, or an origin from another source) is mapped
-     *  to the offending {@code requires} statement; an in-buffer error is mapped to
-     *  its origin span. Empty when there is no origin to anchor to. */
-    private static List<ErrorMark> computeMarks(String content, String sourceName,
-                                                PontifRunner.RunResult error) {
+    /** Translate a failed compile into editor underlines. Precedence:
+     *  <ol>
+     *    <li>an error whose origin points into <b>this buffer</b> underlines the
+     *        offending token — even a "Link error" for an unresolved name used here
+     *        (its origin is the in-buffer use site, not an import problem);</li>
+     *    <li>otherwise a link error, or an origin from another module's source, maps
+     *        to the offending {@code requires} statement;</li>
+     *    <li>otherwise no mark.</li>
+     *  </ol>
+     *  Package-visible for {@code LiveCompileMarksTest}. */
+    static List<ErrorMark> computeMarks(String content, String sourceName,
+                                        PontifRunner.RunResult error) {
         String message = error.text();
         Optional<Origin> originOpt = error.origin();
-        boolean fromImport = message.startsWith("Link error")
-                || (originOpt.isPresent() && !sourceName.equals(originOpt.get().source()));
-        if (fromImport) {
+        // (1) A precise in-buffer origin wins over the "Link error" prefix: an
+        // unresolved name used here is anchored at its use site, not the imports.
+        if (originOpt.isPresent() && originOpt.get().isPresent()
+                && sourceName.equals(originOpt.get().source())) {
+            int[] span = spanOffsets(content, originOpt.get());
+            if (span != null) {
+                span = callNameSpan(content, span);   // pull left onto the callee name
+                return List.of(new ErrorMark(span[0], span[1], message, false));
+            }
+        }
+        // (2) A genuine import/link problem in another module (or an origin-less link
+        // error): flag the requires area so the import site is surfaced.
+        if (message.startsWith("Link error")
+                || (originOpt.isPresent() && originOpt.get().isPresent()
+                    && !sourceName.equals(originOpt.get().source()))) {
             return requiresMarks(content, message, originOpt.orElse(null));
         }
-        if (originOpt.isPresent() && originOpt.get().isPresent()) {
-            int[] span = spanOffsets(content, originOpt.get());
-            if (span != null) return List.of(new ErrorMark(span[0], span[1], message, false));
-        }
         return List.of();
+    }
+
+    /** The compiler anchors a call error at the application ({@code (args)}), so the
+     *  offending name sits immediately to its left. When {@code [start, end)} begins
+     *  right after an identifier, return that identifier's span instead — the name the
+     *  user actually needs to see underlined. Otherwise the span is returned unchanged. */
+    private static int[] callNameSpan(String content, int[] span) {
+        int start = span[0];
+        if (start <= 0 || !isIdentChar(content.charAt(start - 1))) return span;
+        int nameStart = start;
+        while (nameStart > 0 && isIdentChar(content.charAt(nameStart - 1))) nameStart--;
+        return new int[]{nameStart, start};
     }
 
     /** Char offsets {@code [start, end)} for an origin span, clamped to the start
