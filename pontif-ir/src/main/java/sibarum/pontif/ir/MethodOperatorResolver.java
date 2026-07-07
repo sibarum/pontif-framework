@@ -44,6 +44,13 @@ public final class MethodOperatorResolver {
     private final boolean resolveMethods;
     private final boolean routeOperators;
     private final Map<String, IrSort.Structural> structs;
+    /** Top-level `let` name → its DECLARED sort (the nominal claim), the Declared record of the three
+     *  (docs/type-records.md). A transparent alias binding records the structural sort (`_tuple`) as its
+     *  value, keeping the declared name only in the `LetIn` claim; nominal (method) dispatch reads this
+     *  when inference lost the name (an anonymous aggregate), so `let v:Vec3 = {…}; v.m()` dispatches on
+     *  `Vec3`. Kept SEPARATE from the binding — reading it here never disturbs the transparent inferred
+     *  sort the gates/refinement see. */
+    private final Map<String, IrSort> declaredReturns = new LinkedHashMap<>();
     /** Inference AND name-routing both go through the type-system facade (the single answerer): the
      *  operator/method routing tables now live on {@link InferenceContext} and are consulted via
      *  {@code dispatch()}, so this pass no longer keeps its own copies. */
@@ -59,6 +66,15 @@ public final class MethodOperatorResolver {
         this.resolveMethods = resolveMethods;
         this.routeOperators = routeOperators;
         this.structs = InferenceContext.fromModule(module).structDefs();
+        // A top-level `let v:T = …` lowers to a 0-arg FunctionDecl whose body is a LetIn carrying the
+        // declared sort in its claim (the binding/return sort is the transparent structural sort). Record
+        // that claim as v's Declared sort for nominal dispatch.
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.FunctionDecl fd && fd.topLevelLet()
+                    && fd.body() instanceof IrExpr.LetIn letBody && letBody.claim() != null) {
+                declaredReturns.put(fd.name(), letBody.claim());
+            }
+        }
     }
 
     /** Full resolution: methods AND operators (the run path). Unrestricted — for a
@@ -277,7 +293,11 @@ public final class MethodOperatorResolver {
             // (unused) operators-only preset — keep the call symbolic.
             throw MethodResolver.unresolved(mc, "MethodOperatorResolver(routeOperators-only)");
         }
-        IrSort receiverSort = types.infer(receiver, ctx);
+        // NOMINAL identity for method dispatch = the Declared record, falling back to the Inferred
+        // sort's head (docs/type-records.md). Inference gives the transparent structural sort for a
+        // declared alias binding (`_tuple`), which has no method; the declared claim (`Vec3`) is the
+        // identity the method dispatches on.
+        IrSort receiverSort = nominalReceiverSort(receiver, types.infer(receiver, ctx));
         String typeName = baseName(receiverSort);
         if (typeName != null) {
             // Does base(receiver).method name a routable method key? The unified dispatch query answers
@@ -513,5 +533,27 @@ public final class MethodOperatorResolver {
             case IrSort.Trait t -> t.name();
             default -> null;
         };
+    }
+
+    /**
+     * The receiver's NOMINAL identity for method dispatch (docs/type-records.md). Prefer the Inferred
+     * sort's head when it is a concrete nominal name; only when inference lost the name — an anonymous
+     * aggregate ({@code _tuple}) — and the receiver names a top-level {@code let} do we recover the
+     * Declared sort from {@link #declaredReturns}. This is the "read Declared, else the Inferred head"
+     * rule, applied surgically so a concrete inferred receiver (and a shadowing local of the same name)
+     * is never overridden.
+     */
+    private IrSort nominalReceiverSort(IrExpr receiver, IrSort inferred) {
+        String inferredBase = baseName(inferred);
+        if (inferredBase != null && !"_tuple".equals(inferredBase)) {
+            return inferred;  // inference already has a nominal head — use it
+        }
+        String name = switch (receiver) {
+            case IrExpr.Call c -> c.functionName();
+            case IrExpr.Var v -> v.name();
+            default -> null;
+        };
+        IrSort declared = name == null ? null : declaredReturns.get(name);
+        return declared != null ? declared : inferred;
     }
 }
