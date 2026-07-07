@@ -58,6 +58,16 @@ public interface TypeSystem {
      */
     IrSort inferFloor(IrExpr expr, InferenceContext ctx);
 
+    /**
+     * Which coercion (if any) applies when a value of sort {@code from} is bound where sort {@code to} is
+     * claimed — the query that replaces the parser deciding coercion inline (docs/language-inventory.md
+     * §4). Returns a {@link Coercion} verdict (none / Int→Decimal / record promotion / demote / trait-cast
+     * / autobox / mismatch); the caller emits the corresponding IR (the recorded binding sort, whether the
+     * claim travels on a construction-gate {@code LetIn}) rather than the type logic living at the call
+     * site. See {@link Coercion} for what each verdict means and how the caller should act on it.
+     */
+    Coercion coercionFor(IrSort from, IrSort to, CoercionContext ctx);
+
     /** The standard type system — today a thin facade over the existing engine (the migration seam). */
     static TypeSystem standard() {
         return DelegatingTypeSystem.INSTANCE;

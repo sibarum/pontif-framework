@@ -13,6 +13,9 @@ import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
+import sibarum.pontif.types.Coercion;
+import sibarum.pontif.types.CoercionContext;
+import sibarum.pontif.types.TypeSystem;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -1862,79 +1865,39 @@ public final class AltParser {
             }
         }
         IrSort inferredSort = inferMaximalSort(value);
-        boolean intToDecimal = false;
-        boolean demotion = false;
-        boolean traitUpcast = false;
-        boolean streamAutobox = false;
-        if (declaredSort != null) {
-            String declaredBase = baseSortName(declaredSort);
-            String inferredBase = baseSortName(inferredSort);
-            // The lossless Int→Decimal embedding is not a mismatch —
-            // DecimalPromotion promotes the literal at IR time and the
-            // construction gate judges the claim (same leniency the record
-            // gate already grants its fields).
-            intToDecimal = "Decimal".equals(declaredBase) && "Int".equals(inferredBase);
-            // An anonymous aggregate ("_record") against a declared name is the
-            // promotion sugar, not a mismatch — `let p:Point = {x=1, y=2}` is
-            // checked construction with the redundant name elided.
-            // AggregatePromotion stamps and validates it at IR time (it also
-            // sees imported structs this parser can't).
-            if (declaredBase != null && inferredBase != null
-                    && !inferredBase.equals("_record")
-                    && !inferredBase.equals("_")  // unknown floor — parser can't prove a mismatch, so abstain
-                    && !intToDecimal
-                    && !declaredSortAliases.contains(declaredBase)  // alias base unknown until resolved
-                    && !declaredBase.equals(inferredBase)) {
-                // A declared DEMOTION: the value's struct carries a base sort
-                // that demotes to the claimed base (`struct Point3D:[Point:…]`),
-                // so `let b:Point = a` is a valid projection, not a mismatch —
-                // ConstructionGate runs the morphism at IR time. The binding is
-                // recorded at the demoted (base) sort.
-                if (demotesTo(inferredBase, declaredBase)) {
-                    demotion = true;
-                } else if (declaredTraits.contains(declaredBase)
-                        || declaredTraits.contains(inferredBase)) {
-                    // Trait coercion, implicit in BOTH directions (the trait's
-                    // attributes are computed projections — nothing fabricated
-                    // upward, nothing lost downward). Struct→trait binds at the
-                    // trait sort; trait→struct binds at the struct sort and the
-                    // claim's runtime check confirms the value's concrete type
-                    // (a downcast to a type the value isn't is rejected there).
-                    // The value keeps its concrete type at runtime, so trait-view
-                    // attribute access resolves to fields/producers.
-                    traitUpcast = true;
-                } else if ("Stream".equals(declaredBase) && TUPLE_SENTINEL.equals(inferredBase)) {
-                    // tuple → Stream[T]: the one-way autobox (docs/iteration.md §8.6) —
-                    // a clean forget of the tuple's arity/positional identity (in the
-                    // cast law's lose-freely family), gated by every element being
-                    // convertible to T. Figurative for now (a base-level element check
-                    // here); the multi-dispatch promotion path will replace it.
-                    requireStreamElements(declaredSort, inferredSort, start.origin());
-                    streamAutobox = true;
-                } else {
-                    throw new ParseException(
-                            "let '" + name + "' is declared " + describeSort(declaredSort)
+        // Coercion is a QUERY now, not decided here: the type system says which coercion a declared
+        // claim licenses (docs/language-inventory.md §4) and this let-lowering acts on the verdict —
+        // computing the recorded binding sort and whether the claim travels on a construction-gate
+        // LetIn. The parser no longer re-derives demote/trait/autobox/Int→Decimal itself.
+        Coercion coercion = declaredSort == null
+                ? new Coercion.None()
+                : TypeSystem.standard().coercionFor(inferredSort, declaredSort, coercionContext());
+        if (coercion instanceof Coercion.Mismatch mismatch) {
+            // The tuple-element gate supplies its own detail; otherwise phrase the generic message here,
+            // where the binding's name is in scope.
+            throw new ParseException(
+                    mismatch.detail() != null ? mismatch.detail()
+                            : "let '" + name + "' is declared " + describeSort(declaredSort)
                                     + " but its value is " + describeSort(inferredSort)
                                     + " — these are different types.",
-                            start.origin());
-                }
-            }
+                    start.origin());
         }
-        // Promotion cases: an anonymous value's shape takes the declared
-        // sort (stamped at IR time); an Int literal at a Decimal boundary
-        // takes BARE Decimal — the value promotes at IR time, and the
-        // refined claim (if any) travels in the wrapper below, NOT in the
-        // 0-arg return sort, where it would be an obligation the integer-
-        // only discharge kernel can never prove. Otherwise keep the tighter
-        // inferred narrowing as before.
-        IrSort binding = demotion || traitUpcast || streamAutobox
-                ? declaredSort
-                : declaredSort != null
-                && "_record".equals(baseSortName(inferredSort))
-                ? declaredSort
-                : intToDecimal
-                ? new IrSort.Named("Decimal", declaredSort.origin())
-                : inferredSort;
+        boolean recordPromotion = coercion instanceof Coercion.RecordPromotion;
+        boolean streamAutobox = coercion instanceof Coercion.Autobox;
+        // Promotion cases: a demote/trait/autobox/anonymous-aggregate binds at the declared sort
+        // (stamped/gated at IR time); an Int literal at a Decimal boundary takes BARE Decimal — the
+        // value promotes at IR time and the refined claim (if any) travels in the LetIn below, NOT in
+        // the 0-arg return sort, where it would be an obligation the integer-only discharge kernel can
+        // never prove. Otherwise keep the tighter inferred narrowing.
+        IrSort binding = switch (coercion) {
+            case Coercion.Demote d -> declaredSort;
+            case Coercion.TraitCast t -> declaredSort;
+            case Coercion.Autobox a -> declaredSort;
+            case Coercion.RecordPromotion r -> declaredSort;
+            case Coercion.IntToDecimal i -> new IrSort.Named("Decimal", declaredSort.origin());
+            case Coercion.None n -> inferredSort;
+            case Coercion.Mismatch m -> inferredSort;  // unreachable — thrown above
+        };
         declaredTopLevelLets.put(name, binding);
         // A declared sort is a claim made where the binding is made. The
         // 0-arg lowering keeps the tight inferred narrowing as the return
@@ -1943,7 +1906,7 @@ public final class AltParser {
         // The promotion-sugar case is exempt: the stamped record's own
         // construction gate judgment IS the claim check.
         IrExpr fnBody = value;
-        if (declaredSort != null && !"_record".equals(baseSortName(inferredSort)) && !streamAutobox) {
+        if (declaredSort != null && !recordPromotion && !streamAutobox) {
             fnBody = new IrExpr.LetIn(
                     name, binding, value,
                     new IrExpr.Var(name, start.origin()),
@@ -2042,19 +2005,6 @@ public final class AltParser {
      *       a use case justifies them.
      * </ul>
      */
-    /**
-     * True when {@code fromBase}'s declared struct demotes (is-a) to
-     * {@code toBase} — it carries a {@code :[toBase:…]} base sort. The coercion
-     * {@code let b:toBase = a} (where {@code a : fromBase}) is then a valid
-     * demotion projection, not a base-sort mismatch (ConstructionGate runs the
-     * morphism at IR time).
-     */
-    private boolean demotesTo(String fromBase, String toBase) {
-        IrSort.Structural from = declaredStructs.get(fromBase);
-        if (from == null || from.baseSort() == null) return false;
-        return toBase.equals(baseSortName(from.baseSort()));
-    }
-
     // Parse-time best-effort typing — now ONE engine with the core. The parser
     // is no longer a separate reasoner: it runs inferFloor through the TypeSystem
     // facade over an InferenceContext built from its live scope maps, so every narrowing shape
@@ -2101,6 +2051,15 @@ public final class AltParser {
         typeEnv.values().removeIf(java.util.Objects::isNull);
         functionReturns.values().removeIf(java.util.Objects::isNull);
         return new InferenceContext(typeEnv, functionReturns, declaredStructs, Map.of(), Map.of());
+    }
+
+    /**
+     * The registries {@link TypeSystem#coercionFor} consults — the parser's live struct, trait, and
+     * sort-alias declarations. Handed to the type system so the coercion DECISION (demote / trait-cast /
+     * autobox / Int→Decimal / mismatch) lives behind the facade rather than in the let-lowering.
+     */
+    private CoercionContext coercionContext() {
+        return new CoercionContext(declaredStructs, declaredTraits, declaredSortAliases);
     }
 
 

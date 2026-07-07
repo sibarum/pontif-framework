@@ -32,4 +32,9 @@ final class DelegatingTypeSystem implements TypeSystem {
     public IrSort inferFloor(IrExpr expr, InferenceContext ctx) {
         return NarrowingInference.inferFloor(expr, ctx);
     }
+
+    @Override
+    public Coercion coercionFor(IrSort from, IrSort to, CoercionContext ctx) {
+        return CoercionResolver.resolve(from, to, ctx);
+    }
 }
