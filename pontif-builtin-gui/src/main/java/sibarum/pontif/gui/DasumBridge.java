@@ -34,6 +34,7 @@ import sibarum.dasum.gui.vis.DasumVis;
 import sibarum.dasum.gui.vis.render.BloomPass;
 import sibarum.dasum.gui.vis.plot.Axis;
 import sibarum.dasum.gui.vis.plot.LinePlot;
+import sibarum.dasum.gui.vis.plot.PlotFrame;
 import sibarum.dasum.gui.vis.plot.PlotStyle;
 import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
@@ -383,11 +384,13 @@ public final class DasumBridge {
      * {@code DasumVis.init()} must have run first ({@link #openWindowWithRoot} ensures it).
      */
     static Component chartComponent(List<Series> series) {
-        Component.SceneView view =
-                new Component.SceneView(Em.of(22f), Em.of(12f), Em.ZERO, PLOT_BG, true, 1);
-        new PlotView(view).showLinePlot(
-                LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series), series, PlotStyle.defaults());
-        SceneStates.setInteraction(view, InteractionSpec.panZoom2d());
+        Component.SceneView view =                       // null size → fills the window
+                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+        PlotFrame frame = LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series);
+        new PlotView(view).showLinePlot(frame, series, PlotStyle.defaults());
+        // Pan/zoom fenced to the plot's world rect so it can't be dragged off screen.
+        SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
+                .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
         return view;
     }
 
