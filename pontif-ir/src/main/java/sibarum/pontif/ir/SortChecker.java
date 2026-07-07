@@ -62,7 +62,7 @@ public final class SortChecker {
 
     /**
      * Parametric trait names valid in a sort position even though they are not
-     * declared structs (so {@link TypeRegistry#collect} — structs only — does not
+     * declared structs (so {@link sibarum.pontif.types.TypeCatalog#structShapes} — structs only — does not
      * carry them). {@code Stream[T]} is the genuine {@code pontif.core} trait now
      * that the {@code Element|Leaf} cons-cell is retired (stream-trait war,
      * docs/stream-war.md §7); a tuple autoboxes into it and the autobox's element
@@ -82,7 +82,8 @@ public final class SortChecker {
     public static void check(IrModule module) throws CompileException {
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
-        Map<String, IrSort.Structural> structDefs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structDefs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         // Free-function / operator overloads by name (e.g. all `+` declarations) —
         // the mechanism-1 dispatch entries an operator trait contract is checked
         // against (does a coherent `+(T, T):T` exist for the satisfying type T?).

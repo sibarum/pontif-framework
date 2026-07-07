@@ -27,7 +27,8 @@ final class EventEmitCheck {
     private EventEmitCheck() {}
 
     static void check(IrModule module) throws CompileException {
-        Set<String> declaredStructs = TypeRegistry.collect(module).keySet();
+        Set<String> declaredStructs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes().keySet();
         Set<String> eventStructs = new HashSet<>();
         for (IrStmt s : module.statements()) {
             if (s instanceof IrStmt.TraitImpl ti && isEventTrait(ti.traitName())) {

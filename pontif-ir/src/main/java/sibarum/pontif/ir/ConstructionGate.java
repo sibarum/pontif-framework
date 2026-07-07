@@ -52,7 +52,8 @@ final class ConstructionGate {
     private ConstructionGate() {}
 
     static IrModule rewrite(IrModule module) throws CompileException {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         InferenceContext base = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) {

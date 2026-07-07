@@ -18,7 +18,7 @@ import java.util.Map;
  * function that doesn't exist, which would fail as "unknown function".
  *
  * <p>This pass runs on the <em>combined</em> module (so it sees every module's
- * FQN'd struct definitions via {@link TypeRegistry#collect}) and rewrites any
+ * FQN'd struct definitions via {@link sibarum.pontif.types.TypeCatalog#fromModule}) and rewrites any
  * {@code Call(name, args)} whose {@code name} is a registered struct into the
  * equivalent positional {@link IrExpr.Record} — mirroring what
  * {@code AltParser.parsePositionalStructLiteral} does for local structs. Arity is
@@ -49,7 +49,8 @@ public final class StructLiteralRewriter {
     private StructLiteralRewriter() {}
 
     public static IrModule rewrite(IrModule combined) throws CompileException {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(combined);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(combined).structShapes();
         if (structs.isEmpty()) return combined;  // nothing to rewrite
 
         List<IrStmt> out = new ArrayList<>(combined.statements().size());

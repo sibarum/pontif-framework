@@ -36,7 +36,8 @@ import java.util.Map;
  * (both engines) routes registered names through {@link Entry#construct}
  * instead of building a RecordValue.
  *
- * <p>Deliberately <b>not</b> in {@link TypeRegistry}: these names are
+ * <p>Deliberately <b>not</b> registered as declared types in {@link sibarum.pontif.types.TypeCatalog}
+ * (answered there only by lookup fallback): these names are
  * nominal-only (ruled 2026-06-06 — an anonymous {@code {unscaled=…, scale=…}}
  * never matches {@code [Decimal]}), and the carrier is a scalar, so nothing
  * may flatten the anatomy into per-field atoms or match it structurally.

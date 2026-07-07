@@ -29,7 +29,7 @@ import java.util.Map;
  * slot sorts via {@link #DEFERRED_BIND}/{@link #DEFERRED_SKIP})
  * — WITHOUT resolving to declared field names. This pass runs on the combined,
  * FQN-resolved module (so it sees every module's structs via
- * {@link TypeRegistry#collect}) and:
+ * {@link sibarum.pontif.types.TypeCatalog#fromModule}) and:
  * <ol>
  *   <li>maps each positional slot to the struct's declared field name, in order;
  *   <li>fills the slot's field sort from the declaration;
@@ -80,7 +80,8 @@ public final class DestructureResolver {
     }
 
     public static IrModule rewrite(IrModule combined) throws CompileException {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(combined);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(combined).structShapes();
 
         List<IrStmt> out = new ArrayList<>(combined.statements().size());
         for (IrStmt stmt : combined.statements()) {

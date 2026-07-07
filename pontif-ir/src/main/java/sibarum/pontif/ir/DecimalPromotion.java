@@ -31,7 +31,8 @@ final class DecimalPromotion {
     private DecimalPromotion() {}
 
     static IrModule rewrite(IrModule module) {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) {
             out.add(switch (stmt) {

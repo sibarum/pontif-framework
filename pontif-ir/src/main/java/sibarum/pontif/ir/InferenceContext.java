@@ -115,7 +115,8 @@ public record InferenceContext(
                 }
             }
         }
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs);
     }
 

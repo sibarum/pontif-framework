@@ -91,14 +91,15 @@ public final class IrCompiler {
         OverloadOverlap.check(resolved);
 
         // Nominal struct registry: name → compiled structural Sort, for both the
-        // alias name and the struct's own name (see TypeRegistry). Lets the
+        // alias name and the struct's own name (see TypeCatalog.fromModule). Lets the
         // runtime/dispatch resolve a by-reference struct sort to its shape on
         // demand — and tells the kernel's claim rule which names are DECLARED
         // (a name bites iff it's registered). Built before function compilation
         // and wired into the simplifier so the Truffle path's MatchNodes carry
         // it too, not just the IrInterpreter path.
         Map<String, Sort> structRegistry = new LinkedHashMap<>();
-        for (Map.Entry<String, IrSort.Structural> e : TypeRegistry.collect(resolved).entrySet()) {
+        for (Map.Entry<String, IrSort.Structural> e :
+                sibarum.pontif.types.TypeCatalog.fromModule(resolved).structShapes().entrySet()) {
             structRegistry.put(e.getKey(), compileSort(e.getValue()));
         }
         this.simplifier = this.simplifier.withRegistry(structRegistry);

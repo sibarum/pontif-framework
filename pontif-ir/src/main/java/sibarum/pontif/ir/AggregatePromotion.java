@@ -42,7 +42,8 @@ final class AggregatePromotion {
     private AggregatePromotion() {}
 
     static IrModule rewrite(IrModule module) throws CompileException {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         Map<String, List<IrStmt.FunctionDecl>> fns = collectFunctions(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) {

@@ -23,8 +23,8 @@ import sibarum.pontif.ir.NativeConstructors;
  * module it is genuinely unknown. Built-in constructors and primitives are answered by fallback, so a
  * catalog need not have them registered to know {@code Decimal} or {@code Int}.
  *
- * <p>Named {@code TypeCatalog} for now; it becomes {@code TypeRegistry} once the old IR
- * {@code TypeRegistry} it subsumes is decommissioned (James 2026-07-07).
+ * <p>This is now the sole type registry — the old IR {@code TypeRegistry} it subsumed has been
+ * decommissioned (James 2026-07-07, who kept the {@code TypeCatalog} name).
  */
 public final class TypeCatalog {
 
@@ -127,12 +127,14 @@ public final class TypeCatalog {
         return byName.get(name) instanceof TypeInfo.Alias;
     }
 
-    // --- compatibility view -------------------------------------------------
+    // --- bulk view ----------------------------------------------------------
 
     /**
-     * The struct/native {@code name → shape} map, in registration order — the view the legacy IR
-     * {@code TypeRegistry.collect} exposed. A bridge for the still-unmigrated IR callers; drops away
-     * once they consult {@link #shapeOf} / {@link #lookup} directly.
+     * The struct (and native) {@code name → shape} map, in registration order — for callers that
+     * genuinely need the whole set at once (a module's struct table for {@link
+     * sibarum.pontif.ir.InferenceContext}, {@code SortChecker}, the gates) rather than a per-name
+     * {@link #shapeOf} query. In practice struct-only: natives are answered by {@link #lookup} fallback,
+     * never registered, so they do not appear here unless explicitly registered.
      */
     public Map<String, IrSort.Structural> structShapes() {
         Map<String, IrSort.Structural> m = new LinkedHashMap<>();
