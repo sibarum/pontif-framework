@@ -1,20 +1,18 @@
 package sibarum.pontif.ir;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Canonical collection of a module's declared struct definitions.
+ * Legacy struct-collection entry point — now a thin bridge over
+ * {@link sibarum.pontif.types.TypeCatalog}, which holds the single interpretation of a module's
+ * declared types. Retained so the IR callers that still take a plain {@code name → struct} map keep
+ * working while they are migrated to consult the catalog directly ({@link
+ * sibarum.pontif.types.TypeCatalog#shapeOf}/{@code lookup}); it drops away with the last of them.
  *
  * <p>Structs lower to a preserved {@link IrStmt.TypeAlias} whose sort is an
- * {@link IrSort.Structural} (kept past {@link AliasResolver} so downstream
- * passes can resolve struct references by name rather than by inlining). Both
- * {@link SortChecker} and {@link InferenceContext} need the same name → struct
- * mapping; this is the single source so the two never drift.
- *
- * <p>With recursive types, a struct reference stays {@link IrSort.Named} and is
- * resolved <em>by name</em> against this registry on demand — never unrolled —
- * so the type graph can refer to itself through a constructor boundary.
+ * {@link IrSort.Structural} (kept past {@link AliasResolver} so downstream passes resolve struct
+ * references by name rather than by inlining); with recursive types a struct reference stays
+ * {@link IrSort.Named} and is resolved by name against the catalog on demand, never unrolled.
  */
 public final class TypeRegistry {
 
@@ -34,14 +32,9 @@ public final class TypeRegistry {
      * struct references stay nominal rather than being inlined.
      */
     public static Map<String, IrSort.Structural> collect(IrModule module) {
-        Map<String, IrSort.Structural> map = new LinkedHashMap<>();
-        for (IrStmt stmt : module.statements()) {
-            if (stmt instanceof IrStmt.TypeAlias ta
-                    && ta.sort() instanceof IrSort.Structural s) {
-                map.put(ta.name(), s);
-                map.putIfAbsent(s.name(), s);
-            }
-        }
-        return map;
+        // Delegates to the consolidated catalog so struct interpretation lives in ONE place
+        // (sibarum.pontif.types.TypeCatalog). This static entry point is a temporary bridge for the
+        // IR callers not yet migrated to consult the catalog directly; it drops away with them.
+        return sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
     }
 }
