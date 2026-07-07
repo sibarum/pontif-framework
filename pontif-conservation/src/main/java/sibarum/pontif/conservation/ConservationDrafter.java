@@ -16,7 +16,7 @@ import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.ir.TypeRegistry;
+import sibarum.pontif.types.TypeCatalog;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,7 +56,7 @@ public final class ConservationDrafter {
     private ConservationDrafter() {}
 
     public static Ledger draft(IrModule module) throws CompileException {
-        Map<String, IrSort.Structural> structs = TypeRegistry.collect(module);
+        Map<String, IrSort.Structural> structs = TypeCatalog.fromModule(module).structShapes();
 
         // Composition over the call DAG: functions draft in topological order
         // so call sites substitute their callees' summaries (by reference —
