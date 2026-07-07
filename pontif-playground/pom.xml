@@ -187,7 +187,28 @@
                         <atlas>
                             <name>mono</name>
                             <font>${project.basedir}/fonts/UbuntuSansMono/ubuntusansmono-regular.ttf</font>
-                            <charset>ascii</charset>
+                            <!-- Same expanded charset the primary (sans) atlas uses, intersected with
+                                 what Ubuntu Sans Mono actually provides (431 of the 562-ish requested
+                                 glyphs): ASCII, Latin-1, Latin Extended-A, Greek (upper + lower),
+                                 typographic punctuation (em/en-dash, curly quotes, dagger/double-dagger,
+                                 bullet, ellipsis, per-mille, primes, single guillemets, fraction slash),
+                                 super/subscript DIGITS, common vulgar fractions, and the handful of
+                                 Currency + Letterlike glyphs the font carries (€ ₮ ₴ ₸ ₹ ₽; ℓ № ℗ ℠ ™ Ω ℮).
+                                 Ubuntu Sans Mono has NO overline, NO super/subscript letters or signs,
+                                 NO Roman numerals, and only a fraction of the Currency and Letterlike
+                                 blocks — those 182 codepoints are dropped (msdf-atlas-gen would skip
+                                 them anyway; excluding them keeps the atlas clean and warning-free). -->
+                            <charset>
+                                [0x0020, 0x007E], [0x00A0, 0x017F],
+                                [0x0391, 0x03A1], [0x03A3, 0x03A9], [0x03B1, 0x03C9],
+                                [0x2013, 0x2014], [0x2018, 0x201A], [0x201C, 0x201E],
+                                [0x2020, 0x2022], 0x2026, 0x2030, [0x2032, 0x2033], [0x2039, 0x203A],
+                                0x2044, 0x2212,
+                                0x2070, [0x2074, 0x2079], [0x2080, 0x2089],
+                                0x20AC, 0x20AE, 0x20B4, [0x20B8, 0x20B9], 0x20BD,
+                                0x2113, [0x2116, 0x2117], 0x2120, 0x2122, 0x2126, 0x212E,
+                                [0x2150, 0x2151], [0x2153, 0x215E]
+                            </charset>
                             <atlasSize>1024</atlasSize>
                             <fontSize>32</fontSize>
                             <pxRange>4</pxRange>
@@ -201,7 +222,7 @@
                             <icons>
                                 <manifest>${project.basedir}/fonts/lucide/info.json</manifest>
                                 <manifestFormat>lucide</manifestFormat>
-                                <glyphList>play, square, folder, save, file, x, save-all, settings, rotate-ccw, trash-2</glyphList>
+                                <glyphList>play, square, folder, save, file, x, save-all, settings, rotate-ccw, trash-2, chevron-up, chevron-down, search</glyphList>
                                 <generatedSourcesDir>${project.build.directory}/generated-sources/dasum-msdf</generatedSourcesDir>
                                 <packageName>sibarum.pontif.playground.generated</packageName>
                                 <className>Icons</className>
