@@ -1,6 +1,6 @@
 # Pontif Framework
 
-![Pontif Playground editing the Traction example](traction-ptf.png)
+![Pontif Playground editing the Traction example](assets/traction-ptf.png)
 
 An experimental typed language built on GraalVM's Truffle, where **declared
 types are claims the compiler proves or rejects** — never annotations it
@@ -838,6 +838,16 @@ tiny trait and the library samples it and opens an orbitable window. A 2D curve 
 `Curve2D` (`at(x)` plus a `domain()`); a 3D surface is a `HeightMap3D` (`at(x, y)` plus
 a rectangular domain); a point set is a `Cloud3D`. The projection body is ordinary
 Pontif — free to call the math library above (`at(x) -> sin(x)`, say).
+
+Each is a few lines of source that opens a live window — the code on the left, the
+rendered result on the right:
+
+|   |   |
+|:-:|:-:|
+| ![Two overlaid 2D curves — a parabola and a line — on one chart](assets/curve-plots.png) | ![A saddle surface in a labeled, tick-marked bounding box with a colorbar](assets/saddle-plot.png) |
+| **Overlaid 2D curves** (`chart`) | **A 3D surface with labeled axes** (`scene`) |
+| ![A paraboloid height surface shaded with the viridis colormap beside a colorbar](assets/3d-plot.png) | ![A radial scalar field raymarched as a volume, tinted by gradient direction](assets/3d-volumetric.png) |
+| **A colormapped surface + colorbar** (`cmap`) | **A volumetric field render** (`volume`) |
 
 ```pontif
 requires pontif.plot.{HeightMap3D, plotSurface}
