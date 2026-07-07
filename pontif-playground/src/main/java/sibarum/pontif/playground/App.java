@@ -10,6 +10,7 @@ import sibarum.dasum.gui.core.em.Em;
 import sibarum.dasum.gui.core.em.EmContext;
 import sibarum.dasum.gui.core.event.EventLoop;
 import sibarum.dasum.gui.core.event.Invalidator;
+import sibarum.dasum.gui.core.find.FindBar;
 import sibarum.dasum.gui.core.input.CursorManager;
 import sibarum.dasum.gui.core.input.FocusState;
 import sibarum.dasum.gui.core.input.Handlers;
@@ -151,16 +152,19 @@ public final class App {
     private static Component.Text irAstText;
     private static Component.Text narrowingsText;
     private static Component.Text definitionText;
-    // The editor's scroll pane — held so the Ctrl-hover underline can be clipped
-    // to its viewport (the underline is drawn in the top-level render pass, not
-    // inside the Scroll's own clipped render).
+    // The editor's + definition view's scroll panes — held so the Ctrl-hover
+    // underline can be clipped to whichever viewport owns it (the underline is
+    // drawn in the top-level render pass, not inside the Scroll's own clipped render).
     private static Component.Scroll codeScroll;
+    private static Component.Scroll definitionScroll;
 
     // Ctrl-hover "link" underline over the identifier under the mouse (IntelliJ
-    // style). [linkStart, linkEnd) into the editor content, or -1/-1 when no word
-    // is underlined. Set by updateLinkHover, drawn in the render loop.
+    // style). [linkStart, linkEnd) into linkView's content, or -1/-1 when no word
+    // is underlined. linkView is the code view the underline belongs to (the
+    // editor or the definition view). Set by updateLinkHover, drawn in the render loop.
     private static int linkStart = -1;
     private static int linkEnd = -1;
+    private static Component.Text linkView = null;
     // The Definition tab's selected name must be scrolled into view, but only
     // after the tab is active and its text has been laid out — so the request is
     // deferred one frame and serviced in the render loop.
@@ -323,6 +327,13 @@ public final class App {
                 FontGroups.register(FontGroup.of(FontGroups.DEFAULT,        primaryAtlas, primaryTexture));
                 FontGroups.register(FontGroup.of(MONO_FONT_GROUP,           monoAtlas,    monoTexture));
                 FontGroups.register(FontGroup.of(Icon.DEFAULT_FONT_GROUP,   iconsAtlas,   iconsTexture));
+
+                // Give the global Find bar (Ctrl+F) proper lucide glyphs — dasum-core
+                // ships no icons of its own, so the app supplies them (see the mvp demo).
+                // Without this the bar still works, falling back to ASCII < > x controls.
+                FindBar.configureIcons(new FindBar.IconSpec(
+                    Icon.DEFAULT_FONT_GROUP,
+                    Icons.CHEVRON_UP, Icons.CHEVRON_DOWN, Icons.X, Icons.SEARCH));
 
                 Status.setDefaultMessage(DEFAULT_STATUS, Variant.DEFAULT);
                 Status.setCloseIcon(Icons.X);
@@ -498,15 +509,19 @@ public final class App {
 
         // Read-only "go to definition" view: Ctrl+click a name in the editor and
         // the declaring module's source opens here with the name highlighted
-        // (see onMouseDown's Ctrl branch → openDefinition). Esc returns to Editor.
+        // (see onMouseDown's Ctrl branch → openDefinition). Behaves like the Editor
+        // tab but non-editable — same monospace font, line-number gutter, and
+        // Ctrl+click / Ctrl+Enter navigation (you can keep following symbols from
+        // here). Esc returns to the Editor.
         definitionText = new Component.Text(
-            "Ctrl+click a type, function, or method name in the editor to open its definition here.",
+            "Ctrl+click a type, function, or method name (here or in the editor) to open its definition.",
             MONO_FONT_GROUP, Em.of(0.95f), CODE_FG,
             null, null, Em.of(0.5f),
             null, false,
-            true, true, false, false, 1);
+            true, true, false, false, 1).withLineNumbers(true);
 
-        Component definitionPane = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, definitionText, false, 1);
+        definitionScroll = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, definitionText, false, 1);
+        Component definitionPane = definitionScroll;
 
         // Info tab: the Welcome page — a gallery of sample programs. Clicking a card loads
         // that sample into the editor as a fresh untitled buffer (see loadSample). Wrapped in
@@ -1170,13 +1185,35 @@ public final class App {
             }
             if (ctrl && key == 'Y' && TextInputController.onRedo()) return;
 
+            // Ctrl+F opens the Find bar for the focused selectable text area (the
+            // editor or any of the read-only inspector panes). Guarded on focus so
+            // it only fires where there's something to search; FindBar.open is itself
+            // a no-op otherwise.
+            if (ctrl && key == 'F' && !FindBar.isOpen()) {
+                Component f = FocusState.focused();
+                if (f instanceof Component.Text t && t.selectable()) {
+                    FindBar.open();
+                    return;
+                }
+            }
+
             // Ctrl+Enter on the caret's word: navigate to its definition, or add the
-            // requires for it — the keyboard twin of Ctrl+click. Must precede the plain
-            // Enter handler (which would otherwise insert a newline).
+            // requires for it — the keyboard twin of Ctrl+click. Works in the editor
+            // and the read-only Definition view (whichever holds focus, else the
+            // active tab's code view). Must precede the plain Enter handler (which
+            // would otherwise insert a newline).
             if (ctrl && key == Glfw.GLFW_KEY_ENTER) {
-                handleNavigateOrImportAtCaret();
+                Component.Text view = navigableView(FocusState.focused());
+                if (view == null) view = activeCodeView();
+                if (view != null) handleNavigateOrImportAtCaret(view);
                 return;
             }
+
+            // Find bar (if open) consumes Enter / Shift+Enter / Up / Down for
+            // next/prev-match navigation before the editing handlers, so Enter
+            // doesn't insert a newline and the arrows don't move the query caret.
+            // Esc closes it via the generic overlay pop in the ESCAPE branch below.
+            if (FindBar.handleKey(key, shift)) return;
 
             // Editing keys.
             if (key == Glfw.GLFW_KEY_BACKSPACE && TextInputController.onBackspace(ctrl)) return;
@@ -1284,11 +1321,13 @@ public final class App {
                     pressTarget = null;
                     return;
                 }
-                // Ctrl+click on an editor identifier navigates to its definition or,
-                // when the name isn't in scope, adds the requires for it — instead of
-                // moving the caret (the same action Ctrl+Enter runs from the caret).
+                // Ctrl+click on a code-view identifier (editor or the read-only
+                // Definition view) navigates to its definition or, in the editor,
+                // adds the requires when the name isn't in scope — instead of moving
+                // the caret (the same action Ctrl+Enter runs from the caret).
                 boolean ctrl = (mods & Glfw.GLFW_MOD_CONTROL) != 0;
-                if (ctrl && HoverState.hovered() == codeText && handleNavigateOrImportUnderMouse()) {
+                Component.Text hovView = navigableView(HoverState.hovered());
+                if (ctrl && hovView != null && handleNavigateOrImportUnderMouse(hovView)) {
                     pressTarget = null;
                     return;
                 }
@@ -1326,6 +1365,7 @@ public final class App {
                 cursors.setShape(CursorManager.CursorShape.ARROW);
                 linkStart = -1;   // drop the Ctrl-hover underline when the mouse leaves
                 linkEnd = -1;
+                linkView = null;
                 Invalidator.invalidate();
             }
         });
@@ -1372,52 +1412,85 @@ public final class App {
 
     // --- Ctrl+click "go to definition" + Ctrl-hover link underline ---
 
-    /** Run the navigate-or-import action on the identifier under the mouse. Returns
-     *  false when there's no identifier there, so the click falls through to ordinary
-     *  caret placement. */
-    private static boolean handleNavigateOrImportUnderMouse() {
-        int[] w = editorIdentBoundsUnderMouse();
+    /** The code view (Editor or Definition) for a component, or null for anything
+     *  else — the two panes that share the go-to-definition machinery. */
+    private static Component.Text navigableView(Component c) {
+        return (c == codeText || c == definitionText) ? (Component.Text) c : null;
+    }
+
+    /** The code view backing the active tab (Editor or Definition), or null. Used as
+     *  the Ctrl+Enter target when focus isn't itself on a code view. */
+    private static Component.Text activeCodeView() {
+        Integer t = activeTab == null ? null : activeTab.get();
+        if (t == null) return null;
+        if (t == DEFINITION_TAB) return definitionText;
+        if (t == EDITOR_TAB) return codeText;
+        return null;
+    }
+
+    /** The scroll pane wrapping a code view, so its Ctrl-hover underline clips correctly. */
+    private static Component.Scroll scrollFor(Component.Text view) {
+        if (view == definitionText) return definitionScroll;
+        if (view == codeText) return codeScroll;
+        return null;
+    }
+
+    /** Run the navigate-or-import action on the identifier under the mouse in {@code view}.
+     *  Returns false when there's no identifier there, so the click falls through to
+     *  ordinary caret placement. */
+    private static boolean handleNavigateOrImportUnderMouse(Component.Text view) {
+        int[] w = identBoundsUnderMouse(view);
         if (w == null) return false;
-        navigateOrImport(TextStates.contentOf(codeText).substring(w[0], w[1]));
+        navigateFrom(view, TextStates.contentOf(view).substring(w[0], w[1]));
         return true;
     }
 
-    /** Run the navigate-or-import action on the identifier at the caret (Ctrl+Enter). */
-    private static void handleNavigateOrImportAtCaret() {
-        int[] w = caretIdentBounds();
+    /** Run the navigate-or-import action on the identifier at {@code view}'s caret (Ctrl+Enter). */
+    private static void handleNavigateOrImportAtCaret(Component.Text view) {
+        int[] w = caretIdentBounds(view);
         if (w == null) {
             Status.info("Put the caret on a name to navigate to it or add its requires.");
             return;
         }
-        navigateOrImport(TextStates.contentOf(codeText).substring(w[0], w[1]));
+        navigateFrom(view, TextStates.contentOf(view).substring(w[0], w[1]));
     }
 
     /**
-     * The unified action behind Ctrl+click and Ctrl+Enter:
+     * The unified action behind Ctrl+click and Ctrl+Enter, resolved against
+     * {@code source}'s own text (so you can keep following symbols from within the
+     * Definition view, not just the editor):
      * <ul>
-     *   <li>in scope (declared here or already imported) → open its definition;</li>
+     *   <li>in scope (declared there or already imported) → open its definition;</li>
      *   <li>not in scope but exported by a module → add/merge its {@code requires}
-     *       (a chooser when more than one module exports the name);</li>
-     *   <li>not in scope, not exported, but defined somewhere → open it anyway;</li>
+     *       (a chooser when more than one module exports the name) — editor only,
+     *       since the Definition view is read-only;</li>
+     *   <li>not in scope, not importable, but defined somewhere reachable → open it;</li>
      *   <li>primitive / unknown → a status message.</li>
      * </ul>
      */
-    private static void navigateOrImport(String name) {
+    private static void navigateFrom(Component.Text source, String name) {
         if (DefinitionNavigator.isPrimitive(name)) {
             Status.info("'" + name + "' is a builtin primitive — no source or import.");
             return;
         }
-        String content = TextStates.contentOf(codeText);
+        String content = TextStates.contentOf(source);
         if (DefinitionNavigator.inScope(content, name)) {
-            openDefinition(name);
+            openDefinition(content, name);
             return;
         }
-        java.util.List<String> exporters = DefinitionNavigator.exporters(content, name, resolveDir());
+        // Imports mutate the buffer, so only the editor may add a requires; the
+        // read-only Definition view can only follow to what it can already resolve.
+        boolean editor = source == codeText;
+        java.util.List<String> exporters = editor
+                ? DefinitionNavigator.exporters(content, name, resolveDir())
+                : java.util.List.of();
         if (exporters.isEmpty()) {
             if (DefinitionNavigator.resolve(content, name, resolveDir()).isPresent()) {
-                openDefinition(name);   // exists but isn't exported — show it, can't import
-            } else {
+                openDefinition(content, name);   // resolvable but not importable — just show it
+            } else if (editor) {
                 Status.warn("No definition or exporting module found for '" + name + "'.");
+            } else {
+                Status.warn("No definition for '" + name + "' reachable from this view.");
             }
         } else if (exporters.size() == 1) {
             addRequires(exporters.get(0), name);
@@ -1426,13 +1499,13 @@ public final class App {
         }
     }
 
-    /** Identifier bounds {@code [start, end)} at the caret, or null when the caret
-     *  isn't on (or just past) an identifier. A caret resting at a word's end counts. */
-    private static int[] caretIdentBounds() {
-        if (codeText == null) return null;
-        String content = TextStates.contentOf(codeText);
+    /** Identifier bounds {@code [start, end)} at {@code view}'s caret, or null when the
+     *  caret isn't on (or just past) an identifier. A caret resting at a word's end counts. */
+    private static int[] caretIdentBounds(Component.Text view) {
+        if (view == null) return null;
+        String content = TextStates.contentOf(view);
         if (content.isEmpty()) return null;
-        int caret = Math.max(0, Math.min(TextStates.of(codeText).caretIndex, content.length()));
+        int caret = Math.max(0, Math.min(TextStates.of(view).caretIndex, content.length()));
         int probe = caret;
         if (probe >= content.length() || !isIdentChar(content.charAt(probe))) {
             if (caret > 0 && isIdentChar(content.charAt(caret - 1))) probe = caret - 1;  // just past a word
@@ -1548,32 +1621,41 @@ public final class App {
         return Character.isLetterOrDigit(c) || c == '_' || c == '$';
     }
 
-    /** Identifier bounds {@code [start, end)} under the mouse in the editor, or
-     *  null when the cursor isn't over an identifier (or the editor isn't laid
+    /** Identifier bounds {@code [start, end)} under the mouse in {@code view}, or
+     *  null when the cursor isn't over an identifier (or the view isn't laid
      *  out — e.g. another tab is showing). */
-    private static int[] editorIdentBoundsUnderMouse() {
-        if (codeText == null) return null;
+    private static int[] identBoundsUnderMouse(Component.Text view) {
+        if (view == null) return null;
         LayoutResult lr = LatestLayout.result();
-        PixelRect rect = lr == null ? null : lr.rectOf(codeText);
+        PixelRect rect = lr == null ? null : lr.rectOf(view);
         if (rect == null) return null;
-        String content = TextStates.contentOf(codeText);
-        int idx = TextGeometry.charIndexAt(codeText, content, rect,
+        String content = TextStates.contentOf(view);
+        int idx = TextGeometry.charIndexAt(view, content, rect,
                 (float) InputState.mouseX(), (float) InputState.mouseY());
         int[] w = WordBoundary.wordBoundsAt(content, idx);
         if (w == null || w[1] <= w[0]) return null;
         return isIdentifier(content.substring(w[0], w[1])) ? w : null;
     }
 
-    /** Look up {@code name}'s definition and show it in the read-only Definition
-     *  tab — name highlighted, scrolled into view. Primitives and misses flash an
-     *  explanatory status instead of switching tabs. */
+    /** Resolve {@code name} against the editor buffer and show it in the Definition tab.
+     *  The entry point for editor-driven navigation (Ctrl+click in the editor, the
+     *  module explorer). */
     private static void openDefinition(String name) {
+        openDefinition(TextStates.contentOf(codeText), name);
+    }
+
+    /** Look up {@code name}'s definition — resolved against {@code fromContent}'s scope —
+     *  and show it in the read-only Definition tab: name highlighted, scrolled into view.
+     *  {@code fromContent} is the editor buffer for editor navigation, or the currently
+     *  shown definition source when following symbols from within the Definition view.
+     *  Primitives and misses flash an explanatory status instead of switching tabs. */
+    private static void openDefinition(String fromContent, String name) {
         if (DefinitionNavigator.isPrimitive(name)) {
             Status.info("'" + name + "' is a builtin primitive — no source to open.");
             return;
         }
         Optional<DefinitionNavigator.Target> found = DefinitionNavigator.resolve(
-                TextStates.contentOf(codeText), name, resolveDir());
+                fromContent, name, resolveDir());
         if (found.isEmpty()) {
             Status.warn("No definition found for '" + name + "'.");
             return;
@@ -1635,45 +1717,50 @@ public final class App {
         Invalidator.invalidate();
     }
 
-    /** Recompute the Ctrl-hover underline target: the editor identifier under the
-     *  mouse while Ctrl is held and the editor is the active, hovered pane. Cheap
-     *  enough to run on every cursor move and Ctrl press/release. */
+    /** Recompute the Ctrl-hover underline target: the identifier under the mouse in a
+     *  code view (editor or Definition) while Ctrl is held and that view is the hovered
+     *  pane. Cheap enough to run on every cursor move and Ctrl press/release. */
     private static void updateLinkHover() {
         boolean ctrl = window != null
                 && (Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_LEFT_CONTROL) == Glfw.GLFW_PRESS
                  || Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_RIGHT_CONTROL) == Glfw.GLFW_PRESS);
-        int[] w = (ctrl && !OverlayStack.isActive() && HoverState.hovered() == codeText)
-                ? editorIdentBoundsUnderMouse() : null;
+        Component.Text view = (ctrl && !OverlayStack.isActive())
+                ? navigableView(HoverState.hovered()) : null;
+        int[] w = view != null ? identBoundsUnderMouse(view) : null;
         // Don't underline primitives — they aren't navigable.
         if (w != null && DefinitionNavigator.isPrimitive(
-                TextStates.contentOf(codeText).substring(w[0], w[1]))) {
+                TextStates.contentOf(view).substring(w[0], w[1]))) {
             w = null;
         }
         int ns = w == null ? -1 : w[0];
         int ne = w == null ? -1 : w[1];
-        if (ns != linkStart || ne != linkEnd) {
+        Component.Text nv = w == null ? null : view;
+        if (ns != linkStart || ne != linkEnd || nv != linkView) {
             linkStart = ns;
             linkEnd = ne;
+            linkView = nv;
             Invalidator.invalidate();
         }
     }
 
-    /** Draw the Ctrl-hover underline beneath the editor identifier, clipped to the
-     *  editor viewport. No-op unless a word is hovered and the Editor tab is showing
-     *  (an inactive tab's text has no layout rect). */
+    /** Draw the Ctrl-hover underline beneath the hovered identifier, clipped to its code
+     *  view's viewport. No-op unless a word is underlined and its view is showing (an
+     *  inactive tab's text has no layout rect). */
     private static void drawLinkUnderline(LayoutResult layout, Batcher batcher) {
-        if (linkStart < 0 || linkEnd <= linkStart || codeText == null) return;
-        PixelRect tr = layout.rectOf(codeText);
-        if (tr == null) return;   // Editor tab not active
-        String content = TextStates.contentOf(codeText);
+        if (linkStart < 0 || linkEnd <= linkStart || linkView == null) return;
+        Component.Text view = linkView;
+        PixelRect tr = layout.rectOf(view);
+        if (tr == null) return;   // view's tab not active
+        String content = TextStates.contentOf(view);
         if (linkEnd > content.length()) return;
-        PixelRect a = TextGeometry.caretBounds(codeText, content, tr, linkStart);
-        PixelRect b = TextGeometry.caretBounds(codeText, content, tr, linkEnd);
+        PixelRect a = TextGeometry.caretBounds(view, content, tr, linkStart);
+        PixelRect b = TextGeometry.caretBounds(view, content, tr, linkEnd);
         float x = a.x();
         float right = b.x();
         if (right <= x) return;   // word wrapped across visual lines — skip
         float y = a.bottom() - 2f;
-        PixelRect vp = codeScroll == null ? null : layout.rectOf(codeScroll);
+        Component.Scroll sc = scrollFor(view);
+        PixelRect vp = sc == null ? null : layout.rectOf(sc);
         if (vp != null) {
             if (y < vp.y() || y > vp.bottom()) return;   // scrolled out of view
             x = Math.max(x, vp.x());
