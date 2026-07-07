@@ -5,10 +5,8 @@ import sibarum.pontif.core.QualifiedName;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * The unified post-link resolution pass: in ONE bottom-up tree walk it both
@@ -45,12 +43,10 @@ public final class MethodOperatorResolver {
 
     private final boolean resolveMethods;
     private final boolean routeOperators;
-    /** operator member symbol → declared overloads of it (keyed by post-link name). */
-    private final Map<String, List<IrStmt.FunctionDecl>> operatorOverloads = new LinkedHashMap<>();
-    /** every name a {@code MethodCall} may resolve to (Type.method / Trait.method keys). */
-    private final Set<String> methodKeys;
     private final Map<String, IrSort.Structural> structs;
-    /** Sort inference goes through the type-system facade (the single answerer), not a direct call. */
+    /** Inference AND name-routing both go through the type-system facade (the single answerer): the
+     *  operator/method routing tables now live on {@link InferenceContext} and are consulted via
+     *  {@code dispatch()}, so this pass no longer keeps its own copies. */
     private final sibarum.pontif.types.TypeSystem types = sibarum.pontif.types.TypeSystem.standard();
     /** Visibility view used to gate operator/method routing. The whole-module
      *  {@code resolve(...)} entry points leave it {@linkplain ModuleScope#unrestricted()
@@ -62,16 +58,7 @@ public final class MethodOperatorResolver {
     private MethodOperatorResolver(IrModule module, boolean resolveMethods, boolean routeOperators) {
         this.resolveMethods = resolveMethods;
         this.routeOperators = routeOperators;
-        this.methodKeys = collectMethodKeys(module);
         this.structs = InferenceContext.fromModule(module).structDefs();
-        for (IrStmt stmt : module.statements()) {
-            if (stmt instanceof IrStmt.FunctionDecl fd && fd.params().size() == 2) {
-                String sym = QualifiedName.memberOf(fd.name());
-                if (isOperatorSymbol(sym)) {
-                    operatorOverloads.computeIfAbsent(sym, k -> new ArrayList<>()).add(fd);
-                }
-            }
-        }
     }
 
     /** Full resolution: methods AND operators (the run path). Unrestricted — for a
@@ -193,7 +180,7 @@ public final class MethodOperatorResolver {
                     IrSort rightSort = types.infer(right, ctx);
                     String sym = dispatchSymbol(op.op());
                     String resolved = sym == null ? null
-                            : resolveOverload(sym, leftSort, rightSort, op.origin());
+                            : resolveOverload(sym, leftSort, rightSort, op.origin(), ctx);
                     if (resolved != null) {
                         yield new IrExpr.Call(resolved, List.of(left, right), op.origin());
                     }
@@ -226,7 +213,7 @@ public final class MethodOperatorResolver {
                     if (isOperatorSymbol(sym) && args.size() == 2) {
                         String resolved = resolveOverload(sym,
                                 types.infer(args.get(0), ctx),
-                                types.infer(args.get(1), ctx), c.origin());
+                                types.infer(args.get(1), ctx), c.origin(), ctx);
                         if (resolved != null) yield new IrExpr.Call(resolved, args, c.origin());
                     }
                 }
@@ -290,10 +277,14 @@ public final class MethodOperatorResolver {
             // (unused) operators-only preset — keep the call symbolic.
             throw MethodResolver.unresolved(mc, "MethodOperatorResolver(routeOperators-only)");
         }
-        String typeName = baseName(types.infer(receiver, ctx));
+        IrSort receiverSort = types.infer(receiver, ctx);
+        String typeName = baseName(receiverSort);
         if (typeName != null) {
-            String key = typeName + "." + mc.methodName();
-            if (methodKeys.contains(key)) {
+            // Does base(receiver).method name a routable method key? The unified dispatch query answers
+            // (it consults the routable-key set, trait-contract keys included); this pass forms the Call.
+            if (routes(types.dispatch(
+                    sibarum.pontif.types.DispatchQuery.forMethod(mc.methodName(), receiverSort), ctx))) {
+                String key = typeName + "." + mc.methodName();
                 List<IrExpr> withReceiver = new ArrayList<>(args.size() + 1);
                 withReceiver.add(receiver);
                 withReceiver.addAll(args);
@@ -326,22 +317,36 @@ public final class MethodOperatorResolver {
      * isn't imported is a compile error (the migration error), never a silent
      * miss. With no symbol table (single-file / unlinked) nothing is gated.
      */
-    private String resolveOverload(String sym, IrSort leftSort, IrSort rightSort, Origin origin)
-            throws CompileException {
-        String lb = baseName(leftSort);
-        String rb = baseName(rightSort);
-        if (lb == null || rb == null) return null;
+    private String resolveOverload(String sym, IrSort leftSort, IrSort rightSort, Origin origin,
+            InferenceContext ctx) throws CompileException {
+        // The base-name routing family is the unified dispatch query at broad determinacy; visibility
+        // gating (import-by-association) stays here because it needs this pass's per-module ModuleScope.
+        List<IrStmt.FunctionDecl> family = routingFamily(types.dispatch(
+                sibarum.pontif.types.DispatchQuery.forOperator(sym, leftSort, rightSort), ctx));
         IrStmt.FunctionDecl invisible = null;
-        for (IrStmt.FunctionDecl fd : operatorOverloads.getOrDefault(sym, List.of())) {
-            String p0 = baseName(fd.params().get(0).sort());
-            String p1 = baseName(fd.params().get(1).sort());
-            if (lb.equals(p0) && rb.equals(p1)) {
-                if (isVisibleHere(fd)) return fd.name();
-                if (invisible == null) invisible = fd;   // matched by sort, but not imported
-            }
+        for (IrStmt.FunctionDecl fd : family) {
+            if (isVisibleHere(fd)) return fd.name();
+            if (invisible == null) invisible = fd;   // matched by sort, but not imported
         }
         if (invisible != null) throw notImportedError(sym, invisible, origin);
         return null;
+    }
+
+    /** The candidate family a coarse name-routing {@link sibarum.pontif.types.DispatchResult} names — the
+     *  overloads the caller then gates / picks a name from. Residual/Unsatisfiable ⇒ no routable family. */
+    private static List<IrStmt.FunctionDecl> routingFamily(sibarum.pontif.types.DispatchResult r) {
+        return switch (r) {
+            case sibarum.pontif.types.DispatchResult.Ambiguous a -> a.candidates();
+            case sibarum.pontif.types.DispatchResult.Resolved res -> List.of(res.target());
+            case sibarum.pontif.types.DispatchResult.Residual ignored -> List.of();
+            case sibarum.pontif.types.DispatchResult.Unsatisfiable ignored -> List.of();
+        };
+    }
+
+    /** Whether a name-routing query provably routes — a unique target or a matched family. */
+    private static boolean routes(sibarum.pontif.types.DispatchResult r) {
+        return r instanceof sibarum.pontif.types.DispatchResult.Resolved
+                || r instanceof sibarum.pontif.types.DispatchResult.Ambiguous;
     }
 
     /**
@@ -377,32 +382,6 @@ public final class MethodOperatorResolver {
                 "Operator '" + sym + "' resolves to an overload in module '" + declModule
                         + "', which '" + currentScope.module() + "' does not import — " + fix
                         + " (operators come with their operand types, by association).", origin);
-    }
-
-    /**
-     * Every name a {@code MethodCall} may legitimately resolve to: declared
-     * function/method decls, trait-impl methods + attribute producers, and trait
-     * contract methods (keyed {@code Trait.method}; dispatch's trait fallback
-     * redirects those to the concrete type at the call).
-     */
-    private static Set<String> collectMethodKeys(IrModule module) {
-        Set<String> keys = new LinkedHashSet<>();
-        for (IrStmt stmt : module.statements()) {
-            switch (stmt) {
-                case IrStmt.FunctionDecl fd -> keys.add(fd.name());
-                case IrStmt.TraitImpl ti -> {
-                    for (IrStmt.FunctionDecl m : ti.methods()) keys.add(m.name());
-                    for (IrStmt.FunctionDecl a : ti.attributeProducers()) keys.add(a.name());
-                }
-                case IrStmt.TypeAlias ta -> {
-                    if (ta.sort() instanceof IrSort.Trait t) {
-                        for (String methodName : t.methods().keySet()) keys.add(t.name() + "." + methodName);
-                    }
-                }
-                default -> { }
-            }
-        }
-        return keys;
     }
 
     /**
@@ -512,7 +491,7 @@ public final class MethodOperatorResolver {
         };
     }
 
-    static boolean isOperatorSymbol(String s) {  // package-private: reused by CallNameCheck
+    public static boolean isOperatorSymbol(String s) {  // reused by CallNameCheck + the dispatch resolver
         return switch (s) {
             case "+", "-", "*", "/", "%", "^", "<", "<=", ">", ">=", "==", "!=" -> true;
             default -> false;

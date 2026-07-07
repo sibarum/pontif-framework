@@ -48,4 +48,27 @@ public record DispatchQuery(
         for (IrSort s : argSorts) as.add(ArgConstraint.ofSort(s));
         return new DispatchQuery(selector, Optional.empty(), as, Optional.empty());
     }
+
+    /**
+     * Coarse <em>operator</em> name-routing: which operator family does {@code symbol} route to for
+     * operands of these (broad) sorts? The selector is the bare operator symbol ({@code "+"}), not a
+     * resolved Call name — that is what tells the resolver to answer by operand base-name family match
+     * rather than refinement selection. The determinacy is deliberately broad (base names, refinement
+     * blind): it names the target family, and picking the most-specific member is left to a
+     * more-determined query (ultimately runtime dispatch).
+     */
+    public static DispatchQuery forOperator(String symbol, IrSort left, IrSort right) {
+        return new DispatchQuery(symbol, Optional.empty(),
+                List.of(ArgConstraint.ofSort(left), ArgConstraint.ofSort(right)), Optional.empty());
+    }
+
+    /**
+     * Coarse <em>method</em> name-routing: does {@code methodName} route to a method on the receiver's
+     * (base) type? The {@link #receiver} constraint is what marks this a method query. Method routing
+     * today keys only on the receiver type and selector (it does not constrain on argument sorts), so
+     * this carries no {@link #args} — a future arg-directed method-dispatch slice adds them.
+     */
+    public static DispatchQuery forMethod(String methodName, IrSort receiver) {
+        return new DispatchQuery(methodName, Optional.of(receiver), List.of(), Optional.empty());
+    }
 }

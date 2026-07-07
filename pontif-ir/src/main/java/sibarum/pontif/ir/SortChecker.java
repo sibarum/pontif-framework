@@ -2244,7 +2244,9 @@ public final class SortChecker {
                 stripNullValues(functionReturns),
                 structDefs,
                 Map.of(),
-                Map.of());
+                Map.of(),
+                Map.of(),
+                java.util.Set.of());
     }
 
     private static <V> Map<String, V> stripNullValues(Map<String, V> m) {

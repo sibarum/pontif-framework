@@ -3,9 +3,12 @@ package sibarum.pontif.ir;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import sibarum.pontif.core.QualifiedName;
 
 /**
  * Read-only context for {@link NarrowingInference}. Carries the
@@ -29,7 +32,9 @@ public record InferenceContext(
         Map<String, IrSort> functionReturns,
         Map<String, IrSort.Structural> structDefs,
         Map<String, List<IrStmt.FunctionDecl>> overloads,
-        Map<String, List<IrStmt.ReturnProof>> returnProofs) {
+        Map<String, List<IrStmt.ReturnProof>> returnProofs,
+        Map<String, List<IrStmt.FunctionDecl>> operatorOverloads,
+        Set<String> methodKeys) {
 
     public InferenceContext {
         typeEnv = Map.copyOf(typeEnv);
@@ -39,6 +44,8 @@ public record InferenceContext(
         // also defensively copy the inner lists of the two name→list maps.
         overloads = copyOfLists(overloads);
         returnProofs = copyOfLists(returnProofs);
+        operatorOverloads = copyOfLists(operatorOverloads);
+        methodKeys = Set.copyOf(methodKeys);
     }
 
     private static <T> Map<String, List<T>> copyOfLists(Map<String, List<T>> m) {
@@ -50,19 +57,19 @@ public record InferenceContext(
     }
 
     public static InferenceContext empty() {
-        return new InferenceContext(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+        return new InferenceContext(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
     }
 
     /** Convenience for tests / callers with just an env. */
     public static InferenceContext of(Map<String, IrSort> typeEnv) {
-        return new InferenceContext(typeEnv, Map.of(), Map.of(), Map.of(), Map.of());
+        return new InferenceContext(typeEnv, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
     }
 
     /** Convenience for callers with an env and function-return map. */
     public static InferenceContext of(
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns) {
-        return new InferenceContext(typeEnv, functionReturns, Map.of(), Map.of(), Map.of());
+        return new InferenceContext(typeEnv, functionReturns, Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
     }
 
     /**
@@ -78,23 +85,43 @@ public record InferenceContext(
         Map<String, List<IrStmt.FunctionDecl>> overloads = new LinkedHashMap<>();
         Map<String, IrSort> returns = new LinkedHashMap<>();
         Map<String, List<IrStmt.ReturnProof>> returnProofs = new LinkedHashMap<>();
+        // The two canonical name-routing tables (docs/dispatch-query.md): operator overloads keyed by
+        // symbol (base-name family routing) and every key a method call may resolve to. Built here, in
+        // statement order, so the dispatch() resolver and MethodOperatorResolver share one source
+        // rather than the resolver rebuilding its own copies.
+        Map<String, List<IrStmt.FunctionDecl>> operatorOverloads = new LinkedHashMap<>();
+        Set<String> methodKeys = new LinkedHashSet<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 overloads.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
                 returns.put(fd.name(), fd.returnSort());
+                methodKeys.add(fd.name());
+                if (fd.params().size() == 2) {
+                    String sym = QualifiedName.memberOf(fd.name());
+                    if (MethodOperatorResolver.isOperatorSymbol(sym)) {
+                        operatorOverloads.computeIfAbsent(sym, k -> new ArrayList<>()).add(fd);
+                    }
+                }
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 for (IrStmt.FunctionDecl m : ti.methods()) {
                     overloads.computeIfAbsent(m.name(), k -> new ArrayList<>()).add(m);
                     returns.put(m.name(), m.returnSort());
+                    methodKeys.add(m.name());
                 }
                 for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
                     overloads.computeIfAbsent(a.name(), k -> new ArrayList<>()).add(a);
                     returns.put(a.name(), a.returnSort());
+                    methodKeys.add(a.name());
                 }
             } else if (stmt instanceof IrStmt.ReturnProof rp) {
                 returnProofs.computeIfAbsent(rp.functionName(), k -> new ArrayList<>()).add(rp);
             } else if (stmt instanceof IrStmt.TypeAlias ta
                     && ta.sort() instanceof IrSort.Trait t) {
+                // Trait contract methods route as `Trait.method` on a bare-trait receiver (the
+                // existential boundary); a concrete receiver resolves to `ConcreteType.method`.
+                for (String methodName : t.methods().keySet()) {
+                    methodKeys.add(t.name() + "." + methodName);
+                }
                 // Existential boundary (docs/associated-types.md §3.2, §7.3). A
                 // contract method whose return mentions an associated type or
                 // `this.type`, called on a *bare-trait* receiver, resolves to the
@@ -117,7 +144,8 @@ public record InferenceContext(
         }
         Map<String, IrSort.Structural> structs =
                 sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
-        return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs);
+        return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs,
+                operatorOverloads, methodKeys);
     }
 
     /** Whether {@code sort} references any of the given associated-type names. */
@@ -177,17 +205,20 @@ public record InferenceContext(
     public InferenceContext withVar(String name, IrSort sort) {
         Map<String, IrSort> extended = new HashMap<>(typeEnv);
         extended.put(name, sort);
-        return new InferenceContext(extended, functionReturns, structDefs, overloads, returnProofs);
+        return new InferenceContext(extended, functionReturns, structDefs, overloads, returnProofs,
+                operatorOverloads, methodKeys);
     }
 
     /** Returns a new context with the struct-defs map replaced. */
     public InferenceContext withStructDefs(Map<String, IrSort.Structural> defs) {
-        return new InferenceContext(typeEnv, functionReturns, defs, overloads, returnProofs);
+        return new InferenceContext(typeEnv, functionReturns, defs, overloads, returnProofs,
+                operatorOverloads, methodKeys);
     }
 
     /** Returns a new context with the overload map replaced. */
     public InferenceContext withOverloads(Map<String, List<IrStmt.FunctionDecl>> ovs) {
-        return new InferenceContext(typeEnv, functionReturns, structDefs, ovs, returnProofs);
+        return new InferenceContext(typeEnv, functionReturns, structDefs, ovs, returnProofs,
+                operatorOverloads, methodKeys);
     }
 
     /**
