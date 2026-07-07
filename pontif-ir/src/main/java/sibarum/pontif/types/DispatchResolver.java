@@ -31,18 +31,19 @@ final class DispatchResolver {
         for (DispatchQuery.ArgConstraint a : query.args()) argSorts.add(a.sort());
         var registry = ctx.sortRegistry();
 
-        // A unique definite match is the resolved target. Otherwise split the "not unique" cases the way
-        // the query demands: every arity-matching overload provably excluded ⇒ Unsatisfiable (compile
-        // error); several matches or an undecided kernel ⇒ Residual (defer to a more-determined query).
+        // A unique definite match is the resolved target. Otherwise the three-way classify verdict
+        // splits the rest: FAILED (every arity-matching overload provably excluded) ⇒ Unsatisfiable
+        // (compile error); PASSED (≥1 definite match but no unique winner) ⇒ Ambiguous (routes, defer
+        // which); RESIDUAL (kernel can't decide) ⇒ Residual.
         StaticDispatch.Result res = StaticDispatch.resolve(overloads, argSorts, registry);
         if (res instanceof StaticDispatch.Result.Resolved r) {
             return new DispatchResult.Resolved(r.decl());
         }
-        StaticDispatch.Verdict verdict = StaticDispatch.classify(overloads, argSorts, registry);
-        if (verdict == StaticDispatch.Verdict.FAILED) {
-            return new DispatchResult.Unsatisfiable(
+        return switch (StaticDispatch.classify(overloads, argSorts, registry)) {
+            case FAILED -> new DispatchResult.Unsatisfiable(
                     "no target satisfies '" + query.selector() + "' at the given argument sorts");
-        }
-        return new DispatchResult.Residual(overloads);
+            case PASSED -> new DispatchResult.Ambiguous(overloads);
+            case RESIDUAL -> new DispatchResult.Residual(overloads);
+        };
     }
 }

@@ -1,5 +1,7 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.DispatchQuery;
+import sibarum.pontif.types.DispatchResult;
 import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.Origin;
 
@@ -187,8 +189,18 @@ public final class CallGate {
                         // because the gate's FAILED is disjoint-based (gateFit).
                         argNarrowings.add(TypeSystem.standard().inferArg(arg, ctx));
                     }
-                    StaticDispatch.Verdict v =
-                            StaticDispatch.classify(overloads, argNarrowings, ctx.sortRegistry());
+                    // The gate's routing question is the unified dispatch query (the same one inference
+                    // asks): the compile-time verdict is read off the result. Resolved/Ambiguous both
+                    // mean "provably routes" (PASSED); Unsatisfiable is the provable misroute (FAILED);
+                    // Residual is undecided. (overloads stays local for the guard above + detail below.)
+                    DispatchResult routing = TypeSystem.standard()
+                            .dispatch(DispatchQuery.forCall(c.functionName(), argNarrowings), ctx);
+                    StaticDispatch.Verdict v = switch (routing) {
+                        case DispatchResult.Resolved ignored -> StaticDispatch.Verdict.PASSED;
+                        case DispatchResult.Ambiguous ignored -> StaticDispatch.Verdict.PASSED;
+                        case DispatchResult.Unsatisfiable ignored -> StaticDispatch.Verdict.FAILED;
+                        case DispatchResult.Residual ignored -> StaticDispatch.Verdict.RESIDUAL;
+                    };
                     String detail = switch (v) {
                         case FAILED -> failedDetail(overloads, argNarrowings);
                         // Categorize RESIDUAL for the no-lie-sweep measurement: is the
