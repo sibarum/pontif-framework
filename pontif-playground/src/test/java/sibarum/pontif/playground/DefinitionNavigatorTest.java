@@ -37,6 +37,34 @@ class DefinitionNavigatorTest {
     }
 
     @Test
+    void localDeclaration_findsDeclSpanForLocalName() {
+        String src = """
+                function twice(n:Int):Int -> n + n
+                twice(21)
+                """;
+        Optional<int[]> span = DefinitionNavigator.localDeclaration(src, "twice");
+        assertTrue(span.isPresent());
+        // The DECLARATION occurrence (after "function "), not the call site.
+        assertEquals(src.indexOf("twice"), span.get()[0]);
+        assertEquals(src.indexOf("twice") + "twice".length(), span.get()[1]);
+    }
+
+    @Test
+    void localDeclaration_emptyForImportedOrUnknownName() {
+        String src = """
+                requires std.proof.{Split}
+                function local(n:Int):Int -> n
+                local(1)
+                """;
+        // Imported (declared elsewhere) → not a local jump.
+        assertTrue(DefinitionNavigator.localDeclaration(src, "Split").isEmpty());
+        // Unknown → empty.
+        assertTrue(DefinitionNavigator.localDeclaration(src, "Nope").isEmpty());
+        // Locally declared → present.
+        assertTrue(DefinitionNavigator.localDeclaration(src, "local").isPresent());
+    }
+
+    @Test
     void resolvesLocalStruct() {
         String src = """
                 struct Point(x:Int, y:Int)

@@ -169,6 +169,9 @@ public final class App {
     // after the tab is active and its text has been laid out — so the request is
     // deferred one frame and serviced in the render loop.
     private static boolean scrollDefnPending = false;
+    // Same, for the editor: a go-to-definition jump onto a locally-declared name
+    // sets the caret and requests its scroll-into-view on the next laid-out frame.
+    private static boolean scrollEditorPending = false;
     // The main tab strip's active index, hoisted so the entrypoint menu can revert
     // it on dismiss. `committedTab` is the tab the user actually settled on (a press
     // of the Narrowings tab is transient until an entrypoint is chosen);
@@ -381,6 +384,10 @@ public final class App {
                     if (scrollDefnPending) {
                         scrollSelectionIntoView(definitionText);
                         scrollDefnPending = false;
+                    }
+                    if (scrollEditorPending) {
+                        scrollSelectionIntoView(codeText);
+                        scrollEditorPending = false;
                     }
 
                     batcher.beginFrame(fbH);
@@ -1474,6 +1481,16 @@ public final class App {
             return;
         }
         String content = TextStates.contentOf(source);
+        // A token defined in the editor buffer jumps to it in the editor itself, rather
+        // than opening a read-only copy in the Definition view. (Only for the editor —
+        // navigating within the Definition view stays in that view.)
+        if (source == codeText) {
+            Optional<int[]> local = DefinitionNavigator.localDeclaration(content, name);
+            if (local.isPresent()) {
+                jumpInEditor(local.get()[0], local.get()[1], name);
+                return;
+            }
+        }
         if (DefinitionNavigator.inScope(content, name)) {
             openDefinition(content, name);
             return;
@@ -1635,6 +1652,22 @@ public final class App {
         int[] w = WordBoundary.wordBoundsAt(content, idx);
         if (w == null || w[1] <= w[0]) return null;
         return isIdentifier(content.substring(w[0], w[1])) ? w : null;
+    }
+
+    /** Jump to a declaration <em>inside the editor buffer</em>: activate the Editor tab,
+     *  select the name at {@code [start, end)}, and scroll it into view — go-to-definition
+     *  for a locally-defined token, no read-only Definition view needed. */
+    private static void jumpInEditor(int start, int end, String name) {
+        if (activeTab != null) activeTab.set(EDITOR_TAB);
+        FocusState.set(codeText);
+        TextState ts = TextStates.of(codeText);
+        int len = TextStates.contentOf(codeText).length();
+        ts.selectionAnchor = Math.max(0, Math.min(start, len));
+        ts.caretIndex = Math.max(0, Math.min(end, len));
+        ts.hoverCaretIndex = -1;
+        scrollEditorPending = true;   // scroll once the caret's line has a layout rect
+        Status.success("Jumped to the definition of '" + name + "' in this file.");
+        Invalidator.invalidate();
     }
 
     /** Resolve {@code name} against the editor buffer and show it in the Definition tab.

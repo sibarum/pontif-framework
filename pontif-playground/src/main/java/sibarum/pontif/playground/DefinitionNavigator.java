@@ -78,6 +78,21 @@ public final class DefinitionNavigator {
     }
 
     /**
+     * The character span {@code [start, end)} of {@code name}'s declaration <em>in the
+     * editor buffer itself</em>, or empty when the buffer doesn't declare it. The
+     * "jump within the editor" case for go-to-definition: a locally-defined name should
+     * move the caret in the editor rather than open a read-only copy in the Definition
+     * view. Mirrors {@link #resolve}'s step 1 (this file), returning just the span.
+     */
+    public static Optional<int[]> localDeclaration(String editorContent, String name) {
+        if (name == null || name.isEmpty()) return Optional.empty();
+        IrModule mod = tryParse(editorContent, "<editor>");
+        if (mod == null || !declares(mod, name)) return Optional.empty();
+        Target t = located("(this file)", editorContent, name, mod);
+        return t.selEnd() > t.selStart() ? Optional.of(new int[]{t.selStart(), t.selEnd()}) : Optional.empty();
+    }
+
+    /**
      * Module names that <em>export</em> {@code name} — the candidates a {@code requires}
      * could pull it from. Searches sibling {@code .ptf} modules (by their declared
      * {@code module} name) and the builtins (+ the GUI extension). Only exported names
