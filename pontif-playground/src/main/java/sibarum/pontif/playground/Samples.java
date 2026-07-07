@@ -53,7 +53,7 @@ final class Samples {
         new Sample("volume-normals", "Volume + Normals",
             "The gradient-lit volume with a lattice of gradient-direction glyphs."),
         new Sample("sdf-sphere", "SDF Sphere",
-            "A signed-distance-field sphere, ray-marched live with preview."),
+            "A signed-distance-field sphere, ray-marched live as a real surface."),
         new Sample("sdf-csg", "CSG Shape",
             "A sphere with a smaller sphere carved out of it via CSG difference.")
     );

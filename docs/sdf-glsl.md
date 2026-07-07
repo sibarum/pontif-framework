@@ -12,9 +12,9 @@ Markers: **RULED** = settled with James · **DERIVED** = follows from ruled mate
 
 `pontif.shape` (docs/shapes.md, S1–S4 landed) represents a shape as a runtime tree of
 Pontif structs (`Sphere`, `Union`, `Translated`, `SmoothUnion`, …), each satisfying
-`SdfShape.distance(x,y,z):Decimal`. Today `preview` **interprets** that tree per grid point
+`SdfShape.distance(x,y,z):Decimal`. `previewGradientField` **interprets** that tree per grid point
 (13,824 dispatches), clamps to a shell band, and renders it as a `pontif.plot` `Volume` — a
-glow approximation, not a surface.
+glow approximation of the gradient field, not a surface.
 
 Dasum now hosts caller-supplied SDF shaders: `RaymarchLayer.standard(sdf, center, halfExtent,
 color)` takes GLSL defining **`float map(vec3 p)`** in box-local coords (OpenGL 3.3), splices
@@ -111,7 +111,7 @@ supirvast `Iterate → kernel` work retargeted to GLSL.
 
 - **Deferred:** attribute fields (`ScalarField`) → surface color; view modes; refined
   `[Decimal:@>0.0]` primitive params; `Cone`; the macro generalization (mode 1); bounded
-  iteration → GLSL loop. `preview` (sampled glow) stays as the CPU fallback.
+  iteration → GLSL loop. `previewGradientField` (sampled glow) stays as the CPU fallback.
 
 ## Module placement (OPEN — lean)
 

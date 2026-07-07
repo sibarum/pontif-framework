@@ -6,22 +6,22 @@ import sibarum.pontif.runtime.module.Extension;
 import java.util.Map;
 
 /**
- * The shape-composition extension (docs/shapes.md), slice <b>S1</b> — SDF shape primitives + a
- * live preview. A type becomes a shape by assigning the {@code SdfShape} trait and implementing
- * its signed-distance projection; {@code preview} samples that field <b>Pontif-side</b> on a 24³
- * grid and hands the numbers to {@code pontif.plot}'s volumetric renderer as a {@code Volume}
- * layer. Primitives, boolean modifiers, and user SDF surfaces will all share the one
- * {@code SdfShape} trait (docs/shapes.md §The spine).
+ * The shape-composition extension (docs/shapes.md) — SDF shape primitives with two ways to view
+ * them. A type becomes a shape by assigning the {@code SdfShape} trait and implementing its
+ * signed-distance projection; {@code render} lowers that field to a GLSL {@code float map(vec3 p)}
+ * and hands it to Dasum's raymarch layer for a crisp sphere-traced <b>surface</b> (docs/sdf-glsl.md),
+ * while {@code previewGradientField} samples the field <b>Pontif-side</b> on a 24³ grid and hands the
+ * numbers to {@code pontif.plot}'s volumetric renderer as a {@code Volume} layer — a glowing view of
+ * the gradient field, not a solid surface. Primitives, boolean modifiers, and user SDF surfaces all
+ * share the one {@code SdfShape} trait (docs/shapes.md §The spine).
  *
- * <p><b>No new native code.</b> The render path is entirely reused from the plotting extension
- * (docs/shapes.md §Live preview, sampled path (a)): only the sampled distances cross the boundary,
- * so this extension declares no {@link #calls()} of its own — {@code preview} composes existing
- * {@code pontif.plot} functions. Meshing (topologize), attribute fields, and PLY export are later
- * slices.
+ * <p>The only native this extension declares is {@link SdfGlsl#map sdfMap} (the GLSL lowering behind
+ * {@code render}); {@code previewGradientField} composes existing {@code pontif.plot} functions and
+ * crosses only sampled numbers. Meshing (topologize), attribute fields, and PLY export are later slices.
  *
  * <pre>
- *   requires pontif.shape.{Sphere, preview}
- *   main ( preview(Sphere(1.0)) )
+ *   requires pontif.shape.{Sphere, render}
+ *   main ( render(Sphere(1.0)) )
  * </pre>
  */
 public final class ShapeExtension implements Extension {
@@ -38,7 +38,7 @@ public final class ShapeExtension implements Extension {
                 requires pontif.math.{sqrt, abs, clamp, sin, cos, radians, min, max, mix}
                 requires pontif.plot.{Volume, scene}
                 exports @.{SdfShape, Sphere, Box, Torus, Cylinder, Capsule, Plane,
-                           preview, render, distanceAt,
+                           previewGradientField, render, distanceAt,
                            translate, scale, rotateX, rotateY, rotateZ,
                            union, difference, intersect,
                            smoothUnion, smoothIntersect, smoothDifference,
@@ -155,25 +155,27 @@ public final class ShapeExtension implements Extension {
                 # fragment calls this instead (the same workaround pontif.plot uses for volumeAt).
                 function distanceAt(s:[SdfShape], x:Decimal, y:Decimal, z:Decimal):Decimal -> s.distance(x, y, z)
 
-                # Live preview (docs/shapes.md S1, sampled path (a)): sample the signed distance
-                # field on a 24^3 grid over the shape's bounds, but CLAMP it to a thin band around
-                # the surface before handing it to pontif.plot's volumetric renderer. That renderer
-                # lights each voxel by its gradient MAGNITUDE — and a raw SDF has unit gradient
+                # Gradient-field preview (docs/shapes.md S1, sampled path (a)): visualize the shape's
+                # SDF as a VOLUMETRIC GRADIENT FIELD — sample the signed distance on a 24^3 grid over
+                # the shape's bounds, CLAMP it to a thin band around the surface, and hand it to
+                # pontif.plot's volumetric renderer. That renderer lights each voxel by its gradient
+                # MAGNITUDE and tints it by gradient DIRECTION — and a raw SDF has unit gradient
                 # everywhere, so it would glow as a solid box. Clamping flattens the field outside
                 # |sdf| <= band (gradient 0 → transparent) and leaves it varying only across the
-                # surface shell (gradient 1 → lit), so what glows IS the surface, tinted by its
-                # normal direction. No meshing (a crisp analytic trace is a later slice); only the
-                # sampled numbers cross to the native renderer.
+                # surface shell (gradient 1 → lit), so what glows is the surface shell, tinted by its
+                # normal. This is NOT a solid-surface view — use `render` for a crisp sphere-traced
+                # surface; this shows the gradient field itself. Only the sampled numbers cross to the
+                # native renderer.
                 #
                 # `opacity` is the shell's glow intensity (the Volume layer's additive alpha); lower
                 # is subtler. The one-arg form uses a sensible default; pass a second argument to tune
-                # it, e.g. preview(Sphere(1.0), 0.05).
-                function preview(s:[SdfShape]):Stream[String] -> previewGlow(s, 0.1)
+                # it, e.g. previewGradientField(Sphere(1.0), 0.05).
+                function previewGradientField(s:[SdfShape]):Stream[String] -> gradientFieldGlow(s, 0.1)
 
-                function preview(s:[SdfShape], opacity:Decimal):Stream[String] -> previewGlow(s, opacity)
+                function previewGradientField(s:[SdfShape], opacity:Decimal):Stream[String] -> gradientFieldGlow(s, opacity)
 
-                # (internal) shared preview body: sample + clamp the SDF shell, render at `opacity`.
-                function previewGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
+                # (internal) shared body: sample + clamp the SDF shell, render the gradient field at `opacity`.
+                function gradientFieldGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
                   let [{xlo, xhi, ylo, yhi, zlo, zhi}] = s.bounds()
                   let dx = (xhi - xlo) / 23.0
                   let dy = (yhi - ylo) / 23.0

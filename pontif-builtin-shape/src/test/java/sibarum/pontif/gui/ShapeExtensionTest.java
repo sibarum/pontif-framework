@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Headless verification of the shape extension (docs/shapes.md S1). A {@code Sphere} satisfies the
- * {@code SdfShape} trait; {@code preview} dispatches on the trait and samples its signed distance
+ * {@code SdfShape} trait; {@code previewGradientField} dispatches on the trait and samples its signed distance
  * field <b>in Pontif</b> (range synthesis + map + {@code distance} method dispatch), handing the
  * sampled grid to {@code pontif.plot}'s {@code renderScene}. The test overrides that native with a
  * capturing stub, so it exercises the full pipeline — trait dispatch, the Pontif sampling loop, and
@@ -30,12 +30,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ShapeExtensionTest {
 
     @Test
-    void preview_samplesSphereSdfOverGrid_inPontif() {
+    void previewGradientField_samplesSphereSdfOverGrid_inPontif() {
         Extensions.install(new PlotExtension());
         Extensions.install(new ShapeExtension());
 
         // Override the plot native with a capturing stub so NO window opens; capture the {layers}
-        // tuple preview() hands to renderScene. Register both the bare and qualified names.
+        // tuple previewGradientField() hands to renderScene. Register both the bare and qualified names.
         Object[] capturedLayers = new Object[1];
         NativeCalls.NativeCall stub = (args, ctx) -> {
             capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
@@ -46,11 +46,11 @@ class ShapeExtensionTest {
 
         PontifRunner.RunResult r = new PontifRunner().run(
                 new PontifCompiler().compileAlt("""
-                        requires pontif.shape.{Sphere, preview}
-                        preview(Sphere(1.0))""", "sphere.ptf"),
+                        requires pontif.shape.{Sphere, previewGradientField}
+                        previewGradientField(Sphere(1.0))""", "sphere.ptf"),
                 PontifRunner.Engine.INTERPRETER);
 
-        assertFalse(r.isError(), () -> "preview program should run; got " + r.text());
+        assertFalse(r.isError(), () -> "previewGradientField program should run; got " + r.text());
         assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
 
         // The single Volume layer carries the raw signed-distance grid the SDF was sampled into.
@@ -60,7 +60,7 @@ class ShapeExtensionTest {
 
         // 24^3 samples over the sphere's bounds [-2,2]^3 (radius 1, box padded to 2r). The grid is
         // clamped to a surface band (±2·dx) so the volumetric render lights the surface shell, not
-        // the whole box (an SDF has unit gradient everywhere — see ShapeExtension.preview).
+        // the whole box (an SDF has unit gradient everywhere — see ShapeExtension.previewGradientField).
         double dx = 4.0 / 23.0;          // (xhi - xlo) / 23 for bounds [-2, 2]
         double band = 2.0 * dx;
         assertEquals(13824, vs.length, "24^3 SDF sample grid");
@@ -256,9 +256,9 @@ class ShapeExtensionTest {
     @Test
     void readmeSnippet_csgComposePreviews() {
         PontifRunner.RunResult r = runNoWindow("""
-                requires pontif.shape.{Sphere, translate, rotateY, difference, preview}
+                requires pontif.shape.{Sphere, translate, rotateY, difference, render}
 
-                main ( preview(rotateY(
+                main ( render(rotateY(
                   difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
                   30.0, {0.0, 0.0, 0.0})) )""", "readme-csg.ptf");
         assertFalse(r.isError(), () -> "README CSG snippet should run; got " + r.text());
@@ -268,12 +268,12 @@ class ShapeExtensionTest {
     @Test
     void readmeSnippet_attributeField() {
         PontifRunner.RunResult r = runNoWindow("""
-                requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, preview}
+                requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, render}
 
                 struct Height()
                 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
 
-                main ( preview(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
+                main ( render(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
         assertFalse(r.isError(), () -> "README attribute snippet should run; got " + r.text());
 
         // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it.

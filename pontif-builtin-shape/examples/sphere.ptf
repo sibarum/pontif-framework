@@ -1,6 +1,7 @@
-requires pontif.shape.{Sphere, preview}
+requires pontif.shape.{Sphere, previewGradientField}
 
-# docs/shapes.md S1 — the first SDF primitive, previewed live. `preview` samples the sphere's
-# signed distance field on a 24^3 grid and renders it volumetrically (soft / voxelized; a crisp
-# analytic surface trace is a later slice). No mesh exists yet — the field is shown directly.
-main ( preview(Sphere(1.0)) )
+# docs/shapes.md S1 — the first SDF primitive, shown as its gradient field. `previewGradientField`
+# samples the sphere's signed distance field on a 24^3 grid and renders it volumetrically (soft /
+# voxelized), glowing across the surface shell tinted by gradient direction. For a crisp solid
+# surface use `render` instead (see render-sphere.ptf).
+main ( previewGradientField(Sphere(1.0)) )

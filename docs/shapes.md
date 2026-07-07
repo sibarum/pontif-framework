@@ -121,7 +121,7 @@ trait ScalarField{ valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal }
 struct Height() ; assign trait Height:ScalarField { valueAt(x,y,z) -> z }
 
 let a = attr(Sphere(1.0), "height", Height())   # bundle: geometry + one named field
-preview(shapeOf(a))                              # geometry, unchanged
+render(shapeOf(a))                               # geometry, unchanged
 attrAt(a, 0.0, 0.0, 5.0)                         # 5.0 — the field, evaluated on demand
 ```
 A field is defined by a method (a `ScalarField`), not a first-class function value, to stay on the
@@ -350,12 +350,12 @@ previewed field is a caught lie).
 
 - **S0** — this doc ratified.
 - **S1 — LANDED 2026-07-02.** New module `pontif-builtin-shape` (`pontif.shape`): `SdfShape` trait
-  + `Sphere` primitive + `preview` via the sampled path (a) — samples the SDF on a 24³ grid
+  + `Sphere` primitive + `previewGradientField` via the sampled path (a) — samples the SDF on a 24³ grid
   Pontif-side, **clamps it to a surface band** so the reused `pontif.plot` volumetric renderer lights
   the surface shell (not the whole box — see §Live preview (a)), and hands it over as a `Volume`
   layer. **No new native code**; `ShapeExtension` declares no `calls()` of its own (composes existing
-  `pontif.plot` functions). Witness: `ShapeExtensionTest.preview_samplesSphereSdfOverGrid_inPontif`
-  runs `preview(Sphere(1.0))` with `renderScene` stubbed (no window) and asserts the clamped 24³
+  `pontif.plot` functions). Witness: `ShapeExtensionTest.previewGradientField_samplesSphereSdfOverGrid_inPontif`
+  runs `previewGradientField(Sphere(1.0))` with `renderScene` stubbed (no window) and asserts the clamped 24³
   grid — corner clamped to `+band` (outside), near-centre to `−band` (inside), and a near-surface
   voxel carrying the exact `√(x²+y²+z²)−r`, plus one 24³ `VolumeLayer` built. Example:
   `pontif-builtin-shape/examples/sphere.ptf`. (Build with `-am`; the render path lives in

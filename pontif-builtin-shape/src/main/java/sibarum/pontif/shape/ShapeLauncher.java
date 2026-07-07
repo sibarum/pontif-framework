@@ -8,10 +8,10 @@ import java.nio.file.Path;
 
 /**
  * Runs a shape Pontif program (docs/shapes.md). Extensions on the classpath ({@code pontif.shape}
- * and the {@code pontif.plot} render path its preview reuses) self-register via ServiceLoader
- * discovery, so this just compiles and runs the given {@code .ptf} <b>on the main thread</b> — so a
- * {@code preview(...)} call's blocking GLFW loop owns the root thread, satisfying GLFW's thread
- * affinity (mirrors {@code GuiLauncher}).
+ * and the {@code pontif.plot} render path it reuses) self-register via ServiceLoader discovery, so
+ * this just compiles and runs the given {@code .ptf} <b>on the main thread</b> — so a
+ * {@code render(...)} / {@code previewGradientField(...)} call's blocking GLFW loop owns the root
+ * thread, satisfying GLFW's thread affinity (mirrors {@code GuiLauncher}).
  *
  * <p>Args: {@code <program.ptf> [resolveDir] [displayName]} — {@code resolveDir} is where sibling
  * {@code requires} modules live (the editor passes the original file's directory when running an
@@ -25,7 +25,7 @@ public final class ShapeLauncher {
             System.exit(2);
             return;
         }
-        // pontif.shape (and the pontif.plot render path it reuses) self-register via ServiceLoader
+        // pontif.shape (and the pontif.plot path it reuses) self-register via ServiceLoader
         // discovery (BuiltinModules → installDiscovered) before the compile below — no wiring here.
 
         Path target = Path.of(args[0]);
@@ -42,7 +42,7 @@ public final class ShapeLauncher {
             System.err.println(result.text());
             System.exit(1);
         }
-        // Success: the preview window has opened and been closed; the preview call's result is the
-        // inert for-effect placeholder, so there is nothing to print.
+        // Success: the shape window has opened and been closed; the render/previewGradientField call's
+        // result is the inert for-effect placeholder, so there is nothing to print.
     }
 }

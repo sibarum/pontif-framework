@@ -878,12 +878,13 @@ those modules are built in.
 `pontif.shape` composes 3D geometry as **signed distance fields**: a shape is a function
 giving the signed distance to its surface (negative inside, zero on it, positive outside).
 Primitives, boolean modifiers, and transforms are all one `SdfShape`, so they nest freely,
-and `preview` ray-marches whatever you build into a window. Start with a primitive:
+and `render` ray-marches whatever you build into a window as a crisp solid surface. Start
+with a primitive:
 
 ```pontif
-requires pontif.shape.{Sphere, preview}
+requires pontif.shape.{Sphere, render}
 
-main ( preview(Sphere(1.0)) )   # ray-marches the sphere's distance field into a window
+main ( render(Sphere(1.0)) )   # ray-marches the sphere's distance field into a window
 ```
 
 Because every operator returns another `SdfShape`, **constructive solid geometry** and
@@ -892,16 +893,18 @@ Because every operator returns another `SdfShape`, **constructive solid geometry
 the origin (the third argument is the anchor — the adjustable pivot):
 
 ```pontif
-requires pontif.shape.{Sphere, translate, rotateY, difference, preview}
+requires pontif.shape.{Sphere, translate, rotateY, difference, render}
 
-main ( preview(rotateY(
+main ( render(rotateY(
   difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
   30.0, {0.0, 0.0, 0.0})) )
 ```
 
 The full set: `translate` / `scale` / `rotateX`/`rotateY`/`rotateZ` (each about an anchor),
 `union` / `intersect` / `difference` / `smoothUnion` (a filleted blend), and `distanceAt`
-to query the field at any point.
+to query the field at any point. Two ways to view a shape: `render` (a crisp GPU
+sphere-traced surface) and `previewGradientField` (the SDF sampled into a glowing
+volumetric view of its gradient field).
 
 You can also attach **arbitrary data** to a shape — but as a *field* (a value defined at
 every point), not a per-vertex array, because no vertices exist yet: they're only born
@@ -911,15 +914,15 @@ limitation. A field is a `ScalarField` — a value defined by a method, just lik
 distance — and `attr` bundles it with a shape by name:
 
 ```pontif
-requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, preview}
+requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, render}
 
 # a "height" field: defined at every point (here, the z coordinate), NOT stored per vertex
 struct Height()
 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
 
-# attach the field to the sphere; shapeOf hands the geometry back to preview, and attrAt
+# attach the field to the sphere; shapeOf hands the geometry back to render, and attrAt
 # samples the field on demand — attrAt(attr(Sphere(1.0), "height", Height()), 0.0, 0.0, 0.5) is 0.5
-main ( preview(shapeOf(attr(Sphere(1.0), "height", Height()))) )
+main ( render(shapeOf(attr(Sphere(1.0), "height", Height()))) )
 ```
 
 Setting an object's *color* works the same way — a colour field over the object becomes
@@ -927,9 +930,10 @@ per-vertex colours on its surfaces once meshed (and, ultimately, `red`/`green`/`
 columns in an exported PLY mesh — the geometry-and-attributes format `pontif.shape` targets).
 The full design, and the incremental slices, live in [docs/shapes.md](docs/shapes.md).
 
-`pontif.shape` lives in the `pontif-builtin-shape` package (it reuses `pontif.plot`'s
-volumetric renderer for `preview`), so like the GUI/plot snippets these open a real window
-and are illustrative rather than pinned by `ReadmeSnippetTest`.
+`pontif.shape` lives in the `pontif-builtin-shape` package (`render` lowers the SDF to a GLSL
+`map` for Dasum's raymarch layer; `previewGradientField` reuses `pontif.plot`'s volumetric
+renderer), so like the GUI/plot snippets these open a real window and are illustrative rather
+than pinned by `ReadmeSnippetTest`.
 
 ## GPU compute kernels (`on Gpu`)
 
@@ -1117,7 +1121,7 @@ language is one big syntactic sugar for it).
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), and `MathExtExtension` (`pontif.math.ext`). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
 | `pontif-builtin-gui` | The GUI + plotting extensions — `GuiExtension` (`pontif.gui`: `window`, `Label`/`Button`/`Column`, `Clickable`) and `PlotExtension` (`pontif.plot`: `Curve2D`/`HeightMap3D`/`Cloud3D` → `plotLine`/`plotSurface`/`plotCloud`), bridged onto the author's dasum flexbox/OpenGL toolkit via `DasumBridge`. The one module that depends on dasum for rendering. |
-| `pontif-builtin-shape` | The 3D-shape extension — `ShapeExtension` (`pontif.shape`): SDF primitives (`Sphere`) + transforms (`translate`/`scale`/`rotate*` about an anchor) + boolean CSG (`union`/`intersect`/`difference`/`smoothUnion`) + attribute fields (`ScalarField`/`attr`), all one `SdfShape`, `preview`ed by reusing `pontif.plot`'s volumetric renderer. Meshing (*topologize*) and PLY export are in progress ([docs/shapes.md](docs/shapes.md)). |
+| `pontif-builtin-shape` | The 3D-shape extension — `ShapeExtension` (`pontif.shape`): SDF primitives (`Sphere`) + transforms (`translate`/`scale`/`rotate*` about an anchor) + boolean CSG (`union`/`intersect`/`difference`/`smoothUnion`) + attribute fields (`ScalarField`/`attr`), all one `SdfShape`, viewed by `render` (GPU raymarch surface) or `previewGradientField` (reusing `pontif.plot`'s volumetric renderer). Meshing (*topologize*) and PLY export are in progress ([docs/shapes.md](docs/shapes.md)). |
 | `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit; its **Run GUI** launches a program through `pontif-builtin-gui`'s `GuiLauncher`. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
 | `pontif-cli` | The **`pontif`** command-line tool — `run`, `pack`, `console`, `new`, `editor` — over the `pontif-runtime` compile/run surface. picocli-based; runs on the JVM and as a GraalVM native image. |
 | `pontif-demo` | Worked examples and integration tests for every layer — refinements, dispatch, traits, union/intersection, match. |
