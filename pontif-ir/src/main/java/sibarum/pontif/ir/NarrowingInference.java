@@ -5,6 +5,9 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.predicates.BoundAnalysis;
 import sibarum.pontif.predicates.Interval;
+import sibarum.pontif.types.DispatchQuery;
+import sibarum.pontif.types.DispatchResult;
+import sibarum.pontif.types.TypeSystem;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -152,11 +155,12 @@ public final class NarrowingInference {
         for (IrExpr arg : call.args()) {
             argNarrowings.add(infer(arg, ctx));
         }
-        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings, ctx.sortRegistry());
-        if (!(result instanceof StaticDispatch.Result.Resolved resolved)) {
+        DispatchResult result = TypeSystem.standard()
+                .dispatch(DispatchQuery.forCall(call.functionName(), argNarrowings), ctx);
+        if (!(result instanceof DispatchResult.Resolved resolved)) {
             return null;
         }
-        IrSort inferred = inferFunctionReturn(resolved.decl(), ctx);
+        IrSort inferred = inferFunctionReturn(resolved.target(), ctx);
         return inferred instanceof IrSort.Refined refined ? refined : null;
     }
 
@@ -389,9 +393,10 @@ public final class NarrowingInference {
         if (granted != null) {
             return granted;
         }
-        StaticDispatch.Result result = StaticDispatch.resolve(overloads, argNarrowings, ctx.sortRegistry());
-        if (result instanceof StaticDispatch.Result.Resolved resolved) {
-            return resolved.returnSort();
+        DispatchResult result = TypeSystem.standard()
+                .dispatch(DispatchQuery.forCall(c.functionName(), argNarrowings), ctx);
+        if (result instanceof DispatchResult.Resolved resolved) {
+            return resolved.target().returnSort();
         }
         return ctx.functionReturns().get(c.functionName());
     }

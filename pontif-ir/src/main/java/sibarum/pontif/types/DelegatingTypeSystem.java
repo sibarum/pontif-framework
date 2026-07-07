@@ -37,4 +37,9 @@ final class DelegatingTypeSystem implements TypeSystem {
     public Coercion coercionFor(IrSort from, IrSort to, CoercionContext ctx) {
         return CoercionResolver.resolve(from, to, ctx);
     }
+
+    @Override
+    public DispatchResult dispatch(DispatchQuery query, InferenceContext ctx) {
+        return DispatchResolver.resolve(query, ctx);
+    }
 }

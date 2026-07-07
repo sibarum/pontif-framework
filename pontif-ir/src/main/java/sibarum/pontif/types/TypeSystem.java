@@ -68,6 +68,16 @@ public interface TypeSystem {
      */
     Coercion coercionFor(IrSort from, IrSort to, CoercionContext ctx);
 
+    /**
+     * Resolves a {@link DispatchQuery} — the one dispatch answerer, unifying static and dynamic dispatch
+     * as a single satisfiability question over a constraint set (docs, ratified 2026-07-07). Returns
+     * {@link DispatchResult}: {@code Resolved} (a unique target), {@code Unsatisfiable} (no target can
+     * ever satisfy — a compile error), or {@code Residual} (undecided; a more-determined query decides).
+     * The same query serves every determinacy level — coarse name-routing, refinement selection, the call
+     * gate — and the runtime table is its fully-determined, fast-path instance.
+     */
+    DispatchResult dispatch(DispatchQuery query, InferenceContext ctx);
+
     /** The standard type system — today a thin facade over the existing engine (the migration seam). */
     static TypeSystem standard() {
         return DelegatingTypeSystem.INSTANCE;
