@@ -155,6 +155,35 @@ could match at runtime.**
   — not off the table** (TODO); until then a union operand does not statically
   dispatch.
 
+#### Runtime dispatch = the fully-determined query (WAR(dispatch-query) slice 4)
+
+The unified dispatch query (`sibarum.pontif.types.TypeSystem.dispatch`, ratified
+2026-07-07) makes the above precise: static and runtime dispatch are **one
+satisfiability question over a constraint set**, evaluated at different points on a
+determinacy gradient. `DispatchTable.resolve` is that same query **fully
+determined** — every argument pinned to its constant runtime value (`[Int:@==5]`).
+
+The pin is what collapses the two match tests into one: on a singleton, the static
+side's `Refinements.imply(pin, param)` ("is the value-set `{v}` ⊆ `param`") and the
+runtime side's `Refinements.satisfies(v, param)` ("does `v` inhabit `param`") decide
+the same fact, and the most-specific tiebreak is the *same* algorithm on both
+(`Refinements.imply` over the param sorts). So `DispatchTable.resolve(v…)` and
+`dispatch(forCall(name, pin…))` resolve to the same overload, or both reject
+(runtime `NoMatch` ⇔ static `Unsatisfiable`, the provable misroute). This
+correspondence is a **checked property** — `RuntimeDispatchEquivalenceTest`
+(pontif-demo) compiles one overload set and asserts the two agree — not just an
+assertion, so a future drift in either resolver fails a test.
+
+Per the ratified caveat, this is a **justified refinement, not a shared code path**:
+the runtime table keeps its fast value-matching evaluator (it never runs symbolic
+`imply`); it is *provably* the same query on constant inputs. Two things the runtime
+table resolves that the static `forCall` query abstains on are **runtime-only
+refinements, never disagreements** (the static side defers, honoring the no-lie
+law): trait satisfaction via the runtime `TraitRegistry`
+(`DispatchTable.enforceTraitParams`), and the `Trait.method → ConcreteType.method`
+fallback (`resolveTraitFallback`) — which corresponds to slice-3 *name*-routing, not
+this refinement-selection path.
+
 ## Invariants this must preserve
 
 - **Module-scoped + coherent.** Names FQN per module; the orphan rule governs
