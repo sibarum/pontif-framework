@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.TypeSystem;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -133,7 +134,7 @@ public final class IrSourceReflector {
             Map<String, IrSort> narrowing = new LinkedHashMap<>();
             List<IrParam> ps = callee.params();
             for (int i = 0; i < ps.size() && i < c.args().size(); i++) {
-                IrSort argN = NarrowingInference.inferFloor(c.args().get(i), ctx);
+                IrSort argN = TypeSystem.standard().inferFloor(c.args().get(i), ctx);
                 narrowing.put(ps.get(i).name(), argN != null ? argN : ps.get(i).sort());
             }
             work.add(new Node(callee, narrowing));
@@ -214,7 +215,7 @@ public final class IrSourceReflector {
     private static String renderFunction(
             IrStmt.FunctionDecl fd, Map<String, IrSort> paramNarrowing, InferenceContext seeded) {
         IrSort inferredReturn = NarrowingInference.closeOver(
-                NarrowingInference.infer(fd.body(), seeded), paramNames(fd), seeded);
+                TypeSystem.standard().infer(fd.body(), seeded), paramNames(fd), seeded);
         IrSort declaredReturn = fd.returnSort();
         IrSort shownReturn = inferredReturn != null ? inferredReturn : declaredReturn;
         String returnNote = (inferredReturn != null && !inferredReturn.equals(declaredReturn))
@@ -321,7 +322,7 @@ public final class IrSourceReflector {
 
     private static String renderLet(IrExpr.LetIn l, int indent, InferenceContext ctx) {
         // Show the binding's inferred narrowing — the open value-pin, in scope here.
-        IrSort valueN = NarrowingInference.infer(l.value(), ctx);
+        IrSort valueN = TypeSystem.standard().infer(l.value(), ctx);
         String ann = valueN != null ? ":" + IrPrinter.sort(valueN) : "";
         InferenceContext bodyCtx = valueN != null ? ctx.withVar(l.name(), valueN)
                 : (l.declaredSort() != null ? ctx.withVar(l.name(), l.declaredSort()) : ctx);

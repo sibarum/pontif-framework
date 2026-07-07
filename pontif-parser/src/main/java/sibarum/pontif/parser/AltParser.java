@@ -11,7 +11,6 @@ import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.ir.NarrowingInference;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 
@@ -2057,8 +2056,8 @@ public final class AltParser {
     }
 
     // Parse-time best-effort typing — now ONE engine with the core. The parser
-    // is no longer a separate reasoner: it runs NarrowingInference.inferFloor over
-    // an InferenceContext built from its live scope maps, so every narrowing shape
+    // is no longer a separate reasoner: it runs inferFloor through the TypeSystem
+    // facade over an InferenceContext built from its live scope maps, so every narrowing shape
     // the core can express (the exact value-pin, field projection, method/operator
     // return typing) is available here too. Parse-time weakness falls out only from
     // an emptier context (no imports yet → "_"), never a divergent strategy. See
@@ -2077,7 +2076,7 @@ public final class AltParser {
             return new IrSort.Structural(
                     r.typeName() != null ? r.typeName() : "_record", members, r.origin());
         }
-        IrSort inferred = NarrowingInference.inferFloor(expr, parseInferenceContext());
+        IrSort inferred = sibarum.pontif.types.TypeSystem.standard().inferFloor(expr, parseInferenceContext());
         // The parser's floor for "no narrowing" is the unknown sort "_", not null.
         return inferred != null ? inferred : IrSort.named("_");
     }

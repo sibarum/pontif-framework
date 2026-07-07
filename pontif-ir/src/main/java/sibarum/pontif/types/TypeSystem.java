@@ -44,6 +44,20 @@ public interface TypeSystem {
      */
     IrSort infer(IrExpr expr, InferenceContext ctx);
 
+    /**
+     * Inference at an <b>argument</b> position — like {@link #infer} but shaped for how a call site reads
+     * an argument's narrowing (the call gate's per-argument discharge). A projection of the one engine,
+     * not a second engine.
+     */
+    IrSort inferArg(IrExpr arg, InferenceContext ctx);
+
+    /**
+     * The <b>floor</b> (coarse) sort — {@link #infer} with out-of-scope variables projected out, the fact
+     * that survives a scope boundary (a return seen by its caller, a value quantified over). Same engine,
+     * widened deliberately rather than discarded.
+     */
+    IrSort inferFloor(IrExpr expr, InferenceContext ctx);
+
     /** The standard type system — today a thin facade over the existing engine (the migration seam). */
     static TypeSystem standard() {
         return DelegatingTypeSystem.INSTANCE;

@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.Origin;
 
 import java.util.ArrayList;
@@ -184,7 +185,7 @@ public final class CallGate {
                         // hypotheses so a decremented/recursive arg discharges against a
                         // weaker param refinement (n-1 under n>0 → [Int:@>=0]). Safe
                         // because the gate's FAILED is disjoint-based (gateFit).
-                        argNarrowings.add(NarrowingInference.inferArg(arg, ctx));
+                        argNarrowings.add(TypeSystem.standard().inferArg(arg, ctx));
                     }
                     StaticDispatch.Verdict v =
                             StaticDispatch.classify(overloads, argNarrowings, ctx.sortRegistry());
@@ -206,7 +207,7 @@ public final class CallGate {
             }
             case IrExpr.LetIn let -> {
                 walkExpr(let.value(), ctx, sink);
-                IrSort narrowing = NarrowingInference.infer(let.value(), ctx);
+                IrSort narrowing = TypeSystem.standard().infer(let.value(), ctx);
                 IrSort bound = narrowing != null ? narrowing : let.declaredSort();
                 walkExpr(let.body(), bind(ctx, let.name(), bound), sink);
             }

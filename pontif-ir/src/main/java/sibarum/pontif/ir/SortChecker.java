@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.QualifiedName;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
@@ -2221,7 +2222,7 @@ public final class SortChecker {
         // narrowed sort where it has one (so the FieldAccess refinement
         // projection and arithmetic bounds reach SortChecker for free), else the
         // coarse base sort the totality/field-existence consumers need.
-        return NarrowingInference.inferFloor(
+        return TypeSystem.standard().inferFloor(
                 expr, floorContext(typeEnv, functionReturns, structDefs));
     }
 

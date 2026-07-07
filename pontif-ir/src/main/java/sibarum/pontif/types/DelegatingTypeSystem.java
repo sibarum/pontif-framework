@@ -22,4 +22,14 @@ final class DelegatingTypeSystem implements TypeSystem {
     public IrSort infer(IrExpr expr, InferenceContext ctx) {
         return NarrowingInference.infer(expr, ctx);
     }
+
+    @Override
+    public IrSort inferArg(IrExpr arg, InferenceContext ctx) {
+        return NarrowingInference.inferArg(arg, ctx);
+    }
+
+    @Override
+    public IrSort inferFloor(IrExpr expr, InferenceContext ctx) {
+        return NarrowingInference.inferFloor(expr, ctx);
+    }
 }

@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.predicates.ComplementResult;
@@ -122,7 +123,7 @@ final class ConstructionGate {
                 // instead of letting the gate reject it as disjoint.
                 IrExpr coerced = maybeDemote(value, l.claim(), ctx, structs);
                 boolean demoted = coerced != value;
-                IrSort inferred = NarrowingInference.infer(demoted ? coerced : l.value(), ctx);
+                IrSort inferred = TypeSystem.standard().infer(demoted ? coerced : l.value(), ctx);
                 IrSort bound = inferred != null ? inferred
                         : demoted ? l.claim() : l.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(l.name(), bound) : ctx;
@@ -330,7 +331,7 @@ final class ConstructionGate {
         String claimBase = baseName(claim);
         IrSort.Structural to = claimBase == null ? null : structs.get(claimBase);
         if (to == null) return value;  // claim isn't a declared struct
-        IrSort arg = NarrowingInference.infer(value, ctx);
+        IrSort arg = TypeSystem.standard().infer(value, ctx);
         String argBase = arg == null ? null : baseName(arg);
         if (argBase == null || argBase.equals(claimBase)) return value;
         IrSort.Structural from = structs.get(argBase);
@@ -408,7 +409,7 @@ final class ConstructionGate {
     /** The argument's narrowing; a named-record argument claims its own name. */
     private static IrSort argSort(
             IrExpr arg, InferenceContext ctx, Map<String, IrSort.Structural> structs) {
-        IrSort inferred = NarrowingInference.infer(arg, ctx);
+        IrSort inferred = TypeSystem.standard().infer(arg, ctx);
         if (inferred != null) return inferred;
         if (arg instanceof IrExpr.Record rec && rec.typeName() != null
                 && structs.containsKey(rec.typeName())) {
