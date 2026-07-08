@@ -1,0 +1,167 @@
+package sibarum.pontif.types;
+
+import java.util.Map;
+
+import sibarum.pontif.ir.IrSort;
+
+/**
+ * The is-a relation and the assignment rule — the target-state nominal-subtype engine
+ * (docs/type-records.md), built isolated and wired to nothing yet (strangler-fig: prove it in a lab,
+ * then migrate call sites onto it, then delete the scattered copies). Pure over {@link IrSort} +
+ * {@link TypeCatalog}; no parser, no passes, no interpreter.
+ *
+ * <p><b>The model.</b> A value carries a concrete type; a binding is a view (its declared sort).
+ * {@code isA(sub, sup)} answers "is a value whose concrete type is {@code sub} usable where {@code sup}
+ * is required?" and {@link #assign} turns that into what a binding requires. The concrete type changes
+ * only by construction or an explicit cast — never covertly — so a widen preserves it and anything else
+ * needs a cast.
+ *
+ * <p><b>Nominal vs structural.</b> A {@code type X:[Def]} whose {@code Def} is a <em>structure</em>
+ * (a tuple / named-field record) is a nominal <em>tag</em>: {@code X is-a Def} (widen — drop the tag),
+ * but {@code Def is-not-a X} (the bare structure lacks the tag; you must construct/cast). Two tags over
+ * the same structure ({@code Vec3}, {@code Color}) are siblings — neither is-a the other. A
+ * {@code type X:[Def]} whose {@code Def} is a <em>union</em> (or other non-structural) is transparent —
+ * a pure name for {@code Def} — so its branches widen into it as usual ({@code Int is-a AnyNumber}).
+ *
+ * <p><b>Scope (increment 1).</b> Structural leaf subsumption here is SHAPE equality (sound and
+ * conservative — it never claims a false is-a); refinement-precise subsumption (delegating to
+ * {@code Refinements.imply}, needed mainly for scalar bases) and trait satisfaction are later
+ * increments. Construction and cast <em>decisions</em> likewise follow.
+ */
+public final class Assignability {
+
+    private static final String TUPLE = "_tuple";
+
+    private Assignability() {}
+
+    /** Is a value whose concrete type is {@code sub} usable where {@code sup} is required? */
+    public static boolean isA(IrSort sub, IrSort sup, AssignabilityContext ctx) {
+        // Resolve transparent (non-structural) aliases in either position — they are pure names.
+        IrSort tSub = transparentTarget(sub, ctx);
+        if (tSub != null) return isA(tSub, sup, ctx);
+        IrSort tSup = transparentTarget(sup, ctx);
+        if (tSup != null) return isA(sub, tSup, ctx);
+
+        if (sameType(sub, sup)) return true;                                // reflexive
+
+        if (sup instanceof IrSort.Union u) {                               // is-a a union: any branch
+            return u.branches().stream().anyMatch(b -> isA(sub, b, ctx));
+        }
+        if (sub instanceof IrSort.Union u) {                               // a union is-a X: every branch
+            return u.branches().stream().allMatch(b -> isA(b, sup, ctx));
+        }
+
+        IrSort subBase = nominalBase(sub, ctx);                            // a nominal tag widens to its base
+        if (subBase != null && isA(subBase, sup, ctx)) return true;
+
+        // A nominal-tag sup is reached only reflexively or by a nominal descendant (both handled above);
+        // a bare structure / primitive is NOT-a a nominal tag.
+        if (isNominalTag(sup, ctx)) return false;
+
+        return structurallySubsumes(sub, sup, ctx);
+    }
+
+    /** What binding a value of concrete type {@code from} into a slot declared {@code to} requires. */
+    public static Assignment assign(IrSort from, IrSort to, AssignabilityContext ctx) {
+        if (isA(from, to, ctx)) return sameType(from, to) ? Assignment.EXACT : Assignment.WIDEN;
+        // Not is-a: legal only through an explicit cast, and only if the underlying structures are
+        // compatible (a down/lateral/lossless retag). Otherwise there is no cast that could produce it.
+        return sameType(bottomStructure(from, ctx), bottomStructure(to, ctx))
+                ? Assignment.NEEDS_CAST : Assignment.ILLEGAL;
+    }
+
+    /** The outcome of an assignment {@code let _:to = value(concrete=from)}. */
+    public enum Assignment {
+        /** Concrete type already equals the declared sort. */
+        EXACT,
+        /** A widen — {@code from is-a to}; the concrete type is preserved, no runtime work. */
+        WIDEN,
+        /** Not is-a, but a cast could produce it (compatible structure) — the caller must write one. */
+        NEEDS_CAST,
+        /** No cast could produce it — a hard type error. */
+        ILLEGAL
+    }
+
+    // --- name resolution against the catalog ---------------------------------
+
+    /** The target of a <em>transparent</em> alias (one whose definition is NOT a structure), else null. */
+    private static IrSort transparentTarget(IrSort t, AssignabilityContext ctx) {
+        String name = baseName(t);
+        if (name == null) return null;
+        return ctx.catalog().lookup(name).map(info ->
+                info instanceof TypeInfo.Alias a && !(a.target() instanceof IrSort.Structural)
+                        ? a.target() : null).orElse(null);
+    }
+
+    /** The base a nominal <em>tag</em> widens to (its structure), or null if {@code t} is not a tag. */
+    private static IrSort nominalBase(IrSort t, AssignabilityContext ctx) {
+        String name = baseName(t);
+        if (name == null) return null;
+        return ctx.catalog().lookup(name).map(info -> switch (info) {
+            case TypeInfo.Struct s -> s.shape().baseSort() != null ? s.shape().baseSort() : s.shape();
+            case TypeInfo.Alias a when a.target() instanceof IrSort.Structural -> a.target();
+            default -> null;
+        }).orElse(null);
+    }
+
+    /** Whether {@code t} names a nominal tag (a struct, native, or structural alias). */
+    private static boolean isNominalTag(IrSort t, AssignabilityContext ctx) {
+        String name = baseName(t);
+        if (name == null) return false;
+        return ctx.catalog().lookup(name).map(info -> switch (info) {
+            case TypeInfo.Struct ignored -> true;
+            case TypeInfo.Native ignored -> true;
+            case TypeInfo.Alias a -> a.target() instanceof IrSort.Structural;
+            default -> false;
+        }).orElse(false);
+    }
+
+    // --- structural leaf (increment 1: shape equality — sound, refinement-precise later) -------------
+
+    private static boolean structurallySubsumes(IrSort sub, IrSort sup, AssignabilityContext ctx) {
+        if (sub instanceof IrSort.Structural a && sup instanceof IrSort.Structural b) {
+            if (!a.members().keySet().equals(b.members().keySet())) return false;
+            for (Map.Entry<String, IrSort> e : a.members().entrySet()) {
+                if (!isA(e.getValue(), b.members().get(e.getKey()), ctx)) return false;
+            }
+            return true;
+        }
+        String subName = baseName(sub);
+        String supName = baseName(sup);
+        if (subName == null || !subName.equals(supName)) return false;
+        // Widening to the same base is sound (drops any refinement); narrowing TO a refinement needs a
+        // proof this increment doesn't attempt, so only an identical refined sup passes.
+        return !(sup instanceof IrSort.Refined) || sameType(sub, sup);
+    }
+
+    /** Strip nominal tags (and transparent aliases) down to the underlying structure/primitive. */
+    private static IrSort bottomStructure(IrSort t, AssignabilityContext ctx) {
+        IrSort transparent = transparentTarget(t, ctx);
+        if (transparent != null) return bottomStructure(transparent, ctx);
+        IrSort base = nominalBase(t, ctx);
+        return base != null ? bottomStructure(base, ctx) : t;
+    }
+
+    // --- identity ------------------------------------------------------------
+
+    private static boolean sameType(IrSort a, IrSort b) {
+        if (a instanceof IrSort.Structural sa && b instanceof IrSort.Structural sb) {
+            return sa.name().equals(sb.name()) && sa.members().keySet().equals(sb.members().keySet());
+        }
+        String an = baseName(a);
+        String bn = baseName(b);
+        return an != null && an.equals(bn)
+                && (a instanceof IrSort.Refined) == (b instanceof IrSort.Refined);
+    }
+
+    private static String baseName(IrSort sort) {
+        if (sort == null) return null;
+        return switch (sort) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural s -> s.name();
+            case IrSort.Trait t -> t.name();
+            default -> null;
+        };
+    }
+}
