@@ -52,12 +52,16 @@ public final class Assignability {
             return u.branches().stream().allMatch(b -> isA(b, sup, ctx));
         }
 
+        // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
+        boolean supIsTrait = isTrait(sup, ctx);
+        if (supIsTrait && ctx.satisfies(baseName(sub), baseName(sup))) return true;
+
         IrSort subBase = nominalBase(sub, ctx);                            // a nominal tag widens to its base
         if (subBase != null && isA(subBase, sup, ctx)) return true;
 
-        // A nominal-tag sup is reached only reflexively or by a nominal descendant (both handled above);
-        // a bare structure / primitive is NOT-a a nominal tag.
-        if (isNominalTag(sup, ctx)) return false;
+        // A nominal-tag or trait sup is reached only reflexively / by a descendant / by an impl (all
+        // handled above); a bare structure or primitive is NOT-a either.
+        if (isNominalTag(sup, ctx) || supIsTrait) return false;
 
         return structurallySubsumes(sub, sup, ctx);
     }
@@ -152,6 +156,13 @@ public final class Assignability {
             case TypeInfo.Alias a when a.target() instanceof IrSort.Structural -> a.target();
             default -> null;
         }).orElse(null);
+    }
+
+    /** Whether {@code t} is a trait (an {@link IrSort.Trait} or a name the catalog knows as a trait). */
+    private static boolean isTrait(IrSort t, AssignabilityContext ctx) {
+        if (t instanceof IrSort.Trait) return true;
+        String name = baseName(t);
+        return name != null && ctx.catalog().lookup(name).orElse(null) instanceof TypeInfo.Trait;
     }
 
     /** Whether {@code t} names a nominal tag (a struct, native, or structural alias). */

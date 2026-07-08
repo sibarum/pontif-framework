@@ -40,13 +40,17 @@ class AssignabilityTest {
         return IrSort.structural("_tuple", m);
     }
 
-    /** Catalog: Vec3 and Color are nominal tags over `{3*Decimal}`; AnyNumber is a transparent union. */
+    /** Catalog: Vec3 and Color are nominal tags over `{3*Decimal}`; AnyNumber is a transparent union.
+     *  Vec3 and Color both satisfy the trait Showable. */
     private static AssignabilityContext ctx() {
         TypeCatalog cat = new TypeCatalog();
         cat.register("Vec3", new TypeInfo.Alias(tuple3()));
         cat.register("Color", new TypeInfo.Alias(tuple3()));
-        cat.register("AnyNumber", new TypeInfo.Alias(IrSort.union(java.util.List.of(DECIMAL, INT))));
-        return AssignabilityContext.of(cat);
+        cat.register("AnyNumber", new TypeInfo.Alias(IrSort.union(List.of(DECIMAL, INT))));
+        cat.register("Showable", new TypeInfo.Trait(IrSort.trait("Showable", Map.of())));
+        return AssignabilityContext.of(cat, Map.of(
+                "Vec3", java.util.Set.of("Showable"),
+                "Color", java.util.Set.of("Showable")));
     }
 
     private static IrSort named(String n) {
@@ -156,5 +160,20 @@ class AssignabilityTest {
     void castRejectsIncompatibleStructures() {
         assertInstanceOf(Assignability.Made.Rejected.class,
                 Assignability.cast(INT, named("Vec3"), ctx()));
+    }
+
+    // --- trait satisfaction ------------------------------------------------
+
+    @Test
+    void nominalTagSatisfiesImplementedTrait() {
+        assertTrue(Assignability.isA(named("Vec3"), named("Showable"), ctx()));    // let s:Showable = v
+        assertTrue(Assignability.isA(named("Color"), named("Showable"), ctx()));
+        assertEquals(Assignability.Assignment.WIDEN,
+                Assignability.assign(named("Vec3"), named("Showable"), ctx()));
+    }
+
+    @Test
+    void bareStructureDoesNotSatisfyTheTrait() {
+        assertFalse(Assignability.isA(tuple3(), named("Showable"), ctx()));   // a bare tuple implements nothing
     }
 }
