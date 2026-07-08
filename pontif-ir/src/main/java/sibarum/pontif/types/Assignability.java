@@ -1,5 +1,6 @@
 package sibarum.pontif.types;
 
+import java.util.List;
 import java.util.Map;
 
 import sibarum.pontif.ir.IrSort;
@@ -80,6 +81,55 @@ public final class Assignability {
         NEEDS_CAST,
         /** No cast could produce it — a hard type error. */
         ILLEGAL
+    }
+
+    // --- the two concrete-type-changers (decisions only; runtime execution lives in the interpreter) --
+
+    /** The concrete type a construction/cast produces, or why it is rejected. */
+    public sealed interface Made {
+        /** The value's new concrete type. */
+        record Ok(IrSort concreteType) implements Made {}
+        /** No such value can be produced. */
+        record Rejected(String reason) implements Made {}
+    }
+
+    /**
+     * Can {@code X(args…)} construct — does {@code typeName} name a constructible nominal type whose
+     * structure the argument sorts fit (positionally)? On success the produced value's concrete type is
+     * {@code X} itself. This is how a bare literal <em>acquires</em> a nominal tag (`Vec3(1,2,3)`),
+     * the only implicit-free way to move down from the structure to the tag.
+     */
+    public static Made construct(String typeName, List<IrSort> argSorts, AssignabilityContext ctx) {
+        IrSort structure = nominalBase(IrSort.named(typeName), ctx);
+        if (!(structure instanceof IrSort.Structural s)) {
+            return new Made.Rejected("'" + typeName + "' is not a constructible nominal type");
+        }
+        if (s.members().size() != argSorts.size()) {
+            return new Made.Rejected("'" + typeName + "' takes " + s.members().size()
+                    + " field(s) but got " + argSorts.size());
+        }
+        int i = 0;
+        for (IrSort member : s.members().values()) {
+            if (!isA(argSorts.get(i), member, ctx)) {
+                return new Made.Rejected("argument " + i + " is not usable as field of '" + typeName + "'");
+            }
+            i++;
+        }
+        return new Made.Ok(IrSort.named(typeName));
+    }
+
+    /**
+     * Can {@code (target:value)} cast — is a value of concrete type {@code from} castable to
+     * {@code target}? Legal whenever the underlying structures are compatible (a widen, a checked
+     * narrow, or a lossless lateral re-tag between siblings); the value's new concrete type is
+     * {@code target}. Only a structurally incompatible pair is rejected. Unlike a widen, a cast is the
+     * <em>explicit</em> concrete-type change the programmer owns.
+     */
+    public static Made cast(IrSort target, IrSort from, AssignabilityContext ctx) {
+        return assign(from, target, ctx) == Assignment.ILLEGAL
+                ? new Made.Rejected("cannot cast " + baseName(from) + " to " + baseName(target)
+                        + " — incompatible structures")
+                : new Made.Ok(target);
     }
 
     // --- name resolution against the catalog ---------------------------------

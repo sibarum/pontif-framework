@@ -2,12 +2,15 @@ package sibarum.pontif.types;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import sibarum.pontif.ir.IrSort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -21,13 +24,20 @@ class AssignabilityTest {
     private static final IrSort INT = IrSort.named("Int");
     private static final IrSort BOOL = IrSort.named("Bool");
 
-    /** The anonymous tuple `{3*Decimal}` — `_tuple` with positional members `_0.._2`. */
+    /** The anonymous tuple `{3*Decimal}` — `_tuple` with positional members `_0.._2` (ordered). */
     private static IrSort tuple3() {
-        return IrSort.structural("_tuple", Map.of("_0", DECIMAL, "_1", DECIMAL, "_2", DECIMAL));
+        Map<String, IrSort> m = new LinkedHashMap<>();
+        m.put("_0", DECIMAL);
+        m.put("_1", DECIMAL);
+        m.put("_2", DECIMAL);
+        return IrSort.structural("_tuple", m);
     }
 
     private static IrSort tuple2() {
-        return IrSort.structural("_tuple", Map.of("_0", DECIMAL, "_1", DECIMAL));
+        Map<String, IrSort> m = new LinkedHashMap<>();
+        m.put("_0", DECIMAL);
+        m.put("_1", DECIMAL);
+        return IrSort.structural("_tuple", m);
     }
 
     /** Catalog: Vec3 and Color are nominal tags over `{3*Decimal}`; AnyNumber is a transparent union. */
@@ -102,5 +112,49 @@ class AssignabilityTest {
     void assignIllegal_whenStructuresIncompatible() {
         assertEquals(Assignability.Assignment.ILLEGAL,
                 Assignability.assign(named("Vec3"), INT, ctx()));
+    }
+
+    // --- construct ---------------------------------------------------------
+
+    @Test
+    void constructTagFromMatchingArgs() {
+        Assignability.Made m = Assignability.construct("Vec3", List.of(DECIMAL, DECIMAL, DECIMAL), ctx());
+        Assignability.Made.Ok ok = assertInstanceOf(Assignability.Made.Ok.class, m);
+        assertEquals("Vec3", ((IrSort.Named) ok.concreteType()).name());   // value's concrete type is Vec3
+    }
+
+    @Test
+    void constructRejectsWrongArityAndWrongFieldType() {
+        assertInstanceOf(Assignability.Made.Rejected.class,
+                Assignability.construct("Vec3", List.of(DECIMAL, DECIMAL), ctx()));
+        assertInstanceOf(Assignability.Made.Rejected.class,
+                Assignability.construct("Vec3", List.of(DECIMAL, BOOL, DECIMAL), ctx()));
+    }
+
+    @Test
+    void constructRejectsNonConstructibleName() {
+        assertInstanceOf(Assignability.Made.Rejected.class,
+                Assignability.construct("Nope", List.of(DECIMAL), ctx()));
+    }
+
+    // --- cast --------------------------------------------------------------
+
+    @Test
+    void castBetweenSiblings_producesTarget() {
+        Assignability.Made m = Assignability.cast(named("Color"), named("Vec3"), ctx());  // Color:v
+        Assignability.Made.Ok ok = assertInstanceOf(Assignability.Made.Ok.class, m);
+        assertEquals("Color", ((IrSort.Named) ok.concreteType()).name());
+    }
+
+    @Test
+    void castBareTupleToTag_producesTag() {
+        assertInstanceOf(Assignability.Made.Ok.class,
+                Assignability.cast(named("Vec3"), tuple3(), ctx()));   // Vec3:{...}
+    }
+
+    @Test
+    void castRejectsIncompatibleStructures() {
+        assertInstanceOf(Assignability.Made.Rejected.class,
+                Assignability.cast(INT, named("Vec3"), ctx()));
     }
 }
