@@ -147,15 +147,34 @@ public final class Assignability {
                         ? a.target() : null).orElse(null);
     }
 
-    /** The base a nominal <em>tag</em> widens to (its structure), or null if {@code t} is not a tag. */
+    /**
+     * The base a nominal <em>tag</em> widens to (its structure or its explicit struct-base), or null
+     * when {@code t} is not a tag / is already a terminal structure. Two widen steps, in order:
+     * <ol>
+     *   <li>an explicit struct-base (`struct P3D:[Point:…]`) always wins — read from the <em>registered
+     *       shape</em>, so a bare {@code Structural("P3D")} from inference demotes even if it doesn't
+     *       carry the base field itself;</li>
+     *   <li>otherwise a <em>named reference</em> widens to its structure, but a bare {@code Structural}
+     *       that <em>is</em> that structure is terminal — returning its own shape would loop, since
+     *       {@code fromModule} registers a struct under its shape's name.</li>
+     * </ol>
+     */
     private static IrSort nominalBase(IrSort t, AssignabilityContext ctx) {
         String name = baseName(t);
         if (name == null) return null;
-        return ctx.catalog().lookup(name).map(info -> switch (info) {
-            case TypeInfo.Struct s -> s.shape().baseSort() != null ? s.shape().baseSort() : s.shape();
-            case TypeInfo.Alias a when a.target() instanceof IrSort.Structural -> a.target();
-            default -> null;
-        }).orElse(null);
+        IrSort baseSort;
+        IrSort shape;
+        switch (ctx.catalog().lookup(name).orElse(null)) {
+            case TypeInfo.Struct s -> { baseSort = s.shape().baseSort(); shape = s.shape(); }
+            case TypeInfo.Alias a when a.target() instanceof IrSort.Structural -> {
+                baseSort = null;
+                shape = a.target();
+            }
+            // Not a registered nominal tag: a bare structure widens only to its own explicit base.
+            case null, default -> { return t instanceof IrSort.Structural s ? s.baseSort() : null; }
+        }
+        if (baseSort != null) return baseSort;               // (1) explicit demote base
+        return (t instanceof IrSort.Structural) ? null : shape;  // (2) named ref → structure; structure terminal
     }
 
     /** Whether {@code t} is a trait (an {@link IrSort.Trait} or a name the catalog knows as a trait). */
