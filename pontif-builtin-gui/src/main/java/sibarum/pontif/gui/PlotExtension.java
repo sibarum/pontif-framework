@@ -40,7 +40,7 @@ public final class PlotExtension implements Extension {
                 requires pontif.core.{Stream}
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
-                           fade, cmap, wire, scene, Curve, curve, chart,
+                           fade, cmap, wire, scene, Curve, curve, color, chart,
                            Volume3D, Volume, volume, normals}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
@@ -68,8 +68,17 @@ public final class PlotExtension implements Extension {
 
                 # 65 evenly-spaced sample indices {0..64}, synthesized once from the refinement
                 # (the `;` synthesis directive is a top-level-let feature, so it lives here, not
-                # inside plotLine's body).
+                # inside plotLine's body). This is the DEFAULT resolution.
                 let sampleIndices:Stream[Int:0 <= @ < 65];
+
+                # A runtime-length index range (a §7.9 generator): indexRange(0, k)._0 = {0,1,…,k},
+                # the unfold halting when `from` overruns `to`. Unlike the synthesized index streams
+                # above (whose length is baked in at compile time), its length is a RUNTIME value —
+                # this is what lets curve(f, n) / plotLine(f, n) choose n at runtime.
+                let indexRange:[
+                  (from:[Int:@>=0], to:[Int:@>=from]):{Stream[Int], Int, Int} ->
+                  {from, from+1, to}
+                ]
 
                 # 33*33 grid indices for surface sampling (row = i / 33, col = i % 33).
                 let surfaceIndices:Stream[Int:0 <= @ < 1089];
@@ -90,6 +99,21 @@ public final class PlotExtension implements Extension {
                   let step = (hi - lo) / 64.0
                   let xs = &sampleIndices:[ (i:Int) -> lo + i * step ]
                   let ys = &sampleIndices:[ (i:Int) -> sampleAt(c, lo + i * step) ]
+                  renderCurve(xs, ys)
+                )
+
+                # Same, at a chosen resolution: plotLine(f, 200) samples n points over the domain
+                # (n >= 2) instead of the default 65. The n-1 intervals span [lo, hi] exactly, so the
+                # endpoints always land on lo and hi. Indices come from the runtime `indexRange`.
+                # `(n - 1) * 1.0` forces DECIMAL division: a domain with Int bounds (e.g. from
+                # `let radius = 2`) makes `hi - lo` an Int, and Int/Int would truncate the step to 0
+                # for n >= span+2 — collapsing every sample onto lo (the "ghost curve").
+                function plotLine(c:[Curve2D], n:[Int:@ >= 2]):Stream[String] -> (
+                  let [{lo, hi}] = c.domain()
+                  let step = (hi - lo) / ((n - 1) * 1.0)
+                  let idx = indexRange(0, n - 1)._0
+                  let xs = &idx:[ (i:Int) -> lo + i * step ]
+                  let ys = &idx:[ (i:Int) -> sampleAt(c, lo + i * step) ]
                   renderCurve(xs, ys)
                 )
 
@@ -219,15 +243,40 @@ public final class PlotExtension implements Extension {
                 function scene(cfg:_, layers:_):Stream[String] -> renderScene(cfg, layers)
 
                 # A sampled 2D curve as a composable chart layer (65 points over its domain).
-                struct Curve(xs:_, ys:_)
+                # `colored` gates the {r,g,b} line colour (each channel in [0,1]): false ⇒ the
+                # colour is auto-assigned from a palette by curve order; set an explicit colour
+                # with `color`.
+                struct Curve(xs:_, ys:_, r:Decimal, g:Decimal, b:Decimal, colored:Bool)
 
                 # Sample a curve into a Curve layer — the plotLine sampling, as a layer value.
+                # Leaves the colour auto (palette by order); override it with `color`.
                 function curve(c:[Curve2D]):Curve -> (
                   let [{lo, hi}] = c.domain()
                   let step = (hi - lo) / 64.0
                   let xs = &sampleIndices:[ (i:Int) -> lo + i * step ]
                   let ys = &sampleIndices:[ (i:Int) -> sampleAt(c, lo + i * step) ]
-                  Curve(xs, ys)
+                  Curve(xs, ys, 0.0, 0.0, 0.0, false)
+                )
+
+                # Sample a curve at a chosen resolution: curve(f, 200) takes n points over the
+                # domain (n >= 2) instead of the default 65. The index stream is built at runtime by
+                # `indexRange`, so n is an ordinary value, not a compile-time preset. Colour still
+                # defaults to auto (palette by order); wrap in `color` to override.
+                function curve(c:[Curve2D], n:[Int:@ >= 2]):Curve -> (
+                  let [{lo, hi}] = c.domain()
+                  let step = (hi - lo) / ((n - 1) * 1.0)
+                  let idx = indexRange(0, n - 1)._0
+                  let xs = &idx:[ (i:Int) -> lo + i * step ]
+                  let ys = &idx:[ (i:Int) -> sampleAt(c, lo + i * step) ]
+                  Curve(xs, ys, 0.0, 0.0, 0.0, false)
+                )
+
+                # Give a curve an explicit line colour: color(curve(f), {1.0, 0.0, 0.0}) — an
+                # {r,g,b} aggregate, each channel in [0,1]. Without it, curves auto-colour from a
+                # palette by their order in the chart.
+                function color(c:Curve, rgb:[{Decimal, Decimal, Decimal}]):Curve -> (
+                  let [{r, g, b}] = rgb
+                  Curve(c.xs, c.ys, r, g, b, true)
                 )
 
                 # Native: one line-chart window with all the given curves overlaid (auto axes,

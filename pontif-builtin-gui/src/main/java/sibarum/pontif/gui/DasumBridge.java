@@ -360,20 +360,33 @@ public final class DasumBridge {
             new Color(0.95f, 0.85f, 0.40f, 1f),   // yellow
     };
 
-    /** Turn a {@code {layers}} tuple of {@code Curve} records into palette-coloured line series.
+    /** Turn a {@code {layers}} tuple of {@code Curve} records into line series. A curve carrying an
+     *  explicit colour ({@code colored = true}) uses its own {@code {r,g,b}}; the rest auto-colour
+     *  from {@link #SERIES_PALETTE}, cycled by the order of the <em>un-coloured</em> curves (so an
+     *  explicit colour doesn't shift the palette slot of a later auto curve).
      *  Package-visible: the headless test seam for {@link #renderChart}. */
     static List<Series> buildChartSeries(Object layersValue) {
         List<Series> out = new ArrayList<>();
+        int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
                 if (member instanceof RecordValue rv && "Curve".equals(bareType(rv.typeName()))) {
                     double[] xs = doubles(rv.members().get("xs"));
                     double[] ys = doubles(rv.members().get("ys"));
-                    out.add(Series.line(xs, ys, SERIES_PALETTE[out.size() % SERIES_PALETTE.length]));
+                    Color color = rv.members().get("colored") instanceof Boolean c && c
+                            ? new Color(clamp01(memberD(rv, "r")), clamp01(memberD(rv, "g")),
+                                        clamp01(memberD(rv, "b")), 1f)
+                            : SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
+                    out.add(Series.line(xs, ys, color));
                 }
             }
         }
         return out;
+    }
+
+    /** A colour channel clamped to the renderable [0,1] range (a {@link Color} out of range throws). */
+    private static float clamp01(double v) {
+        return (float) Math.max(0.0, Math.min(1.0, v));
     }
 
     /**

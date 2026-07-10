@@ -77,6 +77,79 @@ class PlotExtensionTest {
     }
 
     @Test
+    void plotLine_runtimeSampleRate_choosesPointCount() {
+        Extensions.install(new PlotExtension());
+
+        double[][] captured = new double[2][];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = DasumBridge.doubles(args.get(0));
+            captured[1] = DasumBridge.doubles(args.get(1));
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderCurve", stub);
+        NativeCalls.register("pontif.plot/renderCurve", stub);
+
+        // plotLine(f, 5): 5 points over [-10, 10] via the runtime `indexRange` generator (NOT the
+        // 65-point static preset). step = 20/4 = 5 → x = {-10,-5,0,5,10}, y = x^2.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, plotLine}
+                        struct Parabola()
+                        assign trait Parabola:Curve2D {
+                          at(x:Decimal):Decimal -> x * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        plotLine(Parabola(), 5)""", "curve.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "plotLine(f, 5) program should run; got " + r.text());
+        assertNotNull(captured[0], "renderCurve should have received the xs aggregate");
+
+        assertEquals(5, captured[0].length, "chosen sample count (5), not the default 65");
+        assertEquals(5, captured[1].length, "ys sample count");
+        assertArrayEquals(new double[]{-10.0, -5.0, 0.0, 5.0, 10.0}, captured[0], 1e-9, "5 evenly-spaced x");
+        assertArrayEquals(new double[]{100.0, 25.0, 0.0, 25.0, 100.0}, captured[1], 1e-9, "y = x^2 at each x");
+    }
+
+    @Test
+    void plotLine_runtimeSampleRate_integerDomain_stillSpacesEvenly() {
+        Extensions.install(new PlotExtension());
+
+        double[][] captured = new double[2][];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = DasumBridge.doubles(args.get(0));
+            captured[1] = DasumBridge.doubles(args.get(1));
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderCurve", stub);
+        NativeCalls.register("pontif.plot/renderCurve", stub);
+
+        // REGRESSION (the "ghost curve"): a domain of INTEGER bounds ({-2, 2}, as when the user
+        // writes `let radius = 2`) makes `hi - lo` a Long; step = (hi-lo)/(n-1) must NOT be integer
+        // division (which truncated to 0 for n >= 6, collapsing every sample onto x = lo).
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, plotLine}
+                        struct Line()
+                        assign trait Line:Curve2D {
+                          at(x:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal}] -> {-2, 2}
+                        }
+                        plotLine(Line(), 10)""", "curve.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "plotLine(f, 10) over an integer domain should run; got " + r.text());
+        assertNotNull(captured[0], "renderCurve should have received the xs aggregate");
+
+        assertEquals(10, captured[0].length, "10 samples");
+        assertEquals(-2.0, captured[0][0], 1e-9, "first x = lo");
+        assertEquals(2.0, captured[0][9], 1e-9, "last x = hi (NOT collapsed onto lo)");
+        // The samples must actually span the domain — not all sit on lo.
+        assertTrue(captured[0][9] - captured[0][0] > 3.0,
+                "x range spans the domain; got [" + captured[0][0] + ", " + captured[0][9] + "]");
+    }
+
+    @Test
     void plotCloud_shapesPointsForTheRenderer() {
         Extensions.install(new PlotExtension());
 
@@ -231,6 +304,82 @@ class PlotExtensionTest {
 
         var series = DasumBridge.buildChartSeries(capturedLayers[0]);
         assertEquals(2, series.size(), "two overlaid curves → two series");
+    }
+
+    @Test
+    void color_setsExplicitCurveColour_othersFallBackToPalette() {
+        Extensions.install(new PlotExtension());
+
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderChart", stub);
+        NativeCalls.register("pontif.plot/renderChart", stub);
+
+        // First curve gets an explicit red; second is left auto (palette slot 0 = cyan).
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, curve, color, chart}
+                        struct Parabola()
+                        assign trait Parabola:Curve2D {
+                          at(x:Decimal):Decimal -> x * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        struct Line()
+                        assign trait Line:Curve2D {
+                          at(x:Decimal):Decimal -> 2.0 * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        chart({title = "coloured"},
+                              { color(curve(Parabola()), {1.0, 0.0, 0.0}), curve(Line()) })""", "chart.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "coloured chart program should run; got " + r.text());
+        assertNotNull(capturedLayers[0], "renderChart should have received the {layers} tuple");
+
+        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        assertEquals(2, series.size(), "two overlaid curves → two series");
+
+        // Explicit {1,0,0} honoured verbatim.
+        assertEquals(1f, series.get(0).color().r(), 1e-6, "explicit red channel");
+        assertEquals(0f, series.get(0).color().g(), 1e-6, "explicit green channel");
+        assertEquals(0f, series.get(0).color().b(), 1e-6, "explicit blue channel");
+        // Auto curve takes the FIRST palette slot (cyan), unshifted by the coloured curve before it.
+        assertEquals(0.40f, series.get(1).color().r(), 1e-6, "auto curve → palette slot 0 (cyan)");
+        assertEquals(0.80f, series.get(1).color().g(), 1e-6);
+        assertEquals(1.00f, series.get(1).color().b(), 1e-6);
+    }
+
+    @Test
+    void curve_runtimeSampleRate_flowsThroughChart() {
+        Extensions.install(new PlotExtension());
+
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderChart", stub);
+        NativeCalls.register("pontif.plot/renderChart", stub);
+
+        // curve(f, 10) — the arity overload — inside a chart: the series carries 10 points.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, curve, chart}
+                        struct Parabola()
+                        assign trait Parabola:Curve2D {
+                          at(x:Decimal):Decimal -> x * x
+                          domain():[{Decimal,Decimal}] -> {-10.0, 10.0}
+                        }
+                        chart({title = "coarse"}, { curve(Parabola(), 10) })""", "chart.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "chart with curve(f, 10) should run; got " + r.text());
+        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        assertEquals(1, series.size(), "one curve → one series");
+        assertEquals(10, series.get(0).pointCount(), "10 samples, not the default 65");
     }
 
     @Test
