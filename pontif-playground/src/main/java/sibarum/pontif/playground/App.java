@@ -1287,8 +1287,23 @@ public final class App {
         });
 
         GlfwCallbacks.setCursorPosListener((win, x, y) -> {
-            InputState.updateMousePos(x, y);
-            ScrollbarController.onCursorMove(x, y);
+            // GLFW reports the cursor in window (screen-point) coordinates, but the whole
+            // UI is laid out and hit-tested in FRAMEBUFFER PIXELS (see the render loop's
+            // fbW/fbH viewport). On a HiDPI / Retina display those two spaces differ by the
+            // window's backing scale, so an unconverted cursor lands hover/click at the
+            // wrong place (and over the wrong widgets). Convert here — this is the single
+            // entry point for cursor coordinates; every other handler reads the stored
+            // InputState.mouseX()/mouseY(), so scaling once keeps them all consistent.
+            //
+            // The factor is framebuffer/window size, NOT contentScale: on macOS they match
+            // (2.0 on Retina), but on Windows contentScale is a DPI hint while the
+            // framebuffer already equals the window in pixels, i.e. the factor is 1.
+            int[] wsz = window.size();
+            double sx = wsz[0] > 0 ? x * (double) window.framebufferWidth()  / wsz[0] : x;
+            double sy = wsz[1] > 0 ? y * (double) window.framebufferHeight() / wsz[1] : y;
+
+            InputState.updateMousePos(sx, sy);
+            ScrollbarController.onCursorMove(sx, sy);
             if (ScrollbarController.isDragging()) return;
 
             LayoutResult lr = LatestLayout.result();
@@ -1298,15 +1313,15 @@ public final class App {
             // When an overlay is active, hit-test against its tree exclusively
             // (modal behavior); when none, the main UI.
             Component hitRoot = OverlayStack.activeInputRoot(layoutRoot);
-            Component hit = HitTest.test(hitRoot, lr, (float) x, (float) y);
+            Component hit = HitTest.test(hitRoot, lr, (float) sx, (float) sy);
             HoverState.update(hit);
             // Ctrl-hover: underline the editor identifier under the mouse and show
             // a hand cursor — the "this is a link" affordance (see drawLinkUnderline).
             updateLinkHover();
             cursors.setShape(linkStart >= 0 ? CursorManager.CursorShape.HAND : cursorShapeFor(hit));
 
-            TextInputController.onCursorMove(hit, x, y);
-            TabsController.onCursorMove(x, y);
+            TextInputController.onCursorMove(hit, sx, sy);
+            TabsController.onCursorMove(sx, sy);
         });
 
         GlfwCallbacks.setMouseButtonListener((win, button, action, mods) -> {
