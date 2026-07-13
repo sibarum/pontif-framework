@@ -238,9 +238,16 @@
         <!-- `mvn -Pnative -pl pontif-playground -am package` → a standalone native
              `pontif-editor` GUI binary. The dasum GUI ships GraalVM reachability
              metadata (FFM down/upcalls) + run-time initialization for its native
-             loaders and bundles glfw3.dll, so native-image picks that up automatically;
-             this profile only adds the editor's own pieces. Needs a GraalVM JDK and,
-             on Windows, the MSVC build tools. -->
+             loaders and its per-platform native libraries (glfw3.dll / libglfw3.dylib,
+             nfd.dll / libnfd.dylib) as globbed resources, so native-image embeds the
+             right one automatically; this profile only adds the editor's own pieces.
+             Needs a GraalVM JDK and, on Windows, the MSVC build tools.
+
+             OS adaptation: this `native` profile is OS-neutral (it just produces the
+             binary). The companion `native-macos` profile below auto-activates on macOS
+             and wraps that binary into a `Pontif Editor.app` bundle — so a single
+             `-Pnative` invocation yields a bare binary on Windows/Linux and a `.app` on
+             macOS, with no extra flags. -->
         <profile>
             <id>native</id>
             <build>
@@ -269,7 +276,14 @@
                                 <goals>
                                     <goal>compile-no-fork</goal>
                                 </goals>
-                                <phase>package</phase>
+                                <!-- prepare-package (NOT package) so the native binary exists
+                                     BEFORE the macOS .app assembly step, which runs in `package`
+                                     (see the native-macos profile). exec-maven-plugin is anchored
+                                     to its earlier declaration in the main <build>, so a same-phase
+                                     binding would run the packaging script first, before the binary
+                                     existed. Ordering by lifecycle phase is deterministic; ordering
+                                     within one phase across profiles is not. -->
+                                <phase>prepare-package</phase>
                             </execution>
                         </executions>
                         <configuration>
@@ -284,6 +298,54 @@
                                 <buildArg>-H:IncludeResources=dasum/atlas/.*</buildArg>
                             </buildArgs>
                         </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- macOS packaging: auto-activated by OS family, so it rides along with
+             `-Pnative` on a Mac without the user naming it (and stays dormant on
+             Windows/Linux). After native-image produces target/pontif-editor, the
+             `package` phase assembles target/Pontif Editor.app around it (Info.plist
+             with NSApplication as the principal class, PkgInfo, ad-hoc code signature).
+
+             It binds to `package` AFTER the `native` profile's native-image execution
+             (profiles apply in declaration order within a phase). The script no-ops if
+             the binary is missing, so this profile is harmless on a plain `mvn package`
+             / `mvn install` that did not activate -Pnative. The native binary is
+             self-contained (dasum extracts the GLFW/NFD dylibs from its embedded
+             resources at runtime), so no dylibs need to be copied into the bundle. -->
+        <profile>
+            <id>native-macos</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>package-macos-app</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/native/package-macos-app.sh</argument>
+                                        <argument>${project.build.directory}/pontif-editor</argument>
+                                        <argument>${project.build.directory}/Pontif Editor.app</argument>
+                                        <argument>${project.basedir}/native/Info.plist</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
                     </plugin>
                 </plugins>
             </build>

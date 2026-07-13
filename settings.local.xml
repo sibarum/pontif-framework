@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Project-local Maven settings for building pontif-framework OFF the corporate VPN.
+
+  The global ~/.m2/settings.xml mirrors *everything* (<mirrorOf>*</mirrorOf>) to the
+  DOmedia Nexus (nexus.domedia.com), which is only reachable on the corporate VPN. When
+  the VPN is down that mirror also blocks Maven Central, so nothing resolves.
+
+  This file defines NO mirror, so Maven talks to Maven Central directly. All the
+  private first-party artifacts (sibarum.dasum.gui:*, sibarum.elektro.queue:*,
+  dev.supirvast:*) are `mvn install`-ed into the local repo below from their source
+  checkouts in ~/IdeaProjects, so they resolve without the Nexus too.
+
+  It reuses the SAME local repository (~/.m2/repository) as the global config, so
+  everything already downloaded is reused and installs land where other tools expect.
+
+  Usage (CLI):
+      mvn -s settings.local.xml <goals>
+
+  Usage (IntelliJ):
+      Settings > Build, Execution, Deployment > Build Tools > Maven
+        - "User settings file": check "Override" and point it at
+          <repo>/settings.local.xml
+        - "Local repository" should show ~/.m2/repository (unchanged)
+      Then reload the Maven project. To go back to corporate builds, uncheck "Override".
+
+  Nothing here touches the global ~/.m2/settings.xml, so other projects on this
+  machine are unaffected.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+    <localRepository>${user.home}/.m2/repository</localRepository>
+
+    <!-- No <mirrors>: requests go to each repository's real URL (Central by default). -->
+
+    <profiles>
+        <profile>
+            <id>direct-central</id>
+            <repositories>
+                <repository>
+                    <id>central</id>
+                    <url>https://repo1.maven.org/maven2</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>false</enabled></snapshots>
+                </repository>
+            </repositories>
+            <pluginRepositories>
+                <pluginRepository>
+                    <id>central</id>
+                    <url>https://repo1.maven.org/maven2</url>
+                    <releases><enabled>true</enabled></releases>
+                    <snapshots><enabled>false</enabled></snapshots>
+                </pluginRepository>
+            </pluginRepositories>
+        </profile>
+    </profiles>
+
+    <activeProfiles>
+        <activeProfile>direct-central</activeProfile>
+    </activeProfiles>
+
+</settings>
