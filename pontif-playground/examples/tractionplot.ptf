@@ -1,0 +1,11 @@
+requires pontif.plot.{HeightMap3D, plotSurface}
+requires cott.traction.cd.{TractionCD}
+
+struct TractionField()
+
+assign trait TractionField:HeightMap3D {
+    at(x:Decimal, y:Decimal):Decimal ->
+      ( TractionCD.of(x*x - y*y, 1.0) / TractionCD.of(x*x + y*y, 1.0) ).normalize().n.toReal()
+    domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+  }
+

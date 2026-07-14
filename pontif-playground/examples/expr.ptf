@@ -3,7 +3,7 @@
 requires pontif.core.{Stream}
 
 trait Expr{
-  walkExprTree:[Method():[Stream[Expr]]]
+  evaluate:[Method():[Stream[Expr]]]
 }
 
 trait ValueLiteral[type T]{

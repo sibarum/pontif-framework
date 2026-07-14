@@ -1,0 +1,44 @@
+requires pontif.plot.{Curve2D, curve, chart, color}
+requires pontif.math.{sin}
+
+# Overlaying several 2D curves in one chart, with auto axes, gridlines, and tick labels
+# (each curve gets its own palette colour). The 2D sibling of scene(...)
+
+let radius = 6.0
+let bounds = {-radius, radius}
+
+function f1(x:Decimal):Decimal -> sin(x)
+
+struct F1()
+assign trait F1:Curve2D {
+  at(x:Decimal):Decimal -> f1(x)
+  domain():[{Decimal,Decimal}] -> bounds
+}
+
+function f1d1(x:Decimal):Decimal -> f1(x+0.1) - f1(x)
+
+struct F1D1()
+assign trait F1D1:Curve2D {
+  at(x:Decimal):Decimal -> f1d1(x + 0.1) / f1d1(x)
+  domain():[{Decimal,Decimal}] -> bounds
+}
+
+function f1ld1(x:Decimal):Decimal -> f1(x+0.1) / f1(x)
+
+struct F1LD1()
+assign trait F1LD1:Curve2D {
+  at(x:Decimal):Decimal -> f1ld1(x)
+  domain():[{Decimal,Decimal}] -> bounds
+}
+
+struct F1LD1D1()
+assign trait F1LD1D1:Curve2D {
+  at(x:Decimal):Decimal -> f1ld1(x+0.1) - f1ld1(x)
+  domain():[{Decimal,Decimal}] -> bounds
+}
+
+main ( chart({title = ""}, {
+  color(curve(F1(), 301), {1.0,0.0,0.0}),
+  color(curve(F1D1(), 301), {0.0,1.0,0.0}),
+  color(curve(F1LD1D1(), 301), {0.0,0.0,1.0})
+}) )

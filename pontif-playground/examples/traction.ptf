@@ -47,8 +47,12 @@ method Traction.toString():String ->
       "("+n+"*0^"+z+")"
 
 function +(t1:Traction, t2:Traction):Traction ->
-  match (t1.normalize(),t2.normalize())
-    [(Traction(n1,z1), Traction(n2,z2))] -> Traction(n1+n2, z1+z2)
+  let [{Traction(n1,z1), Traction(n2,z2)}] = {t1.normalize(),t2.normalize()}
+  match {z1, z2}
+    [{0.0,0.0}] -> Traction(n1+n2, 0)
+    [{z,0.0}] -> Traction(n2, 0)
+    [{0.0,z}] -> Traction(n1, 0)
+    [_]     -> Traction(n1+n2, z1+z2)
 
 
 function -(t1:Traction, t2:Traction):Traction ->
@@ -56,8 +60,8 @@ function -(t1:Traction, t2:Traction):Traction ->
 
 
 function *(t1:Traction, t2:Traction):Traction ->
-  match (t1.normalize(),t2.normalize())
-    [(Traction(n1,z1), Traction(n2,z2))] -> Traction(n1*n2, z1+z2)
+  match {t1.normalize(),t2.normalize()}
+    [{Traction(n1,z1), Traction(n2,z2)}] -> Traction(n1*n2, z1+z2)
     
 
 function /(t1:Traction, t2:Traction):Traction ->
@@ -65,5 +69,5 @@ function /(t1:Traction, t2:Traction):Traction ->
 
 
 (
-  Traction(10,2)/Traction(-2,3)
+  Traction(10,2)-Traction(-2,3)
 ).toString()

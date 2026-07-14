@@ -13,8 +13,8 @@ method TractionCD.toString():String ->
   "tcd<"+this.n.toString()+"/"+this.d.toString()+">"
 
 method TractionCD.normalize():TractionCD ->
-  match (this.n, this.d)
-    [(t1, t2)] -> TractionCD(t1/t2, Traction(1,0))
+  match {this.n, this.d}
+    [{t1, t2}] -> TractionCD(t1/t2, Traction(1,0))
 
 function +(
     tcd1:[TractionCD(n1,d1)],

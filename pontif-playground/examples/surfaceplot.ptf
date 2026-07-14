@@ -1,0 +1,12 @@
+requires pontif.plot.{HeightMap3D, plotSurface}
+requires pontif.math.{cos, sin, tan, sqrt}
+
+function bounds(r:Decimal):{Decimal,Decimal,Decimal,Decimal} -> {-r,r,-r,r}
+
+struct Shape()
+assign trait Shape:HeightMap3D {
+  at(x:Decimal, y:Decimal):Decimal -> tan(x) + cos(y + sin(x*sqrt(5)))
+  domain():[{Decimal,Decimal,Decimal,Decimal}] -> bounds(10)
+}
+
+main ( plotSurface(Shape()) )

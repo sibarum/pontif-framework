@@ -12,12 +12,11 @@ function *(left:Ternion, right:Ternion):Ternion ->
   let z = left.z*right.z + left.z*right.n + left.n*right.z
   let n = left.n*right.n + left.z*right.w + left.w*right.z
   let w = left.w*right.w + left.w*right.n + left.n*right.w
-  let incz = left.n == 0 & right.n == 0
   Ternion(z, n, w)
 
 method Ternion.inv():Ternion ->
   match this {
-    [Ternion(z,0,w)] -> Ternion(w, 0, z+1)
+    [Ternion(z,0,w)] -> Ternion(w, 0, z)
     [Ternion(z,n,w)] -> Ternion(w, 1/n, z)
   }
   
@@ -25,3 +24,4 @@ function /(left:Ternion, right:Ternion):Ternion ->
 	  left * right.inv()
 
 
+(Ternion.zero + Ternion.one)*(Ternion.one + Ternion.zero)*Ternion.residue
