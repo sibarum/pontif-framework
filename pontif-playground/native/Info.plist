@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist for the Pontif Editor macOS .app bundle. Assembled around the
+  GraalVM native-image binary by native/package-macos-app.sh. The token
+  @EXECUTABLE@ is substituted with the binary name at packaging time.
+
+  NSPrincipalClass = NSApplication is the important one: it tells macOS to
+  treat this as a real GUI application, which gives it a proper activation
+  policy / menu bar and silences the "NSMenu _setMenuName:" assertion GLFW
+  hits when run as a bare executable outside a bundle.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Pontif Editor</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pontif Editor</string>
+    <key>CFBundleExecutable</key>
+    <string>@EXECUTABLE@</string>
+    <key>CFBundleIdentifier</key>
+    <string>sibarum.pontif.editor</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+</dict>
+</plist>
