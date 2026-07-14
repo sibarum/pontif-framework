@@ -578,7 +578,7 @@ public final class AltParser {
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
                 "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
-                "action", "type").contains(t.text());
+                "action").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -644,11 +644,10 @@ public final class AltParser {
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
             case "action"   -> parseAction();
-            case "type"     -> parseTypeAlias();
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
-                            + "struct / let / cast / trait / assign / proof / type / action); executable logic must "
+                            + "struct / let / cast / trait / assign / proof / action); executable logic must "
                             + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
@@ -2376,27 +2375,6 @@ public final class AltParser {
         expect(AltToken.Kind.EQUALS);
         IrExpr tree = parseExpr();
         return new IrStmt.Proof(functionName, tree, start.origin());
-    }
-
-    /**
-     * A transparent type alias: {@code type Name:[Sort]} — a named abbreviation for a sort (a union,
-     * refinement, tuple, or a composition of other aliases). Lowers to an {@link IrStmt.TypeAlias} the
-     * {@link sibarum.pontif.ir.AliasResolver} inlines, so it is fully transparent and interchangeable
-     * with its definition. The dedicated spelling for what {@code let Name:Type[…]} also produces.
-     * (Nominal aliases — those that host methods — are a later slice; this is the pure-abbreviation form.)
-     */
-    private IrStmt parseTypeAlias() throws ParseException {
-        AltToken start = expectKeyword("type");
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
-        if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
-            throw new ParseException(
-                    "'" + nameTok.text() + "' is a native type and cannot be aliased over",
-                    nameTok.origin());
-        }
-        expect(AltToken.Kind.COLON);
-        IrSort aliased = parseBracketSort();   // the `[…]` — unions, refinements, tuples, alias references
-        types.register(nameTok.text(), new TypeInfo.Alias(aliased));
-        return new IrStmt.TypeAlias(nameTok.text(), aliased, start.origin());
     }
 
     private IrStmt parseStruct() throws ParseException {

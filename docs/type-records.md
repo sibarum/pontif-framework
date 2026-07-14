@@ -5,6 +5,16 @@ position," to be migrated onto piecemeal via the `sibarum.pontif.types.TypeSyste
 (design-first, then strangle — see `project_typesystem_api`). Filename provisional (`type-records`
 vs `sort-records` vs `type-triad` — TBD with James).*
 
+> **Syntax note (2026-07-11, James): the top-level `type Name:[Sort]` alias/nominal-subtype
+> declaration was DROPPED.** The `type` keyword is kept only as the associated-type / type-parameter
+> declarator (`type X` inside traits, `[type T]` slots — `docs/associated-types.md`) and reserved for
+> a possible future top-level meaning. The examples below still spell the running case as
+> `type Vec3:[…]` because that is where the three-records *model* was first exposed — read them as
+> **illustrative of the model, not usable surface syntax**. Under the retained spellings a transparent
+> alias is `let Name:Type[…]` (see `ReusableSortTest`) and a nominal subtype is
+> `struct Name:[Base](…)` (`docs/univocal-language-design.md`); the Declared / Inferred / Value
+> distinction the rest of this doc argues for is unaffected by which spelling introduces the name.*
+
 ## The problem this fixes
 
 Pontif today collapses several distinct notions of "the type here" into one `IrSort` per position,
