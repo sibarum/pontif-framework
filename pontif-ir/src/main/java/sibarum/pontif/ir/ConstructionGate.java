@@ -2,12 +2,15 @@ package sibarum.pontif.ir;
 
 import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.predicates.BoundAnalysis;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.predicates.SatResult;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -200,14 +203,178 @@ final class ConstructionGate {
         // always an UNKNOWN — skip classify (which judges base sorts, not elements).
         if (isParametricStream(claim)) return claim;
         IrSort arg = argSort(value, ctx, structs);
-        return switch (classify(arg, claim, structs)) {
+        // Dependent refinement: a claim predicate may name a preceding in-scope
+        // binding (`let x = 5; let y:[Int:@>=x] = …`). Substitute each referenced
+        // binding's pinned value into the predicate before deciding — the same move
+        // the call gate makes for sibling params (StaticDispatch.substituteSiblings,
+        // docs/dependent-sorts.md §5.2). A value the scope pins makes the claim
+        // decidable (FITS discharges it; DISJOINT is a compile error); an unpinned
+        // reference (a param, a computed local) stays free, and the ORIGINAL claim is
+        // stamped so the runtime resolves it against the concrete scope.
+        IrSort resolved = substituteScope(claim, ctx);
+        // Still names an in-scope binding after substitution (a range-typed reference,
+        // a param) — a genuinely dependent claim. Like the call gate for dependent
+        // params (docs/dependent-sorts.md), PROVE it from the referenced bindings'
+        // refinements; never stamp a runtime check ("no runtime refinement checks by
+        // default"). Proved → discharged; otherwise a compile error as-is (the program
+        // must narrow the reference so its sort entails the claim).
+        if (resolved instanceof IrSort.Refined rr && mentionsBinding(rr.predicate())) {
+            if (dischargesUnderScope(resolved, arg, ctx)) return null;
+            throw new CompileException(
+                    "let '" + l.name() + "' has a dependent declared sort " + render(resolved)
+                            + " that cannot be proved from the referenced binding(s) in scope"
+                            + (arg != null ? " (the value's sort is " + render(arg) + ")" : "")
+                            + " — narrow the referenced binding's sort so it entails the claim.",
+                    value.origin());
+        }
+        return switch (classify(arg, resolved, structs)) {
             case FITS -> null;  // discharged — provable fit, no runtime check
             case DISJOINT -> throw new CompileException(
                     "let '" + l.name() + "' can never satisfy its declared sort "
-                            + render(claim) + " — the value's sort is "
+                            + render(resolved) + " — the value's sort is "
                             + render(arg) + ", which is disjoint",
                     value.origin());
             case UNKNOWN -> runtimeCheckable(claim, structs) ? claim : null;
+        };
+    }
+
+    /**
+     * Proves a dependent claim from the scope: {@code discharge(hyps, goal)} where the
+     * goal is the claim predicate and the hypotheses are the value's own narrowing plus
+     * each referenced binding's refinement (its {@code @} rebound to the binding's name).
+     * {@code [Int:@>=x]} on value {@code 7} under {@code x:[Int:@<=7]} discharges via
+     * {@code [Self==7, x<=7] ⊢ Self>=x}. Reuses the call gate's integer engine
+     * ({@link BoundAnalysis#discharge}); anything outside its fragment (a non-Int base, a
+     * reference with no usable refinement) simply fails to prove and is rejected — honest,
+     * never a false accept.
+     */
+    private static boolean dischargesUnderScope(
+            IrSort claim, IrSort arg, InferenceContext ctx) {
+        if (!(claim instanceof IrSort.Refined ref)) return false;
+        try {
+            SymExpr goal = IrCompiler.compileSymExpr(ref.predicate());
+            List<SymExpr> hyps = new ArrayList<>();
+            if (arg instanceof IrSort.Refined ar) {
+                hyps.add(IrCompiler.compileSymExpr(ar.predicate()));
+            }
+            for (String name : freeBindingNames(ref.predicate())) {
+                IrSort rt = ctx.typeEnv().get(name);
+                if (rt == null) rt = topLevelLetNarrowing(name, ctx);
+                if (rt instanceof IrSort.Refined rr) {
+                    hyps.add(Substitute.applySelf(
+                            IrCompiler.compileSymExpr(rr.predicate()), SymExpr.var(name)));
+                }
+            }
+            return BoundAnalysis.discharge(hyps, goal);
+        } catch (CompileException outsideFragment) {
+            return false;
+        }
+    }
+
+    /** Whether a claim predicate references any in-scope binding (a free {@code Var}
+     *  or a 0-arg {@code Call} — a top-level let) — i.e. it is dependent. */
+    private static boolean mentionsBinding(IrExpr predicate) {
+        return !freeBindingNames(predicate).isEmpty();
+    }
+
+    /** The names a claim predicate references (free {@code Var}s and 0-arg {@code Call}s). */
+    private static Set<String> freeBindingNames(IrExpr predicate) {
+        Set<String> names = new LinkedHashSet<>();
+        collectBindingNames(predicate, names);
+        return names;
+    }
+
+    private static void collectBindingNames(IrExpr e, Set<String> out) {
+        switch (e) {
+            case IrExpr.Var v -> out.add(v.name());
+            case IrExpr.Call c when c.args().isEmpty() -> out.add(c.functionName());
+            case IrExpr.BinOp op -> {
+                collectBindingNames(op.left(), out);
+                collectBindingNames(op.right(), out);
+            }
+            case IrExpr.FieldAccess fa -> collectBindingNames(fa.base(), out);
+            default -> { }
+        }
+    }
+
+    /**
+     * Substitutes in-scope pinned bindings into a refined claim's predicate so a
+     * dependent refinement can be decided statically: {@code [Int:@>=x]} with
+     * {@code x} pinned to {@code 5} becomes {@code [Int:@>=5]}. {@code @} (Self) is
+     * untouched — only value-level name references are replaced. A non-refined claim,
+     * or one that names nothing pinned, returns unchanged.
+     */
+    private static IrSort substituteScope(IrSort claim, InferenceContext ctx) {
+        if (!(claim instanceof IrSort.Refined ref)) return claim;
+        IrExpr sub = substituteRefs(ref.predicate(), ctx);
+        return sub == ref.predicate() ? claim
+                : new IrSort.Refined(ref.name(), ref.typeArgs(), sub, ref.origin());
+    }
+
+    /** Replaces each {@code Var} (or 0-arg {@code Call} — a top-level let) whose
+     *  binding the scope pins with that pinned value. */
+    private static IrExpr substituteRefs(IrExpr e, InferenceContext ctx) {
+        return switch (e) {
+            case IrExpr.Var v -> {
+                IrExpr pin = pinnedValue(v.name(), ctx);
+                yield pin != null ? pin : v;
+            }
+            case IrExpr.Call c when c.args().isEmpty() -> {
+                IrExpr pin = pinnedValue(c.functionName(), ctx);
+                yield pin != null ? pin : c;
+            }
+            case IrExpr.BinOp op -> {
+                IrExpr l = substituteRefs(op.left(), ctx);
+                IrExpr r = substituteRefs(op.right(), ctx);
+                yield l == op.left() && r == op.right() ? op
+                        : new IrExpr.BinOp(op.op(), l, r, op.origin());
+            }
+            case IrExpr.FieldAccess fa -> {
+                IrExpr b = substituteRefs(fa.base(), ctx);
+                yield b == fa.base() ? fa : new IrExpr.FieldAccess(b, fa.fieldName(), fa.origin());
+            }
+            default -> e;
+        };
+    }
+
+    /**
+     * The value an in-scope binding is pinned to, when its inferred narrowing is a
+     * singleton {@code [T:@==V]} with a Self-free {@code V}; else {@code null}. Reads
+     * {@code typeEnv} directly — the same source {@link NarrowingInference} uses for a
+     * {@code Var} — so params and computed locals (narrowed to a range, not a point)
+     * correctly yield {@code null} and stay residual.
+     */
+    private static IrExpr pinnedValue(String name, InferenceContext ctx) {
+        IrSort n = ctx.typeEnv().get(name);
+        if (n == null) n = topLevelLetNarrowing(name, ctx);
+        if (!(n instanceof IrSort.Refined r)) return null;
+        if (!(r.predicate() instanceof IrExpr.BinOp op) || op.op() != IrExpr.Op.EQ) return null;
+        if (op.left() instanceof IrExpr.SelfRef && !mentionsSelf(op.right())) return op.right();
+        if (op.right() instanceof IrExpr.SelfRef && !mentionsSelf(op.left())) return op.left();
+        return null;
+    }
+
+    /**
+     * The inferred narrowing of a top-level {@code let} (a 0-arg function at this
+     * stage, before lowering wraps them into {@code LetIn}s) — {@code let x = 5}
+     * narrows to {@code [Int:@==5]}. Only a single, param-less, top-level-let
+     * overload qualifies; anything else (a real function, an overload set) yields
+     * {@code null} and stays residual.
+     */
+    private static IrSort topLevelLetNarrowing(String name, InferenceContext ctx) {
+        List<IrStmt.FunctionDecl> ovs = ctx.overloads().get(name);
+        if (ovs == null || ovs.size() != 1) return null;
+        IrStmt.FunctionDecl fd = ovs.get(0);
+        if (!fd.topLevelLet() || !fd.params().isEmpty()) return null;
+        return TypeSystem.standard().infer(fd.body(), ctx);
+    }
+
+    private static boolean mentionsSelf(IrExpr e) {
+        return switch (e) {
+            case IrExpr.SelfRef s -> true;
+            case IrExpr.BinOp op -> mentionsSelf(op.left()) || mentionsSelf(op.right());
+            case IrExpr.FieldAccess fa -> mentionsSelf(fa.base());
+            default -> false;
         };
     }
 

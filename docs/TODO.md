@@ -86,6 +86,44 @@ memory `project_type_spec_layering`.*
   expected. Needs the `Stream` trait first (streams slice 2b). **QoL, deprioritized
   by James — not critical path.**
 
+## Value-in-a-type: local-`let` references in a refinement predicate — RESOLVED 2026-07-12
+
+*Was: a refinement predicate naming a **preceding in-scope `let`** — `let x:Int = 5` then
+`let y:[Int:@>=x] = …` — compiled and then threw at runtime for EVERY value, even one that
+satisfied it (a no-lie violation). The local-`let` scope was the one place the dependent-sort
+substitution path (the call gate, `docs/dependent-sorts.md`) was never plumbed into.*
+
+**Ruling (James, 2026-07-12):** *prove at compile time that a valid invocation is possible;
+resolve from the reference's own sort; never a runtime exception nor a stamped refinement
+check.* A dependent `let`-claim is now discharged at the construction gate exactly like the
+call gate discharges a dependent argument — for `let y:[Int:@>=x] = 7`, the reference `x`
+must be provably `[Int:@<=7]` for the binding to be valid as-is.
+
+Implemented in `ConstructionGate.gateClaim` (`pontif-ir`):
+- **Reference pinned to a value** (`let x = 5`, top-level let or local `let`): substituted
+  into the predicate (`substituteScope` → `[Int:@>=5]`) then decided by `classify` — provable
+  fit discharges (no runtime check), provable miss is a compile error.
+- **Reference bounded by a range** (`x:[Int:@<=7]`, incl. params): proved from the
+  reference's refinement via `BoundAnalysis.discharge([Self==v, x<=7], Self>=x)` — the call
+  gate's integer engine, extended to the two-variable coupling.
+- **Too weak to prove** (loose range, unbounded param, non-Int, unknown value): **compile
+  error as-is** — *never* a stamped runtime check (aligning the `let` gate with the call
+  gate's "no runtime refinement checks by default", `docs/dependent-sorts.md` §6). The error
+  directs the author to narrow the reference's sort.
+
+Covered by `DependentLetClaimTest` (6 cases: pinned fit/miss, range-entails/too-weak,
+unbounded-param, non-dependent control). Full suite + probe matrix green.
+
+**Remaining / follow-ups:**
+- **The `[!!Sort]` runtime-defer escape is NOT implemented** — the parser rejects `!`
+  ("no Not op yet"), and there is no hazard sort. Yet `PontifCompiler` (~L442) and the
+  call-gate error advise users to "mark the parameter `[!!Sort]` to defer the check to
+  runtime" — advertising a feature that does not exist (a no-lie / error-messaging bug in
+  its own right; the new `ConstructionGate` message deliberately does NOT suggest `!!`).
+  Either build the hazard (`project_runtime_hazard`) or scrub the advice.
+- Non-`Int` dependent claims (Decimal, struct-field) currently fall to the honest
+  compile-error path rather than being proved — extend the discharge if a real case wants it.
+
 ## ⭐ Next up — dispatch unification (the valuable remaining rung)
 
 *The inference-engine unification (Cluster 5) is done — one engine, `NarrowingInference`,
