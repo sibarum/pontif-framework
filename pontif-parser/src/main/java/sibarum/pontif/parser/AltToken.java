@@ -16,6 +16,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         DECIMAL,    // 3.14, -0.5 — BigDecimal literals (digits '.' digits)
         CHAR,       // 'a', '\n' — text is the RESOLVED character (escapes decoded)
         STRING,     // "abc", "\n" — text is the RESOLVED content (escapes decoded); first Char collection
+        REGEX,      // `\d+` — a RAW regex literal; text is the verbatim regex source (backslashes NOT decoded), only \` un-escaped to `
         IDENT,      // foo, Point, factorial — keywords are recognized at parse time
 
         // Brackets

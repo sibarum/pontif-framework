@@ -102,6 +102,16 @@ public final class AltLexer {
                 continue;
             }
 
+            // Regex literal: `\d+` — a RAW literal between backticks (the
+            // reserved sigil, docs/strings.md; now the regex/pattern literal).
+            // Backslashes are regex backslashes, not string escapes, so the
+            // content is taken verbatim — the whole point is killing the
+            // escape-doubling that plagues regex-as-string in other languages.
+            if (c == '`') {
+                tokens.add(readRegex(startLine, startCol));
+                continue;
+            }
+
             // Operator (including '-' when not a sign, '=', '->')
             if (OP_START_CHARS.contains(c)) {
                 tokens.add(readOperator(startLine, startCol));
@@ -138,7 +148,7 @@ public final class AltLexer {
         if (tokens.isEmpty()) return false;
         AltToken last = tokens.get(tokens.size() - 1);
         return switch (last.kind()) {
-            case INTEGER, DECIMAL, CHAR, STRING, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
+            case INTEGER, DECIMAL, CHAR, STRING, REGEX, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
             default -> false;
         };
     }
@@ -242,6 +252,47 @@ public final class AltLexer {
                 if (Character.charCount(codePoint) == 2) {
                     advance(); // the low surrogate
                 }
+            }
+        }
+    }
+
+    /**
+     * Reads a regex literal: the RAW source between backticks. Unlike a string,
+     * no escape decoding happens — a backslash is a regex backslash, so `` `\d+` ``
+     * carries the two characters {@code \d} verbatim (this is what spares the
+     * author the escape-doubling of regex-as-string). The one exception is
+     * {@code \`}, which embeds a literal backtick (the only character that would
+     * otherwise end the literal); the resolved text holds a bare {@code `} there.
+     * The token text is the regex source, ready to hand to the compiler.
+     */
+    private AltToken readRegex(int startLine, int startCol) throws ParseException {
+        advance(); // opening backtick
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            if (pos >= src.length()) {
+                throw new ParseException(
+                        "Unterminated regex literal — expected closing `",
+                        Origin.at(source, startLine, startCol));
+            }
+            char c = src.charAt(pos);
+            if (c == '`') {
+                advance(); // closing backtick
+                return new AltToken(AltToken.Kind.REGEX, sb.toString(), source, startLine, startCol);
+            }
+            if (c == '\\' && pos + 1 < src.length() && src.charAt(pos + 1) == '`') {
+                // \` escapes a literal backtick — the sole escape; the backslash
+                // is consumed and only the ` is kept.
+                sb.append('`');
+                advance();
+                advance();
+                continue;
+            }
+            // Everything else — backslashes included — is taken verbatim.
+            int codePoint = src.codePointAt(pos);
+            sb.appendCodePoint(codePoint);
+            advance();
+            if (Character.charCount(codePoint) == 2) {
+                advance(); // the low surrogate
             }
         }
     }

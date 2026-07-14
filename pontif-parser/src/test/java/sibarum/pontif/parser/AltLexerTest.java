@@ -61,6 +61,37 @@ class AltLexerTest {
                 shape(tokenize("[-1|0|1]")));
     }
 
+    // --- regex literals (raw, backtick-delimited) ---
+
+    @Test
+    void regexLiteral_tokenizesAsRegex() throws Exception {
+        assertEquals("REGEX:\\d+", shape(tokenize("`\\d+`")));
+        assertEquals("REGEX:(\\w+)=(.*)", shape(tokenize("`(\\w+)=(.*)`")));
+    }
+
+    @Test
+    void regexLiteral_takesBackslashesVerbatim_noStringEscapeDecoding() throws Exception {
+        // The headline win: `\d` is the two chars backslash-d, NOT a decoded
+        // escape. A string literal "\\d" would carry one backslash; the regex
+        // literal keeps both characters exactly as written.
+        List<AltToken> tokens = tokenize("`\\d\\.\\n`");
+        assertEquals(AltToken.Kind.REGEX, tokens.get(0).kind());
+        assertEquals("\\d\\.\\n", tokens.get(0).text());
+    }
+
+    @Test
+    void regexLiteral_backslashBacktick_embedsLiteralBacktick() throws Exception {
+        // \` is the sole escape — it embeds a backtick without ending the literal.
+        List<AltToken> tokens = tokenize("`a\\`b`");
+        assertEquals(AltToken.Kind.REGEX, tokens.get(0).kind());
+        assertEquals("a`b", tokens.get(0).text());
+    }
+
+    @Test
+    void regexLiteral_unterminated_throws() {
+        assertThrows(ParseException.class, () -> tokenize("`\\d+"));
+    }
+
     @Test
     void singleCharLogicalOps_areValid() throws Exception {
         // `&`, `|`, `!` are the logical operators. There is no `&&`/`||` — bitwise
