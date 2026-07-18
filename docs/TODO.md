@@ -41,6 +41,46 @@ build implies. Pair with [[project_inference_unification]] (one-engine invariant
 
 ---
 
+## ⭐ Type-system roadmap — the plan of record
+
+*Plan-of-record: `docs/type-system-roadmap.md` (2026-07-18). The single ordered plan
+tying the type-system campaigns to one target state, with the cross-campaign dependencies
+that were previously written down nowhere. Read it before touching the type system — the
+governing intent (James, 2026-07-18) is **push to the target state before making further
+changes**. (Distinct from the "4 facets" convergence cluster below — that is C5, a related
+but separate goal.)*
+
+Campaigns and status (full detail + dependency graph in the doc):
+
+- **C1 — inference unification.** ☑ landed; `NarrowingInference` is the sole expression-typer.
+  *Precondition: merge `war/scope-aware-narrowing` → master (below) so C3 builds on it.*
+- **C2 — dispatch unification.** ◐ in progress (see "Next up — dispatch unification"). **Phase 2
+  (post-link resolution) is the linchpin that unblocks C3's parser-side deletion.**
+- **C3 — nominal-subtype / `Assignability`.** ◐ Slice 0–1 landed, rest ☐ — **this was the
+  undocumented campaign.** `Assignability` (`pontif-ir/types`) is the target single is-a /
+  assign / construct / cast engine; only struct↔struct `let` is wired (`AltParser:2098`).
+  Finish-line, capability gaps, migration targets, context burden, and DoD are in the doc §4.
+  **Do the differential harness (engine-vs-copy agreement) before deleting any copy.** The
+  largest copy (`CoercionResolver`) is parser-invoked and **blocked on C2 Phase 2** (no trait
+  context at parse time); the `ConstructionGate` base-leg, engine gaps, and static-cast wiring
+  are **not** blocked and can proceed now.
+- **C4 — three-records model** (`type-records.md`). ◐ model settled, migration overlaps C2.
+- **C5 — scoped type-level binding substrate.** ◐ per-facet — the cluster immediately below.
+  A **parallel** axis (dependent sorts / structural traits / Type fragments / generics), not
+  C3; kept distinct so the two convergences aren't conflated.
+
+**Project-wide invariant (roadmap §1d, ratified 2026-07-18):** *no unproven runtime checks.*
+The compiler must prove the runtime will succeed; a runtime decision is legal only when
+coverage was proven (union/match totality), never a can-throw check stamped because a fit
+couldn't be proved. Unprovable ⇒ compile error (or explicit `[!!]`, unbuilt), never a silent
+`runtimeChecks` stamp. Every surviving stamp is a flagged violation. **Deferred audit (not yet
+run):** enumerate every can-throw stamp lacking a proof/`[!!]` (the construction-gate
+`UNKNOWN → stamp`, `ConstructionGate.java:237`, is the known one; likely others).
+
+First customer queued behind the convergence: **`AlgebraicDispatch`** (compile-time-safe
+`$f[Decimal].ast`) — C3's first Method/Dispatch function-sort case; sidesteps the C2 wall
+because its check runs at the gate stage (doc §5).
+
 ## ⭐ Type-system convergence — one scoped type-level binding substrate (4 facets)
 
 *Discovered 2026-06-20 (design dialogue): structural traits, named Type fragments,
