@@ -292,6 +292,18 @@
                             <buildArgs>
                                 <buildArg>--no-fallback</buildArg>
                                 <buildArg>-H:+ReportExceptionStackTraces</buildArg>
+                                <!-- dasum's GLFW/NFD bindings call restricted java.lang.foreign
+                                     methods (Linker::downcallHandle / upcallStub). Grant the
+                                     (class-path = unnamed) module native access at BUILD time:
+                                     native-image bakes the grant into the image, so neither the
+                                     editor's own console nor a self-exec "Run" child (childCommand
+                                     re-invokes THIS same binary — no bundled `java` to pass a flag
+                                     to) prints the "restricted method … has been called" /
+                                     "Use --enable-native-access=ALL-UNNAMED" warnings. Unlike the
+                                     JVM path (App.childCommand / the exec-plugin above, which pass
+                                     this as a launcher arg), for a native image this is a build
+                                     option only — it cannot be passed to the produced exe. -->
+                                <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
                                 <!-- The MSDF font atlases are generated into this module's
                                      resources and loaded by classloader (Texture.fromPngResource
                                      / AtlasData.loadFromResource); embed them in the image. -->
