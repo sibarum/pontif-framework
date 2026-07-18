@@ -216,7 +216,7 @@ engine-vs-copy comparison). *Size: medium. Blocks everything else in C3.*
 |---|---|---|---|
 | struct↔struct `let` assign | [AltParser.java:2098] | landed (Slice 1) | — |
 | all other `let` coercions | [AltParser.java:1883] / `:4576` (`coercionFor` → `CoercionResolver`) | re-point → engine; delete `CoercionResolver`/`CoercionContext`/`Coercion` | **L, C2-Phase-2-blocked** |
-| construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | fit → single-engine query (`Assignability`+`Refinements`); **drop the `UNKNOWN → runtimeChecks` stamp** (§1d) — unprovable = compile error / `[!!]`. Orchestration (demotion, dependent-claims, type-params) stays. | M (context cheap here) |
+| construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | fit → single-engine query (`Assignability`+`Refinements`); **drop the `UNKNOWN → runtimeChecks` stamp** (§1d) — unprovable = compile error / `[!!]`. Remaining orchestration (dependent-claims, type-params) stays; **demotion projection is removed** (§6.5 — demotion is a view now). | M (context cheap here) |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
 | cast legality | `IrInterpreter.evalCast` ([:1189]) + `IrExpr.Cast` producers | new wiring for `Assignability.cast` | M (mostly new) |
 
@@ -306,25 +306,44 @@ the compile-time `.ast` view is the C3-gated upgrade.
    - **view only** (variable sort changes, concrete preserved): free `WIDEN` / trait upcast —
      **no cast, no coercion**.
    - **concrete change, lose-freely / lossless**: **implicit coercion** at the binding, **no
-     cast** — demote-forget, `Int→Decimal`, autobox.
+     cast** — `Int→Decimal`, autobox. *(Demotion is NOT here — see §6.5: it's a view.)*
    - **concrete change, not-obviously-safe**: **explicit `(Target:value)` cast** — render
      (`(String:12)`), sibling re-tag (`Vec3`↔`Color`), narrow.
 
    `(Target:value)` is the *explicit* concrete-type changer — **not** the only one (the implicit
-   lose-freely coercions above also change the concrete value without a cast).
-5. **Demotion — view-widen or value-changing re-stamp? — OPEN (needs James).** The two models in
-   the tree conflict: `Assignability` classifies `Point3D → Point` as `WIDEN` (*"concrete
-   preserved, no runtime work"* — a pure view, concrete stays `Point3D`), while
-   `univocal-implementation-plan.md` / `type-records.md` model demotion as a projection
-   **morphism** that drops `z` and **re-stamps** the value `Point` (concrete changes). Both
-   cannot be literally true. **Revisit and decide: should demotion actually change the concrete
-   type** (run the forget morphism, re-stamp `Point` — so `Value ⊑ Declared` and a later trait
-   upcast dispatches as `Point`), **or leave the concrete `Point3D` intact** and treat `Point`
-   as a view-only widen (methods restricted by the declared sort, concrete unchanged)?
-   Ramifications: the re-stamp discipline (`type-records.md` §132+, incl. the `Color`/`Vec3`
-   stale-stamp lie), whether `WIDEN` is ever permitted to change the concrete type, and the
-   `Assignment.WIDEN` semantics in the engine. Bears on **C3** (`Assignability.assign`) and
-   **C4** (Value-Type record). *Sequence: settle before C3 wires `assign` beyond struct↔struct.*
+   lossless coercions above also change the concrete value without a cast).
+5. ~~**Demotion — view-widen or value-changing re-stamp?**~~ **RESOLVED (2026-07-18, James):
+   view-based — leave the concrete type as-is.** The concrete identity is **immutable**;
+   rebinding to a coarser type is a **view** (the mainstream model — `Animal a = dog` never
+   mutates the `Dog`). Demotion (`Point3D → Point`) is a `WIDEN` that **retains** the value's
+   concrete `Point3D` and restricts access to the declared `Point` interface — it does **not**
+   forget `z` and does **not** re-stamp. **Concrete type changes only by construction or an
+   explicit `(Target:value)` cast.** Consequences ratified with it:
+   - The **re-stamp discipline is retired** (`type-records.md` §132+), and with it the
+     same-structure stale-stamp gap — a demoted value's concrete type is always honest, so
+     runtime trait dispatch ([DispatchTable.java:227], reads the concrete name) is correct by
+     construction (verified 2026-07-18). This is *why* re-stamp existed; it's now unnecessary.
+   - The **cast law shifts** from "lose-freely = *clean forget*" to "**restrict the view,
+     retain the data**." Observable: a pin-less downcast `let back:Point3D = flat` becomes a
+     free **identity-recovery** (recovers `z`), not a fabrication. Requires deliberate prose
+     updates in `README.md` / `docs/univocal-language-design.md`.
+   - The **implicit sibling / same-structure coercion is forbidden** (`Vec3→Color` needs an
+     explicit cast) — which `Assignability` already enforces (`NEEDS_CAST`); a legacy
+     `CoercionResolver` hole to close.
+   - `Assignment.WIDEN` is uniformly view-only (never changes the concrete type), which
+     **simplifies** the C3 engine.
+   *Work status (2026-07-18): (1) **DONE** — demotion made a view; `ConstructionGate`
+   retains the concrete value (no projection/re-stamp), views it at the declared base sort;
+   the projection machinery (`projectDemotion` + helpers) was removed. Full ir+runtime+demo
+   suite green (~1290 tests), README pins intact. (2) **already satisfied** for the nominal
+   case — a same-structure sibling struct assign is already rejected: `Assignability.assign`
+   returns `NEEDS_CAST` and `structAssignBinding` throws ([AltParser.java:2099]); the legacy
+   `CoercionResolver` returns `Mismatch` too. The only residual implicit same-structure
+   coercion is between **transparent aliases**, which is correct under view-based (no concrete
+   change — same structural type) and is tied to `project_type_aliases`, not this ruling.
+   (3) revise the cast-law prose (`README` / `univocal`) — pending. (4) suite = safety net,
+   green. NB: the observable payoffs (free downcast recovery, concrete-based trait dispatch)
+   are follow-on — (1) delivers immutable concrete identity, the foundation they build on.*
 
 ---
 
