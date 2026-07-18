@@ -4,9 +4,11 @@ import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.ir.AlgebraicCheck;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
+import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
@@ -26,9 +28,12 @@ import sibarum.pontif.runtime.module.ModuleLinker;
 import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Source → {@link CompiledProgram} pipeline. Parses with a configured
@@ -301,7 +306,72 @@ public final class PontifCompiler {
         if (conservation.isPresent()) {
             return new CompileResult.Failed(RunResult.error(conservation.get()));
         }
+        // Algebraic gate: an `assign proof f:Algebraic` claim is a refinement on the
+        // function itself. The body must be built only from the algebraic fragment
+        // (arithmetic, parameters, local lets, field access, and calls to other
+        // algebraic functions) and the algebraic call-graph must be acyclic — a false
+        // claim (non-algebraic body, or recursion) is a hard compile error. Programs
+        // with no algebraic proofs pay nothing. This is the substrate the runtime AST
+        // reflection (pontif.algebra) relies on.
+        Optional<String> algebraic = firstFailedAlgebraic(module);
+        if (algebraic.isPresent()) {
+            return new CompileResult.Failed(RunResult.error(algebraic.get()));
+        }
         return new CompileResult.Compiled(new CompiledProgram(compiled, compiler, simplifier, sourceName));
+    }
+
+    /** Proof-tree head-name claiming a function is algebraic ({@code assign proof f:Algebraic}). */
+    private static final String ALGEBRAIC_HEAD = "Algebraic";
+
+    /**
+     * The first algebraic claim the fragment checker refuses to certify, as an
+     * error message — or empty when there are no algebraic proofs and every claim
+     * holds. Fail-closed: a claimed-algebraic body that isn't (a {@code match}, a
+     * comparison, a call to a non-algebraic function, …) or an algebraic call-graph
+     * cycle (recursion) is a hard error. The module arrives method/operator-resolved
+     * (methods already rewritten to {@code Call("Type.method", …)}); type aliases live
+     * only in sort positions, never in the arithmetic body this walks, so no alias
+     * resolution is needed.
+     */
+    private static Optional<String> firstFailedAlgebraic(IrModule module) {
+        Set<String> claimed = new LinkedHashSet<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.Proof p && ALGEBRAIC_HEAD.equals(proofHead(p.proofTree()))) {
+                claimed.add(p.functionName());
+            }
+        }
+        if (claimed.isEmpty()) {
+            return Optional.empty();
+        }
+        Map<String, List<IrStmt.FunctionDecl>> byName = new LinkedHashMap<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.FunctionDecl fd) {
+                byName.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
+            }
+        }
+        Map<String, IrStmt.FunctionDecl> decls = new LinkedHashMap<>();
+        for (String name : claimed) {
+            List<IrStmt.FunctionDecl> fds = byName.get(name);
+            if (fds == null || fds.isEmpty()) {
+                return Optional.of("Algebraic proof references unknown function '" + name + "'.");
+            }
+            if (fds.size() > 1) {
+                return Optional.of("assign proof for '" + name
+                        + "' targets an overloaded function — not supported yet.");
+            }
+            decls.put(name, fds.get(0));
+        }
+        return AlgebraicCheck.check(claimed, decls);
+    }
+
+    /** The local (module-stripped) head-constructor name of a {@code proof} tree, or null. */
+    private static String proofHead(IrExpr tree) {
+        String name = switch (tree) {
+            case IrExpr.Record r -> r.typeName();
+            case IrExpr.Call c -> c.functionName();
+            default -> null;
+        };
+        return name == null ? null : sibarum.pontif.core.QualifiedName.memberOf(name);
     }
 
     /**
@@ -455,8 +525,13 @@ public final class PontifCompiler {
         // multi-branch target, duplicate, untranslatable tree — is a hard error.
         // Conservation-headed trees are another ledger's propositions — skipped
         // here, bound by firstFailedConservation instead.
-        ProofBinding.Result bound = ProofBinding.bind(module, graph,
+        // Conservation-headed AND algebraic-headed proof trees are other gates'
+        // propositions — skip them here so the receipt engine doesn't mistake a
+        // whole-function property claim for a return-refinement obligation.
+        Set<String> foreignHeads = new LinkedHashSet<>(
                 sibarum.pontif.conservation.ConservationProofs.HEAD_NAMES);
+        foreignHeads.add(ALGEBRAIC_HEAD);
+        ProofBinding.Result bound = ProofBinding.bind(module, graph, foreignHeads);
         if (!bound.problems().isEmpty()) {
             return Optional.of(bound.problems().get(0));
         }

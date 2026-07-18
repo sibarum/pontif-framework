@@ -83,6 +83,10 @@ public final class BuiltinModules {
         // pontif.math = the SPIR-V GLSL.std.450 set; pontif.math.ext = the CPU-only extras.
         Extensions.install(MathExtension.INSTANCE);
         Extensions.install(MathExtExtension.INSTANCE);
+        // The algebra extension (pontif.algebra) is pure-JDK too — it reflects an
+        // `assign proof f:Algebraic` function's body into a first-class AST and evaluates
+        // it. The runtime substrate for differential programming (docs/metatypes.md).
+        Extensions.install(AlgebraExtension.INSTANCE);
         // External extensions (GUI, plot, shape, net, …) self-register: every one found on the
         // classpath via ServiceLoader is installed here, so no entry point has to hand-wire them.
         // A context whose classpath omits an extension module (the lean CLI) simply doesn't find it.

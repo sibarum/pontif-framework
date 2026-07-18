@@ -2152,6 +2152,25 @@ public final class AltParser {
         AltToken start = expectKeyword("assign");
         expectKeyword("proof");
         String functionName = parseDottedName();
+        // `assign proof f:Property` — a whole-function property CLAIM (no `=`, no
+        // param list). The property head after `:` is a bare IDENT, optionally with
+        // an empty `()`. It emits the same IrStmt.Proof node the `proof f = X()` form
+        // produces, so the head-name picks the gate downstream (`Algebraic` → the
+        // algebraic gate; `Reversible`/`DataConservative`/… → the conservation gate).
+        // Discriminates against the `(params):PIN` return-proof form by the `:` that
+        // follows the name directly (that form always has `(` there instead).
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();  // ':'
+            AltToken head = expect(AltToken.Kind.IDENT);
+            Origin origin = start.spanTo(head);
+            if (peek().kind() == AltToken.Kind.LPAREN) {
+                expect(AltToken.Kind.LPAREN);
+                AltToken close = expect(AltToken.Kind.RPAREN);  // v1: no-argument properties
+                origin = start.spanTo(close);
+            }
+            IrExpr tree = new IrExpr.Call(head.text(), java.util.List.of(), origin);
+            return new IrStmt.Proof(functionName, tree, origin);
+        }
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);

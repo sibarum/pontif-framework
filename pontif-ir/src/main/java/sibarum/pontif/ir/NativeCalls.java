@@ -64,7 +64,34 @@ public final class NativeCalls {
         default CompiledModule.CompiledFunction methodImpl(RecordValue value, String methodName) {
             return null;
         }
+
+        /**
+         * Reflect a first-class function <b>value</b> — a metareference
+         * ({@code sibarum.pontif.core.types.DispatchValue}) or a fragment/lambda
+         * ({@code Closure}) — to its parameters and IR body, or {@code null} if
+         * {@code fnValue} is not a function value (or its declaration can't be
+         * resolved). The free-function sibling of {@link #methodImpl}: the seam the
+         * {@code pontif.algebra} reflection primitive ({@code astOf}) uses to read an
+         * algebraic function's expression tree instead of running it. Default
+         * {@code null} — only a {@link CompiledModule}-backed context supplies it.
+         */
+        default ReflectedFunction reflectFunction(Object fnValue) {
+            return null;
+        }
+
+        /**
+         * Reflect a function by name and arity to its parameters and IR body, or
+         * {@code null} if none resolves. Used to <b>inline</b> a nested call while
+         * reflecting an algebraic function (the callee is itself algebraic, so it
+         * has a body to inline; recursion is banned, so inlining terminates).
+         */
+        default ReflectedFunction reflectFunctionByName(String name, int arity) {
+            return null;
+        }
     }
+
+    /** A reflected function value: its declared parameters and its IR body. */
+    public record ReflectedFunction(List<IrParam> params, IrExpr body) {}
 
     private static final Map<String, NativeCall> ENTRIES = new LinkedHashMap<>();
 

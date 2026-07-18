@@ -866,18 +866,61 @@ public final class IrInterpreter {
                 match.origin());
     }
 
+    /**
+     * Reflect a first-class function value to its parameters + IR body — the
+     * runtime backing of {@link NativeCalls.Context#reflectFunction}. A {@link Closure}
+     * carries its lambda directly; a {@code DispatchValue} is resolved by name to its
+     * single (non-overloaded) declaration in the compiled module. Null otherwise.
+     */
+    private NativeCalls.ReflectedFunction reflectFunction(Object fnValue, CompiledModule module) {
+        if (fnValue instanceof Closure c) {
+            return new NativeCalls.ReflectedFunction(c.lambda().params(), c.lambda().body());
+        }
+        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
+            return reflectFunctionByName(dv.functionName(), dv.keySorts().size(), module);
+        }
+        return null;
+    }
+
+    /** Resolve a function by name + arity to its (params, body); null if none. */
+    private NativeCalls.ReflectedFunction reflectFunctionByName(
+            String name, int arity, CompiledModule module) {
+        for (Map.Entry<sibarum.pontif.core.symbolic.FunctionDecl,
+                CompiledModule.CompiledFunction> e : module.functions().entrySet()) {
+            if (e.getKey().name().equals(name) && e.getValue().params().size() == arity) {
+                return new NativeCalls.ReflectedFunction(
+                        e.getValue().params(), e.getValue().body());
+            }
+        }
+        return null;
+    }
+
     private Object evalApply(IrExpr.Apply apply, Environment env, CompiledModule module) {
         Object fnValue = eval(apply.fn(), env, module);
-        if (!(fnValue instanceof Closure closure)) {
-            throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
-                    "Apply expects a closure value, got "
-                            + (fnValue == null ? "null" : fnValue.getClass().getSimpleName())
-                            + ": " + fnValue,
-                    apply.origin());
-        }
         List<Object> argValues = new ArrayList<>();
         for (IrExpr argExpr : apply.args()) {
             argValues.add(eval(argExpr, env, module));
+        }
+        // A metareference reached as a bare EXPRESSION (a returned value, a field, a
+        // let) is applied by re-running dispatch under its referenced name — the same
+        // thing the name-lookup Call path does, so function values are uniformly
+        // first-class however they're reached (docs/metatypes.md).
+        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
+            if (apply.args().size() != dv.keySorts().size()) {
+                throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
+                        "Metareference '" + dv.functionName() + "' takes "
+                                + dv.keySorts().size() + " argument(s), got " + apply.args().size(),
+                        apply.origin());
+            }
+            IrExpr.Call synthetic = new IrExpr.Call(dv.functionName(), apply.args(), apply.origin());
+            return dispatchValues(dv.functionName(), argValues, synthetic, env, module);
+        }
+        if (!(fnValue instanceof Closure closure)) {
+            throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
+                    "Apply expects a function value, got "
+                            + (fnValue == null ? "null" : fnValue.getClass().getSimpleName())
+                            + ": " + fnValue,
+                    apply.origin());
         }
         try {
             return closure.invoke(argValues, this, module);
@@ -1415,6 +1458,14 @@ public final class IrInterpreter {
                         @Override public CompiledModule.CompiledFunction methodImpl(
                                 RecordValue value, String methodName) {
                             return resolveMethodImpl(value, methodName, module);
+                        }
+                        @Override public NativeCalls.ReflectedFunction reflectFunction(
+                                Object fnValue) {
+                            return IrInterpreter.this.reflectFunction(fnValue, module);
+                        }
+                        @Override public NativeCalls.ReflectedFunction reflectFunctionByName(
+                                String name, int arity) {
+                            return IrInterpreter.this.reflectFunctionByName(name, arity, module);
                         }
                     };
                     return nativeCall.call(argValues, ctx);
