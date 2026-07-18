@@ -351,20 +351,25 @@ struct Point(x:Int, y:Int)
 struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
 
 let p = Point3D(2, 3, 5)
-let flat:Point = p                   # demote — run the morphism, forget z
-let back:[Point3D:@.z==0] = flat;    # promote — merge the value with the pin
+let flat:Point = p                   # demote — a view; z is hidden, not lost
+let back:[Point3D:@.z==0] = flat;    # promote — synthesize z through the Point view
 
 flat.x + flat.y + back.z             # → 5
 ```
 
 The cast law is the no-lie law made geometric: **lose freely, fabricate never.**
 
-- **Demotion** (`flat:Point = p`) runs `Point3D`'s declared morphism — a clean
-  forget. `flat` is `Point(2, 3)`; `z` is *gone*, not hidden behind a tag.
-- **Promotion** can't conjure `z`, so it's never implicit. The trailing `;` is the
-  *synthesis directive*: the spec writes the body (more in
-  [Proofs and synthesis](#proofs-and-synthesis)). Extension promotes you to a
-  strictly richer type while every existing behavior of the base still applies.
+- **Demotion** (`flat:Point = p`) is a **view**, not a copy: `flat` exposes only
+  `Point`'s interface (`x, y`) and methods, while the value keeps its concrete
+  `Point3D` identity — `z` is *hidden*, not destroyed. Concrete identity changes only
+  by construction or an explicit cast, never covertly by rebinding (the mainstream
+  rule; *lose freely* is losing **access**, not data).
+- **Promotion** builds a strictly richer type *through the view* — `back` sees
+  `Point`'s `x, y` plus the `z==0` pin, so `back.z` is `0` (the concrete's hidden `5`
+  isn't consulted by a pinned promotion; an explicit downcast would recover it). The
+  view can't conjure `z`, so promotion is never implicit: the trailing `;` is the
+  *synthesis directive* (more in [Proofs and synthesis](#proofs-and-synthesis)), and
+  every existing behavior of the base still applies.
 
 ### Explicit casts — `(Type:value)`
 

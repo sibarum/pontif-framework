@@ -50,7 +50,8 @@ struct Point(x:Int,y:Int)
 
 # Inheritance with demotion rule - which is always required.
 # the @.x and @.y belong to Point. x and y from the constructor arguments
-# Demotion provably loses information because of z, but that's fine
+# Demotion hides z (a view); the concrete value retains it — access is lost, not
+# data (view-based ruling, docs/type-system-roadmap.md §6.5)
 struct Point3D:[Point:@.x==x & @.y==y](x:Int,y:Int,z:Int)
 # This variation is also valid and uses positional arguments instead.
 # this.x and this.y could have been used in the return type also.
@@ -58,11 +59,12 @@ struct Point3D:[Point:@.x==x & @.y==y](x:Int,y:Int,z:Int)
 # The return type may access variables from the arguments, always.
 struct Point3D:[Point(x, y)](x:Int,y:Int,z:Int)
 
-# b is a Point with the x and y from a, missing the z.
-# z is still recoverable from a but not from b.
+# b views a's x and y as a Point; a's concrete Point3D identity — including z — is
+# retained by the value, just hidden behind b's Point view.
+# z isn't reachable through b's Point view (an explicit downcast would recover it).
 let a = Point3D(2,3,5)
 let b:Point = a
-# let c:Point3D = b # Compile error, can't synthesize data.
+# let c:Point3D = b # Compile error: z can't be synthesized through the Point view.
 
 # Promotion comes separately.
 # It can be a method or a dispatch function.

@@ -131,6 +131,15 @@ Along the **nominal** axis (identity):
 
 ## Resolved: is the Value Type all you need at runtime? (mostly — under a re-stamp discipline)
 
+> **SUPERSEDED (2026-07-18) by the view-based ruling — `docs/type-system-roadmap.md` §6.5.**
+> The re-stamp discipline below is **retired.** Concrete identity is now **immutable**: a nominal
+> rebinding is a *view* (the value keeps its concrete type), so the Value Type is always honest
+> without re-stamping — which is exactly what this section wanted, reached by *not* mutating the
+> value rather than by re-stamping it. Demotion retains (not forgets) and does not re-tag; the
+> same-structure stale-stamp hole cannot occur (implicit sibling coercion is forbidden — an
+> explicit cast is required). Read the section below as historical motivation; the mechanism it
+> proposes (re-stamp on every nominal binding) is not the resolution taken.
+
 > James (2026-07-07): "It might be perfectly acceptable to only keep the value type at runtime,
 > assuming all methods and accessors are linked at the IR. Then you only need the value type for
 > dispatch." — and: "if you run into problems, fail fast. It's not a big deal to keep a bit more
