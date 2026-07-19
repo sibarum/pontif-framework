@@ -34,7 +34,8 @@ public record InferenceContext(
         Map<String, List<IrStmt.FunctionDecl>> overloads,
         Map<String, List<IrStmt.ReturnProof>> returnProofs,
         Map<String, List<IrStmt.FunctionDecl>> operatorOverloads,
-        Set<String> methodKeys) {
+        Set<String> methodKeys,
+        Set<String> algebraicFunctions) {
 
     public InferenceContext {
         typeEnv = Map.copyOf(typeEnv);
@@ -46,6 +47,7 @@ public record InferenceContext(
         returnProofs = copyOfLists(returnProofs);
         operatorOverloads = copyOfLists(operatorOverloads);
         methodKeys = Set.copyOf(methodKeys);
+        algebraicFunctions = Set.copyOf(algebraicFunctions);
     }
 
     private static <T> Map<String, List<T>> copyOfLists(Map<String, List<T>> m) {
@@ -57,19 +59,22 @@ public record InferenceContext(
     }
 
     public static InferenceContext empty() {
-        return new InferenceContext(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
+        return new InferenceContext(
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
     }
 
     /** Convenience for tests / callers with just an env. */
     public static InferenceContext of(Map<String, IrSort> typeEnv) {
-        return new InferenceContext(typeEnv, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
+        return new InferenceContext(
+                typeEnv, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
     }
 
     /** Convenience for callers with an env and function-return map. */
     public static InferenceContext of(
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns) {
-        return new InferenceContext(typeEnv, functionReturns, Map.of(), Map.of(), Map.of(), Map.of(), Set.of());
+        return new InferenceContext(
+                typeEnv, functionReturns, Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
     }
 
     /**
@@ -91,7 +96,15 @@ public record InferenceContext(
         // rather than the resolver rebuilding its own copies.
         Map<String, List<IrStmt.FunctionDecl>> operatorOverloads = new LinkedHashMap<>();
         Set<String> methodKeys = new LinkedHashSet<>();
+        // Functions carrying an `assign proof f:Algebraic` claim — the set inference
+        // consults to stamp a metareference `$f[…]` as `[Dispatch & Algebraic]`. The
+        // claim (not the discharged proof) suffices: a false claim is a hard compile
+        // error (AlgebraicCheck), so no program with a bad claim ever runs.
+        Set<String> algebraicFunctions = new LinkedHashSet<>();
         for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.Proof p && "Algebraic".equals(proofHeadName(p.proofTree()))) {
+                algebraicFunctions.add(p.functionName());
+            }
             if (stmt instanceof IrStmt.FunctionDecl fd) {
                 overloads.computeIfAbsent(fd.name(), k -> new ArrayList<>()).add(fd);
                 returns.put(fd.name(), fd.returnSort());
@@ -145,7 +158,17 @@ public record InferenceContext(
         Map<String, IrSort.Structural> structs =
                 sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs,
-                operatorOverloads, methodKeys);
+                operatorOverloads, methodKeys, algebraicFunctions);
+    }
+
+    /** The local (module-stripped) head-constructor name of a {@code proof} tree, or null. */
+    private static String proofHeadName(IrExpr tree) {
+        String name = switch (tree) {
+            case IrExpr.Record r -> r.typeName();
+            case IrExpr.Call c -> c.functionName();
+            default -> null;
+        };
+        return name == null ? null : QualifiedName.memberOf(name);
     }
 
     /** Whether {@code sort} references any of the given associated-type names. */
@@ -206,19 +229,19 @@ public record InferenceContext(
         Map<String, IrSort> extended = new HashMap<>(typeEnv);
         extended.put(name, sort);
         return new InferenceContext(extended, functionReturns, structDefs, overloads, returnProofs,
-                operatorOverloads, methodKeys);
+                operatorOverloads, methodKeys, algebraicFunctions);
     }
 
     /** Returns a new context with the struct-defs map replaced. */
     public InferenceContext withStructDefs(Map<String, IrSort.Structural> defs) {
         return new InferenceContext(typeEnv, functionReturns, defs, overloads, returnProofs,
-                operatorOverloads, methodKeys);
+                operatorOverloads, methodKeys, algebraicFunctions);
     }
 
     /** Returns a new context with the overload map replaced. */
     public InferenceContext withOverloads(Map<String, List<IrStmt.FunctionDecl>> ovs) {
         return new InferenceContext(typeEnv, functionReturns, structDefs, ovs, returnProofs,
-                operatorOverloads, methodKeys);
+                operatorOverloads, methodKeys, algebraicFunctions);
     }
 
     /**

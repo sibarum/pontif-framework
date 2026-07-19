@@ -165,6 +165,59 @@ class StructNarrowingTest {
         assertEquals(IrSort.refined("Int", eq(IrExpr.self(), IrExpr.lit(3))), result);
     }
 
+    // --- Intersection member resolution (the some-branch rule) --------------
+
+    /**
+     * A field access on an intersection base resolves off whichever branch
+     * declares the field — {@code [A & B]} carries A's members and B's. This is
+     * the precondition for AlgebraicDispatch's {@code [Dispatch & Algebraic]}.
+     */
+    @Test
+    void fieldAccess_onIntersection_resolvesFromTheBranchThatHasIt() {
+        IrSort.Structural a = (IrSort.Structural) IrSort.structural("A", orderedMembers("a"));
+        IrSort.Structural b = (IrSort.Structural) IrSort.structural("B", orderedMembers("b"));
+        InferenceContext ctx = InferenceContext
+                .of(Map.of("x", intersection(IrSort.named("A"), IrSort.named("B"))))
+                .withStructDefs(Map.of("A", a, "B", b));
+
+        assertEquals(IrSort.named("Int"),
+                NarrowingInference.infer(IrExpr.fieldAccess(IrExpr.var("x"), "a"), ctx));
+        assertEquals(IrSort.named("Int"),
+                NarrowingInference.infer(IrExpr.fieldAccess(IrExpr.var("x"), "b"), ctx));
+    }
+
+    @Test
+    void fieldAccess_onIntersection_absentOnEveryBranch_returnsNull() {
+        IrSort.Structural a = (IrSort.Structural) IrSort.structural("A", orderedMembers("a"));
+        IrSort.Structural b = (IrSort.Structural) IrSort.structural("B", orderedMembers("b"));
+        InferenceContext ctx = InferenceContext
+                .of(Map.of("x", intersection(IrSort.named("A"), IrSort.named("B"))))
+                .withStructDefs(Map.of("A", a, "B", b));
+
+        assertNull(NarrowingInference.infer(IrExpr.fieldAccess(IrExpr.var("x"), "nope"), ctx));
+    }
+
+    @Test
+    void fieldAccess_onIntersection_conflictingBranchesAbstainToNull() {
+        // Both branches declare `v` but at different sorts → the projection can't
+        // pick one, so it abstains (the SortChecker gate reports the ambiguity).
+        Map<String, IrSort> aMembers = new LinkedHashMap<>();
+        aMembers.put("v", IrSort.named("Int"));
+        Map<String, IrSort> bMembers = new LinkedHashMap<>();
+        bMembers.put("v", IrSort.named("String"));
+        IrSort.Structural a = (IrSort.Structural) IrSort.structural("A", aMembers);
+        IrSort.Structural b = (IrSort.Structural) IrSort.structural("B", bMembers);
+        InferenceContext ctx = InferenceContext
+                .of(Map.of("x", intersection(IrSort.named("A"), IrSort.named("B"))))
+                .withStructDefs(Map.of("A", a, "B", b));
+
+        assertNull(NarrowingInference.infer(IrExpr.fieldAccess(IrExpr.var("x"), "v"), ctx));
+    }
+
+    private static IrSort intersection(IrSort... branches) {
+        return new IrSort.Intersection(List.of(branches), sibarum.pontif.core.Origin.NONE);
+    }
+
     // --- Struct match-arm narrowing (the headline) --------------------------
 
     /**

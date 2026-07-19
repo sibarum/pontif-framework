@@ -77,6 +77,16 @@ public final class SortChecker {
      */
     private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
 
+    /**
+     * Compiler-recognized <b>marker</b> sorts — bare names valid in a sort position
+     * that name no struct/primitive and carry no constructor. {@code Algebraic} is the
+     * trait-view marker on a metareference (AlgebraicDispatch, roadmap §5): a
+     * dispatch is viewed as {@code [Dispatch(…):… & Algebraic]} when its referent
+     * carries an {@code assign proof f:Algebraic} claim, so the intersection's
+     * {@code Algebraic} branch must validate as a known name.
+     */
+    private static final Set<String> MARKER_SORT_NAMES = Set.of("Algebraic");
+
     private SortChecker() {}
 
     public static void check(IrModule module) throws CompileException {
@@ -784,6 +794,7 @@ public final class SortChecker {
                 // validates without unrolling Node.
                 if (!PRIMITIVE_SORT_NAMES.contains(n.name())
                         && !BUILTIN_PARAMETRIC_TYPES.contains(n.name())
+                        && !MARKER_SORT_NAMES.contains(n.name())
                         && !structDefs.containsKey(n.name())
                         && !typeVars.contains(n.name())) {
                     // A name that IS a declared trait but survived as a bare
@@ -1341,40 +1352,60 @@ public final class SortChecker {
             case IrExpr.FieldAccess fa -> {
                 checkExpr(fa.base(), typeEnv, functionReturns, structDefs, typeVars);
                 IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
-                IrSort.Structural sp = resolveNominal(baseSort, structDefs);
-                // Anonymous aggregates ('_record'/'_tuple') defer field-existence to
-                // the runtime check (RuntimeCheckException carries the access origin);
-                // only NOMINAL structs are compile-checked here. (The floor now gives
-                // an anonymous record a structural shape for the parser's base-name
-                // needs, but that must not change this check's nominal-only contract.)
-                if (sp != null && sp.name().startsWith("_")) {
-                    sp = null;
-                }
-                if (sp != null) {
-                    // A trait attribute reads as a field but is stored as a
-                    // computed projection: `x.weight` resolves to the satisfier's
-                    // `Type.weight(this)` producer. Allow it when no real field
-                    // exists but such an accessor is registered.
-                    boolean isAttributeProjection =
-                            functionReturns.containsKey(sp.name() + "." + fa.fieldName());
-                    if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection) {
+                // Intersection base: the member exists iff SOME branch provides it
+                // (the some-branch rule — `[A & B]` carries A's members and B's). A
+                // member on no branch is the error; presence on any branch passes.
+                if (baseSort instanceof IrSort.Intersection inter) {
+                    boolean provided = false;
+                    for (IrSort branch : inter.branches()) {
+                        if (branchProvidesField(
+                                branch, fa.fieldName(), functionReturns, structDefs)) {
+                            provided = true;
+                            break;
+                        }
+                    }
+                    if (!provided) {
                         throw new CompileException(
-                                "Record of sort '" + sp.name() + "' has no field '"
-                                        + fa.fieldName() + "'; available fields: "
-                                        + sp.members().keySet(),
+                                "No member '" + fa.fieldName() + "' on any branch of "
+                                        + describeIntersection(inter),
                                 fa.origin());
                     }
-                } else if (baseSort != null) {
-                    // Native anatomies get the same typo coverage as structs.
-                    String base = matchBaseName(baseSort);
-                    if (base != null && NativeConstructors.has(base)
-                            && !NativeConstructors.get(base).shape().members()
-                                    .containsKey(fa.fieldName())) {
-                        throw new CompileException(
-                                "'" + base + "' has no field '" + fa.fieldName()
-                                        + "' — its anatomy is "
-                                        + NativeConstructors.get(base).shape().members().keySet(),
-                                fa.origin());
+                } else {
+                    IrSort.Structural sp = resolveNominal(baseSort, structDefs);
+                    // Anonymous aggregates ('_record'/'_tuple') defer field-existence to
+                    // the runtime check (RuntimeCheckException carries the access origin);
+                    // only NOMINAL structs are compile-checked here. (The floor now gives
+                    // an anonymous record a structural shape for the parser's base-name
+                    // needs, but that must not change this check's nominal-only contract.)
+                    if (sp != null && sp.name().startsWith("_")) {
+                        sp = null;
+                    }
+                    if (sp != null) {
+                        // A trait attribute reads as a field but is stored as a
+                        // computed projection: `x.weight` resolves to the satisfier's
+                        // `Type.weight(this)` producer. Allow it when no real field
+                        // exists but such an accessor is registered.
+                        boolean isAttributeProjection =
+                                functionReturns.containsKey(sp.name() + "." + fa.fieldName());
+                        if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection) {
+                            throw new CompileException(
+                                    "Record of sort '" + sp.name() + "' has no field '"
+                                            + fa.fieldName() + "'; available fields: "
+                                            + sp.members().keySet(),
+                                    fa.origin());
+                        }
+                    } else if (baseSort != null) {
+                        // Native anatomies get the same typo coverage as structs.
+                        String base = matchBaseName(baseSort);
+                        if (base != null && NativeConstructors.has(base)
+                                && !NativeConstructors.get(base).shape().members()
+                                        .containsKey(fa.fieldName())) {
+                            throw new CompileException(
+                                    "'" + base + "' has no field '" + fa.fieldName()
+                                            + "' — its anatomy is "
+                                            + NativeConstructors.get(base).shape().members().keySet(),
+                                    fa.origin());
+                        }
                     }
                 }
             }
@@ -2132,6 +2163,48 @@ public final class SortChecker {
         };
     }
 
+    /**
+     * Whether a single (non-intersection) branch of an intersection base provides
+     * {@code field} — as a real struct field, a registered trait-attribute producer
+     * ({@code Type.field(this)}), or a native anatomy field. The some-branch member
+     * rule (a member of {@code [A & B]} is a member of A or of B) consults this per
+     * branch; an anonymous aggregate branch defers to the runtime check.
+     */
+    private static boolean branchProvidesField(
+            IrSort branch, String field,
+            Map<String, IrSort> functionReturns, Map<String, IrSort.Structural> structDefs) {
+        IrSort.Structural sp = resolveNominal(branch, structDefs);
+        if (sp != null) {
+            if (sp.name().startsWith("_")) return true;   // anonymous — defers to runtime
+            if (sp.members().containsKey(field)
+                    || functionReturns.containsKey(sp.name() + "." + field)) {
+                return true;
+            }
+        }
+        String base = matchBaseName(branch);
+        if (base != null) {
+            // A member contributed by a non-struct branch (e.g. a trait) — the
+            // attribute producer is keyed by the branch's own name.
+            if (functionReturns.containsKey(base + "." + field)) return true;
+            if (NativeConstructors.has(base)
+                    && NativeConstructors.get(base).shape().members().containsKey(field)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** {@code "[A & B & …]"} over an intersection's branch base names, for diagnostics. */
+    private static String describeIntersection(IrSort.Intersection inter) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < inter.branches().size(); i++) {
+            if (i > 0) sb.append(" & ");
+            String name = matchBaseName(inter.branches().get(i));
+            sb.append(name != null ? name : inter.branches().get(i));
+        }
+        return sb.append("]").toString();
+    }
+
     /** Field set of a struct scrutinee, or {@code null} for non-structs. */
     private static Set<String> scrutineeFieldSet(
             IrSort scrutineeIr, Map<String, IrSort.Structural> structDefs) {
@@ -2246,6 +2319,7 @@ public final class SortChecker {
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                java.util.Set.of(),
                 java.util.Set.of());
     }
 

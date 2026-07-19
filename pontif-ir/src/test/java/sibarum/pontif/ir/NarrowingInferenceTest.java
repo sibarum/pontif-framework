@@ -395,6 +395,37 @@ class NarrowingInferenceTest {
                         Map.of("x", IrSort.named("Int"), "y", IrSort.named("Int")))))));
     }
 
+    // --- Metareference stamping (AlgebraicDispatch, roadmap §5) --------------
+
+    @Test
+    void dispatchRef_narrowsToBareDispatchWhenNotAlgebraic() {
+        IrExpr.DispatchRef ref = new IrExpr.DispatchRef(
+                "f", List.of(IrSort.named("Decimal")), Origin.NONE);
+        IrSort result = NarrowingInference.infer(ref, InferenceContext.empty());
+        assertEquals(
+                new IrSort.Dispatch(List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                result);
+    }
+
+    @Test
+    void dispatchRef_narrowsToAlgebraicIntersectionWhenClaimed() {
+        // `poly` carries an `assign proof poly:Algebraic` claim → its metareference is
+        // stamped `[Dispatch(Decimal):_ & Algebraic]`, the trait-view the `.ast` surface
+        // reads. Non-claimed names stay bare Dispatch (above).
+        IrExpr.DispatchRef ref = new IrExpr.DispatchRef(
+                "poly", List.of(IrSort.named("Decimal")), Origin.NONE);
+        InferenceContext ctx = new InferenceContext(
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                Set.of(), Set.of("poly"));
+
+        IrSort result = NarrowingInference.infer(ref, ctx);
+
+        IrSort expected = new IrSort.Intersection(List.of(
+                new IrSort.Dispatch(List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                new IrSort.Named("Algebraic", Origin.NONE)), Origin.NONE);
+        assertEquals(expected, result);
+    }
+
     // --- Floor layer (inferFloor) --------------------------------------------
 
     @Test

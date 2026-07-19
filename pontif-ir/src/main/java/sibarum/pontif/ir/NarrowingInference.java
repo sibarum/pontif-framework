@@ -86,9 +86,13 @@ public final class NarrowingInference {
             // Strings are bare String in the value slice — no narrows.
             case IrExpr.Str s -> IrSort.named("String");
             // A metareference's narrowing is its Dispatch shape; the return
-            // stays "_" at this level (shallow — candidates aren't consulted).
-            case IrExpr.DispatchRef d ->
-                    new IrSort.Dispatch(d.keySorts(), IrSort.named("_"), d.origin());
+            // stays "_" at this level (shallow — candidates aren't consulted). When
+            // the referent carries an `assign proof f:Algebraic` claim, the shape is
+            // the trait-view intersection `[Dispatch & Algebraic]` — the algebraic
+            // guarantee ridden into the sort, so `.ast` resolves off the Algebraic
+            // branch (AlgebraicDispatch, roadmap §5) and a widen to bare `[Dispatch]`
+            // stays free (some-branch is-a).
+            case IrExpr.DispatchRef d -> dispatchRefSort(d, ctx);
             case IrExpr.Bool b -> boolSingleton(b.value());
             case IrExpr.Var v -> ctx.typeEnv().get(v.name());
             case IrExpr.LetIn let -> {
@@ -113,6 +117,26 @@ public final class NarrowingInference {
             // A cast's narrowing is its declared target sort — the coercion's result.
             case IrExpr.Cast cast -> cast.targetSort();
         };
+    }
+
+    /** The name after {@code $} in a metareference — the dispatch's referent function. */
+    private static final String ALGEBRAIC = "Algebraic";
+
+    /**
+     * The narrowed sort of a metareference {@code $f[keys]}: its bare
+     * {@link IrSort.Dispatch} shape, or — when {@code f} carries an {@code assign
+     * proof f:Algebraic} claim — the trait-view intersection
+     * {@code [Dispatch(keys):_ & Algebraic]}. The intersection widens freely to the
+     * bare Dispatch (some-branch is-a) but not the reverse, so the algebraic view is
+     * earned by the proof and never fabricated (roadmap §5).
+     */
+    private static IrSort dispatchRefSort(IrExpr.DispatchRef d, InferenceContext ctx) {
+        IrSort.Dispatch shape = new IrSort.Dispatch(d.keySorts(), IrSort.named("_"), d.origin());
+        if (!ctx.algebraicFunctions().contains(d.functionName())) {
+            return shape;
+        }
+        return new IrSort.Intersection(
+                List.of(shape, new IrSort.Named(ALGEBRAIC, d.origin())), d.origin());
     }
 
     /**
@@ -630,6 +654,30 @@ public final class NarrowingInference {
         IrSort baseNarrowing = infer(fa.base(), ctx);
         if (baseNarrowing == null) return null;
 
+        // Intersection base: the some-branch member rule — the field's narrowing is
+        // whatever the (unique) branch providing it projects. A bare `[A & B]` has
+        // the members of A plus the members of B; cross-branch disagreement abstains
+        // to null (the SortChecker field gate reports the ambiguity).
+        if (baseNarrowing instanceof IrSort.Intersection inter) {
+            IrSort found = null;
+            for (IrSort branch : inter.branches()) {
+                IrSort projected = inferFieldOnBase(branch, fa, ctx);
+                if (projected == null) continue;
+                if (found != null && !found.equals(projected)) return null;
+                found = projected;
+            }
+            return found;
+        }
+        return inferFieldOnBase(baseNarrowing, fa, ctx);
+    }
+
+    /**
+     * Projects {@code fa.fieldName} off a single (non-intersection) base narrowing,
+     * or null when the base is not a struct we can project through. Split out of
+     * {@link #inferFieldAccess} so the intersection arm can consult each branch.
+     */
+    private static IrSort inferFieldOnBase(
+            IrSort baseNarrowing, IrExpr.FieldAccess fa, InferenceContext ctx) {
         // Refined base: project the field-specific refinement conjuncts, so a
         // narrowing on the whole struct (`[Point:@.x>0]`) flows to the field.
         if (baseNarrowing instanceof IrSort.Refined refinedBase) {

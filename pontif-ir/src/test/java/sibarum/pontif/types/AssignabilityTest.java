@@ -262,4 +262,22 @@ class AssignabilityTest {
         assertTrue(Assignability.isA(dispatch(INT, gt0), dispatch(INT, INT), ctx()));    // covariant return
         assertFalse(Assignability.isA(dispatch(INT, INT), dispatch(DECIMAL, INT), ctx())); // different keys
     }
+
+    // --- AlgebraicDispatch: the trait-view intersection (roadmap §5) --------
+
+    @Test
+    void algebraicDispatchIsAViewOfDispatch() {
+        // `[[Dispatch(Decimal):Decimal] & Algebraic]` — the trait-view stamped on a
+        // metareference proven algebraic. It widens FREELY to the bare Dispatch (a
+        // some-branch is-a) but the bare Dispatch is NOT algebraic, and it carries the
+        // Algebraic marker — so `.ast` (a member of Algebraic) is reachable only
+        // through the algebraic view, never fabricated on a plain dispatch.
+        IrSort disp = dispatch(DECIMAL, DECIMAL);
+        IrSort algebraic = IrSort.intersection(List.of(disp, named("Algebraic")));
+
+        assertTrue(Assignability.isA(algebraic, disp, ctx()));               // view widen
+        assertFalse(Assignability.isA(disp, algebraic, ctx()));              // plain ≠ algebraic
+        assertTrue(Assignability.isA(algebraic, algebraic, ctx()));          // reflexive
+        assertTrue(Assignability.isA(algebraic, named("Algebraic"), ctx())); // carries the marker
+    }
 }

@@ -298,29 +298,70 @@ public final class MethodOperatorResolver {
         // declared alias binding (`_tuple`), which has no method; the declared claim (`Vec3`) is the
         // identity the method dispatches on.
         IrSort receiverSort = nominalReceiverSort(receiver, types.infer(receiver, ctx));
+        // Intersection receiver: the some-branch member rule — resolve the method on
+        // whichever branch declares it (`[A & B]` has A's methods and B's). A unique
+        // branch answers; two branches routing it to different keys is ambiguous.
+        List<IrSort> candidates = receiverSort instanceof IrSort.Intersection inter
+                ? inter.branches() : java.util.Collections.singletonList(receiverSort);
+        IrExpr resolved = null;
+        String resolvedVia = null;
+        for (IrSort cand : candidates) {
+            String candName = baseName(cand);
+            if (candName == null) continue;
+            IrExpr r = tryResolveMethodOn(cand, candName, mc, receiver, args, ctx);
+            if (r == null) continue;
+            if (resolved != null && !candName.equals(resolvedVia)) {
+                throw new CompileException(
+                        "Method '" + mc.methodName() + "' is ambiguous across intersection branches '"
+                                + resolvedVia + "' and '" + candName + "'", mc.origin());
+            }
+            resolved = r;
+            resolvedVia = candName;
+        }
+        if (resolved != null) {
+            return resolved;
+        }
+        // No branch resolved it — preserve the single-sort diagnostics.
+        if (receiverSort instanceof IrSort.Intersection) {
+            throw new CompileException(
+                    "No method '" + mc.methodName() + "' on any branch of the receiver's sort",
+                    mc.origin());
+        }
         String typeName = baseName(receiverSort);
         if (typeName != null) {
-            // Does base(receiver).method name a routable method key? The unified dispatch query answers
-            // (it consults the routable-key set, trait-contract keys included); this pass forms the Call.
-            if (routes(types.dispatch(
-                    sibarum.pontif.types.DispatchQuery.forMethod(mc.methodName(), receiverSort), ctx))) {
-                String key = typeName + "." + mc.methodName();
-                List<IrExpr> withReceiver = new ArrayList<>(args.size() + 1);
-                withReceiver.add(receiver);
-                withReceiver.addAll(args);
-                return new IrExpr.Call(key, withReceiver, mc.origin());
-            }
-            // Not a method — a field holding a callable, applied.
-            IrSort.Structural def = structs.get(typeName);
-            if (def != null && def.members().containsKey(mc.methodName())) {
-                return new IrExpr.Apply(
-                        new IrExpr.FieldAccess(receiver, mc.methodName(), mc.origin()), args, mc.origin());
-            }
             throw new CompileException(
                     "No method '" + mc.methodName() + "' on type '" + typeName + "'", mc.origin());
         }
         throw new CompileException(
                 "Cannot determine the type of the receiver of method '" + mc.methodName() + "'", mc.origin());
+    }
+
+    /**
+     * Resolves method {@code mc} against one candidate receiver sort {@code candSort}
+     * (base name {@code typeName}) — a routable method key becomes the dispatch
+     * {@code Call}, a callable field becomes an {@code Apply}, else null. Split out so
+     * an intersection receiver can try each branch.
+     */
+    private IrExpr tryResolveMethodOn(
+            IrSort candSort, String typeName, IrExpr.MethodCall mc,
+            IrExpr receiver, List<IrExpr> args, InferenceContext ctx) {
+        // Does base(receiver).method name a routable method key? The unified dispatch query answers
+        // (it consults the routable-key set, trait-contract keys included); this pass forms the Call.
+        if (routes(types.dispatch(
+                sibarum.pontif.types.DispatchQuery.forMethod(mc.methodName(), candSort), ctx))) {
+            String key = typeName + "." + mc.methodName();
+            List<IrExpr> withReceiver = new ArrayList<>(args.size() + 1);
+            withReceiver.add(receiver);
+            withReceiver.addAll(args);
+            return new IrExpr.Call(key, withReceiver, mc.origin());
+        }
+        // Not a method — a field holding a callable, applied.
+        IrSort.Structural def = structs.get(typeName);
+        if (def != null && def.members().containsKey(mc.methodName())) {
+            return new IrExpr.Apply(
+                    new IrExpr.FieldAccess(receiver, mc.methodName(), mc.origin()), args, mc.origin());
+        }
+        return null;
     }
 
     /**
