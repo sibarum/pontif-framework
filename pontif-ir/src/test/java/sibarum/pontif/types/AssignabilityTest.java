@@ -176,4 +176,25 @@ class AssignabilityTest {
     void bareStructureDoesNotSatisfyTheTrait() {
         assertFalse(Assignability.isA(tuple3(), named("Showable"), ctx()));   // a bare tuple implements nothing
     }
+
+    // --- intersection ------------------------------------------------------
+
+    @Test
+    void intersectionSubtyping() {
+        TypeCatalog cat = new TypeCatalog();
+        cat.register("Drawable", new TypeInfo.Trait(IrSort.trait("Drawable", Map.of())));
+        cat.register("Serial", new TypeInfo.Trait(IrSort.trait("Serial", Map.of())));
+        cat.register("Widget",
+                new TypeInfo.Struct((IrSort.Structural) IrSort.structural("Widget", Map.of("id", INT))));
+        cat.register("Icon",
+                new TypeInfo.Struct((IrSort.Structural) IrSort.structural("Icon", Map.of("id", INT))));
+        AssignabilityContext c = AssignabilityContext.of(cat, Map.of(
+                "Widget", java.util.Set.of("Drawable", "Serial"),
+                "Icon", java.util.Set.of("Drawable")));
+        IrSort both = IrSort.intersection(List.of(named("Drawable"), named("Serial")));
+
+        assertTrue(Assignability.isA(named("Widget"), both, c));   // satisfies both -> is-a the intersection
+        assertFalse(Assignability.isA(named("Icon"), both, c));    // satisfies only one -> is-NOT-a
+        assertTrue(Assignability.isA(both, named("Drawable"), c)); // an intersection is-a one of its branches
+    }
 }

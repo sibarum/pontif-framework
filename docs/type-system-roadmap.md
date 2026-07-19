@@ -219,7 +219,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | `Int→Decimal` / primitive coercion | absent | S–M | lives only in `CoercionResolver`/`ConstructionGate` today |
 | `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
-| Intersection sorts | absent (`isA` handles Union only) | S | |
+| Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
 | Method / Dispatch function-sorts | absent (`baseName` → null) | M | **the arm `AlgebraicDispatch` needs** (§5) |
 | Static-cast legality wiring | decision present, unwired | M | currently decided *nowhere*; `IrExpr.Cast` legality is implicit-at-runtime |
 

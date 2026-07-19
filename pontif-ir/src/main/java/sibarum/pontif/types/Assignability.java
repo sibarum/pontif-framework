@@ -51,6 +51,12 @@ public final class Assignability {
         if (sub instanceof IrSort.Union u) {                               // a union is-a X: every branch
             return u.branches().stream().allMatch(b -> isA(b, sup, ctx));
         }
+        if (sup instanceof IrSort.Intersection i) {                        // is-a an intersection: EVERY branch
+            return i.branches().stream().allMatch(b -> isA(sub, b, ctx));
+        }
+        if (sub instanceof IrSort.Intersection i) {                        // an intersection is-a X: SOME branch
+            return i.branches().stream().anyMatch(b -> isA(b, sup, ctx));
+        }
 
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
         boolean supIsTrait = isTrait(sup, ctx);
