@@ -233,4 +233,33 @@ class AssignabilityTest {
         assertFalse(Assignability.isA(named("Icon"), both, c));    // satisfies only one -> is-NOT-a
         assertTrue(Assignability.isA(both, named("Drawable"), c)); // an intersection is-a one of its branches
     }
+
+    // --- function sorts (Method / Dispatch) --------------------------------
+
+    private static IrSort method(IrSort param, IrSort ret) {
+        return new IrSort.Method(List.of(param), ret, Origin.NONE);   // [Method(param):ret]
+    }
+
+    private static IrSort dispatch(IrSort key, IrSort ret) {
+        return new IrSort.Dispatch(List.of(key), ret, Origin.NONE);   // [Dispatch(key):ret]
+    }
+
+    @Test
+    void methodSortSubtyping() {
+        IrSort gt0 = refinedInt(IrExpr.Op.GT, 0);
+        assertTrue(Assignability.isA(method(INT, INT), method(INT, INT), ctx()));   // reflexive
+        // Covariant return: a method returning [Int:@>0] is-a one returning Int.
+        assertTrue(Assignability.isA(method(INT, gt0), method(INT, INT), ctx()));
+        assertFalse(Assignability.isA(method(INT, INT), method(INT, gt0), ctx()));  // return not covariant
+        // A Method never cross-assigns with a Dispatch.
+        assertFalse(Assignability.isA(method(INT, INT), dispatch(INT, INT), ctx()));
+    }
+
+    @Test
+    void dispatchSortSubtyping() {
+        IrSort gt0 = refinedInt(IrExpr.Op.GT, 0);
+        assertTrue(Assignability.isA(dispatch(INT, INT), dispatch(INT, INT), ctx()));    // reflexive
+        assertTrue(Assignability.isA(dispatch(INT, gt0), dispatch(INT, INT), ctx()));    // covariant return
+        assertFalse(Assignability.isA(dispatch(INT, INT), dispatch(DECIMAL, INT), ctx())); // different keys
+    }
 }

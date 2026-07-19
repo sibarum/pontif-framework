@@ -61,6 +61,12 @@ public final class Assignability {
         if (sub instanceof IrSort.Intersection i) {                        // an intersection is-a X: SOME branch
             return i.branches().stream().anyMatch(b -> isA(b, sup, ctx));
         }
+        if (sub instanceof IrSort.Method && sup instanceof IrSort.Method) {   // function subtyping —
+            return kernelImplies(sub, sup);                                   // contra params, covariant return
+        }
+        if (sub instanceof IrSort.Dispatch dSub && sup instanceof IrSort.Dispatch dSup) {
+            return dispatchSubsumes(dSub, dSup, ctx);
+        }
 
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
         boolean supIsTrait = isTrait(sup, ctx);
@@ -244,16 +250,33 @@ public final class Assignability {
         return refinementImplies(sub, sup);
     }
 
-    /** Does {@code sub}'s refinement predicate imply {@code sup}'s? Delegated to {@code Refinements.imply}. */
+    /** Does {@code sub}'s refinement predicate imply {@code sup}'s? (A bare base can't prove one.) */
     private static boolean refinementImplies(IrSort sub, IrSort sup) {
-        if (!(sub instanceof IrSort.Refined)) return false;  // a bare base can't prove sup's predicate
+        return sub instanceof IrSort.Refined && kernelImplies(sub, sup);
+    }
+
+    /** {@code sub ⊑ sup} via the refinement kernel — compile both, ask {@code Refinements.imply}. */
+    private static boolean kernelImplies(IrSort sub, IrSort sup) {
         try {
-            Sort subSort = IrCompiler.compileSort(sub);
-            Sort supSort = IrCompiler.compileSort(sup);
-            return Refinements.imply(subSort, supSort, new Simplifier(List.of())).isPassed();
+            return Refinements.imply(IrCompiler.compileSort(sub), IrCompiler.compileSort(sup),
+                    new Simplifier(List.of())).isPassed();
         } catch (Exception abstain) {
             return false;  // outside the linear kernel — abstain, never fabricate an is-a
         }
+    }
+
+    /**
+     * Metareference-contract subsumption: {@code [Dispatch(K):R] ⊑ [Dispatch(K'):R']} iff the key
+     * sorts match (a dispatch never cross-assigns on different keys — docs/metatypes.md) and the
+     * return is covariant. {@code Refinements.imply} has no dispatch arm, so this is decided directly.
+     */
+    private static boolean dispatchSubsumes(
+            IrSort.Dispatch sub, IrSort.Dispatch sup, AssignabilityContext ctx) {
+        if (sub.keySorts().size() != sup.keySorts().size()) return false;
+        for (int i = 0; i < sub.keySorts().size(); i++) {
+            if (!sameType(sub.keySorts().get(i), sup.keySorts().get(i))) return false;
+        }
+        return isA(sub.returnSort(), sup.returnSort(), ctx);
     }
 
     /** Strip nominal tags (and transparent aliases) down to the underlying structure/primitive. */

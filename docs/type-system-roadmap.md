@@ -218,7 +218,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
-| Method / Dispatch function-sorts | absent (`baseName` → null) | M | **the arm `AlgebraicDispatch` needs** (§5) |
+| Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **This is the arm `AlgebraicDispatch` builds on** (§5) — the remaining piece there is the `Algebraic` property on the sort + inference stamping, not the function-sort relation |
 | Static-cast legality wiring | decision present, unwired | M | currently decided *nowhere*; `IrExpr.Cast` legality is implicit-at-runtime |
 
 ### 4.3 Migration targets (wire onto the engine, then delete)
