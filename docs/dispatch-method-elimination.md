@@ -135,6 +135,40 @@ Using only E1's general machinery — **no** further type-system change (that's 
 Tests: `eval($poly[Decimal].ast, x) == poly(x)`; `$poly[Decimal].ast` matches `[Add(_,_)]`;
 `$inc[Decimal].ast` is a **compile error**; existing `astOf` reflection still green.
 
+#### E2 finalized design (ratified with James 2026-07-19 — supersedes the §5 "value carries its type" sketch)
+
+**Governing rule (James):** *"Anything that looks like an object should actually be one."* Any value
+bindable to a variable is a `RecordValue`; special behaviors (invoking/dispatch) are added on top,
+read from the value's `typeName`, never a bespoke Java value class. (Memory: `values-are-recordvalues`.)
+
+- **Runtime value.** The metareference `$f[…]` evaluates to a `RecordValue(typeName =
+  `AlgebraicDispatch`/`DispatchBase`, members = the dispatch payload {functionName, keySorts})` instead
+  of `DispatchValue`. `.ast` then flows through the stock `RecordValue` attribute-producer path
+  (`tryAttributeProducer` → `AlgebraicDispatch.ast(this) -> astOf(this)`), no interpreter special-case.
+  **Scope decision (James): the ir/runtime layer migrates now; relocating `RecordValue` down to
+  `pontif-core` and fully retiring `DispatchValue` (incl. the symbolic `Force` path, which is
+  primitive-oriented and can't see `RecordValue` from core) is the IMMEDIATELY-FOLLOWING commit, not
+  bundled into E2.** During E2 the ir consumers recognize both the new `RecordValue` metaref and a
+  legacy `DispatchValue` (transitional).
+- **Sort stamp = the concrete nominal (no intersection).** `dispatchRefSort` stamps
+  `CallSig("AlgebraicDispatch", keys, ret)` (algebraic) / `CallSig("DispatchBase", keys, ret)` (plain).
+  Both are dispatch-style (already seeded in `CallKinds`), so either still fits a `[Dispatch(…)]`
+  param via `dispatchSubsumes`. `inferFloor(DispatchRef)` must return this stamp (today it returns
+  null), and `SortChecker.floorContext` must carry the real `algebraicFunctions` (today hardcoded
+  empty) so the gate can tell the two apart.
+- **`.ast` compile gate.** `matchBaseName(CallSig) = typeName`; the FieldAccess member gate, on a
+  dispatch-`CallSig` base, requires a registered producer `typeName + ".ast"` (a closed member set) —
+  so `$poly[Decimal].ast` (AlgebraicDispatch, producer present) passes and `$inc[Decimal].ast`
+  (DispatchBase, no producer) is a **compile error**. This is a general soundness fix (dispatch bases
+  were unsoundly blind), extensibility-preserving — a new dispatch type with attributes works with no
+  further gate change.
+- **Declarations (in `AlgebraExtension.SOURCE`, the required `pontif.algebra` module — not a prelude):**
+  `trait Algebraic{ ast:AlgExpr }`; `assign trait AlgebraicDispatch : Algebraic { ast(this)->astOf(this) }`
+  (a non-struct impl — `satisfier==null` is tolerated, the producer satisfies `ast`). `astOf`'s param
+  becomes `Algebraic` (so `astOf(this)` type-checks; a non-algebraic ref is rejected) and `astOf` is
+  dropped from `exports` — `$f[Decimal].ast` is the only surface. Retire `MARKER_SORT_NAMES` +
+  the `NameResolver` mirror (Algebraic is a real trait now).
+
 ## 4. The "what and where" — site checklist (as of `1890fda`; verify line numbers)
 
 Sealed `IrSort` means every exhaustive `switch` is compiler-enforced — removing `Method`/
