@@ -107,7 +107,7 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 
 | # | Campaign | Owns | Status | Doc |
 |---|---|---|---|---|
-| C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (unmerged branch) | `inference-unification.md` |
+| C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
 | C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ in progress | `dispatch-unification.md`, `cross-module-dispatch.md` |
 | C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ Slice 1 landed, else ☐ | **this doc** (§4) |
 | C4 | **Three-records model** | Declared / Inferred / Value split | ◐ model settled, migration ☐ | `type-records.md` |
@@ -121,13 +121,12 @@ war docs.
 
 ### Campaign notes
 
-- **C1 (inference) — done, but on a branch.** `NarrowingInference` is the sole
-  expression-typer: `SortChecker.inferSort` → `inferFloor` ([SortChecker.java:2226]),
+- **C1 (inference) — done, on master.** `NarrowingInference` is the sole expression-typer:
+  `SortChecker.inferSort` → `inferFloor` ([SortChecker.java:2226]),
   `AltParser.inferMaximalSort` → `inferFloor` ([AltParser.java:2039]); all four stages route
-  through it; TODO marks Cluster 5 done. **Caveat:** the whole campaign lives on
-  `war/scope-aware-narrowing`, **not merged to master** (`TODO.md` "Merge
-  `war/scope-aware-narrowing` → master"). *Merging it is a precondition for building on the
-  unified state.*
+  through it; TODO marks Cluster 5 done. **Precondition SATISFIED (verified 2026-07-18):**
+  `war/scope-aware-narrowing` is fully subsumed by master (master 0 behind / 207 ahead), so
+  C3 already builds on the unified state — no merge needed.
 - **C2 (dispatch) — in progress.** Cluster 4 (operators route once, drop method-form
   operators) + Phases 2–4 (methods resolve on the receiver sort **post-typecheck / post-link**;
   trait dispatch becomes receiver-sort resolution; parser de-blinding). **Phase 2 is the
@@ -149,7 +148,7 @@ war docs.
 ## 3. The dependency graph (the part written down nowhere until now)
 
 ```
-C1 inference ✔ ──────────────► (merge to master) ──► everything builds on the unified state
+C1 inference ✔ ──────────────► (on master) ──► everything builds on the unified state
                                                         │
 C2 dispatch ◐ ── Phase 2 (post-link resolution) ───────┤
      │                                                  │
@@ -170,8 +169,9 @@ does, and it needs a finished `IrModule`). So the parser-side migration is **cap
 struct↔struct slice already shipped until C2 Phase 2 moves method/trait resolution
 post-link**. Everything else in C3 (below) is independent of C2 and can proceed now.
 
-**Merge-first:** C1 is on an unmerged branch. Land that merge before C3 work, so C3 builds on
-the single-engine narrowing state rather than diverging from it.
+**C1 is on master** (the `war/scope-aware-narrowing` branch is fully subsumed — master 0
+behind / 207 ahead, verified 2026-07-18), so C3 already builds on the single-engine narrowing
+state. No merge step.
 
 ---
 
@@ -240,8 +240,8 @@ Therefore:
 *Sequencing decision (§6.2): after step 1, steps 2–5 are C2-independent and run in parallel
 with C2; only step 6 serializes behind C2 Phase 2.*
 
-1. **Merge `war/scope-aware-narrowing` → master** (C1) so C3 builds on the unified state.
-2. **Write the DoD + differential harness** (§4.1). Nothing gets deleted without it.
+1. ~~Merge C1~~ **DONE** — C1 is already on master (war branch fully subsumed).
+2. **Write the DoD + differential harness** (§4.1). Nothing gets deleted without it. ← *current*
 3. **Close the cheap engine gaps**: intersection (S), `Int→Decimal` (S–M),
    refinement-precise via `imply` delegation (M).
 4. **Migrate `ConstructionGate`'s base leg** — a real deletion that never touches the parser.

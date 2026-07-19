@@ -52,8 +52,9 @@ but separate goal.)*
 
 Campaigns and status (full detail + dependency graph in the doc):
 
-- **C1 — inference unification.** ☑ landed; `NarrowingInference` is the sole expression-typer.
-  *Precondition: merge `war/scope-aware-narrowing` → master (below) so C3 builds on it.*
+- **C1 — inference unification.** ☑ landed **on master**; `NarrowingInference` is the sole
+  expression-typer. (`war/scope-aware-narrowing` is fully subsumed by master — 0 behind /
+  207 ahead, verified 2026-07-18; no merge needed.)
 - **C2 — dispatch unification.** ◐ in progress (see "Next up — dispatch unification"). **Phase 2
   (post-link resolution) is the linchpin that unblocks C3's parser-side deletion.**
 - **C3 — nominal-subtype / `Assignability`.** ◐ Slice 0–1 landed, rest ☐ — **this was the
@@ -219,9 +220,9 @@ so `v + v` can't route post-link), `generics__22` (`checkOperatorBounds` can't r
 
 ## Merge / housekeeping
 
-- **Merge `war/scope-aware-narrowing` → master.** The whole inference-unification campaign +
-  the playground Narrowings view live on the branch (green at every commit, pushed to remote);
-  `master` is still at the slice-3 commit. Merge when ready.
+- ~~**Merge `war/scope-aware-narrowing` → master.**~~ **DONE** (verified 2026-07-18): master
+  fully subsumes the branch (0 behind / 207 ahead) — the inference-unification campaign + the
+  playground Narrowings view are on master. Stale remote branch can be pruned.
 - **Narrowings view polish (optional, cosmetic):** absorption in narrowing predicates
   (`(A & B) | A → A`); whether to prettify a resolved `Type.method(v)` back to `v.method()`
   (the resolved form is arguably more truthful — leave unless it bugs).
