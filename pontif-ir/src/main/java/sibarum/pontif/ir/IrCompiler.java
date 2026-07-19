@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.QualifiedName;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.symbolic.Simplifier;
@@ -117,6 +118,10 @@ public final class IrCompiler {
         // `#action#`-keyed FunctionDecl (the parser's lowering, mirroring a coercion) is
         // compiled as an ordinary function AND recorded here so `emit` can fire it.
         Map<String, List<CompiledModule.CompiledAction>> actionsByType = new LinkedHashMap<>();
+        // Functions carrying an `assign proof f:Algebraic` claim — mirrors
+        // InferenceContext.fromModule so the runtime tags a metareference's concrete
+        // nominal (AlgebraicDispatch/DispatchBase) the same way the sort stamp does.
+        java.util.Set<String> algebraicFunctions = new java.util.LinkedHashSet<>();
 
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
@@ -174,7 +179,13 @@ public final class IrCompiler {
                         dispatch.traitRegistry().declareTrait(t.name(), t.baseTrait());
                     }
                 }
-                case IrStmt.Proof p -> { /* proof metadata; consumed by the return-refinement gate (PontifCompiler), never compiled or evaluated */ }
+                case IrStmt.Proof p -> {
+                    // proof metadata; not compiled/evaluated — but an `f:Algebraic` claim
+                    // is recorded so the runtime can tag `$f[…]` as AlgebraicDispatch.
+                    if ("Algebraic".equals(proofHeadName(p.proofTree()))) {
+                        algebraicFunctions.add(p.functionName());
+                    }
+                }
                 case IrStmt.ReturnProof rp -> { /* assign-proof metadata; consumed by the return-refinement gate, never compiled or evaluated */ }
                 case IrStmt.Requires r -> { /* import decl; consumed by the module loader/linker + name resolver, not the per-module compile */ }
                 case IrStmt.Exports e -> { /* export decl; consumed by the linker's visibility check */ }
@@ -188,7 +199,17 @@ public final class IrCompiler {
 
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
-                structRegistry, topLevelLets, actionsByType);
+                structRegistry, topLevelLets, actionsByType, algebraicFunctions);
+    }
+
+    /** The local head-constructor name of a {@code proof} tree ({@code Algebraic}), or null. */
+    private static String proofHeadName(IrExpr tree) {
+        String name = switch (tree) {
+            case IrExpr.Record r -> r.typeName();
+            case IrExpr.Call c -> c.functionName();
+            default -> null;
+        };
+        return name == null ? null : QualifiedName.memberOf(name);
     }
 
     /**

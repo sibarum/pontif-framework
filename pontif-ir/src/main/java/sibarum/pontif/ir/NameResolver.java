@@ -46,9 +46,11 @@ public final class NameResolver {
      */
     private static final Set<String> PRIMITIVES = Set.of(
             "Int", "Bool", "Decimal", "_", "_record", "_tuple",
-            // Compiler-recognized marker (AlgebraicDispatch, roadmap §5): a global
-            // name, never module-qualified — mirrors SortChecker.MARKER_SORT_NAMES.
-            "Algebraic");
+            // Builtin dispatch/algebra type names — global, never module-qualified, so the
+            // metareference sort stamp + runtime Metaref value + the Algebraic trait agree on
+            // one spelling (docs/dispatch-method-elimination.md §2). Mirrors
+            // SortChecker.MARKER_SORT_NAMES.
+            "Algebraic", "DispatchBase", "AlgebraicDispatch");
 
     private NameResolver() {}
 

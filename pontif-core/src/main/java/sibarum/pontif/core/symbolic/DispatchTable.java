@@ -143,6 +143,12 @@ public final class DispatchTable {
             boolean satisfies = arg instanceof SymExpr.Record r
                     && r.typeName() != null
                     && traitRegistry.satisfies(paramSort.name(), r.typeName());
+            // A first-class metareference is a dispatch OBJECT with a concrete nominal
+            // (Dispatch / AlgebraicDispatch): it satisfies a trait param when that nominal
+            // is-a the trait — so `astOf(f:Algebraic)` accepts `$poly[Decimal]`.
+            if (!satisfies && arg instanceof SymExpr.DispatchRef dr && dr.typeName() != null) {
+                satisfies = traitRegistry.satisfies(paramSort.name(), dr.typeName());
+            }
             // A positional tuple satisfies a Stream[T] parameter STRUCTURALLY — the §4
             // autobox: a tuple IS a stream, with elements checked against T (§8.6,
             // Refinements.satisfiesStreamElements). Nominal satisfiers cover the other

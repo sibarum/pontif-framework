@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.ast.record.Metaref;
 import sibarum.pontif.ast.record.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.DispatchResult;
@@ -178,7 +179,12 @@ public final class IrInterpreter {
                             "Metareference key sort failed to compile: " + ce.getMessage(),
                             d.origin());
                 }
-                yield new sibarum.pontif.core.types.DispatchValue(d.functionName(), keys);
+                // A metareference is a first-class OBJECT — a RecordValue tagged with its
+                // concrete dispatch nominal (AlgebraicDispatch when the referent is proven
+                // algebraic, else DispatchBase), carrying the dispatch payload. Its `.ast`
+                // then resolves through the stock RecordValue attribute-producer path.
+                yield Metaref.of(d.functionName(), keys,
+                        module.algebraicFunctions().contains(d.functionName()));
             }
             case IrExpr.Bool b -> b.value();
             case IrExpr.Var v -> env.lookup(v.name());
@@ -878,8 +884,9 @@ public final class IrInterpreter {
         if (fnValue instanceof Closure c) {
             return new NativeCalls.ReflectedFunction(c.lambda().params(), c.lambda().body());
         }
-        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
-            return reflectFunctionByName(dv.functionName(), dv.keySorts().size(), module);
+        if (Metaref.is(fnValue)) {
+            return reflectFunctionByName(
+                    Metaref.functionName(fnValue), Metaref.keySorts(fnValue).size(), module);
         }
         return null;
     }
@@ -907,15 +914,17 @@ public final class IrInterpreter {
         // let) is applied by re-running dispatch under its referenced name — the same
         // thing the name-lookup Call path does, so function values are uniformly
         // first-class however they're reached (docs/metatypes.md).
-        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
-            if (apply.args().size() != dv.keySorts().size()) {
+        if (Metaref.is(fnValue)) {
+            String fn = Metaref.functionName(fnValue);
+            int arity = Metaref.keySorts(fnValue).size();
+            if (apply.args().size() != arity) {
                 throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
-                        "Metareference '" + dv.functionName() + "' takes "
-                                + dv.keySorts().size() + " argument(s), got " + apply.args().size(),
+                        "Metareference '" + fn + "' takes "
+                                + arity + " argument(s), got " + apply.args().size(),
                         apply.origin());
             }
-            IrExpr.Call synthetic = new IrExpr.Call(dv.functionName(), apply.args(), apply.origin());
-            return dispatchValues(dv.functionName(), argValues, synthetic, env, module);
+            IrExpr.Call synthetic = new IrExpr.Call(fn, apply.args(), apply.origin());
+            return dispatchValues(fn, argValues, synthetic, env, module);
         }
         if (!(fnValue instanceof Closure closure)) {
             throw new sibarum.pontif.core.symbolic.RuntimeCheckException(
@@ -1342,14 +1351,15 @@ public final class IrInterpreter {
             // A bound metareference: application reruns registry dispatch
             // under the REFERENCED name — `ref(2)` does what `inc(2)` does,
             // candidates and narrowings intact.
-            if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
-                if (call.args().size() != dv.keySorts().size()) {
+            if (Metaref.is(fnValue)) {
+                int arity = Metaref.keySorts(fnValue).size();
+                if (call.args().size() != arity) {
                     throw new RuntimeCheckException(
-                            "Metareference " + dv + " takes " + dv.keySorts().size()
+                            "Metareference " + fnValue + " takes " + arity
                                     + " argument(s); got " + call.args().size(),
                             call.origin());
                 }
-                return dispatchByName(dv.functionName(), call, env, module);
+                return dispatchByName(Metaref.functionName(fnValue), call, env, module);
             }
             if (!(fnValue instanceof Closure closure)) {
                 throw new RuntimeCheckException(
@@ -1418,8 +1428,8 @@ public final class IrInterpreter {
                         CompiledModule.CompiledFunction zf = module.functions().get(z.decl());
                         if (zf != null) {
                             Object bound = eval(zf.body(), Environment.empty(), module);
-                            if (bound instanceof sibarum.pontif.core.types.DispatchValue dv) {
-                                return dispatchByName(dv.functionName(), call, env, module);
+                            if (Metaref.is(bound)) {
+                                return dispatchByName(Metaref.functionName(bound), call, env, module);
                             }
                             // A let bound to a fragment/lambda VALUE: applying it
                             // with args invokes the closure — the synthesis fragment
@@ -1507,13 +1517,34 @@ public final class IrInterpreter {
      */
     private Object tryAttributeProducer(RecordValue rec, String name, CompiledModule module) {
         if (rec.typeName() == null) return NO_ATTRIBUTE;
-        DispatchResult dr = module.dispatch().resolve(
-                rec.typeName() + "." + name, List.of(toSymExpr(rec)), checker(module));
-        if (!(dr instanceof DispatchResult.Resolved resolved)) return NO_ATTRIBUTE;
-        CompiledModule.CompiledFunction func = module.functions().get(resolved.decl());
-        if (func == null || func.params().size() != 1) return NO_ATTRIBUTE;
-        Environment env = Environment.empty().extend(func.params().get(0).name(), rec);
-        return eval(func.body(), env, module);
+        // Dispatch resolution under both the qualified and bare type spellings (an
+        // attribute producer registers like a 0-user-arg method).
+        for (String key : List.of(rec.typeName() + "." + name,
+                bareName(rec.typeName()) + "." + name)) {
+            DispatchResult dr = module.dispatch().resolve(
+                    key, List.of(toSymExpr(rec)), checker(module));
+            if (dr instanceof DispatchResult.Resolved resolved) {
+                CompiledModule.CompiledFunction func = module.functions().get(resolved.decl());
+                if (func != null && func.params().size() == 1) {
+                    Environment env = Environment.empty().extend(func.params().get(0).name(), rec);
+                    return eval(func.body(), env, module);
+                }
+            }
+        }
+        // Fallback: scan compiled functions by decl-name suffix — robust to the linker
+        // module-qualifying a bare-builtin-typed impl's producer (e.g. the required
+        // pontif.algebra's `AlgebraicDispatch.ast`, keyed `pontif.algebra/AlgebraicDispatch.ast`).
+        String suffix = bareName(rec.typeName()) + "." + name;
+        for (Map.Entry<FunctionDecl, CompiledModule.CompiledFunction> e
+                : module.functions().entrySet()) {
+            String n = e.getKey().name();
+            if ((n.equals(suffix) || n.endsWith("/" + suffix)) && e.getValue().params().size() == 1) {
+                Environment env = Environment.empty()
+                        .extend(e.getValue().params().get(0).name(), rec);
+                return eval(e.getValue().body(), env, module);
+            }
+        }
+        return NO_ATTRIBUTE;
     }
 
     /**
@@ -1604,8 +1635,16 @@ public final class IrInterpreter {
         if (value instanceof sibarum.pontif.core.types.StringValue s) {
             return SymExpr.str(s.content());
         }
+        // A metareference round-trips as a SymExpr.DispatchRef — key-matched against a
+        // [Dispatch(…)] sort. The RecordValue metaref also carries its concrete nominal
+        // (Dispatch / AlgebraicDispatch), so trait-param dispatch (e.g. astOf's Algebraic
+        // param) can see `AlgebraicDispatch is-a Algebraic`. A legacy DispatchValue has none.
         if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
             return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
+        }
+        if (value instanceof RecordValue r && Metaref.is(r)) {
+            return new SymExpr.DispatchRef(
+                    Metaref.functionName(r), Metaref.keySorts(r), r.typeName());
         }
         if (value instanceof Boolean b) return SymExpr.bool(b);
         if (value instanceof RecordValue r) {

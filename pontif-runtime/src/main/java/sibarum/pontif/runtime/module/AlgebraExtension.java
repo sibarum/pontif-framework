@@ -197,7 +197,7 @@ public final class AlgebraExtension implements Extension {
     }
 
     private static final String SOURCE = """
-            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, astOf, eval}
+            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, Algebraic, eval}
 
             trait AlgExpr{}
 
@@ -217,10 +217,22 @@ public final class AlgebraExtension implements Extension {
             assign trait Div:AlgExpr{}
             assign trait Pow:AlgExpr{}
 
-            # astOf reflects an algebraic function VALUE into its AST; eval evaluates the
-            # AST over one variable. Both bodies are placeholders — a resolved call runs
-            # this extension's Java object (AlgebraExtension.calls) instead.
-            function astOf(f:[Dispatch(Decimal):Decimal]):AlgExpr -> Const(0.0)
+            # Algebraic: the trait a metareference proven algebraic is-a. Its `ast` attribute
+            # IS the AST surface — `$f[Decimal].ast` reads it (docs/dispatch-method-elimination
+            # .md E2). A metareference $f[…] narrows to the builtin nominal AlgebraicDispatch
+            # when f carries `assign proof f:Algebraic`, else DispatchBase (no `.ast`).
+            trait Algebraic{ast:AlgExpr}
+
+            # The dispatch nominal AlgebraicDispatch provides `.ast` by reflecting the
+            # referent function. `this` is the metareference RecordValue; astOf reflects it.
+            assign trait AlgebraicDispatch:Algebraic { ast:AlgExpr -> astOf(this) }
+
+            # astOf reflects an algebraic function VALUE into its AST — NON-EXPORTED, so
+            # `$f[Decimal].ast` is the only surface. eval evaluates the AST over one variable.
+            # Both bodies are placeholders — a resolved call runs this extension's Java object
+            # (AlgebraExtension.calls) instead. astOf's param is Algebraic, so a non-algebraic
+            # reference is rejected at the type level.
+            function astOf(f:Algebraic):AlgExpr -> Const(0.0)
             function eval(e:AlgExpr, x:Decimal):Decimal -> 0.0
 
             0

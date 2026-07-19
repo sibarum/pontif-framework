@@ -16,10 +16,16 @@ public record CompiledModule(
         Map<IrSort, Sort> compiledSorts,
         Map<String, Sort> structRegistry,
         List<String> topLevelLets,
-        Map<String, List<CompiledAction>> actionsByType) {
+        Map<String, List<CompiledAction>> actionsByType,
+        java.util.Set<String> algebraicFunctions) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
+        // Names of functions carrying an `assign proof f:Algebraic` claim (docs/algebra).
+        // The interpreter tags a metareference `$f[…]` as the concrete nominal
+        // `AlgebraicDispatch` (else `DispatchBase`) from this set, so its `.ast` attribute
+        // resolves — the runtime image of NarrowingInference's sort stamp.
+        algebraicFunctions = java.util.Set.copyOf(algebraicFunctions);
         // Actions (docs/events.md, the Action reaction leg) keyed by the base name of the
         // event type they match. emit enumerates the bucket for an emitted event's type and
         // fires each reaction whose match-filter the event satisfies. An empty/absent bucket
@@ -46,7 +52,16 @@ public record CompiledModule(
             IrExpr main, Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
             List<String> topLevelLets) {
         this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
-                Map.of());
+                Map.of(), java.util.Set.of());
+    }
+
+    /** Back-compat: a module with Actions but no algebraic-function set. */
+    public CompiledModule(
+            String name, DispatchTable dispatch, Map<FunctionDecl, CompiledFunction> functions,
+            IrExpr main, Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
+            List<String> topLevelLets, Map<String, List<CompiledAction>> actionsByType) {
+        this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
+                actionsByType, java.util.Set.of());
     }
 
     /**

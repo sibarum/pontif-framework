@@ -28,8 +28,13 @@ import java.util.Map;
  */
 public final class Metaref {
 
-    /** The concrete nominal of a plain (non-algebraic) metareference. */
-    public static final String DISPATCH_BASE = "DispatchBase";
+    /**
+     * The concrete nominal of a plain (non-algebraic) metareference — the builtin
+     * {@code Dispatch}. (An earlier plan named a distinct {@code DispatchBase}, but reusing
+     * {@code Dispatch} keeps every existing metareference-as-Dispatch check unchanged; the
+     * only distinction E2 needs is algebraic vs not.)
+     */
+    public static final String DISPATCH = "Dispatch";
     /** The concrete nominal of a metareference proven algebraic (is-a {@code Algebraic}). */
     public static final String ALGEBRAIC_DISPATCH = "AlgebraicDispatch";
 
@@ -43,7 +48,7 @@ public final class Metaref {
     /** Builds the metaref record — {@code typeName} is {@link #ALGEBRAIC_DISPATCH} iff {@code algebraic}. */
     public static RecordValue of(String functionName, List<Sort> keySorts, boolean algebraic) {
         return new RecordValue(
-                algebraic ? ALGEBRAIC_DISPATCH : DISPATCH_BASE,
+                algebraic ? ALGEBRAIC_DISPATCH : DISPATCH,
                 Map.of(FN, functionName, KEYS, List.copyOf(keySorts)));
     }
 

@@ -21,11 +21,12 @@ class AlgebraReflectTest {
 
     @Test
     void astOfThenEval_matchesTheDirectCall() {
+        // The `.ast` surface reflects the algebraic function; astOf is non-exported (E2).
         assertEquals("true", run("""
-                requires pontif.algebra.{astOf, eval}
+                requires pontif.algebra.{eval}
                 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
                 assign proof poly:Algebraic
-                eval(astOf($poly[Decimal]), 3.0) == poly(3.0)
+                eval($poly[Decimal].ast, 3.0) == poly(3.0)
                 """));
     }
 
@@ -33,10 +34,10 @@ class AlgebraReflectTest {
     void ast_isInspectableWithMatch() {
         // poly's body ((x*x + 2.0*x) + 1.0) has an Add at its root.
         assertEquals("1", run("""
-                requires pontif.algebra.{astOf, AlgExpr, Add}
+                requires pontif.algebra.{AlgExpr, Add}
                 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
                 assign proof poly:Algebraic
-                let e:AlgExpr = astOf($poly[Decimal])
+                let e:AlgExpr = $poly[Decimal].ast
                 match e {
                   [Add(_, _)] -> 1
                   [_]         -> 0
@@ -47,25 +48,26 @@ class AlgebraReflectTest {
     @Test
     void nestedAlgebraicCall_isInlinedAndEvaluates() {
         assertEquals("true", run("""
-                requires pontif.algebra.{astOf, eval}
+                requires pontif.algebra.{eval}
                 function sq(x:Decimal):Decimal -> x*x
                 assign proof sq:Algebraic
                 function poly(x:Decimal):Decimal -> sq(x) + 1.0
                 assign proof poly:Algebraic
-                eval(astOf($poly[Decimal]), 4.0) == poly(4.0)
+                eval($poly[Decimal].ast, 4.0) == poly(4.0)
                 """));
     }
 
     @Test
     void reflectionWorksOnAPassedInFunctionValue() {
-        // The AST is produced from a function VALUE handed to another function —
-        // the payoff of first-class, reflectable Dispatch values.
+        // The AST is produced from a metareference handed to another function through an
+        // Algebraic parameter — the algebraic guarantee travels with the value's type, and
+        // `.ast` reads it (a non-algebraic reference wouldn't type-check as Algebraic).
         assertEquals("true", run("""
-                requires pontif.algebra.{astOf, eval, AlgExpr}
+                requires pontif.algebra.{eval, Algebraic}
                 function poly(x:Decimal):Decimal -> x*x + 1.0
                 assign proof poly:Algebraic
-                function reflectAndEval(f:[Dispatch(Decimal):Decimal], x:Decimal):Decimal ->
-                  eval(astOf(f), x)
+                function reflectAndEval(f:Algebraic, x:Decimal):Decimal ->
+                  eval(f.ast, x)
                 reflectAndEval($poly[Decimal], 5.0) == poly(5.0)
                 """));
     }
@@ -73,10 +75,10 @@ class AlgebraReflectTest {
     @Test
     void division_evaluates() {
         assertEquals("true", run("""
-                requires pontif.algebra.{astOf, eval}
+                requires pontif.algebra.{eval}
                 function f(x:Decimal):Decimal -> x / 2.0
                 assign proof f:Algebraic
-                eval(astOf($f[Decimal]), 7.0) == f(7.0)
+                eval($f[Decimal].ast, 7.0) == f(7.0)
                 """));
     }
 

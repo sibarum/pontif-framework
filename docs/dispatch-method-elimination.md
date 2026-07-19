@@ -163,11 +163,38 @@ read from the value's `typeName`, never a bespoke Java value class. (Memory: `va
   were unsoundly blind), extensibility-preserving — a new dispatch type with attributes works with no
   further gate change.
 - **Declarations (in `AlgebraExtension.SOURCE`, the required `pontif.algebra` module — not a prelude):**
-  `trait Algebraic{ ast:AlgExpr }`; `assign trait AlgebraicDispatch : Algebraic { ast(this)->astOf(this) }`
+  `trait Algebraic{ ast:AlgExpr }`; `assign trait AlgebraicDispatch : Algebraic { ast:AlgExpr -> astOf(this) }`
   (a non-struct impl — `satisfier==null` is tolerated, the producer satisfies `ast`). `astOf`'s param
   becomes `Algebraic` (so `astOf(this)` type-checks; a non-algebraic ref is rejected) and `astOf` is
-  dropped from `exports` — `$f[Decimal].ast` is the only surface. Retire `MARKER_SORT_NAMES` +
-  the `NameResolver` mirror (Algebraic is a real trait now).
+  dropped from `exports` — `$f[Decimal].ast` is the only surface.
+
+#### As-built deviations from the sketch above (E2 landed)
+
+- **Plain nominal is `Dispatch`, not `DispatchBase`.** A distinct `DispatchBase` broke pervasive
+  exact-name checks (`let x:[Dispatch(Int):Int] = $inc[Int]`, Truffle agreement) for no benefit — the
+  only distinction E2 needs is algebraic vs not. Plain metarefs keep the `Dispatch` nominal (unchanged
+  from E1); only algebraic ones get `AlgebraicDispatch`. `DispatchBase` is unused.
+- **`MARKER_SORT_NAMES` kept, not retired — expanded.** With the concrete-nominal stamp there is no
+  `Named("Algebraic")` intersection branch to validate, but `Algebraic`/`AlgebraicDispatch` must stay
+  BARE builtin names (never module-qualified) so the metaref stamp, runtime `Metaref` value, and the
+  trait declaration/impl all agree on one spelling. So the marker set + `NameResolver` mirror now
+  recognize `{Algebraic, DispatchBase, AlgebraicDispatch}` as builtin names (like `Int`, §2).
+- **The `.ast` gate is restricted to dispatch nominals.** The FieldAccess member gate rejects an
+  unknown member only on a `CallSig` whose head is-a `dispatch-style` (via `CallKinds.builtin`) — a
+  function-style `Method` call sig (a lambda) stays lenient, as before (streams do `frag._0`).
+- **Runtime value carries the nominal via `CompiledModule.algebraicFunctions`.** `IrCompiler` collects
+  the `assign proof f:Algebraic` names onto `CompiledModule`; `IrInterpreter` tags `$f[…]` as
+  `AlgebraicDispatch`/`Dispatch` from it. `SortChecker.floorContext` was threaded the same set so the
+  gate's floor sort distinguishes algebraic from not.
+- **`SymExpr.DispatchRef` gained a nullable `typeName`** so a metaref satisfies BOTH a `[Dispatch(…)]`
+  sort (by keys) AND a trait param (by nominal — `DispatchTable` checks `AlgebraicDispatch is-a
+  Algebraic` for `astOf(f:Algebraic)`). This is a small core touch ahead of the substrate move.
+- **`tryAttributeProducer` + `validateTraitImpl` made qualification-tolerant** (suffix match) so the
+  required-module producer `pontif.algebra/AlgebraicDispatch.ast` resolves against the bare nominal.
+
+*(Retiring `MARKER_SORT_NAMES` entirely, and the `DispatchValue`→`RecordValue` substrate move — incl.
+the symbolic `Force`/Truffle paths still on `DispatchValue` — remain the next commit, per the ratified
+scope.)*
 
 ## 4. The "what and where" — site checklist (as of `1890fda`; verify line numbers)
 

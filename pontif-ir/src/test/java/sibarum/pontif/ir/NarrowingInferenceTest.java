@@ -395,23 +395,27 @@ class NarrowingInferenceTest {
                         Map.of("x", IrSort.named("Int"), "y", IrSort.named("Int")))))));
     }
 
-    // --- Metareference stamping (AlgebraicDispatch, roadmap §5) --------------
+    // --- Metareference stamping: the concrete dispatch nominal (E2) -----------
 
     @Test
-    void dispatchRef_narrowsToBareDispatchWhenNotAlgebraic() {
+    void dispatchRef_narrowsToPlainDispatchWhenNotAlgebraic() {
+        // A plain metareference narrows to the builtin nominal Dispatch — a dispatch-style
+        // call sig with no `.ast` (docs/dispatch-method-elimination.md E2). Only an algebraic
+        // reference gets the distinct AlgebraicDispatch nominal (below).
         IrExpr.DispatchRef ref = new IrExpr.DispatchRef(
                 "f", List.of(IrSort.named("Decimal")), Origin.NONE);
         IrSort result = NarrowingInference.infer(ref, InferenceContext.empty());
         assertEquals(
-                new IrSort.CallSig(IrSort.CallSig.DISPATCH, List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                new IrSort.CallSig("Dispatch",
+                        List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
                 result);
     }
 
     @Test
-    void dispatchRef_narrowsToAlgebraicIntersectionWhenClaimed() {
+    void dispatchRef_narrowsToAlgebraicDispatchWhenClaimed() {
         // `poly` carries an `assign proof poly:Algebraic` claim → its metareference is
-        // stamped `[Dispatch(Decimal):_ & Algebraic]`, the trait-view the `.ast` surface
-        // reads. Non-claimed names stay bare Dispatch (above).
+        // stamped with the concrete nominal AlgebraicDispatch (is-a Algebraic), off which
+        // the `.ast` surface resolves. Non-claimed names stay DispatchBase (above).
         IrExpr.DispatchRef ref = new IrExpr.DispatchRef(
                 "poly", List.of(IrSort.named("Decimal")), Origin.NONE);
         InferenceContext ctx = new InferenceContext(
@@ -420,10 +424,10 @@ class NarrowingInferenceTest {
 
         IrSort result = NarrowingInference.infer(ref, ctx);
 
-        IrSort expected = new IrSort.Intersection(List.of(
-                new IrSort.CallSig(IrSort.CallSig.DISPATCH, List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
-                new IrSort.Named("Algebraic", Origin.NONE)), Origin.NONE);
-        assertEquals(expected, result);
+        assertEquals(
+                new IrSort.CallSig("AlgebraicDispatch",
+                        List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                result);
     }
 
     // --- Floor layer (inferFloor) --------------------------------------------

@@ -78,14 +78,15 @@ public final class SortChecker {
     private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
 
     /**
-     * Compiler-recognized <b>marker</b> sorts — bare names valid in a sort position
-     * that name no struct/primitive and carry no constructor. {@code Algebraic} is the
-     * trait-view marker on a metareference (AlgebraicDispatch, roadmap §5): a
-     * dispatch is viewed as {@code [Dispatch(…):… & Algebraic]} when its referent
-     * carries an {@code assign proof f:Algebraic} claim, so the intersection's
-     * {@code Algebraic} branch must validate as a known name.
+     * Builtin dispatch/algebra type names — recognized as bare names the way primitives
+     * are (docs/dispatch-method-elimination.md §2; like {@code Int}), never module-qualified,
+     * so the metareference sort stamp ({@code AlgebraicDispatch}/{@code DispatchBase}), the
+     * {@code Algebraic} trait (which owns the {@code ast} attribute), and the runtime
+     * {@link sibarum.pontif.ast.record.Metaref} value all agree on one spelling. Kept in
+     * sync with {@code NameResolver}'s builtin set.
      */
-    private static final Set<String> MARKER_SORT_NAMES = Set.of("Algebraic");
+    private static final Set<String> MARKER_SORT_NAMES =
+            Set.of("Algebraic", "DispatchBase", "AlgebraicDispatch");
 
     private SortChecker() {}
 
@@ -98,6 +99,10 @@ public final class SortChecker {
         // the mechanism-1 dispatch entries an operator trait contract is checked
         // against (does a coherent `+(T, T):T` exist for the satisfying type T?).
         Map<String, List<IrStmt.FunctionDecl>> overloads = collectOverloadsByName(module);
+        // Functions carrying an `assign proof f:Algebraic` claim — so the field-existence
+        // gate can stamp a metareference `$f[…]` as AlgebraicDispatch (its `.ast` resolves)
+        // vs DispatchBase (`.ast` is a compile error). Mirrors IrCompiler/InferenceContext.
+        Set<String> algebraicFunctions = collectAlgebraicFunctions(module);
         // The declared trait-satisfaction relation (type satisfies trait), from
         // every `assign trait` block — used to check associated-type bounds.
         Set<String> satisfies = new HashSet<>();
@@ -131,7 +136,7 @@ public final class SortChecker {
                     typeEnv.put(p.name(), p.sort());
                 }
                 validateSortNames(fd.returnSort(), structDefs, fnTypeVars, traitContracts.keySet());
-                checkExpr(fd.body(), typeEnv, functionReturns, structDefs, fnTypeVars);
+                checkExpr(fd.body(), typeEnv, functionReturns, structDefs, fnTypeVars, algebraicFunctions);
                 // Operator bound propagation (dispatch-unification B1): an operator
                 // applied to a value of a trait-bounded type parameter is checked
                 // against the bound's operator contract members — `a + b` over
@@ -140,7 +145,7 @@ public final class SortChecker {
                 // not at the call site's monomorphization.
                 checkOperatorBounds(fd, typeEnv, traitContracts, functionReturns);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
                 // Validate a trait DECLARATION end-to-end: its member sorts must
                 // reference only known sorts — primitives, declared types, or the
@@ -150,7 +155,27 @@ public final class SortChecker {
                 validateSortNames(tr, structDefs, Set.of(), traitContracts.keySet());
             }
         }
-        checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs);
+        checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs, algebraicFunctions);
+    }
+
+    /** Names of functions with an {@code assign proof f:Algebraic} claim (docs/algebra). */
+    private static Set<String> collectAlgebraicFunctions(IrModule module) {
+        Set<String> out = new HashSet<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.Proof p) {
+                IrExpr tree = p.proofTree();
+                String head = switch (tree) {
+                    case IrExpr.Record r -> r.typeName();
+                    case IrExpr.Call c -> c.functionName();
+                    default -> null;
+                };
+                if (head != null
+                        && "Algebraic".equals(sibarum.pontif.core.QualifiedName.memberOf(head))) {
+                    out.add(p.functionName());
+                }
+            }
+        }
+        return out;
     }
 
     /**
@@ -251,7 +276,8 @@ public final class SortChecker {
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs,
             Set<String> satisfies,
-            Map<String, List<IrStmt.FunctionDecl>> overloads) throws CompileException {
+            Map<String, List<IrStmt.FunctionDecl>> overloads,
+            Set<String> algebraicFunctions) throws CompileException {
         IrSort.Trait ownContract = traitContracts.get(ti.traitName());
         if (ownContract == null) {
             throw new CompileException(
@@ -490,11 +516,11 @@ public final class SortChecker {
         // neither is incomplete). A trait attribute is a computed projection,
         // which is what makes coercion information-conserving in both directions.
         Map<String, IrStmt.FunctionDecl> producerByShortName = new LinkedHashMap<>();
-        String prodPrefix = ti.typeName() + ".";
         for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-            String shortName = a.name().startsWith(prodPrefix)
-                    ? a.name().substring(prodPrefix.length())
-                    : a.name();
+            // The attribute name is the final segment — robust whether the producer is
+            // bare (`Type.attr`) or the linker module-qualified it (`mod/Type.attr`), the
+            // latter arising when the impl type is a bare builtin (AlgebraicDispatch).
+            String shortName = a.name().substring(a.name().lastIndexOf('.') + 1);
             producerByShortName.put(shortName, a);
         }
         IrSort.Structural satisfier = structDefs.get(ti.typeName());
@@ -548,10 +574,10 @@ public final class SortChecker {
         // `[type T]` variables are in scope for their param/return sorts (so
         // `head(this):T` validates — T is the bound variable, not an unknown).
         for (IrStmt.FunctionDecl m : ti.methods()) {
-            validateImplBody(m, functionReturns, structDefs, implTypeVars);
+            validateImplBody(m, functionReturns, structDefs, implTypeVars, algebraicFunctions);
         }
         for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-            validateImplBody(a, functionReturns, structDefs, implTypeVars);
+            validateImplBody(a, functionReturns, structDefs, implTypeVars, algebraicFunctions);
         }
     }
 
@@ -559,14 +585,15 @@ public final class SortChecker {
             IrStmt.FunctionDecl m,
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs,
-            Set<String> typeVars) throws CompileException {
+            Set<String> typeVars,
+            Set<String> algebraicFunctions) throws CompileException {
         Map<String, IrSort> typeEnv = new HashMap<>();
         for (IrParam p : m.params()) {
             validateSortNames(p.sort(), structDefs, typeVars);
             typeEnv.put(p.name(), p.sort());
         }
         validateSortNames(m.returnSort(), structDefs, typeVars);
-        checkExpr(m.body(), typeEnv, functionReturns, structDefs, typeVars);
+        checkExpr(m.body(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
     }
 
     /**
@@ -1213,9 +1240,10 @@ public final class SortChecker {
 
     private static void checkExpr(IrExpr expr, Map<String, IrSort> typeEnv,
                                   Map<String, IrSort> functionReturns,
-                                  Map<String, IrSort.Structural> structDefs)
+                                  Map<String, IrSort.Structural> structDefs,
+                                  Set<String> algebraicFunctions)
             throws CompileException {
-        checkExpr(expr, typeEnv, functionReturns, structDefs, Set.of());
+        checkExpr(expr, typeEnv, functionReturns, structDefs, Set.of(), algebraicFunctions);
     }
 
     /**
@@ -1228,7 +1256,8 @@ public final class SortChecker {
     private static void checkExpr(IrExpr expr, Map<String, IrSort> typeEnv,
                                   Map<String, IrSort> functionReturns,
                                   Map<String, IrSort.Structural> structDefs,
-                                  Set<String> typeVars)
+                                  Set<String> typeVars,
+                                  Set<String> algebraicFunctions)
             throws CompileException {
         switch (expr) {
             case IrExpr.Lit l -> {}
@@ -1264,12 +1293,12 @@ public final class SortChecker {
                 }
             }
             case IrExpr.BinOp op -> {
-                checkExpr(op.left(), typeEnv, functionReturns, structDefs, typeVars);
-                checkExpr(op.right(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(op.left(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
+                checkExpr(op.right(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.LetIn l -> {
                 validateSortNames(l.declaredSort(), structDefs, typeVars);
-                checkExpr(l.value(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(l.value(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 IrSort bound = l.declaredSort();
                 // An undeclared binder ("_") takes the value's inferred sort,
@@ -1277,11 +1306,11 @@ public final class SortChecker {
                 // totality over (the parser's synthetic scrutinee lets and
                 // bare `let x = …` both land here).
                 if (bound instanceof IrSort.Named n && n.name().equals("_")) {
-                    IrSort inferred = inferSort(l.value(), typeEnv, functionReturns, structDefs);
+                    IrSort inferred = inferSort(l.value(), typeEnv, functionReturns, structDefs, algebraicFunctions);
                     if (inferred != null) bound = inferred;
                 }
                 extended.put(l.name(), bound);
-                checkExpr(l.body(), extended, functionReturns, structDefs, typeVars);
+                checkExpr(l.body(), extended, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.Call c -> {
                 // The name might be a top-level function/method, OR a locally
@@ -1296,7 +1325,7 @@ public final class SortChecker {
                                     + "of '" + c.functionName() + "' exists at all).",
                             c.origin());
                 }
-                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns, structDefs, typeVars);
+                for (IrExpr arg : c.args()) checkExpr(arg, typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.Lambda lam -> {
                 // The enclosing function's type params are in scope for a fragment's
@@ -1306,7 +1335,7 @@ public final class SortChecker {
                 validateSortNames(lam.returnSort(), structDefs, typeVars);
                 Map<String, IrSort> extended = new HashMap<>(typeEnv);
                 for (IrParam p : lam.params()) extended.put(p.name(), p.sort());
-                checkExpr(lam.body(), extended, functionReturns, structDefs, typeVars);
+                checkExpr(lam.body(), extended, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.Apply app -> {
                 // Applying something that can statically NEVER be a function —
@@ -1324,11 +1353,11 @@ public final class SortChecker {
                                     + app.args().size() + " argument(s).",
                             app.origin());
                 }
-                checkExpr(app.fn(), typeEnv, functionReturns, structDefs, typeVars);
-                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(app.fn(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
+                for (IrExpr a : app.args()) checkExpr(a, typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.Match m -> {
-                checkExpr(m.scrutinee(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(m.scrutinee(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                 for (IrExpr.MatchBranch b : m.branches()) {
                     validateSortNames(b.pattern(), structDefs, typeVars);
                     Map<String, IrSort> branchEnv = new HashMap<>(typeEnv);
@@ -1336,16 +1365,16 @@ public final class SortChecker {
                             && b.pattern() instanceof IrSort.Structural) {
                         branchEnv.put(v.name(), b.pattern());
                     }
-                    checkExpr(b.result(), branchEnv, functionReturns, structDefs, typeVars);
+                    checkExpr(b.result(), branchEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                 }
-                checkMatchTotality(m, typeEnv, functionReturns, structDefs);
+                checkMatchTotality(m, typeEnv, functionReturns, structDefs, algebraicFunctions);
             }
             case IrExpr.Record r -> {
-                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs, typeVars);
+                for (IrExpr v : r.members().values()) checkExpr(v, typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.FieldAccess fa -> {
-                checkExpr(fa.base(), typeEnv, functionReturns, structDefs, typeVars);
-                IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs);
+                checkExpr(fa.base(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
+                IrSort baseSort = inferSort(fa.base(), typeEnv, functionReturns, structDefs, algebraicFunctions);
                 // Intersection base: the member exists iff SOME branch provides it
                 // (the some-branch rule — `[A & B]` carries A's members and B's). A
                 // member on no branch is the error; presence on any branch passes.
@@ -1388,6 +1417,21 @@ public final class SortChecker {
                                             + sp.members().keySet(),
                                     fa.origin());
                         }
+                    } else if (baseSort instanceof IrSort.CallSig cs
+                            && CallKinds.builtin(cs.typeName()) == CallKinds.Kind.DISPATCH) {
+                        // A dispatch nominal (Dispatch / AlgebraicDispatch) has a CLOSED member
+                        // set — only the attributes its trait impls register (e.g. Algebraic's
+                        // `ast` via `AlgebraicDispatch.ast`). No such producer → the member does
+                        // not exist: `$poly[Decimal].ast` (AlgebraicDispatch) resolves, while
+                        // `$inc[Decimal].ast` (plain Dispatch) is a compile error. (Function-style
+                        // call sigs — a lambda's Method — stay lenient, as before.)
+                        if (!hasAttributeProducer(functionReturns, cs.typeName(), fa.fieldName())) {
+                            throw new CompileException(
+                                    "'" + cs.typeName() + "' has no member '" + fa.fieldName()
+                                            + "' — a metareference exposes only the attributes its "
+                                            + "type provides (e.g. `.ast` on an algebraic reference)",
+                                    fa.origin());
+                        }
                     } else if (baseSort != null) {
                         // Native anatomies get the same typo coverage as structs.
                         String base = matchBaseName(baseSort);
@@ -1409,12 +1453,12 @@ public final class SortChecker {
                 // the element binder and the accumulator names are in scope inside
                 // each arm's writes — bind them so the unbound-variable check (the
                 // Var case) doesn't flag them.
-                checkExpr(it.source(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(it.source(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                 Map<String, IrSort> iterEnv = new HashMap<>(typeEnv);
                 iterEnv.put(it.element(), IrSort.named("_"));
                 for (IrExpr.OutputSpec os : it.outputs()) {
                     if (os.init() != null) {
-                        checkExpr(os.init(), typeEnv, functionReturns, structDefs, typeVars);
+                        checkExpr(os.init(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                     }
                     if (os.kind() == IrExpr.OutputKind.ACCUMULATOR) {
                         iterEnv.put(os.name(), IrSort.named("_"));
@@ -1423,8 +1467,8 @@ public final class SortChecker {
                 for (IrExpr.Arm arm : it.arms()) {
                     validateSortNames(arm.pattern(), structDefs, typeVars);
                     for (IrExpr.Write w : arm.writes()) {
-                        if (w.key() != null) checkExpr(w.key(), iterEnv, functionReturns, structDefs, typeVars);
-                        checkExpr(w.value(), iterEnv, functionReturns, structDefs, typeVars);
+                        if (w.key() != null) checkExpr(w.key(), iterEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
+                        checkExpr(w.value(), iterEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
                     }
                 }
                 // The always-on conservation discipline (§4): output-kind/write
@@ -1436,8 +1480,8 @@ public final class SortChecker {
                 // emit EVENT  BODY: both are ordinary sub-expressions; the event is
                 // checked (e.g. StdOut("..") is a valid construction) and the body
                 // continues the scope. emit binds nothing.
-                checkExpr(em.event(), typeEnv, functionReturns, structDefs, typeVars);
-                checkExpr(em.body(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(em.event(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
+                checkExpr(em.body(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
             case IrExpr.Cast cast -> {
                 // The target names a sort (validate it like any reference); the
@@ -1445,7 +1489,7 @@ public final class SortChecker {
                 // coercion is actually supported is enforced at eval (slice 1 =
                 // built-in renders to String) — fail-closed there, not here.
                 validateSortNames(cast.targetSort(), structDefs, typeVars);
-                checkExpr(cast.value(), typeEnv, functionReturns, structDefs, typeVars);
+                checkExpr(cast.value(), typeEnv, functionReturns, structDefs, typeVars, algebraicFunctions);
             }
         }
     }
@@ -1585,9 +1629,10 @@ public final class SortChecker {
             IrExpr.Match m,
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns,
-            Map<String, IrSort.Structural> structDefs) throws CompileException {
+            Map<String, IrSort.Structural> structDefs,
+            Set<String> algebraicFunctions) throws CompileException {
         IrSort scrutineeIr = widenOpenPinToBase(
-                inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs));
+                inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs, algebraicFunctions));
 
         // A catch-all arm makes the match total by construction, regardless of
         // what the other arms look like (ordered match: it catches the rest).
@@ -1768,6 +1813,7 @@ public final class SortChecker {
             case IrSort.Named n -> n.name();
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
+            case IrSort.CallSig c -> c.typeName();   // a dispatch nominal's head is its base
             default -> null;
         };
     }
@@ -2183,6 +2229,19 @@ public final class SortChecker {
         return false;
     }
 
+    /**
+     * Whether a {@code Type.field(this)} attribute producer is registered — tolerant to the
+     * linker's module qualification (a builtin type stays bare, but a producer key may be
+     * bare or {@code module/Type.field}).
+     */
+    private static boolean hasAttributeProducer(
+            Map<String, IrSort> functionReturns, String typeName, String field) {
+        String bare = typeName + "." + field;
+        if (functionReturns.containsKey(bare)) return true;
+        String suffix = "/" + bare;
+        return functionReturns.keySet().stream().anyMatch(k -> k.endsWith(suffix));
+    }
+
     /** {@code "[A & B & …]"} over an intersection's branch base names, for diagnostics. */
     private static String describeIntersection(IrSort.Intersection inter) {
         StringBuilder sb = new StringBuilder("[");
@@ -2280,13 +2339,16 @@ public final class SortChecker {
      */
     private static IrSort inferSort(IrExpr expr, Map<String, IrSort> typeEnv,
                                     Map<String, IrSort> functionReturns,
-                                    Map<String, IrSort.Structural> structDefs) {
+                                    Map<String, IrSort.Structural> structDefs,
+                                    Set<String> algebraicFunctions) {
         // One engine: route through NarrowingInference.inferFloor — infer's
         // narrowed sort where it has one (so the FieldAccess refinement
         // projection and arithmetic bounds reach SortChecker for free), else the
-        // coarse base sort the totality/field-existence consumers need.
+        // coarse base sort the totality/field-existence consumers need. The
+        // algebraic-function set lets the floor stamp a metareference's concrete
+        // nominal (AlgebraicDispatch/DispatchBase) so `.ast` field-existence decides.
         return TypeSystem.standard().inferFloor(
-                expr, floorContext(typeEnv, functionReturns, structDefs));
+                expr, floorContext(typeEnv, functionReturns, structDefs, algebraicFunctions));
     }
 
     /**
@@ -2300,7 +2362,8 @@ public final class SortChecker {
     private static InferenceContext floorContext(
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns,
-            Map<String, IrSort.Structural> structDefs) {
+            Map<String, IrSort.Structural> structDefs,
+            Set<String> algebraicFunctions) {
         return new InferenceContext(
                 stripNullValues(typeEnv),
                 stripNullValues(functionReturns),
@@ -2309,7 +2372,7 @@ public final class SortChecker {
                 Map.of(),
                 Map.of(),
                 java.util.Set.of(),
-                java.util.Set.of());
+                algebraicFunctions);
     }
 
     private static <V> Map<String, V> stripNullValues(Map<String, V> m) {

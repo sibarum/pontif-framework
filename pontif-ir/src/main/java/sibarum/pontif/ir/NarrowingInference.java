@@ -119,25 +119,22 @@ public final class NarrowingInference {
         };
     }
 
-    /** The name after {@code $} in a metareference — the dispatch's referent function. */
-    private static final String ALGEBRAIC = "Algebraic";
-
     /**
-     * The narrowed sort of a metareference {@code $f[keys]}: its bare
-     * {@link IrSort.Dispatch} shape, or — when {@code f} carries an {@code assign
-     * proof f:Algebraic} claim — the trait-view intersection
-     * {@code [Dispatch(keys):_ & Algebraic]}. The intersection widens freely to the
-     * bare Dispatch (some-branch is-a) but not the reverse, so the algebraic view is
-     * earned by the proof and never fabricated (roadmap §5).
+     * The narrowed sort of a metareference {@code $f[keys]}: a dispatch-style
+     * {@link IrSort.CallSig} stamped with its CONCRETE nominal — {@code AlgebraicDispatch}
+     * when {@code f} carries an {@code assign proof f:Algebraic} claim, else the plain
+     * {@code DispatchBase} (docs/dispatch-method-elimination.md E2). Both are dispatch-style
+     * (seeded in {@link CallKinds}), so either still fits a {@code [Dispatch(…)]} param via
+     * key-sort subsumption; only {@code AlgebraicDispatch is-a Algebraic}, so {@code .ast}
+     * resolves off its {@code ast} attribute and {@code $inc[…].ast} (DispatchBase) is a
+     * compile error. The runtime image is the matching {@code RecordValue} (see
+     * {@link sibarum.pontif.ast.record.Metaref}).
      */
     private static IrSort dispatchRefSort(IrExpr.DispatchRef d, InferenceContext ctx) {
-        IrSort.CallSig shape = new IrSort.CallSig(
-                IrSort.CallSig.DISPATCH, d.keySorts(), IrSort.named("_"), d.origin());
-        if (!ctx.algebraicFunctions().contains(d.functionName())) {
-            return shape;
-        }
-        return new IrSort.Intersection(
-                List.of(shape, new IrSort.Named(ALGEBRAIC, d.origin())), d.origin());
+        String typeName = ctx.algebraicFunctions().contains(d.functionName())
+                ? sibarum.pontif.ast.record.Metaref.ALGEBRAIC_DISPATCH
+                : sibarum.pontif.ast.record.Metaref.DISPATCH;
+        return new IrSort.CallSig(typeName, d.keySorts(), IrSort.named("_"), d.origin());
     }
 
     /**
@@ -287,8 +284,11 @@ public final class NarrowingInference {
             case IrExpr.Lambda lam -> new IrSort.CallSig(IrSort.CallSig.METHOD,
                     lam.params().stream().map(IrParam::sort).toList(),
                     lam.returnSort(), lam.origin());
-            // Match / LetIn / Apply / SelfRef / Iterate / DispatchRef: no coarser
-            // floor than infer already gives.
+            // A metareference's floor IS its concrete dispatch nominal
+            // (AlgebraicDispatch/DispatchBase) — the field-existence gate reads it to
+            // decide whether `.ast` is available (docs/dispatch-method-elimination.md E2).
+            case IrExpr.DispatchRef d -> dispatchRefSort(d, ctx);
+            // Match / LetIn / Apply / SelfRef / Iterate: no coarser floor than infer gives.
             default -> null;
         };
     }

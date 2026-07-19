@@ -6,12 +6,12 @@ import sibarum.pontif.runtime.PontifRunner.Engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * AlgebraicDispatch (roadmap §5): the {@code [[Dispatch(Decimal):Decimal] & Algebraic]}
- * trait-view sort. A metareference whose referent carries an {@code assign proof
- * f:Algebraic} claim is stamped with this intersection by inference; it widens to a
- * plain {@code Dispatch} (a some-branch is-a) and carries the {@code Algebraic} marker.
- * This slice pins the sort's well-formedness and propagation through a parameter; the
- * {@code $f[Decimal].ast} member surface is the next slice.
+ * AlgebraicDispatch (docs/dispatch-method-elimination.md E2): a metareference whose
+ * referent carries an {@code assign proof f:Algebraic} claim narrows to the concrete
+ * builtin nominal {@code AlgebraicDispatch} (is-a both {@code Dispatch} and the real
+ * {@code Algebraic} trait). This pins that it fits an {@code Algebraic} parameter
+ * (propagation), and that a NON-algebraic reference does NOT — the guarantee travels
+ * with the value's type, not a marker intersection.
  */
 class AlgebraicDispatchTest {
 
@@ -23,15 +23,17 @@ class AlgebraicDispatchTest {
     }
 
     @Test
-    void algebraicDispatchParamSort_isWellFormedAndAlgebraicRefFits() {
-        // The `& Algebraic` param sort validates, an algebraic metareference fits it
-        // (propagation), and it widens to a plain Dispatch for astOf — end-to-end.
+    void algebraicMetareference_fitsAnAlgebraicParameter_andReflects() {
+        // An algebraic metareference fits an `Algebraic` param and its `.ast` reflects —
+        // end-to-end through a function boundary. (Static REJECTION of a non-algebraic ref
+        // at such a param is the deferred §1d propagation gate; the DIRECT `$f[…].ast`
+        // guarantee is statically enforced — see AlgebraAstSurfaceTest.)
         assertEquals("true", run("""
-                requires pontif.algebra.{astOf, eval}
+                requires pontif.algebra.{eval, Algebraic}
                 function poly(x:Decimal):Decimal -> x*x + 1.0
                 assign proof poly:Algebraic
-                function reflectAndEval(f:[[Dispatch(Decimal):Decimal] & Algebraic], x:Decimal):Decimal ->
-                  eval(astOf(f), x)
+                function reflectAndEval(f:Algebraic, x:Decimal):Decimal ->
+                  eval(f.ast, x)
                 reflectAndEval($poly[Decimal], 5.0) == poly(5.0)
                 """));
     }

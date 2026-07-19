@@ -106,10 +106,22 @@ public sealed interface SymExpr
      * Dispatch-reference value leaf — a metareference ({@code inc[Int]})
      * lifted to the symbolic layer. A value atom built from statics only
      * (name + key sorts, no data content); the discharge engines abstain.
+     *
+     * <p>{@code typeName} (nullable) is the reference's concrete dispatch nominal
+     * ({@code Dispatch} / {@code AlgebraicDispatch}) when it came from a first-class
+     * metareference value; it lets trait-param dispatch see e.g. {@code AlgebraicDispatch
+     * is-a Algebraic}. {@code null} for a static/compiled metareference (no nominal yet).
+     * Key-sort matching against a {@code [Dispatch(…)]} sort ignores it.
      */
-    record DispatchRef(String functionName, List<Sort> keySorts) implements SymExpr {
+    record DispatchRef(String functionName, List<Sort> keySorts, String typeName)
+            implements SymExpr {
         public DispatchRef {
             keySorts = List.copyOf(keySorts);
+        }
+
+        /** Back-compat: a metareference with no concrete nominal (a static reference). */
+        public DispatchRef(String functionName, List<Sort> keySorts) {
+            this(functionName, keySorts, null);
         }
     }
 
