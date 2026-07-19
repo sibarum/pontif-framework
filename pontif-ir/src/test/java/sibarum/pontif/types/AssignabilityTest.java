@@ -118,6 +118,19 @@ class AssignabilityTest {
                 Assignability.assign(named("Vec3"), INT, ctx()));
     }
 
+    @Test
+    void numericTowerCoerces_butStructsDoNot() {
+        // Int -> Decimal: the lossless auto-conversion — COERCE (concrete changes), not WIDEN, not a cast.
+        assertEquals(Assignability.Assignment.COERCE,
+                Assignability.assign(INT, DECIMAL, ctx()));
+        // The reverse is not a lossless tower step.
+        assertEquals(Assignability.Assignment.ILLEGAL,
+                Assignability.assign(DECIMAL, INT, ctx()));
+        // COERCE never applies to structs — same-structure siblings still NEEDS_CAST.
+        assertEquals(Assignability.Assignment.NEEDS_CAST,
+                Assignability.assign(named("Vec3"), named("Color"), ctx()));
+    }
+
     // --- construct ---------------------------------------------------------
 
     @Test

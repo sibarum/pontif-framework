@@ -75,18 +75,33 @@ public final class Assignability {
     /** What binding a value of concrete type {@code from} into a slot declared {@code to} requires. */
     public static Assignment assign(IrSort from, IrSort to, AssignabilityContext ctx) {
         if (isA(from, to, ctx)) return sameType(from, to) ? Assignment.EXACT : Assignment.WIDEN;
+        // The numeric tower's lossless auto-conversion (Int -> Decimal) — a convenience/compatibility
+        // coercion for primitives only. NOT an is-a, and it never applies to structs (roadmap §6.4).
+        if (isNumericWidening(from, to)) return Assignment.COERCE;
         // Not is-a: legal only through an explicit cast, and only if the underlying structures are
         // compatible (a down/lateral/lossless retag). Otherwise there is no cast that could produce it.
         return sameType(bottomStructure(from, ctx), bottomStructure(to, ctx))
                 ? Assignment.NEEDS_CAST : Assignment.ILLEGAL;
     }
 
+    /** The closed numeric tower's one lossless auto-conversion: {@code Int → Decimal}. */
+    private static boolean isNumericWidening(IrSort from, IrSort to) {
+        return "Int".equals(baseName(from)) && "Decimal".equals(baseName(to));
+    }
+
     /** The outcome of an assignment {@code let _:to = value(concrete=from)}. */
     public enum Assignment {
         /** Concrete type already equals the declared sort. */
         EXACT,
-        /** A widen — {@code from is-a to}; the concrete type is preserved, no runtime work. */
+        /** A widen — {@code from is-a to}; the concrete type is preserved, no runtime work (a view). */
         WIDEN,
+        /**
+         * A lossless implicit CONVERSION — the numeric tower's {@code Int → Decimal} (and, later,
+         * autobox). Unlike {@link #WIDEN} (a view, concrete preserved), it <em>changes</em> the
+         * concrete value ({@code Long → BigDecimal}): convenience/numeric-compatibility sugar that
+         * applies to primitives only, never structs. No explicit cast needed (roadmap §6.4).
+         */
+        COERCE,
         /** Not is-a, but a cast could produce it (compatible structure) — the caller must write one. */
         NEEDS_CAST,
         /** No cast could produce it — a hard type error. */

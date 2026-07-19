@@ -196,17 +196,15 @@ runtime check** — an unprovable fit is a compile error (or explicit `[!!]`), n
 (or a listed one that stops diverging) fails the test, so drift on either engine is caught.
 This is the deletion baseline for the whole C3 migration.
 
-**First-run findings (10-pair corpus): 7 agree, 3 diverge — two categories:**
-- **engine WEAKER — a gap to close (§4.2):** `Int → Decimal` — legacy `IntToDecimal` is legal;
-  `Assignability` has no primitive-embedding. *(NB: this one is entangled with the §6.5
-  view-based `WIDEN` — `Int→Decimal` **changes** the concrete (Long→BigDecimal), so it's a
-  lossless **coercion**, not a view-only `WIDEN`. Closing it needs a design call: a distinct
-  `Assignment` outcome for lossless coercion vs folding it into `WIDEN`. Decide before coding.)*
+**Findings (10-pair corpus): now 8 agree, 2 diverge (both "engine stricter").**
+- ~~engine WEAKER — `Int → Decimal`~~ **CLOSED** via the new `Assignment.COERCE` outcome (§4.2):
+  a lossless primitive conversion, distinct from view-`WIDEN` (per §6.5, it changes the concrete
+  `Long→BigDecimal`). Now agrees with the legacy.
 - **engine STRICTER — accepted, the target is better:** `Point → Showable` (non-impl) and
   `Point → AnyNumber` (non-member). The engine rejects eagerly (correct); the legacy **defers**
   — `TraitCast` (satisfaction checked later by `SortChecker`) / abstains to `None` on the
   unresolved alias. The deferred stage rejects these anyway, so migrating tightens the check
-  with no valid-program regression.
+  with no valid-program regression. These stay in `KNOWN_DIVERGENCES`.
 
 *The harness is corpus-extensible: add refinement / generics / intersection / function-sort
 pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVERGENCES`).*
@@ -216,7 +214,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Gap | Status | Size | Notes |
 |---|---|---|---|
 | Refinement-precise leaf subsumption | absent (shape-equality only) | M | delegate to `Refinements.imply`; partly gated on TODO "strengthen `imply` via bounds" |
-| `Int→Decimal` / primitive coercion | absent | S–M | lives only in `CoercionResolver`/`ConstructionGate` today |
+| `Int→Decimal` / primitive coercion | ✅ **DONE** (2026-07-18) | S | new `Assignment.COERCE` outcome — a lossless primitive conversion (concrete changes), distinct from view-`WIDEN`; structs never get it. Pinned by `AssignabilityTest.numericTowerCoerces_butStructsDoNot` |
 | `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |

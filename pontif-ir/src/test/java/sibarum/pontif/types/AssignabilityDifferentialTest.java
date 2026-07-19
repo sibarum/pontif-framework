@@ -57,7 +57,9 @@ class AssignabilityDifferentialTest {
     private static boolean legalAssignability(IrSort from, IrSort to) {
         Assignability.Assignment v =
                 Assignability.assign(from, to, AssignabilityContext.of(catalog(), TRAIT_IMPLS));
-        return v == Assignability.Assignment.EXACT || v == Assignability.Assignment.WIDEN;
+        return v == Assignability.Assignment.EXACT
+                || v == Assignability.Assignment.WIDEN
+                || v == Assignability.Assignment.COERCE;   // lossless implicit conversion (Int->Decimal)
     }
 
     private static boolean legalCoercion(IrSort from, IrSort to) {
@@ -98,9 +100,6 @@ class AssignabilityDifferentialTest {
      * A divergence outside this set — or a listed one that no longer diverges — fails the test.
      */
     private static final Map<String, String> KNOWN_DIVERGENCES = Map.of(
-            "int->decimal embed: Int -> Decimal",
-            "engine WEAKER (gap to close, §4.2): legacy IntToDecimal is legal; Assignability lacks "
-                    + "the primitive-coercion embedding.",
             "trait (non-impl): Point -> Showable",
             "engine STRICTER (accepted): Point does not satisfy Showable — the engine rejects "
                     + "eagerly; legacy returns TraitCast and defers satisfaction to SortChecker.",
