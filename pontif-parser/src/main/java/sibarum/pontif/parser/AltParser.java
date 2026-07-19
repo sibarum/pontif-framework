@@ -3,6 +3,7 @@ package sibarum.pontif.parser;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.ir.CallKinds;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.InferenceContext;
 import sibarum.pontif.ir.IrCompiler;
@@ -487,8 +488,9 @@ public final class AltParser {
         // for the gate; monomorphizing would coarsen it to the base — so defer to it.
         boolean needsMono = false;
         for (IrParam p : sig.params()) {
-            if (p.sort() instanceof IrSort.Dispatch d
-                    && d.keySorts().stream().anyMatch(k ->
+            if (p.sort() instanceof IrSort.CallSig d
+                    && CallKinds.builtin(d.typeName()) == CallKinds.Kind.DISPATCH
+                    && d.paramSorts().stream().anyMatch(k ->
                             k instanceof IrSort.Named kn && sig.typeParams().contains(kn.name()))) {
                 needsMono = true;
                 break;
@@ -536,10 +538,12 @@ public final class AltParser {
             }
             return;
         }
-        if (param instanceof IrSort.Dispatch pd && arg instanceof IrSort.Dispatch ad) {
-            if (pd.keySorts().size() == ad.keySorts().size()) {
-                for (int i = 0; i < pd.keySorts().size(); i++) {
-                    unifyTypeParam(pd.keySorts().get(i), ad.keySorts().get(i), tvars, binds);
+        if (param instanceof IrSort.CallSig pd && arg instanceof IrSort.CallSig ad
+                && CallKinds.builtin(pd.typeName()) == CallKinds.Kind.DISPATCH
+                && CallKinds.builtin(ad.typeName()) == CallKinds.Kind.DISPATCH) {
+            if (pd.paramSorts().size() == ad.paramSorts().size()) {
+                for (int i = 0; i < pd.paramSorts().size(); i++) {
+                    unifyTypeParam(pd.paramSorts().get(i), ad.paramSorts().get(i), tvars, binds);
                 }
             }
             unifyTypeParam(pd.returnSort(), ad.returnSort(), tvars, binds);
@@ -1762,8 +1766,9 @@ public final class AltParser {
                         paramSorts.add(p.sort());
                         paramNames.add(p.name());
                     }
-                    IrSort methodSort = new IrSort.Method(
-                            paramSorts, paramNames, frag.returnSort(), start.origin());
+                    IrSort methodSort = new IrSort.CallSig(
+                            IrSort.CallSig.METHOD, paramSorts, paramNames,
+                            frag.returnSort(), start.origin());
                     declaredTopLevelLets.put(name, methodSort);
                     if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
                     return new IrStmt.FunctionDecl(
@@ -2728,7 +2733,7 @@ public final class AltParser {
                 typeParams, body.operators(), baseTrait, List.of(),
                 body.methodDefaults(), body.returnShells(), body.argShells(), body.origin());
         types.register(name, new TypeInfo.Trait(named));
-        for (Map.Entry<String, IrSort.Method> e : named.methods().entrySet()) {
+        for (Map.Entry<String, IrSort.CallSig> e : named.methods().entrySet()) {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue().returnSort());
         }
         // A data attribute is a computed projection — accessing it through the
@@ -2753,11 +2758,11 @@ public final class AltParser {
      */
     private IrSort.Trait parseTraitMembers(AltToken headTok) throws ParseException {
         expect(AltToken.Kind.LBRACE);
-        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
         // Default method bodies — member name → a body-bearing FunctionDecl, present
         // only for a DEFAULTED method (`quack():Int -> this.x`). The same method also
-        // lands in `methods` as its IrSort.Method signature.
+        // lands in `methods` as its IrSort.CallSig signature.
         Map<String, IrStmt.FunctionDecl> methodDefaults = new LinkedHashMap<>();
         // Return shells — member name → its trait-owned output transform `[C->D]`
         // (docs/sort-transforms.md); present when a method's return is a clause-chain.
@@ -2771,7 +2776,7 @@ public final class AltParser {
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
         // Operator contract members — `+:[Dispatch(this.type, this.type):this.type]`
         // (dispatch-unification B1). Keyed by the operator symbol.
-        Map<String, IrSort.Dispatch> operators = new LinkedHashMap<>();
+        Map<String, IrSort.CallSig> operators = new LinkedHashMap<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
@@ -2788,7 +2793,8 @@ public final class AltParser {
                 }
                 expect(AltToken.Kind.COLON);
                 IrSort opSort = parseSort();
-                if (!(opSort instanceof IrSort.Dispatch dispatch)) {
+                if (!(opSort instanceof IrSort.CallSig dispatch)
+                        || CallKinds.builtin(dispatch.typeName()) != CallKinds.Kind.DISPATCH) {
                     throw new ParseException(
                             "Operator contract member '" + opTok.text() + "' must be a "
                                     + "[Dispatch(...)] sort (e.g. "
@@ -2850,10 +2856,12 @@ public final class AltParser {
             }
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
-            // A member is a METHOD if its sort is [Method(...):Ret]; otherwise
-            // it is a typed data ATTRIBUTE — a value sort the satisfier must
-            // supply (a field or a computed producer). Both live in `Type{…}`.
-            if (memberSort instanceof IrSort.Method fn) {
+            // A member is a METHOD if its sort is a function-style call signature
+            // ([Method(...):Ret]); otherwise it is a typed data ATTRIBUTE — a value
+            // sort the satisfier must supply (a field or a computed producer). Both
+            // live in `Type{…}`. Decided by call-kind capability, not by name.
+            if (memberSort instanceof IrSort.CallSig fn
+                    && CallKinds.builtin(fn.typeName()) == CallKinds.Kind.FUNCTION) {
                 methods.put(memberName.text(), fn);
             } else {
                 attributes.put(memberName.text(), memberSort);
@@ -2874,7 +2882,7 @@ public final class AltParser {
      * <ul>
      *   <li><b>Return shell</b> — when the return is a clause-chain {@code [C -> … -> D]}
      *       (docs/sort-transforms.md), callers see the terminus {@code D} (the contract
-     *       {@link IrSort.Method} returnSort), the kernel returns the domain {@code C}, and
+     *       {@link IrSort.CallSig} returnSort), the kernel returns the domain {@code C}, and
      *       the chain is stored in {@code returnShells} for TraitDefaultExpansion to wrap
      *       the kernel with. A plain sort = no shell (kernel return == contract return).</li>
      *   <li><b>Default body</b> — a trailing {@code -> body} makes it a DEFAULT kernel
@@ -2890,7 +2898,7 @@ public final class AltParser {
      */
     private void parseTraitMethodMember(
             AltToken nameTok,
-            Map<String, IrSort.Method> methods,
+            Map<String, IrSort.CallSig> methods,
             Map<String, IrStmt.FunctionDecl> methodDefaults,
             Map<String, IrExpr.Lambda> returnShells,
             Map<String, Map<Integer, IrExpr.Lambda>> argShells) throws ParseException {
@@ -2943,7 +2951,8 @@ public final class AltParser {
             paramNames.add(p.name());
         }
         methods.put(nameTok.text(),
-                new IrSort.Method(paramSorts, paramNames, contractReturn, nameTok.origin()));
+                new IrSort.CallSig(IrSort.CallSig.METHOD, paramSorts, paramNames,
+                        contractReturn, nameTok.origin()));
         declaredFunctionReturns.put(nameTok.text(), contractReturn);
 
         // Body OPTIONAL: `-> expr` is a default kernel (returning the inner face C);
@@ -2989,11 +2998,11 @@ public final class AltParser {
      * later slice; until then they fail here with a clear error rather than being
      * silently stored and ignored (no verifier consumes them yet).
      */
-    private void requireHomogeneousSelfOperatorContract(AltToken opTok, IrSort.Dispatch d)
+    private void requireHomogeneousSelfOperatorContract(AltToken opTok, IrSort.CallSig d)
             throws ParseException {
-        boolean homogeneous = d.keySorts().size() == 2
-                && isSelfType(d.keySorts().get(0))
-                && isSelfType(d.keySorts().get(1))
+        boolean homogeneous = d.paramSorts().size() == 2
+                && isSelfType(d.paramSorts().get(0))
+                && isSelfType(d.paramSorts().get(1))
                 && isSelfType(d.returnSort());
         if (!homogeneous) {
             throw new ParseException(
@@ -3105,15 +3114,13 @@ public final class AltParser {
         }
 
         if (typeArgs.isEmpty() && peek().kind() == AltToken.Kind.LPAREN) {
-            if (baseTok.text().equals("Method")) {
-                return parseFunctionSortBody(baseTok);
-            }
-            if (baseTok.text().equals("Dispatch")) {
-                // [Dispatch(Int):Int] — the metareference sort. Same body
-                // grammar as Method; a different sort entirely (a dispatch is
-                // a name-keyed candidate set, not a single body).
-                IrSort.Method shape = parseFunctionSortBody(baseTok);
-                return new IrSort.Dispatch(shape.paramSorts(), shape.returnSort(), baseTok.origin());
+            // Call-signature vs struct is PURELY SYNTACTIC (docs/dispatch-method-elimination.md
+            // §2): `Name(…):Return` (a `:` after the matching `)`) is a call signature whose
+            // head name is DATA; `Name(…)` with no trailing `:` is a struct. No `Method`/
+            // `Dispatch` keyword branch — the head type's call-kind capability is resolved
+            // downstream, never here.
+            if (callSigColonFollows()) {
+                return parseCallSigBody(baseTok);
             }
             consume();  // LPAREN
             java.util.Set<String> literalFields = new java.util.LinkedHashSet<>();
@@ -3421,16 +3428,37 @@ public final class AltParser {
     }
 
     /**
-     * Parses {@code (P1, P2, ...):R} after the {@code Method} keyword. Each parameter
-     * is either positional ({@code Int}) or named ({@code i:Int}); a sort is all-named
-     * or all-positional (mixing is an error). Named parameters are the binders a
-     * dependent return/param sort references (WAR(dependent-sorts), slice 1: names are
-     * parsed and carried on {@link IrSort.Method}; slice 2 resolves references to them).
-     *
-     * <p>The returned {@link IrSort.Method} uses the {@code Method} token's origin; the
-     * caller may rebuild with a wider span if it has the closing {@code ]} on hand.
+     * Whether {@code peek()} — an opening {@code (} of a {@code Name(…)} group — is the
+     * start of a <b>call signature</b> {@code Name(…):Return} rather than a struct
+     * {@code Name(…)}. Purely syntactic: scan to the matching {@code )} and report whether
+     * a {@code :} follows it at paren-depth 0 (docs/dispatch-method-elimination.md §2).
      */
-    private IrSort.Method parseFunctionSortBody(AltToken funcTok) throws ParseException {
+    private boolean callSigColonFollows() {
+        int depth = 0;
+        for (int i = 0; ; i++) {
+            AltToken.Kind k = peek(i).kind();
+            if (k == AltToken.Kind.EOF) return false;
+            if (k == AltToken.Kind.LPAREN || k == AltToken.Kind.LBRACKET
+                    || k == AltToken.Kind.LBRACE) {
+                depth++;
+            } else if (k == AltToken.Kind.RPAREN || k == AltToken.Kind.RBRACKET
+                    || k == AltToken.Kind.RBRACE) {
+                depth--;
+                if (depth == 0) return peek(i + 1).kind() == AltToken.Kind.COLON;
+            }
+        }
+    }
+
+    /**
+     * Parses a call signature {@code Head(P1, P2, ...):R} — the head token is already
+     * consumed (passed as {@code headTok}); the {@code (} is the current token. The head
+     * NAME is data ({@code Method}, {@code Dispatch}, or any callable type); the sort's
+     * call-kind behavior is decided downstream by capability, never by this name. Each
+     * parameter is positional ({@code Int}) or named ({@code i:Int}); a sort is all-named
+     * or all-positional (mixing is an error). Named parameters are the binders a dependent
+     * return/param sort references (WAR(dependent-sorts)).
+     */
+    private IrSort.CallSig parseCallSigBody(AltToken headTok) throws ParseException {
         expect(AltToken.Kind.LPAREN);
         List<IrSort> paramSorts = new ArrayList<>();
         List<String> paramNames = new ArrayList<>();
@@ -3454,11 +3482,11 @@ public final class AltParser {
         IrSort returnSort = parseSort();
         if (named != 0 && named != paramSorts.size()) {
             throw new ParseException(
-                    "Method sort mixes named and positional parameters — name all of "
-                            + "them or none.", funcTok.origin());
+                    "'" + headTok.text() + "' call signature mixes named and positional "
+                            + "parameters — name all of them or none.", headTok.origin());
         }
         List<String> names = named == 0 ? List.of() : paramNames;
-        return new IrSort.Method(paramSorts, names, returnSort, funcTok.origin());
+        return new IrSort.CallSig(headTok.text(), paramSorts, names, returnSort, headTok.origin());
     }
 
     /**
@@ -4534,8 +4562,9 @@ public final class AltParser {
                         paramSorts.add(p.sort());
                         paramNames.add(p.name());
                     }
-                    IrSort methodSort = new IrSort.Method(
-                            paramSorts, paramNames, frag.returnSort(), start.origin());
+                    IrSort methodSort = new IrSort.CallSig(
+                            IrSort.CallSig.METHOD, paramSorts, paramNames,
+                            frag.returnSort(), start.origin());
                     IrSort prev = currentScope.get(name);
                     boolean had = currentScope.containsKey(name);
                     currentScope.put(name, methodSort);
@@ -5609,8 +5638,7 @@ public final class AltParser {
                 }
                 yield sb.append(")").toString();
             }
-            case IrSort.Method m -> "Method(…)";
-            case IrSort.Dispatch d -> "Dispatch(…)";
+            case IrSort.CallSig c -> c.typeName() + "(…)";
             case IrSort.Union u -> {
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < u.branches().size(); i++) {
@@ -5636,8 +5664,8 @@ public final class AltParser {
             case IrSort.Named n -> n.name();
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
-            case IrSort.Method f -> null;
-            case IrSort.Dispatch d -> "Dispatch";
+            case IrSort.CallSig c -> CallKinds.builtin(c.typeName()) == CallKinds.Kind.FUNCTION
+                    ? null : c.typeName();
             case IrSort.Trait t -> t.name();
             // Cross-base unions/intersections have no single base name.
             case IrSort.Union u -> null;

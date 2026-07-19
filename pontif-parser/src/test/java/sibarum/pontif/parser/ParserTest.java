@@ -206,8 +206,8 @@ class ParserTest {
     @Test
     void functionSort_parsesParamsAndReturn() throws Exception {
         IrSort s = sort("(function (Int) Int)");
-        assertInstanceOf(IrSort.Method.class, s);
-        IrSort.Method f = (IrSort.Method) s;
+        assertInstanceOf(IrSort.CallSig.class, s);
+        IrSort.CallSig f = (IrSort.CallSig) s;
         assertEquals(1, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Int", ((IrSort.Named) f.returnSort()).name());
@@ -216,7 +216,7 @@ class ParserTest {
     @Test
     void functionSort_withMultipleParams_parses() throws Exception {
         IrSort s = sort("(function (Int Int Bool) Int)");
-        IrSort.Method f = (IrSort.Method) s;
+        IrSort.CallSig f = (IrSort.CallSig) s;
         assertEquals(3, f.paramSorts().size());
         assertEquals("Bool", ((IrSort.Named) f.paramSorts().get(2)).name());
     }
@@ -224,7 +224,7 @@ class ParserTest {
     @Test
     void functionSort_withZeroParams_parses() throws Exception {
         IrSort s = sort("(function () Int)");
-        IrSort.Method f = (IrSort.Method) s;
+        IrSort.CallSig f = (IrSort.CallSig) s;
         assertEquals(0, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.returnSort()).name());
     }
@@ -295,9 +295,9 @@ class ParserTest {
     void functionSort_canReturnAnotherFunctionSort() throws Exception {
         // (Int) -> ((Int) -> Int) — curried Int -> Int -> Int
         IrSort s = sort("(function (Int) (function (Int) Int))");
-        IrSort.Method outer = (IrSort.Method) s;
-        assertInstanceOf(IrSort.Method.class, outer.returnSort());
-        IrSort.Method inner = (IrSort.Method) outer.returnSort();
+        IrSort.CallSig outer = (IrSort.CallSig) s;
+        assertInstanceOf(IrSort.CallSig.class, outer.returnSort());
+        IrSort.CallSig inner = (IrSort.CallSig) outer.returnSort();
         assertEquals(1, inner.paramSorts().size());
     }
 

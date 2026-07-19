@@ -892,8 +892,7 @@ public final class ConservationDrafter {
                     ? "(" + String.join(", ", s.members().values().stream()
                             .map(ConservationDrafter::renderSort).toList()) + ")"
                     : s.name();
-            case IrSort.Method f -> "Method";
-            case IrSort.Dispatch d -> "Dispatch";
+            case IrSort.CallSig c -> c.typeName();
             case IrSort.Trait t -> t.name();
             case IrSort.Union u -> "Union";
             case IrSort.Intersection i -> "Intersection";

@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.ir.CallKinds;
+import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrSort;
 
@@ -237,11 +239,11 @@ class AssignabilityTest {
     // --- function sorts (Method / Dispatch) --------------------------------
 
     private static IrSort method(IrSort param, IrSort ret) {
-        return new IrSort.Method(List.of(param), ret, Origin.NONE);   // [Method(param):ret]
+        return new IrSort.CallSig(IrSort.CallSig.METHOD, List.of(param), ret, Origin.NONE);   // [Method(param):ret]
     }
 
     private static IrSort dispatch(IrSort key, IrSort ret) {
-        return new IrSort.Dispatch(List.of(key), ret, Origin.NONE);   // [Dispatch(key):ret]
+        return new IrSort.CallSig(IrSort.CallSig.DISPATCH, List.of(key), ret, Origin.NONE);   // [Dispatch(key):ret]
     }
 
     @Test
@@ -279,5 +281,39 @@ class AssignabilityTest {
         assertFalse(Assignability.isA(disp, algebraic, ctx()));              // plain ≠ algebraic
         assertTrue(Assignability.isA(algebraic, algebraic, ctx()));          // reflexive
         assertTrue(Assignability.isA(algebraic, named("Algebraic"), ctx())); // carries the marker
+    }
+
+    // --- ACID TEST: a NEW callable type via pure capability DATA (no type-system edit) ---
+
+    private static IrSort widget(IrSort key, IrSort ret) {
+        return new IrSort.CallSig("Widget", List.of(key), ret, Origin.NONE);   // [Widget(key):ret]
+    }
+
+    @Test
+    void newCallableType_parsesSubtypesSatisfies_viaCapabilityDataOnly() throws Exception {
+        // docs/dispatch-method-elimination.md §3 (E1 acid test). "Widget" is not a builtin
+        // call-kind head; it becomes dispatch-style ONLY through the capability DATA in the
+        // context (as if a user wrote `assign trait Widget : dispatch-style`). No edit to
+        // Assignability, Refinements, or the parser is required — the head name is data and
+        // the call-kind behavior is looked up from the trait-impl view. (Parsing of an
+        // arbitrary `Widget(Int):Int` head is proven in AltParserSortTest.)
+        AssignabilityContext c = AssignabilityContext.of(new TypeCatalog(), Map.of(
+                "Widget", java.util.Set.of(CallKinds.DISPATCH_STYLE)));
+        IrSort gt0 = refinedInt(IrExpr.Op.GT, 0);
+
+        // SUBTYPE — the dispatch-style rule (exact keys + covariant return) fires because
+        // Widget is-a dispatch-style, selected by capability, never by name.
+        assertTrue(Assignability.isA(widget(INT, INT), widget(INT, INT), c));      // reflexive
+        assertTrue(Assignability.isA(widget(INT, gt0), widget(INT, INT), c));      // covariant return
+        assertFalse(Assignability.isA(widget(INT, INT), widget(DECIMAL, INT), c)); // different keys
+        // A dispatch-style Widget never cross-assigns a function-style Method.
+        assertFalse(Assignability.isA(method(INT, INT), widget(INT, INT), c));
+
+        // SATISFY — the compiled core sort is dispatch-shaped (value-satisfied by a
+        // metareference, not a lambda). Method is the sole function-style head, so every
+        // other callable head compiles to the dispatch value rule (§2) — matching Widget's
+        // declared capability, again with no Refinements change.
+        assertTrue(IrCompiler.compileSort(widget(INT, INT)).isDispatch());
+        assertFalse(IrCompiler.compileSort(method(INT, INT)).isDispatch());
     }
 }

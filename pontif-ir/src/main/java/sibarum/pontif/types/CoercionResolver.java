@@ -1,5 +1,6 @@
 package sibarum.pontif.types;
 
+import sibarum.pontif.ir.CallKinds;
 import sibarum.pontif.ir.IrSort;
 
 /**
@@ -101,8 +102,8 @@ final class CoercionResolver {
             case IrSort.Named n -> n.name();
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
-            case IrSort.Method f -> null;
-            case IrSort.Dispatch d -> "Dispatch";
+            case IrSort.CallSig c -> CallKinds.builtin(c.typeName()) == CallKinds.Kind.FUNCTION
+                    ? null : c.typeName();
             case IrSort.Trait t -> t.name();
             // Cross-base unions/intersections have no single base name.
             case IrSort.Union u -> null;
@@ -134,8 +135,7 @@ final class CoercionResolver {
                 }
                 yield sb.append(")").toString();
             }
-            case IrSort.Method m -> "Method(…)";
-            case IrSort.Dispatch d -> "Dispatch(…)";
+            case IrSort.CallSig c -> c.typeName() + "(…)";
             case IrSort.Union u -> {
                 StringBuilder sb = new StringBuilder();
                 for (int i = 0; i < u.branches().size(); i++) {

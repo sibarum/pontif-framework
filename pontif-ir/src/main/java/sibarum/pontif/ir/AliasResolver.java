@@ -251,28 +251,22 @@ public final class AliasResolver {
                 yield new IrSort.Structural(
                         s.name(), resolvedMembers, resolvedBase, s.typeParams(), s.origin());
             }
-            case IrSort.Method f -> {
-                List<IrSort> resolvedParams = new ArrayList<>(f.paramSorts().size());
-                for (IrSort p : f.paramSorts()) {
+            case IrSort.CallSig c -> {
+                List<IrSort> resolvedParams = new ArrayList<>(c.paramSorts().size());
+                for (IrSort p : c.paramSorts()) {
                     resolvedParams.add(resolveSort(p, aliases, path));
                 }
-                yield new IrSort.Method(resolvedParams, resolveSort(f.returnSort(), aliases, path), f.origin());
-            }
-            case IrSort.Dispatch d -> {
-                List<IrSort> resolvedKeys = new ArrayList<>(d.keySorts().size());
-                for (IrSort k : d.keySorts()) {
-                    resolvedKeys.add(resolveSort(k, aliases, path));
-                }
-                yield new IrSort.Dispatch(resolvedKeys, resolveSort(d.returnSort(), aliases, path), d.origin());
+                yield new IrSort.CallSig(c.typeName(), resolvedParams, c.paramNames(),
+                        resolveSort(c.returnSort(), aliases, path), c.origin());
             }
             case IrSort.Trait t -> {
-                // Trait sort's method signatures are Function sorts; recurse
+                // Trait sort's method signatures are call-sig sorts; recurse
                 // into each to substitute any aliased param/return types.
-                Map<String, IrSort.Method> resolvedMethods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
+                Map<String, IrSort.CallSig> resolvedMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.CallSig> e : t.methods().entrySet()) {
                     resolvedMethods.put(
                             e.getKey(),
-                            (IrSort.Method) resolveSort(e.getValue(), aliases, path));
+                            (IrSort.CallSig) resolveSort(e.getValue(), aliases, path));
                 }
                 Map<String, IrSort> resolvedAttrs = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
@@ -452,22 +446,18 @@ public final class AliasResolver {
                 yield new IrSort.Structural(
                         s.name(), newMembers, newBase, s.typeParams(), s.origin());
             }
-            case IrSort.Dispatch d -> {
-                List<IrSort> newKeys = new ArrayList<>(d.keySorts().size());
-                for (IrSort k : d.keySorts()) newKeys.add(substituteResolved(k, resolved));
-                yield new IrSort.Dispatch(newKeys, substituteResolved(d.returnSort(), resolved), d.origin());
-            }
-            case IrSort.Method f -> {
-                List<IrSort> newParams = new ArrayList<>(f.paramSorts().size());
-                for (IrSort p : f.paramSorts()) newParams.add(substituteResolved(p, resolved));
-                yield new IrSort.Method(newParams, substituteResolved(f.returnSort(), resolved), f.origin());
+            case IrSort.CallSig c -> {
+                List<IrSort> newParams = new ArrayList<>(c.paramSorts().size());
+                for (IrSort p : c.paramSorts()) newParams.add(substituteResolved(p, resolved));
+                yield new IrSort.CallSig(c.typeName(), newParams, c.paramNames(),
+                        substituteResolved(c.returnSort(), resolved), c.origin());
             }
             case IrSort.Trait t -> {
-                Map<String, IrSort.Method> newMethods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
+                Map<String, IrSort.CallSig> newMethods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.CallSig> e : t.methods().entrySet()) {
                     newMethods.put(
                             e.getKey(),
-                            (IrSort.Method) substituteResolved(e.getValue(), resolved));
+                            (IrSort.CallSig) substituteResolved(e.getValue(), resolved));
                 }
                 Map<String, IrSort> newAttrs = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
@@ -533,14 +523,14 @@ public final class AliasResolver {
     /**
      * Substitute type-parameter bindings through a trait's member sorts,
      * yielding a trait with no remaining parameters (they are now bound). The
-     * member sorts ({@link IrSort.Method} contracts, attribute/associated-type
+     * member sorts ({@link IrSort.CallSig} contracts, attribute/associated-type
      * sorts) are substituted via {@link SortChecker#substituteTypeVars}; the
      * trait's nominal {@code name} is preserved.
      */
     private static IrSort.Trait substituteTraitBody(IrSort.Trait tr, Map<String, IrSort> binds) {
-        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
-        for (Map.Entry<String, IrSort.Method> e : tr.methods().entrySet()) {
-            methods.put(e.getKey(), (IrSort.Method) SortChecker.substituteTypeVars(e.getValue(), binds));
+        Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort.CallSig> e : tr.methods().entrySet()) {
+            methods.put(e.getKey(), (IrSort.CallSig) SortChecker.substituteTypeVars(e.getValue(), binds));
         }
         Map<String, IrSort> attrs = new LinkedHashMap<>();
         for (Map.Entry<String, IrSort> e : tr.attributes().entrySet()) {

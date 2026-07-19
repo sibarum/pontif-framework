@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.Method, IrSort.Dispatch, IrSort.Trait, IrSort.Union, IrSort.Intersection {
+public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Structural, IrSort.CallSig, IrSort.Trait, IrSort.Union, IrSort.Intersection {
 
     /**
      * Reserved sentinel sort name for the {@code this.type} self-type (the
@@ -32,11 +32,15 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         return new Structural(name, members, Origin.NONE);
     }
 
-    static Method method(List<IrSort> paramSorts, IrSort returnSort) {
-        return new Method(paramSorts, returnSort, Origin.NONE);
+    static CallSig method(List<IrSort> paramSorts, IrSort returnSort) {
+        return new CallSig(CallSig.METHOD, paramSorts, List.of(), returnSort, Origin.NONE);
     }
 
-    static Trait trait(String name, Map<String, IrSort.Method> methods) {
+    static CallSig dispatch(List<IrSort> keySorts, IrSort returnSort) {
+        return new CallSig(CallSig.DISPATCH, keySorts, List.of(), returnSort, Origin.NONE);
+    }
+
+    static Trait trait(String name, Map<String, IrSort.CallSig> methods) {
         return new Trait(name, methods, Map.of(), Origin.NONE);
     }
 
@@ -137,53 +141,53 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
     }
 
     /**
-     * A method/function sort. {@code paramNames} is either empty (a positional sort,
+     * A <b>call signature</b> sort {@code Type(Params):Return} — the one generic
+     * node that replaces the old hardcoded {@code Method} and {@code Dispatch}
+     * kinds (docs/dispatch-method-elimination.md). {@code typeName} is <em>data</em>
+     * — {@code "Method"}, {@code "Dispatch"}, or any future callable type — never a
+     * keyword branched on: subtyping and value-satisfaction are driven by which
+     * <em>call-kind capability</em> ({@code function-style} / {@code dispatch-style})
+     * the head type is-a, looked up as registry data ({@link CallKinds}).
+     *
+     * <p>{@code paramSorts} is the variadic parameter list (the one sanctioned
+     * variadic type-argument list — carried structurally here rather than as trait
+     * type-args). {@code paramNames} is either empty (a positional sort,
      * {@code [Method(Int,Int):R]}) or one name per parameter (a named sort,
-     * {@code [Method(i:Int,j:Int):R]}) — never partially named. Names are the binders a
-     * dependent return/param sort may reference (WAR(dependent-sorts), slice 1 carries
-     * them; slice 2 resolves references to them).
+     * {@code [Method(i:Int,j:Int):R]}) — never partially named; names are the
+     * binders a dependent return/param sort may reference (WAR(dependent-sorts)).
+     * For a dispatch-style sort the params are the dispatch <em>key</em> sorts.
      */
-    record Method(List<IrSort> paramSorts, List<String> paramNames, IrSort returnSort, Origin origin)
-            implements IrSort {
-        public Method {
+    record CallSig(String typeName, List<IrSort> paramSorts, List<String> paramNames,
+                   IrSort returnSort, Origin origin) implements IrSort {
+
+        /** The builtin function-style head type ({@code Method}) — a lambda's contract. */
+        public static final String METHOD = "Method";
+        /** The builtin dispatch-style head type ({@code Dispatch}) — a metareference's contract. */
+        public static final String DISPATCH = "Dispatch";
+
+        public CallSig {
+            if (typeName == null || typeName.isEmpty()) {
+                throw new IllegalArgumentException("CallSig typeName must be non-empty");
+            }
             if (paramSorts == null) {
-                throw new IllegalArgumentException("Method paramSorts must be non-null");
+                throw new IllegalArgumentException("CallSig paramSorts must be non-null");
             }
             if (returnSort == null) {
-                throw new IllegalArgumentException("Method returnSort must be non-null");
+                throw new IllegalArgumentException("CallSig returnSort must be non-null");
             }
             paramSorts = List.copyOf(paramSorts);
             paramNames = paramNames == null ? List.of() : List.copyOf(paramNames);
             if (!paramNames.isEmpty() && paramNames.size() != paramSorts.size()) {
                 throw new IllegalArgumentException(
-                        "Method paramNames, when present, must be one per parameter "
+                        "CallSig paramNames, when present, must be one per parameter "
                                 + "(got " + paramNames.size() + " names for "
                                 + paramSorts.size() + " params)");
             }
         }
 
-        /** Back-compat: a positional method sort — no parameter names. */
-        public Method(List<IrSort> paramSorts, IrSort returnSort, Origin origin) {
-            this(paramSorts, List.of(), returnSort, origin);
-        }
-    }
-
-    /**
-     * Dispatch sort — the metareference's contract: a first-class DISPATCH
-     * keyed at the given argument sorts ({@code [Dispatch(Int):Int]}). NOT a
-     * method/closure: a dispatch value carries a name-keyed candidate set and
-     * invocation reruns runtime dispatch, narrowings intact. The two sorts
-     * mirror the two dispatch mechanisms and never cross-assign.
-     */
-    record Dispatch(List<IrSort> keySorts, IrSort returnSort, Origin origin) implements IrSort {
-        public Dispatch {
-            if (keySorts == null) {
-                throw new IllegalArgumentException("Dispatch keySorts must be non-null");
-            }
-            if (returnSort == null) {
-                throw new IllegalArgumentException("Dispatch returnSort must be non-null");
-            }
-            keySorts = List.copyOf(keySorts);
+        /** Back-compat: a positional call signature — no parameter names. */
+        public CallSig(String typeName, List<IrSort> paramSorts, IrSort returnSort, Origin origin) {
+            this(typeName, paramSorts, List.of(), returnSort, origin);
         }
     }
 
@@ -197,14 +201,14 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      *
      * <p>An {@code attribute} {@code name->sort} is a required data member: it
      * is a value sort ({@code Int}, a refinement {@code [Int:@>0]}, a named
-     * struct), NOT a {@link Method} sort. A satisfier supplies it either with a
+     * struct), NOT a {@link CallSig} sort. A satisfier supplies it either with a
      * matching struct field or with a computed producer in its impl block — a
      * trait attribute is a computed projection of the underlying value, which is
      * what makes trait coercion free in both directions.
      */
-    record Trait(String name, Map<String, IrSort.Method> methods,
+    record Trait(String name, Map<String, IrSort.CallSig> methods,
                  Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                 Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                 Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                  String baseTrait, List<IrSort> typeArgs,
                  Map<String, IrStmt.FunctionDecl> methodDefaults,
                  Map<String, IrExpr.Lambda> returnShells,
@@ -297,9 +301,9 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
 
         /** Back-compat: the pre-argShells canonical — return shells present, no arg shells. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                      String baseTrait, List<IrSort> typeArgs,
                      Map<String, IrStmt.FunctionDecl> methodDefaults,
                      Map<String, IrExpr.Lambda> returnShells, Origin origin) {
@@ -308,9 +312,9 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
 
         /** Back-compat: the pre-returnShells canonical — defaults present, no return shells. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                      String baseTrait, List<IrSort> typeArgs,
                      Map<String, IrStmt.FunctionDecl> methodDefaults, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
@@ -318,54 +322,54 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         }
 
         /** Back-compat: the pre-methodDefaults canonical signature — no default method bodies. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                      String baseTrait, List<IrSort> typeArgs, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
                     baseTrait, typeArgs, java.util.Map.of(), java.util.Map.of(), origin);
         }
 
         /** Back-compat: the pre-typeArgs canonical signature — no applied type arguments. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                      String baseTrait, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
                     baseTrait, List.of(), java.util.Map.of(), origin);
         }
 
         /** Back-compat: a trait with no base trait (a root trait). */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
-                     Map<String, IrSort> typeParams, Map<String, IrSort.Dispatch> operators,
+                     Map<String, IrSort> typeParams, Map<String, IrSort.CallSig> operators,
                      Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, operators,
                     null, List.of(), origin);
         }
 
         /** Back-compat: a trait with no operator contract members. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                      Map<String, IrSort> typeParams, Origin origin) {
             this(name, methods, attributes, associatedTypes, typeParams, Map.of(), null, origin);
         }
 
         /** Back-compat: a trait with no type parameters. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Map<String, IrSort> associatedTypes,
                      Origin origin) {
             this(name, methods, attributes, associatedTypes, Map.of(), Map.of(), origin);
         }
 
         /** Back-compat: a trait with no associated types or type parameters. */
-        public Trait(String name, Map<String, IrSort.Method> methods,
+        public Trait(String name, Map<String, IrSort.CallSig> methods,
                      Map<String, IrSort> attributes, Origin origin) {
             this(name, methods, attributes, Map.of(), Map.of(), Map.of(), origin);
         }
 
         /** Back-compat: a methods-only trait (no data attributes). */
-        public Trait(String name, Map<String, IrSort.Method> methods, Origin origin) {
+        public Trait(String name, Map<String, IrSort.CallSig> methods, Origin origin) {
             this(name, methods, Map.of(), Map.of(), Map.of(), Map.of(), origin);
         }
     }

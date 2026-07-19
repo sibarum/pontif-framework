@@ -45,7 +45,7 @@ class AltParserTraitTest {
         IrModule m = parse("trait Eater{eat:[Method(Int):Int]}");
         IrStmt.TypeAlias ta = (IrStmt.TypeAlias) m.statements().get(0);
         IrSort.Trait trait = (IrSort.Trait) ta.sort();
-        IrSort.Method eatSig = trait.methods().get("eat");
+        IrSort.CallSig eatSig = trait.methods().get("eat");
         assertEquals(1, eatSig.paramSorts().size());
     }
 

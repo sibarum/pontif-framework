@@ -175,8 +175,9 @@ public final class IrPrinter {
             case IrSort.Refined r      -> "[" + r.name() + ":" + inline(r.predicate()) + "]";
             case IrSort.Structural st  -> st.name()
                     + (st.members().isEmpty() ? "" : "{" + members(st.members()) + "}");
-            case IrSort.Method m       -> "(" + sorts(m.paramSorts()) + ") -> " + sort(m.returnSort());
-            case IrSort.Dispatch dp    -> "Dispatch[" + sorts(dp.keySorts()) + "] -> " + sort(dp.returnSort());
+            case IrSort.CallSig c      -> c.typeName().equals(IrSort.CallSig.METHOD)
+                    ? "(" + sorts(c.paramSorts()) + ") -> " + sort(c.returnSort())
+                    : c.typeName() + "[" + sorts(c.paramSorts()) + "] -> " + sort(c.returnSort());
             case IrSort.Trait t        -> t.name();
             case IrSort.Union u        -> "[" + u.branches().stream().map(IrPrinter::sort)
                     .collect(Collectors.joining(" | ")) + "]";

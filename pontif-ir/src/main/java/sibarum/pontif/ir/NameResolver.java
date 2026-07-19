@@ -190,20 +190,16 @@ public final class NameResolver {
                         resolveTypeName(s.name(), m, table, s.origin()), members, base,
                         s.typeParams(), s.origin());
             }
-            case IrSort.Method f -> {
-                List<IrSort> ps = new ArrayList<>(f.paramSorts().size());
-                for (IrSort p : f.paramSorts()) ps.add(rewriteSort(p, m, table));
-                yield new IrSort.Method(ps, rewriteSort(f.returnSort(), m, table), f.origin());
-            }
-            case IrSort.Dispatch d -> {
-                List<IrSort> ks = new ArrayList<>(d.keySorts().size());
-                for (IrSort k : d.keySorts()) ks.add(rewriteSort(k, m, table));
-                yield new IrSort.Dispatch(ks, rewriteSort(d.returnSort(), m, table), d.origin());
+            case IrSort.CallSig c -> {
+                List<IrSort> ps = new ArrayList<>(c.paramSorts().size());
+                for (IrSort p : c.paramSorts()) ps.add(rewriteSort(p, m, table));
+                yield new IrSort.CallSig(c.typeName(), ps, c.paramNames(),
+                        rewriteSort(c.returnSort(), m, table), c.origin());
             }
             case IrSort.Trait t -> {
-                Map<String, IrSort.Method> methods = new LinkedHashMap<>();
-                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
-                    methods.put(e.getKey(), (IrSort.Method) rewriteSort(e.getValue(), m, table));
+                Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
+                for (Map.Entry<String, IrSort.CallSig> e : t.methods().entrySet()) {
+                    methods.put(e.getKey(), (IrSort.CallSig) rewriteSort(e.getValue(), m, table));
                 }
                 Map<String, IrSort> attrs = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {

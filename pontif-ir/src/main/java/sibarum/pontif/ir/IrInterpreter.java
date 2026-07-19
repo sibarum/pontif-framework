@@ -716,8 +716,10 @@ public final class IrInterpreter {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             case IrSort.Trait t -> t.name();
-            case IrSort.Method f -> null;
-            case IrSort.Dispatch d -> "Dispatch";
+            // A function-style call sig (a closure) has no nominal base name; a
+            // dispatch-style one is named by its head type (the old "Dispatch").
+            case IrSort.CallSig c -> CallKinds.builtin(c.typeName()) == CallKinds.Kind.FUNCTION
+                    ? null : c.typeName();
             case IrSort.Union u -> null;
             case IrSort.Intersection i -> null;
         };

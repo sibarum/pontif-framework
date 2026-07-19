@@ -41,9 +41,9 @@ class AltParserOperatorTraitTest {
         assertTrue(trait.methods().isEmpty(), "no method members");
         assertTrue(trait.attributes().isEmpty(), "no attribute members");
 
-        IrSort.Dispatch d = trait.operators().get("+");
-        assertEquals(2, d.keySorts().size());
-        assertTrue(isSelf(d.keySorts().get(0)) && isSelf(d.keySorts().get(1)),
+        IrSort.CallSig d = trait.operators().get("+");
+        assertEquals(2, d.paramSorts().size());
+        assertTrue(isSelf(d.paramSorts().get(0)) && isSelf(d.paramSorts().get(1)),
                 "both operands are this.type");
         assertTrue(isSelf(d.returnSort()), "result is this.type");
     }

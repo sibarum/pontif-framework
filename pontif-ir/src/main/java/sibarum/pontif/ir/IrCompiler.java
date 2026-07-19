@@ -251,17 +251,13 @@ public final class IrCompiler {
             case IrSort.Structural s -> {
                 for (IrSort inner : s.members().values()) registerSort(inner, map);
             }
-            case IrSort.Method f -> {
-                for (IrSort p : f.paramSorts()) registerSort(p, map);
-                registerSort(f.returnSort(), map);
-            }
-            case IrSort.Dispatch d -> {
-                for (IrSort k : d.keySorts()) registerSort(k, map);
-                registerSort(d.returnSort(), map);
+            case IrSort.CallSig c -> {
+                for (IrSort p : c.paramSorts()) registerSort(p, map);
+                registerSort(c.returnSort(), map);
             }
             case IrSort.Trait t -> {
-                // Method contract sorts are Function sorts; recurse into each.
-                for (IrSort.Method f : t.methods().values()) registerSort(f, map);
+                // Contract member sorts are call-sig sorts; recurse into each.
+                for (IrSort.CallSig f : t.methods().values()) registerSort(f, map);
                 // Attribute requirement sorts (e.g. [Int:@>0]) bite too.
                 for (IrSort a : t.attributes().values()) registerSort(a, map);
             }
@@ -361,11 +357,6 @@ public final class IrCompiler {
         return switch (sort) {
             case IrSort.Named n -> Sort.of(n.name());
             case IrSort.Refined r -> Sort.refined(r.name(), compileSymExpr(r.predicate()));
-            case IrSort.Dispatch d -> {
-                List<Sort> keys = new ArrayList<>(d.keySorts().size());
-                for (IrSort k : d.keySorts()) keys.add(compileSort(k));
-                yield Sort.dispatch(keys, compileSort(d.returnSort()));
-            }
             case IrSort.Structural s -> {
                 java.util.Map<String, Sort> members = new java.util.LinkedHashMap<>();
                 for (java.util.Map.Entry<String, IrSort> e : s.members().entrySet()) {
@@ -373,12 +364,22 @@ public final class IrCompiler {
                 }
                 yield Sort.structural(s.name(), members);
             }
-            case IrSort.Method f -> {
-                java.util.List<Sort> params = new java.util.ArrayList<>(f.paramSorts().size());
-                for (IrSort p : f.paramSorts()) {
+            case IrSort.CallSig c -> {
+                // The call-kind capability decides which core-Sort shape to build:
+                // a function-style head (Method, the builtin) → a function sort
+                // (satisfied by a lambda, full function subtyping); any other callable
+                // head → a dispatch sort (satisfied by a metareference, exact keys).
+                // Only Method is function-style, so everything else defaults to
+                // dispatch — no name-branch logic, just the seeded capability
+                // (docs/dispatch-method-elimination.md §2).
+                java.util.List<Sort> params = new java.util.ArrayList<>(c.paramSorts().size());
+                for (IrSort p : c.paramSorts()) {
                     params.add(compileSort(p));
                 }
-                yield Sort.method(params, compileSort(f.returnSort()));
+                Sort ret = compileSort(c.returnSort());
+                yield CallKinds.builtin(c.typeName()) == CallKinds.Kind.FUNCTION
+                        ? Sort.method(params, ret)
+                        : Sort.dispatch(params, ret);
             }
             case IrSort.Trait t -> {
                 // At the Sort layer, a trait collapses to a bare named sort.

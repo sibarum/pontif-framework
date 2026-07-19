@@ -212,7 +212,7 @@ class AltParserSortTest {
     @Test
     void functionSort_anonymousParams() throws Exception {
         // [Method(Int):Int] — single anonymous param returning Int.
-        IrSort.Method f = (IrSort.Method) sort("[Method(Int):Int]");
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Method(Int):Int]");
         assertEquals(1, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Int", ((IrSort.Named) f.returnSort()).name());
@@ -221,7 +221,7 @@ class AltParserSortTest {
     @Test
     void functionSort_multipleAnonymousParams() throws Exception {
         // [Method(Int, Bool):Int]
-        IrSort.Method f = (IrSort.Method) sort("[Method(Int, Bool):Int]");
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Method(Int, Bool):Int]");
         assertEquals(2, f.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Bool", ((IrSort.Named) f.paramSorts().get(1)).name());
@@ -230,8 +230,8 @@ class AltParserSortTest {
     @Test
     void functionSort_nestedFunctionReturn() throws Exception {
         // [Method(Int):[Method(Int):Int]] — curried-style sort.
-        IrSort.Method f = (IrSort.Method) sort("[Method(Int):[Method(Int):Int]]");
-        IrSort.Method inner = (IrSort.Method) f.returnSort();
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Method(Int):[Method(Int):Int]]");
+        IrSort.CallSig inner = (IrSort.CallSig) f.returnSort();
         assertEquals(1, inner.paramSorts().size());
         assertEquals("Int", ((IrSort.Named) inner.returnSort()).name());
     }
@@ -239,19 +239,32 @@ class AltParserSortTest {
     @Test
     void functionSort_positionalParams_haveNoNames() throws Exception {
         // Positional sorts keep the empty-names (positional) form.
-        IrSort.Method f = (IrSort.Method) sort("[Method(Int, Bool):Int]");
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Method(Int, Bool):Int]");
         assertTrue(f.paramNames().isEmpty(), "positional sort carries no names");
     }
 
     @Test
     void functionSort_namedParams_carryNames() throws Exception {
         // [Method(i:Int, j:Bool):Int] — named params now parse and carry their names
-        // (WAR(dependent-sorts) slice 1: IrSort.Method holds param names).
-        IrSort.Method f = (IrSort.Method) sort("[Method(i:Int, j:Bool):Int]");
+        // (WAR(dependent-sorts) slice 1: IrSort.CallSig holds param names).
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Method(i:Int, j:Bool):Int]");
         assertEquals(2, f.paramSorts().size());
         assertEquals(java.util.List.of("i", "j"), f.paramNames());
         assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
         assertEquals("Bool", ((IrSort.Named) f.paramSorts().get(1)).name());
+    }
+
+    @Test
+    void callSignature_arbitraryHeadName_parsesPurelySyntactically() throws Exception {
+        // ACID TEST (docs/dispatch-method-elimination.md §3, E1): the parser has NO
+        // Method/Dispatch keyword branch — a call signature is `Name(…):Return` decided
+        // purely by the trailing `:`. So a brand-new callable head type parses with zero
+        // parser change; its call-kind capability is resolved downstream, not here.
+        IrSort.CallSig f = (IrSort.CallSig) sort("[Widget(Int):Int]");
+        assertEquals("Widget", f.typeName());
+        assertEquals(1, f.paramSorts().size());
+        assertEquals("Int", ((IrSort.Named) f.paramSorts().get(0)).name());
+        assertEquals("Int", ((IrSort.Named) f.returnSort()).name());
     }
 
     @Test

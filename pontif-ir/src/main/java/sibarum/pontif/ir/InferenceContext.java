@@ -147,7 +147,7 @@ public record InferenceContext(
                 // owning trait (so `e.copy()` on `e:Expr` flows out as `Expr`).
                 Map<String, IrSort> exVars = new LinkedHashMap<>(t.associatedTypes());
                 exVars.put(IrSort.SELF_TYPE, IrSort.named(t.name()));
-                for (Map.Entry<String, IrSort.Method> m : t.methods().entrySet()) {
+                for (Map.Entry<String, IrSort.CallSig> m : t.methods().entrySet()) {
                     IrSort ret = m.getValue().returnSort();
                     if (mentionsAssociatedType(ret, exVars.keySet())) {
                         returns.put(t.name() + "." + m.getKey(), existentialize(ret, exVars));
@@ -177,12 +177,10 @@ public record InferenceContext(
             case IrSort.Named n -> names.contains(n.name())
                     || n.typeArgs().stream().anyMatch(a -> mentionsAssociatedType(a, names));
             case IrSort.Refined r -> names.contains(r.name());
-            case IrSort.Method m -> mentionsAssociatedType(m.returnSort(), names)
-                    || m.paramSorts().stream().anyMatch(p -> mentionsAssociatedType(p, names));
+            case IrSort.CallSig c -> mentionsAssociatedType(c.returnSort(), names)
+                    || c.paramSorts().stream().anyMatch(p -> mentionsAssociatedType(p, names));
             case IrSort.Union u -> u.branches().stream().anyMatch(b -> mentionsAssociatedType(b, names));
             case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> mentionsAssociatedType(b, names));
-            case IrSort.Dispatch d -> mentionsAssociatedType(d.returnSort(), names)
-                    || d.keySorts().stream().anyMatch(k -> mentionsAssociatedType(k, names));
             default -> false;
         };
     }
@@ -208,16 +206,13 @@ public record InferenceContext(
                         n.typeArgs().stream().map(a -> existentialize(a, assoc)).toList(),
                         n.origin());
             }
-            case IrSort.Method m -> new IrSort.Method(
-                    m.paramSorts().stream().map(p -> existentialize(p, assoc)).toList(),
-                    existentialize(m.returnSort(), assoc), m.origin());
+            case IrSort.CallSig c -> new IrSort.CallSig(c.typeName(),
+                    c.paramSorts().stream().map(p -> existentialize(p, assoc)).toList(),
+                    c.paramNames(), existentialize(c.returnSort(), assoc), c.origin());
             case IrSort.Union u -> new IrSort.Union(
                     u.branches().stream().map(b -> existentialize(b, assoc)).toList(), u.origin());
             case IrSort.Intersection i -> new IrSort.Intersection(
                     i.branches().stream().map(b -> existentialize(b, assoc)).toList(), i.origin());
-            case IrSort.Dispatch d -> new IrSort.Dispatch(
-                    d.keySorts().stream().map(k -> existentialize(k, assoc)).toList(),
-                    existentialize(d.returnSort(), assoc), d.origin());
             // Refined/Structural/Trait: an associated type appears as a bare
             // Named in practice; these aren't substitution sites for this slice.
             default -> sort;

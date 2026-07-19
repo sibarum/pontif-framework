@@ -6,6 +6,7 @@ import java.util.Map;
 import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.ir.CallKinds;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrSort;
 
@@ -61,11 +62,21 @@ public final class Assignability {
         if (sub instanceof IrSort.Intersection i) {                        // an intersection is-a X: SOME branch
             return i.branches().stream().anyMatch(b -> isA(b, sup, ctx));
         }
-        if (sub instanceof IrSort.Method && sup instanceof IrSort.Method) {   // function subtyping —
-            return kernelImplies(sub, sup);                                   // contra params, covariant return
-        }
-        if (sub instanceof IrSort.Dispatch dSub && sup instanceof IrSort.Dispatch dSup) {
-            return dispatchSubsumes(dSub, dSup, ctx);
+        if (sub instanceof IrSort.CallSig cSub && sup instanceof IrSort.CallSig cSup) {
+            // Two call-signature sorts relate by their shared call-kind CAPABILITY,
+            // never by a hardcoded Method/Dispatch instanceof (§2). A function-style
+            // pair uses full function subtyping (contra params, covariant return); a
+            // dispatch-style pair uses exact key-sort match + covariant return. The
+            // two kinds never cross-assign.
+            CallKinds.Kind ks = callKind(cSub.typeName(), ctx);
+            CallKinds.Kind kt = callKind(cSup.typeName(), ctx);
+            if (ks == CallKinds.Kind.FUNCTION && kt == CallKinds.Kind.FUNCTION) {
+                return kernelImplies(sub, sup);
+            }
+            if (ks == CallKinds.Kind.DISPATCH && kt == CallKinds.Kind.DISPATCH) {
+                return dispatchSubsumes(cSub, cSup, ctx);
+            }
+            return false;
         }
 
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
@@ -271,12 +282,25 @@ public final class Assignability {
      * return is covariant. {@code Refinements.imply} has no dispatch arm, so this is decided directly.
      */
     private static boolean dispatchSubsumes(
-            IrSort.Dispatch sub, IrSort.Dispatch sup, AssignabilityContext ctx) {
-        if (sub.keySorts().size() != sup.keySorts().size()) return false;
-        for (int i = 0; i < sub.keySorts().size(); i++) {
-            if (!sameType(sub.keySorts().get(i), sup.keySorts().get(i))) return false;
+            IrSort.CallSig sub, IrSort.CallSig sup, AssignabilityContext ctx) {
+        if (sub.paramSorts().size() != sup.paramSorts().size()) return false;
+        for (int i = 0; i < sub.paramSorts().size(); i++) {
+            if (!sameType(sub.paramSorts().get(i), sup.paramSorts().get(i))) return false;
         }
         return isA(sub.returnSort(), sup.returnSort(), ctx);
+    }
+
+    /**
+     * The call-kind capability of a head type — {@code Method}/builtins from the seed,
+     * a user type from the {@code function-style}/{@code dispatch-style} trait-impl view.
+     * {@code null} when {@code typeName} carries no call-kind capability (not callable).
+     */
+    private static CallKinds.Kind callKind(String typeName, AssignabilityContext ctx) {
+        CallKinds.Kind builtin = CallKinds.builtin(typeName);
+        if (builtin != null) return builtin;
+        if (ctx.satisfies(typeName, CallKinds.DISPATCH_STYLE)) return CallKinds.Kind.DISPATCH;
+        if (ctx.satisfies(typeName, CallKinds.FUNCTION_STYLE)) return CallKinds.Kind.FUNCTION;
+        return null;
     }
 
     /** Strip nominal tags (and transparent aliases) down to the underlying structure/primitive. */
@@ -293,6 +317,11 @@ public final class Assignability {
         if (a instanceof IrSort.Structural sa && b instanceof IrSort.Structural sb) {
             return sa.name().equals(sb.name()) && sa.members().keySet().equals(sb.members().keySet());
         }
+        // A call-signature sort is never "same type" by head name alone — two function
+        // sorts both have base "Method" yet differ in params/return. Defer to the
+        // dedicated CallSig subtyping arm (which decides reflexivity precisely), exactly
+        // as the old null-baseName Method/Dispatch sorts did.
+        if (a instanceof IrSort.CallSig || b instanceof IrSort.CallSig) return false;
         String an = baseName(a);
         String bn = baseName(b);
         if (an == null || !an.equals(bn)) return false;
@@ -315,6 +344,7 @@ public final class Assignability {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             case IrSort.Trait t -> t.name();
+            case IrSort.CallSig c -> c.typeName();   // §4: the head type name is the base
             default -> null;
         };
     }

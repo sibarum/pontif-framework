@@ -52,8 +52,8 @@ class AssignabilityContextTest {
 
     /** trait Duck : Bird — a sub-trait, for the transitive-satisfaction leg. */
     private static IrSort.Trait duckTrait() {
-        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
-        methods.put("quack", new IrSort.Method(List.of(), INT, Origin.NONE));
+        Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
+        methods.put("quack", new IrSort.CallSig(IrSort.CallSig.METHOD, List.of(), INT, Origin.NONE));
         return new IrSort.Trait("Duck", methods, Map.of(), Map.of(), Map.of(), Map.of(),
                 "Bird", Origin.NONE);
     }

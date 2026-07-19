@@ -86,7 +86,7 @@ public final class IrSourcePrinter {
         StringBuilder sb = new StringBuilder("trait ").append(name).append(typeParamSlot(t.typeParams()));
         if (t.baseTrait() != null) sb.append(" : ").append(t.baseTrait());
         List<String> members = new java.util.ArrayList<>();
-        for (Map.Entry<String, IrSort.Method> m : t.methods().entrySet()) {
+        for (Map.Entry<String, IrSort.CallSig> m : t.methods().entrySet()) {
             members.add(m.getKey() + "(" + sorts(m.getValue().paramSorts()) + "):"
                     + sortRef(m.getValue().returnSort()));
         }
@@ -148,10 +148,8 @@ public final class IrSourcePrinter {
                     .map(IrSourcePrinter::sortRef).collect(Collectors.joining(" | ")) + "]";
             case IrSort.Intersection i -> "[" + i.branches().stream()
                     .map(IrSourcePrinter::sortRef).collect(Collectors.joining(" & ")) + "]";
-            case IrSort.Method m       -> "[Method(" + sorts(m.paramSorts()) + "):"
-                    + sortRef(m.returnSort()) + "]";
-            case IrSort.Dispatch dp    -> "[Dispatch(" + sorts(dp.keySorts()) + "):"
-                    + sortRef(dp.returnSort()) + "]";
+            case IrSort.CallSig c      -> "[" + c.typeName() + "(" + sorts(c.paramSorts()) + "):"
+                    + sortRef(c.returnSort()) + "]";
         };
     }
 

@@ -131,7 +131,8 @@ public final class NarrowingInference {
      * earned by the proof and never fabricated (roadmap §5).
      */
     private static IrSort dispatchRefSort(IrExpr.DispatchRef d, InferenceContext ctx) {
-        IrSort.Dispatch shape = new IrSort.Dispatch(d.keySorts(), IrSort.named("_"), d.origin());
+        IrSort.CallSig shape = new IrSort.CallSig(
+                IrSort.CallSig.DISPATCH, d.keySorts(), IrSort.named("_"), d.origin());
         if (!ctx.algebraicFunctions().contains(d.functionName())) {
             return shape;
         }
@@ -283,7 +284,7 @@ public final class NarrowingInference {
                 yield IrSort.structural(r.typeName() != null ? r.typeName() : "_record", members);
             }
             // A lambda's shape is its method sort (param sorts → return sort).
-            case IrExpr.Lambda lam -> new IrSort.Method(
+            case IrExpr.Lambda lam -> new IrSort.CallSig(IrSort.CallSig.METHOD,
                     lam.params().stream().map(IrParam::sort).toList(),
                     lam.returnSort(), lam.origin());
             // Match / LetIn / Apply / SelfRef / Iterate / DispatchRef: no coarser
@@ -464,12 +465,9 @@ public final class NarrowingInference {
                     u.branches().stream().map(b -> substituteTypeArgs(b, bindings)).toList(), u.origin());
             case IrSort.Intersection i -> new IrSort.Intersection(
                     i.branches().stream().map(b -> substituteTypeArgs(b, bindings)).toList(), i.origin());
-            case IrSort.Method m -> new IrSort.Method(
-                    m.paramSorts().stream().map(p -> substituteTypeArgs(p, bindings)).toList(),
-                    substituteTypeArgs(m.returnSort(), bindings), m.origin());
-            case IrSort.Dispatch d -> new IrSort.Dispatch(
-                    d.keySorts().stream().map(k -> substituteTypeArgs(k, bindings)).toList(),
-                    substituteTypeArgs(d.returnSort(), bindings), d.origin());
+            case IrSort.CallSig c -> new IrSort.CallSig(c.typeName(),
+                    c.paramSorts().stream().map(p -> substituteTypeArgs(p, bindings)).toList(),
+                    c.paramNames(), substituteTypeArgs(c.returnSort(), bindings), c.origin());
             // Refined's base is not a variable; Structural/Trait stay nominal.
             default -> sort;
         };

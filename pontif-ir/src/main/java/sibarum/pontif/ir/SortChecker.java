@@ -221,11 +221,11 @@ public final class SortChecker {
             }
             cur = next;
         }
-        Map<String, IrSort.Method> methods = new LinkedHashMap<>();
+        Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
         Map<String, IrSort> associatedTypes = new LinkedHashMap<>();
         Map<String, IrSort> typeParams = new LinkedHashMap<>();
-        Map<String, IrSort.Dispatch> operators = new LinkedHashMap<>();
+        Map<String, IrSort.CallSig> operators = new LinkedHashMap<>();
         Map<String, IrStmt.FunctionDecl> methodDefaults = new LinkedHashMap<>();
         Map<String, IrExpr.Lambda> returnShells = new LinkedHashMap<>();
         Map<String, Map<Integer, IrExpr.Lambda>> argShells = new LinkedHashMap<>();
@@ -387,9 +387,9 @@ public final class SortChecker {
         }
 
         // Verify every contract method has a matching impl with self-prepended arity.
-        for (Map.Entry<String, IrSort.Method> e : contract.methods().entrySet()) {
+        for (Map.Entry<String, IrSort.CallSig> e : contract.methods().entrySet()) {
             String methodName = e.getKey();
-            IrSort.Method contractSig = e.getValue();
+            IrSort.CallSig contractSig = e.getValue();
             IrStmt.FunctionDecl impl = implByShortName.get(methodName);
             if (impl == null) {
                 throw new CompileException(
@@ -415,7 +415,7 @@ public final class SortChecker {
             // `copy:[Method():this.type]` binds to a `():<implType>` obligation.
             // Methods that mention neither keep the prior arity-only check.
             if (mentionsAny(contractSig, typeVarNames)) {
-                IrSort.Method want = (IrSort.Method)
+                IrSort.CallSig want = (IrSort.CallSig)
                         substituteTypeVars(contractSig, typeVarSubst);
                 if (!sameBaseSort(impl.returnSort(), want.returnSort())) {
                     throw new CompileException(
@@ -466,7 +466,7 @@ public final class SortChecker {
         // consistent with traits being user-types-only today. Cross-module witness
         // overloads are the linker's coherence concern, not checked here.)
         String implType = ti.typeName();
-        for (Map.Entry<String, IrSort.Dispatch> op : contract.operators().entrySet()) {
+        for (Map.Entry<String, IrSort.CallSig> op : contract.operators().entrySet()) {
             String opSym = op.getKey();
             List<IrStmt.FunctionDecl> candidates = overloads.getOrDefault(opSym, List.of());
             boolean witnessed = candidates.stream()
@@ -665,7 +665,7 @@ public final class SortChecker {
                 // the dispatch fallback resolves them to ConcreteType.member
                 // at runtime against the trait registry. Return sort is the
                 // contract's declared return (method) / attribute sort.
-                for (Map.Entry<String, IrSort.Method> e : t.methods().entrySet()) {
+                for (Map.Entry<String, IrSort.CallSig> e : t.methods().entrySet()) {
                     map.put(t.name() + "." + e.getKey(), e.getValue().returnSort());
                 }
                 for (Map.Entry<String, IrSort> e : t.attributes().entrySet()) {
@@ -877,13 +877,9 @@ public final class SortChecker {
                     validateSortNames(member, structDefs, inner, traitNames);
                 }
             }
-            case IrSort.Method f -> {
-                for (IrSort p : f.paramSorts()) validateSortNames(p, structDefs, typeVars, traitNames);
-                validateSortNames(f.returnSort(), structDefs, typeVars, traitNames);
-            }
-            case IrSort.Dispatch d -> {
-                for (IrSort k : d.keySorts()) validateSortNames(k, structDefs, typeVars, traitNames);
-                validateSortNames(d.returnSort(), structDefs, typeVars, traitNames);
+            case IrSort.CallSig c -> {
+                for (IrSort p : c.paramSorts()) validateSortNames(p, structDefs, typeVars, traitNames);
+                validateSortNames(c.returnSort(), structDefs, typeVars, traitNames);
             }
             case IrSort.Trait t -> {
                 // The trait's name identifies the trait — not a reference to
@@ -902,7 +898,7 @@ public final class SortChecker {
                 for (IrSort bound : t.associatedTypes().values()) {
                     if (bound != null) validateSortNames(bound, structDefs, inner, traitNames);
                 }
-                for (IrSort.Method f : t.methods().values()) validateSortNames(f, structDefs, inner, traitNames);
+                for (IrSort.CallSig f : t.methods().values()) validateSortNames(f, structDefs, inner, traitNames);
             }
             case IrSort.Union u -> {
                 for (IrSort b : u.branches()) validateSortNames(b, structDefs, typeVars, traitNames);
@@ -1069,12 +1065,10 @@ public final class SortChecker {
                     && ra.name().equals(rb.name())
                     && sortListsExactlyEqual(ra.typeArgs(), rb.typeArgs())
                     && exprExactlyEqual(ra.predicate(), rb.predicate());
-            case IrSort.Method ma -> b instanceof IrSort.Method mb
-                    && sortListsExactlyEqual(ma.paramSorts(), mb.paramSorts())
-                    && sortsExactlyEqual(ma.returnSort(), mb.returnSort());
-            case IrSort.Dispatch da -> b instanceof IrSort.Dispatch db
-                    && sortListsExactlyEqual(da.keySorts(), db.keySorts())
-                    && sortsExactlyEqual(da.returnSort(), db.returnSort());
+            case IrSort.CallSig ca -> b instanceof IrSort.CallSig cb
+                    && ca.typeName().equals(cb.typeName())   // Method != Dispatch by head type
+                    && sortListsExactlyEqual(ca.paramSorts(), cb.paramSorts())
+                    && sortsExactlyEqual(ca.returnSort(), cb.returnSort());
             case IrSort.Union ua -> b instanceof IrSort.Union ub
                     && sortListsExactlyEqual(ua.branches(), ub.branches());
             case IrSort.Intersection ia -> b instanceof IrSort.Intersection ib
@@ -1985,13 +1979,11 @@ public final class SortChecker {
             case IrSort.Named n -> names.contains(n.name())
                     || n.typeArgs().stream().anyMatch(a -> mentionsAny(a, names));
             case IrSort.Refined r -> names.contains(r.name());
-            case IrSort.Method f -> f.paramSorts().stream().anyMatch(p -> mentionsAny(p, names))
-                    || mentionsAny(f.returnSort(), names);
+            case IrSort.CallSig c -> c.paramSorts().stream().anyMatch(p -> mentionsAny(p, names))
+                    || mentionsAny(c.returnSort(), names);
             case IrSort.Union u -> u.branches().stream().anyMatch(b -> mentionsAny(b, names));
             case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> mentionsAny(b, names));
             case IrSort.Structural s -> s.members().values().stream().anyMatch(mm -> mentionsAny(mm, names));
-            case IrSort.Dispatch d -> d.keySorts().stream().anyMatch(k -> mentionsAny(k, names))
-                    || mentionsAny(d.returnSort(), names);
             case IrSort.Trait t -> false;  // a trait shell/ref doesn't name the variable
         };
     }
@@ -2018,16 +2010,13 @@ public final class SortChecker {
                         n.typeArgs().stream().map(a -> substituteTypeVars(a, bindings)).toList(),
                         n.origin());
             }
-            case IrSort.Method f -> new IrSort.Method(
-                    f.paramSorts().stream().map(p -> substituteTypeVars(p, bindings)).toList(),
-                    substituteTypeVars(f.returnSort(), bindings), f.origin());
+            case IrSort.CallSig c -> new IrSort.CallSig(c.typeName(),
+                    c.paramSorts().stream().map(p -> substituteTypeVars(p, bindings)).toList(),
+                    c.paramNames(), substituteTypeVars(c.returnSort(), bindings), c.origin());
             case IrSort.Union u -> new IrSort.Union(
                     u.branches().stream().map(b -> substituteTypeVars(b, bindings)).toList(), u.origin());
             case IrSort.Intersection i -> new IrSort.Intersection(
                     i.branches().stream().map(b -> substituteTypeVars(b, bindings)).toList(), i.origin());
-            case IrSort.Dispatch d -> new IrSort.Dispatch(
-                    d.keySorts().stream().map(k -> substituteTypeVars(k, bindings)).toList(),
-                    substituteTypeVars(d.returnSort(), bindings), d.origin());
             case IrSort.Structural s -> {
                 Map<String, IrSort> mem = new LinkedHashMap<>();
                 for (Map.Entry<String, IrSort> e : s.members().entrySet()) {

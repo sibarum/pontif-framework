@@ -36,8 +36,8 @@ public final class SortLowering {
             case IrSort.Trait t -> throw LoweringError.aggregateSort(sort, "Trait '" + t.name() + "'");
             case IrSort.Union ignored -> throw LoweringError.aggregateSort(sort, "Union");
             case IrSort.Intersection ignored -> throw LoweringError.aggregateSort(sort, "Intersection");
-            case IrSort.Method ignored -> throw LoweringError.aggregateSort(sort, "Function sort");
-            case IrSort.Dispatch ignored -> throw LoweringError.aggregateSort(sort, "Dispatch sort");
+            case IrSort.CallSig c -> throw LoweringError.aggregateSort(
+                    sort, c.typeName() + " call signature");
         };
     }
 

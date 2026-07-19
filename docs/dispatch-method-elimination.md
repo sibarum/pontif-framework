@@ -5,7 +5,40 @@ from the type system, and delivers `$f[Decimal].ast` (AlgebraicDispatch) as its 
 Ratified with James across the 2026-07-19 design session. This supersedes roadmap §5's earlier
 "`AlgebraicDispatch <: Dispatch` intersection view" framing (that was a stepping stone).*
 
-Status: **PLAN — approved, not yet implemented.** Baseline: `1890fda` (Slices A + B on master).
+Status: **E1 LANDED (behavior-preserving); E2 not yet started.** Baseline for E1 work: `1890fda`
+(Slices A + B on master). Full `mvn test` green after E1 including the extensibility acid test.
+
+### E1 implementation notes (sub-decisions taken)
+
+- **One node.** `IrSort.CallSig(String typeName, List<IrSort> paramSorts, List<String> paramNames,
+  IrSort returnSort, Origin)` replaced `IrSort.Method` + `IrSort.Dispatch`. Factories
+  `IrSort.method(...)` / `IrSort.dispatch(...)` and constants `CallSig.METHOD` / `CallSig.DISPATCH`
+  preserve call sites. `Trait.methods` and `Trait.operators` retyped to `CallSig`.
+- **Capability registry.** New `pontif-ir/.../ir/CallKinds` holds the builtin seed
+  (`function-style = {Method}`, `dispatch-style = {Dispatch, DispatchBase, AlgebraicDispatch}`) and
+  the shared trait-name constants `FUNCTION_STYLE` / `DISPATCH_STYLE`. The ctx-aware lookup
+  (`Assignability.callKind`) is `builtin(typeName)` else `ctx.satisfies(typeName, …-style)`.
+- **Parser.** Discrimination is purely syntactic — `AltParser.callSigColonFollows()` (a `:` after the
+  matching `)` at depth 0) → `parseCallSigBody(headTok)` with the head name as data; the
+  `equals("Method")`/`equals("Dispatch")` branches are gone. Both the alt parser AND the live
+  S-expression reference parser (`Parser.java`, used by the unit suite) were updated.
+- **Core `Sort` (deliberate E1 deferral).** §2 calls for a `callSigTypeName` discriminator on the
+  core `Sort`; for E1 I KEPT the existing `method`/`dispatch` field-pairs instead (so `Refinements`
+  is untouched — lowest-risk behavior-preservation) and made `IrCompiler.compileSort(CallSig)` pick
+  the pair by capability: a function-style head → `Sort.method`, every other callable head →
+  `Sort.dispatch` (Method is the sole function-style head, §2). Adding `callSigTypeName` to the core
+  `Sort` is folded into **E2** if `.ast` resolution needs the concrete nominal name at the core layer.
+- **`Refinements` (core) is unchanged.** Its `satisfies`/`imply` still key on `Sort.isMethod()` /
+  `isDispatch()`, but those field-pairs are now SET by capability at compile — so behavior is
+  capability-driven one layer up, and a new callable type needs no core edit. Reworking `Refinements`
+  to read a `callSigTypeName` directly is deferred with the core-`Sort` decision above.
+- **Acid test (green).** `AltParserSortTest.callSignature_arbitraryHeadName_parsesPurelySyntactically`
+  (parse) + `AssignabilityTest.newCallableType_parsesSubtypesSatisfies_viaCapabilityDataOnly`
+  (subtype via `ctx.satisfies` capability data; satisfy via the dispatch-shaped compiled sort). A new
+  callable type is recognized entirely through capability DATA — no edit to Assignability,
+  Refinements, or the parser.
+
+---
 
 ---
 

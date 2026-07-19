@@ -403,7 +403,7 @@ class NarrowingInferenceTest {
                 "f", List.of(IrSort.named("Decimal")), Origin.NONE);
         IrSort result = NarrowingInference.infer(ref, InferenceContext.empty());
         assertEquals(
-                new IrSort.Dispatch(List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                new IrSort.CallSig(IrSort.CallSig.DISPATCH, List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
                 result);
     }
 
@@ -421,7 +421,7 @@ class NarrowingInferenceTest {
         IrSort result = NarrowingInference.infer(ref, ctx);
 
         IrSort expected = new IrSort.Intersection(List.of(
-                new IrSort.Dispatch(List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
+                new IrSort.CallSig(IrSort.CallSig.DISPATCH, List.of(IrSort.named("Decimal")), IrSort.named("_"), Origin.NONE),
                 new IrSort.Named("Algebraic", Origin.NONE)), Origin.NONE);
         assertEquals(expected, result);
     }
