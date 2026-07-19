@@ -252,14 +252,44 @@ Therefore:
 with C2; only step 6 serializes behind C2 Phase 2.*
 
 1. ~~Merge C1~~ **DONE** — C1 is already on master (war branch fully subsumed).
-2. **Write the DoD + differential harness** (§4.1). Nothing gets deleted without it. ← *current*
-3. **Close the cheap engine gaps**: intersection (S), `Int→Decimal` (S–M),
-   refinement-precise via `imply` delegation (M).
-4. **Migrate `ConstructionGate`'s base leg** — a real deletion that never touches the parser.
+2. ~~DoD + differential harness (§4.1)~~ **DONE** (`fe4d48d`).
+3. ~~Close the cheap engine gaps~~ **DONE** — intersection (`c0fbfa3`), `Int→Decimal`/`COERCE`
+   (`90b6b74`), refinement-precise (`759b9c5`); plus Method/Dispatch function-sorts (`03bd09b`).
+4. **Migrate `ConstructionGate`'s base leg** — a real deletion that never touches the parser. ← *next candidate*
 5. **Wire static-cast legality** through `Assignability.cast`.
 6. **Defer** the `CoercionResolver` parser deletion until **C2 Phase 2** lands (post-link
-   trait context) — or consciously accept the struct-only slice until then. Generics and
-   function-sorts land as their consumers require.
+   trait context) — or consciously accept the struct-only slice until then.
+
+### 4.6 Progress & resume point (updated 2026-07-18)
+
+**Landed this session (all on master, each green):** the differential harness + four
+`Assignability` engine-capability gaps — **intersection**, **`Int→Decimal` (`COERCE`)**,
+**refinement-precise leaf subsumption**, **Method/Dispatch function-sorts** — plus a latent
+**`sameType` unsoundness fix** (it was predicate-blind, equating `[Int:@>=0]` with `[Int:@>0]`).
+
+**Engine state:** `Assignability.isA`/`assign` now handles exact, is-a widen (view), demotion
+(view, §6.5), `COERCE`, siblings→`NEEDS_CAST`, unions, intersections, traits, refinement-precise
+leaves, and function-sorts. The differential harness (`AssignabilityDifferentialTest`) is at
+**8 agree / 2 diverge**, and both divergences are the engine being *correctly stricter* than the
+legacy (eager trait-satisfaction / alias-membership rejection the legacy defers). **No case where
+the engine is weaker** — a strong license-to-delete position.
+
+**Remaining §4.2 engine gaps:** generics/type-args (L), three-way `construct`→two-way per §1d
+(L), static-cast wiring (M).
+
+**Where to resume — pick one:**
+- **`AlgebraicDispatch`** (§5) — now unblocked (function-sorts done). Multi-part: (a) the
+  `Algebraic` property on a `Dispatch` sort + the `AlgebraicDispatch <: Dispatch` edge in
+  `Assignability`; (b) `NarrowingInference` stamps `$f[Decimal]` from the `assign proof
+  f:Algebraic` claim set; (c) the `$f[Decimal].ast` compile-check replacing the runtime
+  fail-closed `astOf`. Closes the original differential-programming loop.
+- **First migration (§4.5 step 4)** — delegate `ConstructionGate`'s base-name fit leg to
+  `Assignability`, guarded by the harness. C2-independent; the first real legacy consolidation.
+- **Remaining engine gaps** — generics / construct-two-way / static-cast.
+
+**Key files:** `pontif-ir/.../types/Assignability.java` (the engine),
+`.../types/{AssignabilityContext,TypeCatalog,TypeInfo,CoercionResolver}.java`,
+`pontif-ir/src/test/.../types/{AssignabilityTest,AssignabilityDifferentialTest}.java`.
 
 ---
 

@@ -57,14 +57,15 @@ Campaigns and status (full detail + dependency graph in the doc):
   207 ahead, verified 2026-07-18; no merge needed.)
 - **C2 — dispatch unification.** ◐ in progress (see "Next up — dispatch unification"). **Phase 2
   (post-link resolution) is the linchpin that unblocks C3's parser-side deletion.**
-- **C3 — nominal-subtype / `Assignability`.** ◐ Slice 0–1 landed, rest ☐ — **this was the
-  undocumented campaign.** `Assignability` (`pontif-ir/types`) is the target single is-a /
-  assign / construct / cast engine; only struct↔struct `let` is wired (`AltParser:2098`).
-  Finish-line, capability gaps, migration targets, context burden, and DoD are in the doc §4.
-  **Do the differential harness (engine-vs-copy agreement) before deleting any copy.** The
-  largest copy (`CoercionResolver`) is parser-invoked and **blocked on C2 Phase 2** (no trait
-  context at parse time); the `ConstructionGate` base-leg, engine gaps, and static-cast wiring
-  are **not** blocked and can proceed now.
+- **C3 — nominal-subtype / `Assignability`.** ◐ **engine substantially built** (2026-07-18).
+  `Assignability` (`pontif-ir/types`) is the target single is-a / assign / construct / cast
+  engine; only struct↔struct `let` is *wired* so far (`AltParser:2098`), but the engine now
+  handles intersection, `Int→Decimal` (`COERCE`), refinement-precise leaves, and Method/Dispatch
+  function-sorts, guarded by a differential harness (8 agree / 2 diverge, both engine-stricter —
+  no case weaker than the legacy). Landed slices, engine state, remaining gaps (generics /
+  construct-two-way / static-cast), and the **resume point** are in `type-system-roadmap.md`
+  §4.6. Next: `AlgebraicDispatch` (§5, now unblocked) or the first migration (`ConstructionGate`
+  base-leg). The `CoercionResolver` parser deletion stays **blocked on C2 Phase 2**.
 - **C4 — three-records model** (`type-records.md`). ◐ model settled, migration overlaps C2.
 - **C5 — scoped type-level binding substrate.** ◐ per-facet — the cluster immediately below.
   A **parallel** axis (dependent sorts / structural traits / Type fragments / generics), not
