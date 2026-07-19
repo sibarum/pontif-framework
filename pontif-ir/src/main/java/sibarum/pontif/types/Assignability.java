@@ -3,6 +3,10 @@ package sibarum.pontif.types;
 import java.util.List;
 import java.util.Map;
 
+import sibarum.pontif.core.symbolic.Refinements;
+import sibarum.pontif.core.symbolic.Simplifier;
+import sibarum.pontif.core.types.Sort;
+import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrSort;
 
 /**
@@ -230,9 +234,26 @@ public final class Assignability {
         String subName = baseName(sub);
         String supName = baseName(sup);
         if (subName == null || !subName.equals(supName)) return false;
-        // Widening to the same base is sound (drops any refinement); narrowing TO a refinement needs a
-        // proof this increment doesn't attempt, so only an identical refined sup passes.
-        return !(sup instanceof IrSort.Refined) || sameType(sub, sup);
+        if (!(sup instanceof IrSort.Refined)) return true;   // widen to the bare base — drops any refinement
+        // Refinement-precise leaf subsumption (roadmap §4.2): sub's predicate must IMPLY sup's — e.g.
+        // [Int:@>0] is-a [Int:@>=0], and reflexively [Int:@>0] is-a itself, but NOT [Int:@>=0] is-a
+        // [Int:@>0]. Delegated to the refinement kernel (Refinements.imply); the engine does not
+        // re-implement predicate reasoning. (Note: sameType is predicate-blind — deliberately not used
+        // here.) Abstains (false — sound, never a false is-a) on any predicate the linear kernel can't
+        // compile or prove.
+        return refinementImplies(sub, sup);
+    }
+
+    /** Does {@code sub}'s refinement predicate imply {@code sup}'s? Delegated to {@code Refinements.imply}. */
+    private static boolean refinementImplies(IrSort sub, IrSort sup) {
+        if (!(sub instanceof IrSort.Refined)) return false;  // a bare base can't prove sup's predicate
+        try {
+            Sort subSort = IrCompiler.compileSort(sub);
+            Sort supSort = IrCompiler.compileSort(sup);
+            return Refinements.imply(subSort, supSort, new Simplifier(List.of())).isPassed();
+        } catch (Exception abstain) {
+            return false;  // outside the linear kernel — abstain, never fabricate an is-a
+        }
     }
 
     /** Strip nominal tags (and transparent aliases) down to the underlying structure/primitive. */
@@ -251,8 +272,17 @@ public final class Assignability {
         }
         String an = baseName(a);
         String bn = baseName(b);
-        return an != null && an.equals(bn)
-                && (a instanceof IrSort.Refined) == (b instanceof IrSort.Refined);
+        if (an == null || !an.equals(bn)) return false;
+        boolean aRef = a instanceof IrSort.Refined;
+        boolean bRef = b instanceof IrSort.Refined;
+        if (aRef != bRef) return false;
+        // Two refined sorts are the SAME type only if their predicates match. sameType must NOT be
+        // predicate-blind — otherwise it wrongly equates [Int:@>=0] with [Int:@>0] and isA's reflexive
+        // shortcut returns a false is-a. A predicate difference (or merely different origins) falls
+        // through to the imply-based subsumption path, which decides it soundly (reflexivity via
+        // alpha-equivalence, precise cases via Refinements.imply).
+        return !aRef
+                || ((IrSort.Refined) a).predicate().equals(((IrSort.Refined) b).predicate());
     }
 
     private static String baseName(IrSort sort) {

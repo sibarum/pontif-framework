@@ -6,6 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import sibarum.pontif.core.Origin;
+import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrSort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -188,6 +190,27 @@ class AssignabilityTest {
     @Test
     void bareStructureDoesNotSatisfyTheTrait() {
         assertFalse(Assignability.isA(tuple3(), named("Showable"), ctx()));   // a bare tuple implements nothing
+    }
+
+    // --- refinement-precise leaf subsumption -------------------------------
+
+    /** {@code [Int:@ <op> bound]}. */
+    private static IrSort refinedInt(IrExpr.Op op, long bound) {
+        IrExpr pred = new IrExpr.BinOp(op,
+                new IrExpr.SelfRef(Origin.NONE),
+                new IrExpr.Lit(bound, Origin.NONE), Origin.NONE);
+        return new IrSort.Refined("Int", pred, Origin.NONE);
+    }
+
+    @Test
+    void refinementPreciseSubsumption() {
+        IrSort gt0 = refinedInt(IrExpr.Op.GT, 0);   // [Int:@>0]
+        IrSort ge0 = refinedInt(IrExpr.Op.GE, 0);   // [Int:@>=0]
+        assertTrue(Assignability.isA(gt0, ge0, ctx()));    // @>0 implies @>=0
+        assertFalse(Assignability.isA(ge0, gt0, ctx()));   // @>=0 does NOT imply @>0 (0 is a counterexample)
+        assertTrue(Assignability.isA(gt0, gt0, ctx()));    // reflexive
+        assertTrue(Assignability.isA(gt0, INT, ctx()));    // widen to bare Int drops the refinement
+        assertFalse(Assignability.isA(INT, gt0, ctx()));   // bare Int can't prove @>0
     }
 
     // --- intersection ------------------------------------------------------

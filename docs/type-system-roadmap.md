@@ -213,7 +213,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 
 | Gap | Status | Size | Notes |
 |---|---|---|---|
-| Refinement-precise leaf subsumption | absent (shape-equality only) | M | delegate to `Refinements.imply`; partly gated on TODO "strengthen `imply` via bounds" |
+| Refinement-precise leaf subsumption | ✅ **DONE** (2026-07-18) | M | `structurallySubsumes` delegates a refined-`sup` leaf to `Refinements.imply` (compile both sorts, abstain on non-linear predicates). Also fixed a latent unsoundness: `sameType` was predicate-blind (equated `[Int:@>=0]` with `[Int:@>0]`) — now compares predicates. Pinned by `AssignabilityTest.refinementPreciseSubsumption` |
 | `Int→Decimal` / primitive coercion | ✅ **DONE** (2026-07-18) | S | new `Assignment.COERCE` outcome — a lossless primitive conversion (concrete changes), distinct from view-`WIDEN`; structs never get it. Pinned by `AssignabilityTest.numericTowerCoerces_butStructsDoNot` |
 | `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
