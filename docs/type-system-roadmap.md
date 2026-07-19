@@ -188,15 +188,28 @@ any copy is deleted; and (d) per §1d, **no construction path stamps an unproven
 runtime check** — an unprovable fit is a compile error (or explicit `[!!]`), never a
 `runtimeChecks` stamp. Until (c) exists, no deletion is safe.
 
-### 4.1 Do this first — the differential harness (the license to delete)
+### 4.1 Do this first — the differential harness (the license to delete) — ✅ LANDED (2026-07-18)
 
-Build a test that runs `Assignability`'s verdict against the incumbent
-(`CoercionResolver` / `ConstructionGate`) over the existing snapshot/probe corpus and asserts
-agreement. A strangler migration deletes a copy only once "engine == copy on every existing
-case" is green. This is the **highest-priority missing guardrail** (today
-`AssignabilityTest` + `AssignabilityContextTest` cover increment-1 shape logic well but have
-**zero** refinement, generics, intersection, function-sort, or Int→Decimal cases, and no
-engine-vs-copy comparison). *Size: medium. Blocks everything else in C3.*
+`AssignabilityDifferentialTest` (pontif-ir) drives `Assignability.assign` and the legacy
+`CoercionResolver.resolve` over a shared-catalog corpus and compares the one shared question —
+*is this an implicitly-legal binding?* A divergence outside the documented `KNOWN_DIVERGENCES`
+(or a listed one that stops diverging) fails the test, so drift on either engine is caught.
+This is the deletion baseline for the whole C3 migration.
+
+**First-run findings (10-pair corpus): 7 agree, 3 diverge — two categories:**
+- **engine WEAKER — a gap to close (§4.2):** `Int → Decimal` — legacy `IntToDecimal` is legal;
+  `Assignability` has no primitive-embedding. *(NB: this one is entangled with the §6.5
+  view-based `WIDEN` — `Int→Decimal` **changes** the concrete (Long→BigDecimal), so it's a
+  lossless **coercion**, not a view-only `WIDEN`. Closing it needs a design call: a distinct
+  `Assignment` outcome for lossless coercion vs folding it into `WIDEN`. Decide before coding.)*
+- **engine STRICTER — accepted, the target is better:** `Point → Showable` (non-impl) and
+  `Point → AnyNumber` (non-member). The engine rejects eagerly (correct); the legacy **defers**
+  — `TraitCast` (satisfaction checked later by `SortChecker`) / abstains to `None` on the
+  unresolved alias. The deferred stage rejects these anyway, so migrating tightens the check
+  with no valid-program regression.
+
+*The harness is corpus-extensible: add refinement / generics / intersection / function-sort
+pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVERGENCES`).*
 
 ### 4.2 Engine capability gaps (build inside `Assignability`)
 
