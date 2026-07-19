@@ -64,8 +64,9 @@ Campaigns and status (full detail + dependency graph in the doc):
   function-sorts, guarded by a differential harness (8 agree / 2 diverge, both engine-stricter —
   no case weaker than the legacy). Landed slices, engine state, remaining gaps (generics /
   construct-two-way / static-cast), and the **resume point** are in `type-system-roadmap.md`
-  §4.6. Next: `AlgebraicDispatch` (§5, now unblocked) or the first migration (`ConstructionGate`
-  base-leg). The `CoercionResolver` parser deletion stays **blocked on C2 Phase 2**.
+  §4.6. Next: the **Dispatch/Method elimination** (`dispatch-method-elimination.md`, §5 — the
+  active thread) or the first migration (`ConstructionGate` base-leg). The `CoercionResolver`
+  parser deletion stays **blocked on C2 Phase 2**.
 - **C4 — three-records model** (`type-records.md`). ◐ model settled, migration overlaps C2.
 - **C5 — scoped type-level binding substrate.** ◐ per-facet — the cluster immediately below.
   A **parallel** axis (dependent sorts / structural traits / Type fragments / generics), not
@@ -79,9 +80,15 @@ couldn't be proved. Unprovable ⇒ compile error (or explicit `[!!]`, unbuilt), 
 run):** enumerate every can-throw stamp lacking a proof/`[!!]` (the construction-gate
 `UNKNOWN → stamp`, `ConstructionGate.java:237`, is the known one; likely others).
 
-First customer queued behind the convergence: **`AlgebraicDispatch`** (compile-time-safe
-`$f[Decimal].ast`) — C3's first Method/Dispatch function-sort case; sidesteps the C2 wall
-because its check runs at the gate stage (doc §5).
+**Active thread — the Dispatch/Method elimination** (`docs/dispatch-method-elimination.md`,
+ratified 2026-07-19). Pursuing `AlgebraicDispatch` (compile-time-safe `$f[Decimal].ast`) surfaced
+that `Method`/`Dispatch` are hardcoded (~40 sites) in a way that blocks extension. Plan: collapse
+them into one capability-driven `IrSort.CallSig` (two builtin call-kind capability traits drive
+subtyping/satisfaction; parser discrimination purely syntactic) so a new callable type needs zero
+type-system changes (the acid test); then `.ast` is purely additive (Stage E2). Substrate landed
+on master (`1890fda`): Slice A (intersection member resolution, kept) + Slice B (the
+`[Dispatch & Algebraic]` stamp, a stepping stone E2 reworks). C2-independent (the `.ast` gate is
+post-link). Next session starts **Stage E1**.
 
 ## ⭐ Type-system convergence — one scoped type-level binding substrate (4 facets)
 

@@ -218,7 +218,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
-| Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **This is the arm `AlgebraicDispatch` builds on** (§5) — the remaining piece there is the `Algebraic` property on the sort + inference stamping, not the function-sort relation |
+| Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **NB (2026-07-19):** these two arms are exactly what the Dispatch/Method elimination (`docs/dispatch-method-elimination.md`, §5) makes **capability-driven** — Stage E1 replaces the `instanceof Method`/`instanceof Dispatch` selection here with a call-kind-capability lookup on the unified `CallSig` node (behavior-preserving) |
 | Static-cast legality wiring | decision present, unwired | M | currently decided *nowhere*; `IrExpr.Cast` legality is implicit-at-runtime |
 
 ### 4.3 Migration targets (wire onto the engine, then delete)
@@ -277,12 +277,23 @@ the engine is weaker** — a strong license-to-delete position.
 **Remaining §4.2 engine gaps:** generics/type-args (L), three-way `construct`→two-way per §1d
 (L), static-cast wiring (M).
 
+**Update (2026-07-19):** the `AlgebraicDispatch` thread was pursued and pivoted into a larger,
+ratified refactor — **[`docs/dispatch-method-elimination.md`](dispatch-method-elimination.md)**
+(the Dispatch/Method → capability-driven `CallSig` elimination; §5). Along the way, two substrate
+slices landed on master (`1890fda`):
+- **Slice A** — general some-branch **intersection member resolution** (`NarrowingInference`
+  field inference, `MethodOperatorResolver`, `SortChecker` gate). Reusable; kept.
+- **Slice B** — the `[Dispatch & Algebraic]` metareference stamp (`Algebraic` marker,
+  `InferenceContext.algebraicFunctions`, `dispatchRefSort`). A **stepping stone** the elimination's
+  Stage E2 reworks onto real traits.
+A third increment (**C1a**, nominal identity on the runtime `DispatchValue`) was explored and
+**reverted** — superseded by the E1 design. The next session starts **Stage E1** of the
+elimination doc (a fresh context was intended for it).
+
 **Where to resume — pick one:**
-- **`AlgebraicDispatch`** (§5) — now unblocked (function-sorts done). Multi-part: (a) the
-  `Algebraic` property on a `Dispatch` sort + the `AlgebraicDispatch <: Dispatch` edge in
-  `Assignability`; (b) `NarrowingInference` stamps `$f[Decimal]` from the `assign proof
-  f:Algebraic` claim set; (c) the `$f[Decimal].ast` compile-check replacing the runtime
-  fail-closed `astOf`. Closes the original differential-programming loop.
+- **Dispatch/Method elimination, Stage E1** (`docs/dispatch-method-elimination.md`) — the primary
+  thread; collapse `IrSort.Method`/`IrSort.Dispatch` into capability-driven `CallSig`,
+  behavior-preserving, then Stage E2 delivers `.ast`.
 - **First migration (§4.5 step 4)** — delegate `ConstructionGate`'s base-name fit leg to
   `Assignability`, guarded by the harness. C2-independent; the first real legacy consolidation.
 - **Remaining engine gaps** — generics / construct-two-way / static-cast.
@@ -293,29 +304,38 @@ the engine is weaker** — a strong license-to-delete position.
 
 ---
 
-## 5. Motivating first customer — `AlgebraicDispatch` (the thread that surfaced this)
+## 5. Motivating first customer — `AlgebraicDispatch` → the Dispatch/Method elimination
 
 The differential-programming work (`assign proof f:Algebraic` + runtime `pontif.algebra`
-reflection, landed 2026-07-18) wants a compile-time-safe `$f[Decimal].ast` — i.e. a
-`Dispatch` value that *statically* carries "algebraic," so `.ast` is a type error on a
-non-algebraic function and the guarantee propagates through parameters. Design conclusions:
+reflection, landed 2026-07-18) wants a compile-time-safe `$f[Decimal].ast` — a `Dispatch` value
+that *statically* carries "algebraic," so `.ast` is a type error on a non-algebraic function.
 
-- **Represent it as a trait-style view, not type-extension.** Trait = variable type and value
-  type stay distinct (the runtime value is unchanged; "algebraic" is a static view). Type
-  extension would wrongly imply a value morphism. `AlgebraicDispatch <: Dispatch`, earned by
-  the proof, stamped on the metareference by inference (never fabricated).
-- **It is C3's first function-sort case.** It needs the **Method/Dispatch function-sort arm**
-  in `Assignability` (§4.2) plus the nominal `AlgebraicDispatch <: Dispatch` edge — a
-  contained increment.
-- **It sidesteps the C2 wall.** The `.ast` legality check runs at the **gate stage** (module
-  in hand → `fromModule` context cheap), so it does **not** wait on C2 Phase 2. That makes it
-  a clean, self-contained slice that *advances* C3 while delivering the feature.
-- **Per the governing intent**, it is sequenced **after** the convergence lands (or at least
-  after §4.5 steps 1–2), not bolted onto `Refinements.imply` ahead of the engine that is
-  slated to own subsumption.
+**This has its own plan of record now: [`docs/dispatch-method-elimination.md`](dispatch-method-elimination.md).**
+Building `.ast` surfaced that `Method`/`Dispatch` are hardcoded (parser keywords + two bespoke
+`IrSort` kinds + name/`instanceof` logic at ~40 sites) *in a way that makes the type system hard
+to extend*. Ratified with James (2026-07-19): the right move is to **remove that hardcoding**, not
+to bolt `.ast` onto it. So the plan pivoted from the earlier "`AlgebraicDispatch <: Dispatch`
+intersection view" (a stepping stone — see the note below) to:
 
-Until then, the shipped runtime path keeps `astOf`/`eval` (a runtime fail-closed reflect);
-the compile-time `.ast` view is the C3-gated upgrade.
+- **One generic `IrSort.CallSig(typeName, paramSorts, paramNames, returnSort)`** replacing
+  `IrSort.Method` + `IrSort.Dispatch`; `typeName` is data.
+- **Two builtin call-kind capability traits** (function-style / dispatch-style) that *drive*
+  subtyping + value-satisfaction, selected by which the head type is-a — never by name. `Dispatch`
+  and `Method` become ordinary types carrying a capability; the `Type(Args):Return` syntax is
+  attribute-driven and parser discrimination is purely syntactic (trailing `:Return`).
+- **Acid test:** adding a future callable type touches *no* type-system code. `.ast` is then
+  Stage E2 — purely additive on the general machinery, which *proves* the acid test.
+
+Sequencing: **Stage E1** (the elimination, behavior-preserving) then **Stage E2** (`.ast`). Both
+are C2-independent (the `.ast` gate is post-link). Slices A + B (below, `1890fda`) are the
+substrate; Slice B's `Algebraic` marker + `[Dispatch & Algebraic]` intersection are stepping
+stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays until E2 makes
+`astOf` non-exported behind `.ast`.
+
+> **Superseded (kept for provenance):** the earlier §5 framing represented `AlgebraicDispatch` as
+> a nominal `AlgebraicDispatch <: Dispatch` trait-view *layered on the existing structural
+> `IrSort.Dispatch`*. That relocates rather than removes the hardcoding (it keeps the two special
+> sort kinds), which fails the acid test — hence the CallSig/capability design above.
 
 ---
 
