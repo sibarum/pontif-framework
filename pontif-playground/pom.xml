@@ -299,7 +299,8 @@
                                      editor's own console nor a self-exec "Run" child (childCommand
                                      re-invokes THIS same binary — no bundled `java` to pass a flag
                                      to) prints the "restricted method … has been called" /
-                                     "Use --enable-native-access=ALL-UNNAMED" warnings. Unlike the
+                                     "Use enable-native-access=ALL-UNNAMED" warnings (the flag is
+                                     the buildArg below). Unlike the
                                      JVM path (App.childCommand / the exec-plugin above, which pass
                                      this as a launcher arg), for a native image this is a build
                                      option only — it cannot be passed to the produced exe. -->
