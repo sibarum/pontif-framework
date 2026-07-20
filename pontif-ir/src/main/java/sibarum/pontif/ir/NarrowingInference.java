@@ -1,6 +1,7 @@
 package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
+import sibarum.pontif.core.Origin.Span;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.predicates.BoundAnalysis;
@@ -95,11 +96,7 @@ public final class NarrowingInference {
             case IrExpr.DispatchRef d -> dispatchRefSort(d, ctx);
             case IrExpr.Bool b -> boolSingleton(b.value());
             case IrExpr.Var v -> ctx.typeEnv().get(v.name());
-            case IrExpr.LetIn let -> {
-                IrSort valueNarrowing = infer(let.value(), ctx);
-                IrSort bound = valueNarrowing != null ? valueNarrowing : let.declaredSort();
-                yield infer(let.body(), ctx.withVar(let.name(), bound));
-            }
+            case IrExpr.LetIn let -> infer(let.body(), letBodyCtx(let, ctx));
             case IrExpr.Match m -> inferMatch(m, ctx);
             case IrExpr.Call c -> inferCall(c, ctx);
             case IrExpr.Record r -> inferRecord(r, ctx);
@@ -520,13 +517,7 @@ public final class NarrowingInference {
     private static IrSort inferMatch(IrExpr.Match m, InferenceContext ctx) {
         List<IrSort> armResults = new ArrayList<>(m.branches().size());
         for (IrExpr.MatchBranch branch : m.branches()) {
-            InferenceContext armCtx = ctx;
-            if (m.scrutinee() instanceof IrExpr.Var v
-                    && (branch.pattern() instanceof IrSort.Refined
-                        || branch.pattern() instanceof IrSort.Structural)) {
-                armCtx = ctx.withVar(v.name(), branch.pattern());
-            }
-            IrSort armResult = infer(branch.result(), armCtx);
+            IrSort armResult = infer(branch.result(), matchArmCtx(m, branch, ctx));
             if (armResult == null) return null;
             armResults.add(armResult);
         }
@@ -1076,6 +1067,95 @@ public final class NarrowingInference {
         // consuming scope, so the honest effective sort is the bare base.
         String base = baseName(narrowing);
         return base != null ? IrSort.named(base) : narrowing;
+    }
+
+    // --- Shared env-threading (one definition, reused by infer and the lens walk) -------------------
+
+    /** The context inside a let body: the bound name narrowed to the value's inferred sort (or the
+     *  declared sort when inference abstains). The one definition of the let-narrowing decision. */
+    private static InferenceContext letBodyCtx(IrExpr.LetIn let, InferenceContext ctx) {
+        IrSort value = infer(let.value(), ctx);
+        return ctx.withVar(let.name(), value != null ? value : let.declaredSort());
+    }
+
+    /** The context inside a match arm: a variable scrutinee is narrowed to the arm's pattern when
+     *  that pattern is a refinement or struct. The one definition of the arm-narrowing decision. */
+    private static InferenceContext matchArmCtx(
+            IrExpr.Match m, IrExpr.MatchBranch branch, InferenceContext ctx) {
+        if (m.scrutinee() instanceof IrExpr.Var v
+                && (branch.pattern() instanceof IrSort.Refined
+                    || branch.pattern() instanceof IrSort.Structural)) {
+            return ctx.withVar(v.name(), branch.pattern());
+        }
+        return ctx;
+    }
+
+    /** The context inside a lambda body: each parameter bound to its declared sort. */
+    private static InferenceContext lambdaBodyCtx(IrExpr.Lambda lam, InferenceContext ctx) {
+        InferenceContext c = ctx;
+        for (IrParam p : lam.params()) {
+            if (p.sort() != null) c = c.withVar(p.name(), p.sort());
+        }
+        return c;
+    }
+
+    // --- The effective-sort lens (span → effective sort, every position) ----------------------------
+
+    /**
+     * The effective-sort lens over an expression tree: {@code span → effective sort} at every
+     * position that carries one, for the construction/claim gates and (later) an IDE. Reuses
+     * {@link #effectiveSort} for the per-node calculation and the shared env-threading helpers
+     * ({@link #letBodyCtx} / {@link #matchArmCtx} / {@link #lambdaBodyCtx}) for the domain-specific
+     * scoping — only the generic child-walk is local (two cohesive passes over one tree is not
+     * duplication). Positions with no source span (synthesized nodes) are omitted.
+     */
+    public static Map<Span, IrSort> effectiveSorts(IrExpr root, InferenceContext ctx) {
+        Map<Span, IrSort> lens = new LinkedHashMap<>();
+        collectEffectiveSorts(root, ctx, lens);
+        return lens;
+    }
+
+    private static void collectEffectiveSorts(IrExpr e, InferenceContext ctx, Map<Span, IrSort> lens) {
+        if (e == null) return;
+        IrSort effective = effectiveSort(e, ctx);
+        if (effective != null && e.origin() != null && e.origin().span() != null) {
+            lens.put(e.origin().span(), effective);
+        }
+        switch (e) {
+            case IrExpr.LetIn let -> {
+                collectEffectiveSorts(let.value(), ctx, lens);
+                collectEffectiveSorts(let.body(), letBodyCtx(let, ctx), lens);
+            }
+            case IrExpr.Match m -> {
+                collectEffectiveSorts(m.scrutinee(), ctx, lens);
+                for (IrExpr.MatchBranch b : m.branches()) {
+                    collectEffectiveSorts(b.result(), matchArmCtx(m, b, ctx), lens);
+                }
+            }
+            case IrExpr.BinOp op -> {
+                collectEffectiveSorts(op.left(), ctx, lens);
+                collectEffectiveSorts(op.right(), ctx, lens);
+            }
+            case IrExpr.FieldAccess fa -> collectEffectiveSorts(fa.base(), ctx, lens);
+            case IrExpr.Call c -> {
+                for (IrExpr a : c.args()) collectEffectiveSorts(a, ctx, lens);
+            }
+            case IrExpr.Record r -> {
+                for (IrExpr v : r.members().values()) collectEffectiveSorts(v, ctx, lens);
+            }
+            case IrExpr.Apply ap -> {
+                collectEffectiveSorts(ap.fn(), ctx, lens);
+                for (IrExpr a : ap.args()) collectEffectiveSorts(a, ctx, lens);
+            }
+            case IrExpr.Lambda lam -> collectEffectiveSorts(lam.body(), lambdaBodyCtx(lam, ctx), lens);
+            case IrExpr.Emit em -> {
+                collectEffectiveSorts(em.event(), ctx, lens);
+                collectEffectiveSorts(em.body(), ctx, lens);
+            }
+            case IrExpr.Cast cast -> collectEffectiveSorts(cast.value(), ctx, lens);
+            // Leaves and not-yet-walked (Iterate): the node's own sort is recorded above.
+            default -> { }
+        }
     }
 
     /**

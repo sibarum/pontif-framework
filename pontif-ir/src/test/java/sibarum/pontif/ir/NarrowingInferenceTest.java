@@ -128,6 +128,21 @@ class NarrowingInferenceTest {
         assertEquals(intGe(7), NarrowingInference.effectiveSort(balancePlusN, ctx));
     }
 
+    @Test
+    void effectiveSorts_recordsProjectedSortKeyedBySpan() {
+        // The lens keys each position's span to its EFFECTIVE sort. For `n - 1` under n:[Int:@>0],
+        // the BinOp position carries the projected [Int:@>=0] — the same value effectiveSort returns,
+        // now materialized per position for downstream gates / an IDE.
+        IrSort nGt0 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        InferenceContext ctx = InferenceContext.of(Map.of("n", nGt0));
+        sibarum.pontif.core.Origin at = sibarum.pontif.core.Origin.at("t.ptf", 1, 1);
+        IrExpr nMinus1 = new IrExpr.BinOp(IrExpr.Op.SUB, IrExpr.var("n"), IrExpr.lit(1), at);
+        Map<sibarum.pontif.core.Origin.Span, IrSort> lens =
+                NarrowingInference.effectiveSorts(nMinus1, ctx);
+        assertEquals(intGe(0), lens.get(at.span()));
+    }
+
     // --- Match: the headline slice -------------------------------------------
 
     /**
