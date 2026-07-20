@@ -227,6 +227,17 @@ public record InferenceContext(
                 operatorOverloads, methodKeys, algebraicFunctions);
     }
 
+    /** A new context with each of {@code params} bound to its declared sort (params with no declared
+     *  sort are skipped) — the one definition of "seed a function's parameters into scope", shared by
+     *  the construction gate and the effective-sort lens. */
+    public InferenceContext withParams(List<IrParam> params) {
+        InferenceContext c = this;
+        for (IrParam p : params) {
+            if (p.sort() != null) c = c.withVar(p.name(), p.sort());
+        }
+        return c;
+    }
+
     /** Returns a new context with the struct-defs map replaced. */
     public InferenceContext withStructDefs(Map<String, IrSort.Structural> defs) {
         return new InferenceContext(typeEnv, functionReturns, defs, overloads, returnProofs,

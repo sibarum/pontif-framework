@@ -67,6 +67,12 @@ public final class IrCompiler {
         // both single-file and linked compiles get it.
         resolved = DecimalPromotion.rewrite(resolved);
 
+        // The effective-sort lens over the promoted IR (docs/type-records.md, the Inferred record):
+        // span → the accumulated effective sort at each position. Computed here — after the promotions
+        // so it sees promoted members, and BEFORE the construction gate so the gate consumes it rather
+        // than recomputing. Carried onto CompiledModule so it survives compilation (for an IDE later).
+        var effectiveSorts = EffectiveSortLens.of(resolved);
+
         // The claim rule at construction sites, three-way: provable fit passes
         // unchecked, provable miss is a compile error, genuine overlap gets a
         // runtime check stamped on the record (enforced by the interpreter and
@@ -199,7 +205,7 @@ public final class IrCompiler {
 
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
-                structRegistry, topLevelLets, actionsByType, algebraicFunctions);
+                structRegistry, topLevelLets, actionsByType, algebraicFunctions, effectiveSorts);
     }
 
     /** The local head-constructor name of a {@code proof} tree ({@code Algebraic}), or null. */

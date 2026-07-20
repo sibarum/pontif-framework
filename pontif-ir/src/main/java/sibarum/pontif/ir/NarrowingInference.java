@@ -10,7 +10,9 @@ import sibarum.pontif.types.DispatchQuery;
 import sibarum.pontif.types.DispatchResult;
 import sibarum.pontif.types.TypeSystem;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1061,12 +1063,49 @@ public final class NarrowingInference {
     public static IrSort effectiveSort(IrExpr expr, InferenceContext ctx) {
         IrSort narrowing = infer(expr, ctx);
         if (narrowing == null) return null;
-        IrSort projected = closeOver(narrowing, ctx.typeEnv().keySet(), ctx);
-        if (projected != null) return projected;
-        // Unbounded projection: a pin still mentioning free vars would leak them into the
-        // consuming scope, so the honest effective sort is the bare base.
+        // closeOver recurses over the narrowing's predicate; run at every position, a pathologically
+        // deep predicate (a long operator chain in generated code) would risk overflowing. Cap it —
+        // too deep → skip the projection and report the bare base, a sound coarser effective sort.
+        boolean projectable = !(narrowing instanceof IrSort.Refined ref)
+                || predicateDepthWithin(ref.predicate(), MAX_PROJECTION_DEPTH);
+        if (projectable) {
+            IrSort projected = closeOver(narrowing, ctx.typeEnv().keySet(), ctx);
+            if (projected != null) return projected;
+        }
+        // Unbounded (or un-projectably-deep): a pin still mentioning free vars would leak them into
+        // the consuming scope, so the honest effective sort is the bare base.
         String base = baseName(narrowing);
         return base != null ? IrSort.named(base) : narrowing;
+    }
+
+    private static final int MAX_PROJECTION_DEPTH = 200;
+
+    /** Whether {@code predicate}'s nesting depth is within {@code max} — an <em>iterative</em> check
+     *  (explicit stack, no recursion) so the guard itself never overflows on the very predicates it
+     *  is meant to fence off. Early-exits as soon as the bound is exceeded. */
+    private static boolean predicateDepthWithin(IrExpr predicate, int max) {
+        Deque<IrExpr> nodes = new ArrayDeque<>();
+        Deque<Integer> depths = new ArrayDeque<>();
+        nodes.push(predicate);
+        depths.push(1);
+        while (!nodes.isEmpty()) {
+            IrExpr n = nodes.pop();
+            int d = depths.pop();
+            if (d > max) return false;
+            switch (n) {
+                case IrExpr.BinOp op -> {
+                    nodes.push(op.left());  depths.push(d + 1);
+                    nodes.push(op.right()); depths.push(d + 1);
+                }
+                case IrExpr.FieldAccess fa -> { nodes.push(fa.base()); depths.push(d + 1); }
+                case IrExpr.Call c -> {
+                    for (IrExpr a : c.args()) { nodes.push(a); depths.push(d + 1); }
+                }
+                case IrExpr.Cast c -> { nodes.push(c.value()); depths.push(d + 1); }
+                default -> { }
+            }
+        }
+        return true;
     }
 
     // --- Shared env-threading (one definition, reused by infer and the lens walk) -------------------

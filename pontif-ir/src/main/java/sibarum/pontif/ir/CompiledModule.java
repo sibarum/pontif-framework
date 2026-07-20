@@ -1,5 +1,6 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.DispatchTable;
 import sibarum.pontif.core.symbolic.FunctionDecl;
 import sibarum.pontif.core.types.Sort;
@@ -17,7 +18,8 @@ public record CompiledModule(
         Map<String, Sort> structRegistry,
         List<String> topLevelLets,
         Map<String, List<CompiledAction>> actionsByType,
-        java.util.Set<String> algebraicFunctions) {
+        java.util.Set<String> algebraicFunctions,
+        Map<Origin.Span, IrSort> effectiveSorts) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
@@ -44,6 +46,20 @@ public record CompiledModule(
         // by-reference struct sort can be resolved to its shape at check time
         // without inlining. Keyed by name (record-equality), unlike compiledSorts.
         structRegistry = Map.copyOf(structRegistry);
+        // The effective-sort lens (docs/type-records.md, the Inferred record): span → the accumulated
+        // effective sort at that position, produced by EffectiveSortLens before the construction gate
+        // and carried here so it survives compilation (read by the gates and, later, an IDE).
+        effectiveSorts = Map.copyOf(effectiveSorts);
+    }
+
+    /** Back-compat: a module with no effective-sort lens (empty). */
+    public CompiledModule(
+            String name, DispatchTable dispatch, Map<FunctionDecl, CompiledFunction> functions,
+            IrExpr main, Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
+            List<String> topLevelLets, Map<String, List<CompiledAction>> actionsByType,
+            java.util.Set<String> algebraicFunctions) {
+        this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
+                actionsByType, algebraicFunctions, Map.of());
     }
 
     /** Back-compat: a module with no Actions (the pre-Action-leg shape). */
