@@ -707,21 +707,25 @@ parameter). The compiler holds you to it — a body that isn't (a branch, an eff
 an unprovable shape) fails the proof.
 
 That claim buys a capability. `$poly[Decimal]` — the metareference — now *is-a*
-`Algebraic`, and an `Algebraic` carries one attribute, `.ast`, which reflects the
-body into a first-class `AlgExpr`:
+`Algebraic`, a trait it satisfies as an ordinary first-class **object**: it carries
+an attribute `.ast` that reflects the body into a first-class `AlgExpr`, and a
+method `.eval(x)` that evaluates the function at a point.
 
 ```pontif
-requires pontif.algebra.{eval}
+requires pontif.algebra.{Algebraic}
 
 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
 assign proof poly:Algebraic
 
-eval($poly[Decimal].ast, 3.0) == poly(3.0)   # → true
+$poly[Decimal].eval(3.0) == poly(3.0)   # → true
 ```
 
-`$poly[Decimal].ast` is the AST of `poly`'s body; the builtin `eval` walks it over
-`x = 3.0` in exact `BigDecimal` arithmetic, and it agrees with calling `poly`
-directly.
+Calling `$poly[Decimal].eval(3.0)` treats the reference as a differentiable object;
+under the hood it walks `poly`'s AST over `x = 3.0` in exact `BigDecimal`
+arithmetic, and it agrees with calling `poly` directly. `.ast` and `.eval` are
+members the metareference gets purely by *being* an `AlgebraicDispatch` — each was
+added with only a trait declaration, no change to the type system, because a
+metareference is a genuine object and not a special-cased function pointer.
 
 `AlgExpr` is no black box — it is an ordinary trait union (`Const`, `Param`, `Add`,
 `Sub`, `Mul`, `Div`, `Pow`), so you `match` on it and write your own evaluator,
@@ -746,8 +750,8 @@ and it travels through parameters — a function taking `f:Algebraic` may write
 `f.ast`, and only a proven-algebraic metareference type-checks as its argument. And
 nested calls to other algebraic functions are **inlined** into one tree (finite —
 recursion is banned by the same gate), so `.ast` always yields a self-contained AST.
-The reflection primitive itself (`astOf`) is non-exported: `$f[Decimal].ast` is the
-only door in.
+The reflection primitive itself (`astOf`) is non-exported: the `Algebraic` members
+(`$f[Decimal].ast` / `.eval`) are the only door in.
 
 ## Conservation receipts — the second ledger
 

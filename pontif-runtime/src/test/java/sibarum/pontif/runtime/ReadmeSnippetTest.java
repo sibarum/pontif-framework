@@ -424,14 +424,14 @@ class ReadmeSnippetTest {
     // --- Reflecting a function into its AST (pontif.algebra, default-installed) --
 
     @Test
-    void readmeAlgebraAstSnippet_evalMatchesTheDirectCall() {
+    void readmeAlgebraEvalMethodSnippet_matchesTheDirectCall() {
         assertEquals("true", runGated("""
-                requires pontif.algebra.{eval}
+                requires pontif.algebra.{Algebraic}
 
                 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
                 assign proof poly:Algebraic
 
-                eval($poly[Decimal].ast, 3.0) == poly(3.0)
+                $poly[Decimal].eval(3.0) == poly(3.0)
                 """));
     }
 
