@@ -36,6 +36,20 @@ class AlgebraAstSurfaceTest {
     }
 
     @Test
+    void evalMethod_onTheMetareference_matchesTheDirectCall() {
+        // THE ULTIMATE TEST: `eval` is a METHOD on the AlgebraicDispatch reference —
+        // `$poly[Decimal].eval(3.0)` — added purely by declaring a trait method + impl in the
+        // algebra module, with ZERO type-system code change. The metareference behaves as a
+        // first-class object: a member that reflects (`.ast`) and a method that computes.
+        assertEquals("true", run("""
+                requires pontif.algebra.{Algebraic}
+                function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
+                assign proof poly:Algebraic
+                $poly[Decimal].eval(3.0) == poly(3.0)
+                """));
+    }
+
+    @Test
     void astSurface_isInspectableWithMatch() {
         // poly's body ((x*x + 2.0*x) + 1.0) has an Add at its root.
         assertEquals("1", run("""

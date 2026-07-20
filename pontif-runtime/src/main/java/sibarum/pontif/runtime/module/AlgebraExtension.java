@@ -219,17 +219,24 @@ public final class AlgebraExtension implements Extension {
 
             # Algebraic: the trait a metareference proven algebraic is-a. Its `ast` attribute
             # IS the AST surface — `$f[Decimal].ast` reads it (docs/dispatch-method-elimination
-            # .md E2). A metareference $f[…] narrows to the builtin nominal AlgebraicDispatch
-            # when f carries `assign proof f:Algebraic`, else DispatchBase (no `.ast`).
-            trait Algebraic{ast:AlgExpr}
+            # .md E2). The `eval` METHOD evaluates the reference at a point — `$f[Decimal].eval(x)`
+            # — so the metareference behaves as a first-class differentiable object. A
+            # metareference $f[…] narrows to the builtin nominal AlgebraicDispatch when f carries
+            # `assign proof f:Algebraic`, else the plain Dispatch (no `.ast`, no `.eval`).
+            trait Algebraic{ast:AlgExpr, eval(x:Decimal):Decimal}
 
-            # The dispatch nominal AlgebraicDispatch provides `.ast` by reflecting the
-            # referent function. `this` is the metareference RecordValue; astOf reflects it.
-            assign trait AlgebraicDispatch:Algebraic { ast:AlgExpr -> astOf(this) }
+            # AlgebraicDispatch provides both members by reflecting the referent function:
+            # `.ast` via astOf; `.eval(x)` by evaluating that AST at x (the free `eval` over the
+            # AST, reached by its distinct 2-arg signature). `this` is the metareference itself.
+            assign trait AlgebraicDispatch:Algebraic {
+              ast:AlgExpr -> astOf(this)
+              eval(x:Decimal):Decimal -> eval(this.ast, x)
+            }
 
             # astOf reflects an algebraic function VALUE into its AST — NON-EXPORTED, so
-            # `$f[Decimal].ast` is the only surface. eval evaluates the AST over one variable.
-            # Both bodies are placeholders — a resolved call runs this extension's Java object
+            # `$f[Decimal].ast`/`.eval` are the only surface. The free `eval` evaluates the AST
+            # over one variable (the `.eval` method delegates to it). Both bodies are
+            # placeholders — a resolved call runs this extension's Java object
             # (AlgebraExtension.calls) instead. astOf's param is Algebraic, so a non-algebraic
             # reference is rejected at the type level.
             function astOf(f:Algebraic):AlgExpr -> Const(0.0)

@@ -347,9 +347,17 @@ public final class MethodOperatorResolver {
             IrExpr receiver, List<IrExpr> args, InferenceContext ctx) {
         // Does base(receiver).method name a routable method key? The unified dispatch query answers
         // (it consults the routable-key set, trait-contract keys included); this pass forms the Call.
-        if (routes(types.dispatch(
-                sibarum.pontif.types.DispatchQuery.forMethod(mc.methodName(), candSort), ctx))) {
-            String key = typeName + "." + mc.methodName();
+        sibarum.pontif.types.DispatchResult dr = types.dispatch(
+                sibarum.pontif.types.DispatchQuery.forMethod(mc.methodName(), candSort), ctx);
+        if (routes(dr)) {
+            // Target the RESOLVED function's actual name — which the linker may have
+            // module-qualified (a bare receiver nominal like a metareference's
+            // `AlgebraicDispatch` routes to `pontif.algebra/AlgebraicDispatch.method`). Fall
+            // back to `Type.method` for a trait-contract key with no concrete declaration.
+            List<IrStmt.FunctionDecl> family = routingFamily(dr);
+            String key = family.isEmpty()
+                    ? typeName + "." + mc.methodName()
+                    : family.get(0).name();
             List<IrExpr> withReceiver = new ArrayList<>(args.size() + 1);
             withReceiver.add(receiver);
             withReceiver.addAll(args);
@@ -572,6 +580,10 @@ public final class MethodOperatorResolver {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             case IrSort.Trait t -> t.name();
+            // A call-signature receiver dispatches methods on its head type — a metareference
+            // ($f[…] : AlgebraicDispatch) resolves the methods of the traits it is-a, exactly
+            // like any nominal (docs/dispatch-method-elimination.md §2).
+            case IrSort.CallSig c -> c.typeName();
             default -> null;
         };
     }

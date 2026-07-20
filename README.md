@@ -697,6 +697,58 @@ step(5)   # → 6
 once and reuses it wherever a type annotation goes. It is the bracketed sibling of
 the `Type{...}` trait form.
 
+## Reflecting a function into its AST
+
+A metareference isn't only a callable — when its referent is *proven algebraic* it
+becomes a window onto the function's own structure. Mark a function
+`assign proof f:Algebraic` and you promise its body is pure algebra: arithmetic in
+one variable over `pontif.algebra`'s node set (`+ - * / ^`, constants, the
+parameter). The compiler holds you to it — a body that isn't (a branch, an effect,
+an unprovable shape) fails the proof.
+
+That claim buys a capability. `$poly[Decimal]` — the metareference — now *is-a*
+`Algebraic`, and an `Algebraic` carries one attribute, `.ast`, which reflects the
+body into a first-class `AlgExpr`:
+
+```pontif
+requires pontif.algebra.{eval}
+
+function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
+assign proof poly:Algebraic
+
+eval($poly[Decimal].ast, 3.0) == poly(3.0)   # → true
+```
+
+`$poly[Decimal].ast` is the AST of `poly`'s body; the builtin `eval` walks it over
+`x = 3.0` in exact `BigDecimal` arithmetic, and it agrees with calling `poly`
+directly.
+
+`AlgExpr` is no black box — it is an ordinary trait union (`Const`, `Param`, `Add`,
+`Sub`, `Mul`, `Div`, `Pow`), so you `match` on it and write your own evaluator,
+simplifier, or symbolic *differentiator*:
+
+```pontif
+requires pontif.algebra.{AlgExpr, Add}
+
+function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
+assign proof poly:Algebraic
+
+let e:AlgExpr = $poly[Decimal].ast
+match e {
+  [Add(_, _)] -> 1                 # poly's body ((x*x + 2.0*x) + 1.0) is rooted at `+`
+  [_]         -> 0
+}                                  # → 1
+```
+
+Two honesty rules make this more than reflection. The guarantee is a **type**, not a
+marker: `.ast` on a non-algebraic reference (`$inc[Int].ast`) is a *compile* error,
+and it travels through parameters — a function taking `f:Algebraic` may write
+`f.ast`, and only a proven-algebraic metareference type-checks as its argument. And
+nested calls to other algebraic functions are **inlined** into one tree (finite —
+recursion is banned by the same gate), so `.ast` always yields a self-contained AST.
+The reflection primitive itself (`astOf`) is non-exported: `$f[Decimal].ast` is the
+only door in.
+
 ## Conservation receipts — the second ledger
 
 The receipt graph proves what values *are*; the conservation ledger proves where
@@ -1135,7 +1187,7 @@ language is one big syntactic sugar for it).
 | `pontif-parser` | Two parsers sharing the same IR: the **reference parser** (`Parser`, S-expression, stable, for tests / reference) and the **Pontif parser** (`AltParser`, the user-facing surface) — including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's sort. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
-| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), and `MathExtExtension` (`pontif.math.ext`). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
+| `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), `MathExtExtension` (`pontif.math.ext`), and `AlgebraExtension` (`pontif.algebra`: reflects an `assign proof f:Algebraic` function's body into a first-class `AlgExpr` AST via `$f[Decimal].ast`, and `eval`s it). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
 | `pontif-builtin-gui` | The GUI + plotting extensions — `GuiExtension` (`pontif.gui`: `window`, `Label`/`Button`/`Column`, `Clickable`) and `PlotExtension` (`pontif.plot`: `Curve2D`/`HeightMap3D`/`Cloud3D` → `plotLine`/`plotSurface`/`plotCloud`), bridged onto the author's dasum flexbox/OpenGL toolkit via `DasumBridge`. The one module that depends on dasum for rendering. |
 | `pontif-builtin-shape` | The 3D-shape extension — `ShapeExtension` (`pontif.shape`): SDF primitives (`Sphere`) + transforms (`translate`/`scale`/`rotate*` about an anchor) + boolean CSG (`union`/`intersect`/`difference`/`smoothUnion`) + attribute fields (`ScalarField`/`attr`), all one `SdfShape`, viewed by `render` (GPU raymarch surface) or `previewGradientField` (reusing `pontif.plot`'s volumetric renderer). Meshing (*topologize*) and PLY export are in progress ([docs/shapes.md](docs/shapes.md)). |
 | `pontif-playground` | **Pontif Editor** — editor + status ribbon for running snippets interactively, built on the dasum UI toolkit; its **Run GUI** launches a program through `pontif-builtin-gui`'s `GuiLauncher`. (The module is still named `pontif-playground`; the product is the Pontif Editor.) |
@@ -1171,6 +1223,11 @@ Capabilities that work end-to-end in the Pontif surface syntax:
 - **Synthesis from the spec** — the trailing `;` directive (value pins,
   construction pins, in-type `let`-pipelines)
 - **Metareferences** — `$f[Sorts]` first-class dispatch references
+- **Algebraic reflection** (`pontif.algebra`) — a function proven
+  `assign proof f:Algebraic` reflects its body into a first-class `AlgExpr` AST via
+  `$f[Decimal].ast` (an `Algebraic`-trait attribute, gated by type — `.ast` on a
+  non-algebraic reference is a compile error), inspectable with `match` and
+  runnable with `eval`
 - **Compile-time match totality**, **return verification** (automatic
   receipt-graph discharge or in-source `proof` / `assign proof`), and
   **conservation receipts** (`DataConservative`, `Reversible`, `NoDuplication`,

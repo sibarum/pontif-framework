@@ -421,6 +421,36 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    // --- Reflecting a function into its AST (pontif.algebra, default-installed) --
+
+    @Test
+    void readmeAlgebraAstSnippet_evalMatchesTheDirectCall() {
+        assertEquals("true", runGated("""
+                requires pontif.algebra.{eval}
+
+                function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
+                assign proof poly:Algebraic
+
+                eval($poly[Decimal].ast, 3.0) == poly(3.0)
+                """));
+    }
+
+    @Test
+    void readmeAlgebraAstSnippet_inspectableWithMatch_evaluatesTo1() {
+        assertEquals("1", runGated("""
+                requires pontif.algebra.{AlgExpr, Add}
+
+                function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
+                assign proof poly:Algebraic
+
+                let e:AlgExpr = $poly[Decimal].ast
+                match e {
+                  [Add(_, _)] -> 1
+                  [_]         -> 0
+                }
+                """));
+    }
+
     // --- Conservation receipts (the second ledger) ---------------------------
 
     @Test

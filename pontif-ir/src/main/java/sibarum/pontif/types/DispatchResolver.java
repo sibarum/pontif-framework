@@ -60,8 +60,14 @@ final class DispatchResolver {
             return new DispatchResult.Residual(List.of());
         }
         String key = typeName + "." + query.selector();
-        if (ctx.methodKeys().contains(key)) {
-            return new DispatchResult.Ambiguous(ctx.overloads().getOrDefault(key, List.of()));
+        // Tolerate the linker's module qualification: a bare receiver nominal (e.g. a
+        // metareference's builtin `AlgebraicDispatch`) routes to a `mod/Type.method` key when
+        // the impl lives in a required module. Mirrors the attribute-producer lookup.
+        String resolvedKey = ctx.methodKeys().contains(key) ? key
+                : ctx.methodKeys().stream()
+                        .filter(k -> k.endsWith("/" + key)).findFirst().orElse(null);
+        if (resolvedKey != null) {
+            return new DispatchResult.Ambiguous(ctx.overloads().getOrDefault(resolvedKey, List.of()));
         }
         return new DispatchResult.Residual(List.of());
     }
@@ -123,6 +129,9 @@ final class DispatchResolver {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             case IrSort.Trait t -> t.name();
+            // A call-signature receiver routes methods on its head type — a metareference
+            // ($f[…] : AlgebraicDispatch) dispatches its traits' methods like any nominal.
+            case IrSort.CallSig c -> c.typeName();
             default -> null;
         };
     }

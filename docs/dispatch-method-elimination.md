@@ -298,6 +298,29 @@ general member machinery. (An earlier partial attempt, "C1a," bolted a `typeName
   a metareference reached through a let/var, a multi-overload callee, or a non-trait `[Dispatch(…)]`
   parameter still defers to runtime dispatch — the general static call-arg gate remains the C3 slice.
 
+#### The ultimate test: `eval` as a METHOD on the metareference (`$f[Decimal].eval(x)`)
+
+Adding a *method* (not just an attribute) to a callable metaprogramming type. The feature itself is
+pure declaration — a trait method + impl in `AlgebraExtension.SOURCE`:
+`trait Algebraic{ast:AlgExpr, eval(x:Decimal):Decimal}` + `assign trait AlgebraicDispatch:Algebraic { …
+eval(x:Decimal):Decimal -> eval(this.ast, x) }`, used as `$poly[Decimal].eval(3.0) == poly(3.0)`.
+**Green.** But it was NOT zero-type-system-change: it surfaced that the *method*-dispatch paths had
+never been taught that a `CallSig` is a nominal receiver (metareferences were never method receivers
+before), plus the same bare-vs-qualified name tolerance the attribute path already had. Five principled
+completions (none Method/Dispatch-specific hardcoding — all "a CallSig's head is its type name" /
+"tolerate the linker's module qualification", i.e. E1's mechanical fold + the attribute-path fixes,
+extended to method dispatch):
+- `MethodOperatorResolver.baseName` and `DispatchResolver.baseName` → `CallSig` yields its `typeName`
+  (a metaref receiver dispatches its traits' methods like any nominal).
+- `DispatchResolver.routeMethod` → tolerate a `mod/Type.method` key for a bare receiver nominal.
+- `MethodOperatorResolver.tryResolveMethodOn` → target the resolved function's actual (qualified) name.
+- `SortChecker` impl-method `implByShortName` → take the final name segment (the same
+  qualification-tolerant strip already applied to attribute producers), so a builtin-typed impl's
+  linker-qualified method matches its contract.
+
+Takeaway: the refactoring holds — a new callable type's members are added by declaration, and every
+engine touch was completing a generic pattern for a code path E1/E2 hadn't exercised, not new special-casing.
+
 ## 7. Verification
 
 Full `mvn test` green after E1 (behavior-preserving + the extensibility acid-test type) and after

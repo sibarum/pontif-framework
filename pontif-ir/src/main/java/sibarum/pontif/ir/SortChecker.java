@@ -476,13 +476,13 @@ public final class SortChecker {
             validateSortNames(arg, structDefs, implTypeVars);
         }
 
-        // Build short-name -> impl map (stripping the "Type." prefix).
+        // Build short-name -> impl map. The method name is the final segment — robust
+        // whether it is bare (`Type.method`) or the linker module-qualified it
+        // (`mod/Type.method`), the latter when the impl type is a bare builtin like
+        // AlgebraicDispatch (mirrors the attribute-producer short-name below).
         Map<String, IrStmt.FunctionDecl> implByShortName = new LinkedHashMap<>();
-        String prefix = ti.typeName() + ".";
         for (IrStmt.FunctionDecl m : ti.methods()) {
-            String shortName = m.name().startsWith(prefix)
-                    ? m.name().substring(prefix.length())
-                    : m.name();
+            String shortName = m.name().substring(m.name().lastIndexOf('.') + 1);
             implByShortName.put(shortName, m);
         }
 
