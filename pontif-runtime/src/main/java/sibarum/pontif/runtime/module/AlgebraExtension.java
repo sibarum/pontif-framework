@@ -65,7 +65,30 @@ public final class AlgebraExtension implements Extension {
             }
             return walk(reflected.body(), env, ctx);
         });
-        m.put("eval", (args, ctx) -> evalNode(args.get(0), decimal(args.get(1))));
+        // eval: single-variable convenience — bind EVERY Param to the one point `x`.
+        m.put("eval", (args, ctx) -> {
+            BigDecimal x = decimal(args.get(1));
+            return evalNode(args.get(0), name -> x);
+        });
+        // evalAt: N-variable — bind each Param by NAME from a point dict `{x = …, y = …}`
+        // (the AST already carries a distinct Param per argument, by name). This is the
+        // multi-argument surface; the binding is a dynamically-typed record (param sort `_`).
+        m.put("evalAt", (args, ctx) -> {
+            Object at = args.get(1);
+            if (!(at instanceof RecordValue point)) {
+                throw new RuntimeCheckException(
+                        "evalAt: the binding must be a record `{name = value, …}`, got " + at,
+                        Origin.NONE);
+            }
+            return evalNode(args.get(0), name -> {
+                Object v = point.members().get(name);
+                if (v == null) {
+                    throw new RuntimeCheckException(
+                            "evalAt: no binding for variable '" + name + "' in " + point, Origin.NONE);
+                }
+                return decimal(v);
+            });
+        });
         return m;
     }
 
@@ -155,26 +178,35 @@ public final class AlgebraExtension implements Extension {
 
     // --- AlgExpr AST evaluation ------------------------------------------------
 
-    private static BigDecimal evalNode(Object node, BigDecimal x) {
+    private static BigDecimal evalNode(
+            Object node, java.util.function.Function<String, BigDecimal> env) {
         if (!(node instanceof RecordValue r) || r.typeName() == null) {
             throw new RuntimeCheckException("eval: not an AlgExpr node: " + node, Origin.NONE);
         }
         return switch (QualifiedName.memberOf(r.typeName())) {
             case "Const" -> decimal(r.members().get("value"));
-            case "Param" -> x;
-            case "Add" -> evalNode(r.members().get("left"), x)
-                    .add(evalNode(r.members().get("right"), x));
-            case "Sub" -> evalNode(r.members().get("left"), x)
-                    .subtract(evalNode(r.members().get("right"), x));
-            case "Mul" -> evalNode(r.members().get("left"), x)
-                    .multiply(evalNode(r.members().get("right"), x));
-            case "Div" -> evalNode(r.members().get("left"), x)
-                    .divide(evalNode(r.members().get("right"), x), MathContext.DECIMAL128);
-            case "Pow" -> pow(evalNode(r.members().get("base"), x),
-                    evalNode(r.members().get("exponent"), x));
+            // Each Param carries the source parameter's NAME; the environment binds it to a
+            // point. A single-variable eval binds every name to one value; evalAt binds by name.
+            case "Param" -> env.apply(paramName(r));
+            case "Add" -> evalNode(r.members().get("left"), env)
+                    .add(evalNode(r.members().get("right"), env));
+            case "Sub" -> evalNode(r.members().get("left"), env)
+                    .subtract(evalNode(r.members().get("right"), env));
+            case "Mul" -> evalNode(r.members().get("left"), env)
+                    .multiply(evalNode(r.members().get("right"), env));
+            case "Div" -> evalNode(r.members().get("left"), env)
+                    .divide(evalNode(r.members().get("right"), env), MathContext.DECIMAL128);
+            case "Pow" -> pow(evalNode(r.members().get("base"), env),
+                    evalNode(r.members().get("exponent"), env));
             default -> throw new RuntimeCheckException(
                     "eval: unknown AlgExpr node '" + r.typeName() + "'", Origin.NONE);
         };
+    }
+
+    /** The source parameter name a {@code Param} node carries. */
+    private static String paramName(RecordValue param) {
+        Object n = param.members().get("name");
+        return n instanceof StringValue s ? s.content() : String.valueOf(n);
     }
 
     private static BigDecimal pow(BigDecimal base, BigDecimal exp) {
@@ -197,7 +229,7 @@ public final class AlgebraExtension implements Extension {
     }
 
     private static final String SOURCE = """
-            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, Algebraic, eval}
+            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, Algebraic, eval, evalAt}
 
             trait AlgExpr{}
 
@@ -241,6 +273,10 @@ public final class AlgebraExtension implements Extension {
             # reference is rejected at the type level.
             function astOf(f:Algebraic):AlgExpr -> Const(0.0)
             function eval(e:AlgExpr, x:Decimal):Decimal -> 0.0
+            # evalAt binds each variable by NAME from a point dict `{x = …, y = …}` — the
+            # N-argument surface (`eval` is the one-variable convenience). The binding is
+            # dynamically typed (`_`); a statically-typed point is the next slice.
+            function evalAt(e:AlgExpr, at:_):Decimal -> 0.0
 
             0
             """;

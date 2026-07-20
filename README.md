@@ -744,6 +744,19 @@ match e {
 }                                  # → 1
 ```
 
+The AST is genuinely **multi-variable** — reflection mints a distinct `Param` per
+argument, by name — so evaluation takes a point that binds each name. `.eval(x)` is
+the one-variable convenience; `evalAt` is the general form:
+
+```pontif
+requires pontif.algebra.{evalAt}
+
+function f(x:Decimal, y:Decimal):Decimal -> x*y + x
+assign proof f:Algebraic
+
+evalAt($f[Decimal, Decimal].ast, {x = 3.0, y = 4.0}) == f(3.0, 4.0)   # → true
+```
+
 Two honesty rules make this more than reflection. The guarantee is a **type**, not a
 marker: `.ast` on a non-algebraic reference (`$inc[Int].ast`) is a *compile* error,
 and it travels through parameters — a function taking `f:Algebraic` may write

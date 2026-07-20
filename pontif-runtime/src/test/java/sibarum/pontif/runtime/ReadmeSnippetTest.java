@@ -451,6 +451,18 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    @Test
+    void readmeAlgebraEvalAtSnippet_multiVariable_matchesTheDirectCall() {
+        assertEquals("true", runGated("""
+                requires pontif.algebra.{evalAt}
+
+                function f(x:Decimal, y:Decimal):Decimal -> x*y + x
+                assign proof f:Algebraic
+
+                evalAt($f[Decimal, Decimal].ast, {x = 3.0, y = 4.0}) == f(3.0, 4.0)
+                """));
+    }
+
     // --- Conservation receipts (the second ledger) ---------------------------
 
     @Test

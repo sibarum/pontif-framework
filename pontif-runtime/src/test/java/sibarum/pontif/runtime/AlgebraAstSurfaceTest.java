@@ -50,6 +50,19 @@ class AlgebraAstSurfaceTest {
     }
 
     @Test
+    void evalAt_multiVariable_matchesTheDirectCall() {
+        // The AST is genuinely multi-variable — astOf mints a distinct Param per argument, by
+        // name — and `evalAt` binds each name from a point dict. Reflection + evaluation both
+        // generalize past one argument (the single-arg `eval` above is the convenience form).
+        assertEquals("true", run("""
+                requires pontif.algebra.{evalAt}
+                function f(x:Decimal, y:Decimal):Decimal -> x*y + x
+                assign proof f:Algebraic
+                evalAt($f[Decimal, Decimal].ast, {x = 3.0, y = 4.0}) == f(3.0, 4.0)
+                """));
+    }
+
+    @Test
     void astSurface_isInspectableWithMatch() {
         // poly's body ((x*x + 2.0*x) + 1.0) has an Add at its root.
         assertEquals("1", run("""
