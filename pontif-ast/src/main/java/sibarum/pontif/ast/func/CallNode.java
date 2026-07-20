@@ -90,13 +90,14 @@ public final class CallNode extends PontifNode {
         Object fnValue = frame.getObject(closureSlot);
         // A bound metareference: application reruns registry dispatch under
         // the REFERENCED name — candidates and narrowings intact.
-        if (fnValue instanceof sibarum.pontif.core.types.DispatchValue dv) {
-            if (argNodes.length != dv.keySorts().size()) {
+        if (sibarum.pontif.core.types.Metaref.is(fnValue)) {
+            int arity = sibarum.pontif.core.types.Metaref.keySorts(fnValue).size();
+            if (argNodes.length != arity) {
                 throw new RuntimeCheckException(
-                        "Metareference " + dv + " takes " + dv.keySorts().size()
+                        "Metareference " + fnValue + " takes " + arity
                                 + " argument(s); got " + argNodes.length, origin());
             }
-            return executeAsDispatch(frame, dv.functionName());
+            return executeAsDispatch(frame, sibarum.pontif.core.types.Metaref.functionName(fnValue));
         }
         if (!(fnValue instanceof LambdaValue lambda)) {
             throw new RuntimeCheckException(
@@ -144,9 +145,9 @@ public final class CallNode extends PontifNode {
                         && dispatch.resolve(name, List.of(), simplifier)
                                 instanceof DispatchResult.Resolved z) {
                     CallTarget zt = registry.callTarget(z.decl());
-                    if (zt != null && zt.call()
-                            instanceof sibarum.pontif.core.types.DispatchValue dv) {
-                        yield executeAsDispatch(frame, dv.functionName());
+                    if (zt != null && sibarum.pontif.core.types.Metaref.is(zt.call())) {
+                        yield executeAsDispatch(
+                                frame, sibarum.pontif.core.types.Metaref.functionName(zt.call()));
                     }
                 }
                 throw new RuntimeCheckException(
@@ -193,10 +194,15 @@ public final class CallNode extends PontifNode {
         if (value instanceof sibarum.pontif.core.types.StringValue s) {
             return SymExpr.str(s.content());
         }
-        if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
-            return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
+        // A metaref record round-trips as a DispatchRef carrying its nominal — caught
+        // before the generic RecordValue case so its dispatch identity is preserved.
+        if (sibarum.pontif.core.types.Metaref.is(value)) {
+            return new SymExpr.DispatchRef(
+                    sibarum.pontif.core.types.Metaref.functionName(value),
+                    sibarum.pontif.core.types.Metaref.keySorts(value),
+                    ((sibarum.pontif.core.types.RecordValue) value).typeName());
         }
-        if (value instanceof sibarum.pontif.ast.record.RecordValue r) {
+        if (value instanceof sibarum.pontif.core.types.RecordValue r) {
             java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
             for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
                 members.put(e.getKey(), toSymExpr(e.getValue()));

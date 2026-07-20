@@ -1,4 +1,4 @@
-package sibarum.pontif.ast.record;
+package sibarum.pontif.core.types;
 
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;

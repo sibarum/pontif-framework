@@ -54,7 +54,7 @@ import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.dasum.gui.vis.scene.TextLayer;
 import sibarum.dasum.gui.vis.scene.TriangleLayer;
 import sibarum.dasum.gui.vis.scene.VolumeLayer;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;

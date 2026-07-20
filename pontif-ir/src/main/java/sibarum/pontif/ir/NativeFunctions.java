@@ -1,6 +1,6 @@
 package sibarum.pontif.ir;
 
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 
 import java.util.LinkedHashMap;

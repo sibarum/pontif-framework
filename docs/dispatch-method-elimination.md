@@ -279,7 +279,14 @@ general member machinery. (An earlier partial attempt, "C1a," bolted a `typeName
   sound; the *parameter-propagation* guarantee needs a static intersection-assignment gate at the
   call site — its own slice, overlapping the C3 call-gate migration.
 - **Always-on prelude.** Not built; builtins stay known-names + registry-data (§2).
-- **Full `DispatchValue` → `RecordValue` retirement.** Optional cleanup after E1/E2.
+- **Full `DispatchValue` → `RecordValue` retirement.** ~~Optional cleanup after E1/E2.~~ **DONE (the
+  substrate move):** `RecordValue` relocated `pontif-ast` → `pontif-core` (`sibarum.pontif.core.types`)
+  as the universal value type; `Metaref` moved with it; `DispatchValue` deleted. A metareference is
+  now a `RecordValue` across ALL layers — the tree-walking interpreter, the symbolic `Force`, and the
+  Truffle mirror (`CallNode`/`TruffleLowering`/`DispatchRefLiteral`). Realizes the ratified rule
+  "anything that looks like an object should actually be one" (memory `values-are-recordvalues`).
+  Full `mvn test` green. Still open: retire `MARKER_SORT_NAMES` entirely; the §1d parameter-
+  propagation gate.
 
 ## 7. Verification
 

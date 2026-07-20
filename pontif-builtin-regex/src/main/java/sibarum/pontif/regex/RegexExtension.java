@@ -1,6 +1,6 @@
 package sibarum.pontif.regex;
 
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.module.Extension;

@@ -2,7 +2,7 @@ package sibarum.pontif.net;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 
 import java.util.LinkedHashMap;
 import java.util.List;

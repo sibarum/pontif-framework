@@ -1,4 +1,5 @@
 package sibarum.pontif.ast.record;
+import sibarum.pontif.core.types.RecordValue;
 
 import com.oracle.truffle.api.frame.VirtualFrame;
 import sibarum.pontif.core.PontifNode;

@@ -124,7 +124,7 @@ public final class TruffleLowering {
                                     + "caught at sort-check): " + ce.getMessage(), ce);
                 }
                 yield sibarum.pontif.ast.literal.DispatchRefLiteral.of(
-                        new sibarum.pontif.core.types.DispatchValue(d.functionName(), keys));
+                        sibarum.pontif.core.types.Metaref.of(d.functionName(), keys, false));
             }
             case IrExpr.Bool b -> Bool.of(b.value());
             case IrExpr.Var v -> Var.of(v.name());

@@ -9,7 +9,7 @@ import dev.supirvast.vastir.tools.Submission;
 import dev.supirvast.vastir.type.Type;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrExpr;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.KernelRunners;
 import sibarum.pontif.ir.Pending;
 import sibarum.pontif.supirvast.KernelLowering;

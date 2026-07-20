@@ -1,4 +1,5 @@
 package sibarum.pontif.ast.record;
+import sibarum.pontif.core.types.RecordValue;
 
 import sibarum.pontif.core.symbolic.SymExpr;
 

@@ -1,6 +1,6 @@
 package sibarum.pontif.shape;
 
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrExpr;

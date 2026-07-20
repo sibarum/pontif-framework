@@ -1,7 +1,7 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.NativeFunctions;
 import sibarum.pontif.runtime.PontifRunner.Engine;

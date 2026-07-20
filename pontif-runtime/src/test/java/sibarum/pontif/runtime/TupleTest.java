@@ -1,7 +1,7 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.ir.CompileException;

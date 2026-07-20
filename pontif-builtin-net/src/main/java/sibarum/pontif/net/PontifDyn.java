@@ -1,7 +1,7 @@
 package sibarum.pontif.net;
 
 import sibarum.elektro.queue.dyn.DynValue;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.CharValue;
 import sibarum.pontif.core.types.StringValue;
 

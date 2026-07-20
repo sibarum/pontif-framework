@@ -1,6 +1,6 @@
 package sibarum.pontif.ir;
 
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,8 +66,8 @@ public final class NativeCalls {
         }
 
         /**
-         * Reflect a first-class function <b>value</b> — a metareference
-         * ({@code sibarum.pontif.core.types.DispatchValue}) or a fragment/lambda
+         * Reflect a first-class function <b>value</b> — a metareference (a
+         * {@code sibarum.pontif.core.types.Metaref} record) or a fragment/lambda
          * ({@code Closure}) — to its parameters and IR body, or {@code null} if
          * {@code fnValue} is not a function value (or its declaration can't be
          * resolved). The free-function sibling of {@link #methodImpl}: the seam the

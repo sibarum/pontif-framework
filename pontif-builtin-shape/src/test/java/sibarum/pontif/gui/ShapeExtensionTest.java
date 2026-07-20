@@ -1,7 +1,7 @@
 package sibarum.pontif.gui;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.PontifCompiler;

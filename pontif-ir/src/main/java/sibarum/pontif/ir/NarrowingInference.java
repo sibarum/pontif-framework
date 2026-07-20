@@ -128,12 +128,12 @@ public final class NarrowingInference {
      * key-sort subsumption; only {@code AlgebraicDispatch is-a Algebraic}, so {@code .ast}
      * resolves off its {@code ast} attribute and {@code $inc[…].ast} (DispatchBase) is a
      * compile error. The runtime image is the matching {@code RecordValue} (see
-     * {@link sibarum.pontif.ast.record.Metaref}).
+     * {@link sibarum.pontif.core.types.Metaref}).
      */
     private static IrSort dispatchRefSort(IrExpr.DispatchRef d, InferenceContext ctx) {
         String typeName = ctx.algebraicFunctions().contains(d.functionName())
-                ? sibarum.pontif.ast.record.Metaref.ALGEBRAIC_DISPATCH
-                : sibarum.pontif.ast.record.Metaref.DISPATCH;
+                ? sibarum.pontif.core.types.Metaref.ALGEBRAIC_DISPATCH
+                : sibarum.pontif.core.types.Metaref.DISPATCH;
         return new IrSort.CallSig(typeName, d.keySorts(), IrSort.named("_"), d.origin());
     }
 

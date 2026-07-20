@@ -9,7 +9,7 @@ import sibarum.elektro.queue.message.MessageRegistry;
 import sibarum.elektro.queue.transport.local.ElektroLocal;
 import sibarum.elektro.queue.transport.tcp.ElektroTcp;
 import sibarum.elektro.queue.transport.tcp.TcpTransport;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.LiveSource;
 import sibarum.pontif.ir.NativeCalls;
 

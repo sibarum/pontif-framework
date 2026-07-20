@@ -1,7 +1,7 @@
 package sibarum.pontif.ir;
 
-import sibarum.pontif.ast.record.Metaref;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.Metaref;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.DispatchResult;
 import sibarum.pontif.core.symbolic.FunctionDecl;
@@ -877,7 +877,7 @@ public final class IrInterpreter {
     /**
      * Reflect a first-class function value to its parameters + IR body — the
      * runtime backing of {@link NativeCalls.Context#reflectFunction}. A {@link Closure}
-     * carries its lambda directly; a {@code DispatchValue} is resolved by name to its
+     * carries its lambda directly; a metareference is resolved by name to its
      * single (non-overloaded) declaration in the compiled module. Null otherwise.
      */
     private NativeCalls.ReflectedFunction reflectFunction(Object fnValue, CompiledModule module) {
@@ -1635,13 +1635,10 @@ public final class IrInterpreter {
         if (value instanceof sibarum.pontif.core.types.StringValue s) {
             return SymExpr.str(s.content());
         }
-        // A metareference round-trips as a SymExpr.DispatchRef — key-matched against a
-        // [Dispatch(…)] sort. The RecordValue metaref also carries its concrete nominal
-        // (Dispatch / AlgebraicDispatch), so trait-param dispatch (e.g. astOf's Algebraic
-        // param) can see `AlgebraicDispatch is-a Algebraic`. A legacy DispatchValue has none.
-        if (value instanceof sibarum.pontif.core.types.DispatchValue dv) {
-            return new SymExpr.DispatchRef(dv.functionName(), dv.keySorts());
-        }
+        // A metareference round-trips as a SymExpr.DispatchRef carrying its concrete nominal
+        // (Dispatch / AlgebraicDispatch) — key-matched against a [Dispatch(…)] sort, and its
+        // nominal lets trait-param dispatch (e.g. astOf's Algebraic param) see
+        // `AlgebraicDispatch is-a Algebraic`. Caught before the generic RecordValue case.
         if (value instanceof RecordValue r && Metaref.is(r)) {
             return new SymExpr.DispatchRef(
                     Metaref.functionName(r), Metaref.keySorts(r), r.typeName());

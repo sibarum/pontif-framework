@@ -6,7 +6,7 @@ import sibarum.elektro.queue.dyn.DynValue;
 import sibarum.elektro.queue.message.MessageType;
 import sibarum.elektro.queue.transport.tcp.ElektroTcp;
 import sibarum.elektro.queue.wire.WireBufferWriter;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;

@@ -1,6 +1,6 @@
 package sibarum.pontif.runtime.module;
 
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.core.types.StringValue;

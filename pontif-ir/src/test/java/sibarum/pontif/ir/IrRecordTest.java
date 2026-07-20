@@ -1,7 +1,7 @@
 package sibarum.pontif.ir;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;

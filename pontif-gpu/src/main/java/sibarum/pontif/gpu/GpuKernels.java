@@ -5,7 +5,7 @@ import dev.supirvast.vastir.tools.KernelHandle;
 import dev.supirvast.vastir.tools.KernelSpec;
 import dev.supirvast.vastir.tools.Registration;
 import dev.supirvast.vastir.tools.Rejection;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrSort;

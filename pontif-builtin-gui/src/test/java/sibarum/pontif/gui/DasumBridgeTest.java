@@ -1,7 +1,7 @@
 package sibarum.pontif.gui;
 
 import org.junit.jupiter.api.Test;
-import sibarum.pontif.ast.record.RecordValue;
+import sibarum.pontif.core.types.RecordValue;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;

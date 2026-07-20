@@ -82,7 +82,7 @@ public final class SortChecker {
      * are (docs/dispatch-method-elimination.md §2; like {@code Int}), never module-qualified,
      * so the metareference sort stamp ({@code AlgebraicDispatch}/{@code DispatchBase}), the
      * {@code Algebraic} trait (which owns the {@code ast} attribute), and the runtime
-     * {@link sibarum.pontif.ast.record.Metaref} value all agree on one spelling. Kept in
+     * {@link sibarum.pontif.core.types.Metaref} value all agree on one spelling. Kept in
      * sync with {@code NameResolver}'s builtin set.
      */
     private static final Set<String> MARKER_SORT_NAMES =
