@@ -285,8 +285,18 @@ general member machinery. (An earlier partial attempt, "C1a," bolted a `typeName
   now a `RecordValue` across ALL layers — the tree-walking interpreter, the symbolic `Force`, and the
   Truffle mirror (`CallNode`/`TruffleLowering`/`DispatchRefLiteral`). Realizes the ratified rule
   "anything that looks like an object should actually be one" (memory `values-are-recordvalues`).
-  Full `mvn test` green. Still open: retire `MARKER_SORT_NAMES` entirely; the §1d parameter-
-  propagation gate.
+  Full `mvn test` green.
+- **Retire `MARKER_SORT_NAMES`.** **DONE:** the bespoke marker set is deleted; `validateSortNames`
+  now recognizes a builtin call-kind head (`Method`/`Dispatch`/`AlgebraicDispatch`, e.g. an
+  `AlgebraicDispatch` impl's `this` self-sort) via the capability registry `CallKinds.builtin`, and
+  `Algebraic` validates as the real trait it is. (The `NameResolver` bare-name exemption stays — it is
+  the module-qualification exemption, a separate concern.)
+- **§1d parameter-propagation gate.** **DONE (targeted):** `SortChecker.checkMetareferencePropagation`
+  rejects a direct `$f[…]` argument to a single-overload callee's TRAIT parameter when the reference's
+  concrete nominal is-not-a that trait (`Assignability.isA`) — so `g($inc[Decimal])` into
+  `g(f:Algebraic)` is now a compile error, not a runtime one. Deliberately narrow (sound, not complete):
+  a metareference reached through a let/var, a multi-overload callee, or a non-trait `[Dispatch(…)]`
+  parameter still defers to runtime dispatch — the general static call-arg gate remains the C3 slice.
 
 ## 7. Verification
 

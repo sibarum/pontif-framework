@@ -77,17 +77,6 @@ public final class SortChecker {
      */
     private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
 
-    /**
-     * Builtin dispatch/algebra type names — recognized as bare names the way primitives
-     * are (docs/dispatch-method-elimination.md §2; like {@code Int}), never module-qualified,
-     * so the metareference sort stamp ({@code AlgebraicDispatch}/{@code DispatchBase}), the
-     * {@code Algebraic} trait (which owns the {@code ast} attribute), and the runtime
-     * {@link sibarum.pontif.core.types.Metaref} value all agree on one spelling. Kept in
-     * sync with {@code NameResolver}'s builtin set.
-     */
-    private static final Set<String> MARKER_SORT_NAMES =
-            Set.of("Algebraic", "DispatchBase", "AlgebraicDispatch");
-
     private SortChecker() {}
 
     public static void check(IrModule module) throws CompileException {
@@ -156,6 +145,110 @@ public final class SortChecker {
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs, algebraicFunctions);
+        checkMetareferencePropagation(module, traitContracts, overloads, algebraicFunctions);
+    }
+
+    /**
+     * The metareference-propagation gate (docs/dispatch-method-elimination.md §1d): a
+     * metareference argument passed where a TRAIT is required must have a concrete dispatch
+     * nominal that is-a that trait — so {@code g($poly[Decimal])} into {@code g(f:Algebraic)}
+     * is accepted (AlgebraicDispatch is-a Algebraic) but {@code g($inc[Decimal])} is a compile
+     * error (a plain Dispatch is not Algebraic). This closes the gap the direct
+     * {@code $f[…].ast} gate can't see — the guarantee travelling THROUGH a parameter.
+     *
+     * <p>Deliberately narrow (sound, not complete — it only adds rejections, never removes
+     * the permissive runtime path the general C3 call-gate will subsume): it fires only for a
+     * <em>direct</em> {@code $f[…]} argument to a single-overload callee's <em>trait</em>
+     * parameter. A metareference reached through a let/var, a multi-overload callee, or a
+     * non-trait ({@code [Dispatch(…)]}) parameter still defers to runtime dispatch.
+     */
+    private static void checkMetareferencePropagation(
+            IrModule module,
+            Map<String, IrSort.Trait> traitContracts,
+            Map<String, List<IrStmt.FunctionDecl>> overloads,
+            Set<String> algebraicFunctions) throws CompileException {
+        sibarum.pontif.types.AssignabilityContext actx =
+                sibarum.pontif.types.AssignabilityContext.fromModule(module);
+        List<IrExpr.Call> calls = new ArrayList<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.FunctionDecl fd) {
+                collectCalls(fd.body(), calls);
+            } else if (stmt instanceof IrStmt.TraitImpl ti) {
+                for (IrStmt.FunctionDecl m : ti.methods()) collectCalls(m.body(), calls);
+                for (IrStmt.FunctionDecl a : ti.attributeProducers()) collectCalls(a.body(), calls);
+            }
+        }
+        collectCalls(module.main(), calls);
+
+        for (IrExpr.Call c : calls) {
+            List<IrStmt.FunctionDecl> ovs =
+                    overloads.getOrDefault(QualifiedName.memberOf(c.functionName()), List.of());
+            if (ovs.size() != 1) continue;   // ambiguous / unknown → defer to runtime dispatch
+            List<IrParam> params = ovs.get(0).params();
+            for (int i = 0; i < c.args().size() && i < params.size(); i++) {
+                if (!(c.args().get(i) instanceof IrExpr.DispatchRef d)) continue;
+                IrSort paramSort = params.get(i).sort();
+                // Only a TRAIT parameter carries a satisfiability obligation a metareference
+                // could violate; a `[Dispatch(…)]` (CallSig) parameter is permissive. The trait
+                // may be an inlined IrSort.Trait or a bare Named the catalog knows as a trait.
+                String traitName = paramSort instanceof IrSort.Trait t ? t.name()
+                        : paramSort instanceof IrSort.Named pn && traitContracts.containsKey(pn.name())
+                                ? pn.name() : null;
+                if (traitName == null) continue;
+                String nominal = algebraicFunctions.contains(d.functionName())
+                        ? sibarum.pontif.core.types.Metaref.ALGEBRAIC_DISPATCH
+                        : sibarum.pontif.core.types.Metaref.DISPATCH;
+                if (!sibarum.pontif.types.Assignability.isA(IrSort.named(nominal), paramSort, actx)) {
+                    throw new CompileException(
+                            "Metareference '$" + d.functionName() + "[…]' is a '" + nominal
+                                    + "', which does not satisfy '" + traitName + "' required by "
+                                    + "parameter " + (i + 1) + " of '" + c.functionName()
+                                    + "' — only a reference proven algebraic (`assign proof "
+                                    + d.functionName() + ":Algebraic`) satisfies it.",
+                            d.origin());
+                }
+            }
+        }
+    }
+
+    /** Gathers every {@link IrExpr.Call} reachable from {@code e} (into {@code out}). */
+    private static void collectCalls(IrExpr e, List<IrExpr.Call> out) {
+        switch (e) {
+            case IrExpr.Call c -> {
+                out.add(c);
+                for (IrExpr a : c.args()) collectCalls(a, out);
+            }
+            case IrExpr.BinOp op -> { collectCalls(op.left(), out); collectCalls(op.right(), out); }
+            case IrExpr.LetIn l -> { collectCalls(l.value(), out); collectCalls(l.body(), out); }
+            case IrExpr.Lambda lam -> collectCalls(lam.body(), out);
+            case IrExpr.Apply ap -> {
+                collectCalls(ap.fn(), out);
+                for (IrExpr a : ap.args()) collectCalls(a, out);
+            }
+            case IrExpr.Match m -> {
+                collectCalls(m.scrutinee(), out);
+                for (IrExpr.MatchBranch b : m.branches()) collectCalls(b.result(), out);
+            }
+            case IrExpr.Record r -> { for (IrExpr v : r.members().values()) collectCalls(v, out); }
+            case IrExpr.FieldAccess fa -> collectCalls(fa.base(), out);
+            case IrExpr.Cast cast -> collectCalls(cast.value(), out);
+            case IrExpr.Emit em -> { collectCalls(em.event(), out); collectCalls(em.body(), out); }
+            case IrExpr.Iterate it -> {
+                collectCalls(it.source(), out);
+                for (IrExpr cs : it.coSources()) collectCalls(cs, out);
+                for (IrExpr.OutputSpec os : it.outputs()) {
+                    if (os.init() != null) collectCalls(os.init(), out);
+                }
+                for (IrExpr.Arm arm : it.arms()) {
+                    for (IrExpr.Write w : arm.writes()) {
+                        if (w.key() != null) collectCalls(w.key(), out);
+                        collectCalls(w.value(), out);
+                    }
+                }
+            }
+            // Leaves + MethodCall (resolved away before here): no nested calls to visit.
+            default -> { }
+        }
     }
 
     /** Names of functions with an {@code assign proof f:Algebraic} claim (docs/algebra). */
@@ -821,7 +914,11 @@ public final class SortChecker {
                 // validates without unrolling Node.
                 if (!PRIMITIVE_SORT_NAMES.contains(n.name())
                         && !BUILTIN_PARAMETRIC_TYPES.contains(n.name())
-                        && !MARKER_SORT_NAMES.contains(n.name())
+                        // A builtin call-kind head (Method / Dispatch / AlgebraicDispatch …) is a
+                        // known name, sourced from the capability registry rather than a bespoke
+                        // marker set — e.g. an AlgebraicDispatch impl's `this` self-sort
+                        // (docs/dispatch-method-elimination.md §2).
+                        && CallKinds.builtin(n.name()) == null
                         && !structDefs.containsKey(n.name())
                         && !typeVars.contains(n.name())) {
                     // A name that IS a declared trait but survived as a bare

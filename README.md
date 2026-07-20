@@ -23,6 +23,7 @@ allowed to lie.
 - [Braces, Brackets, Parenthesis](#braces-brackets-parenthesis)
 - [Operator overloading](#operator-overloading)
 - [Proofs and synthesis](#proofs-and-synthesis)
+- [Reflecting a function into its AST](#reflecting-a-function-into-its-ast)
 - [Conservation receipts — the second ledger](#conservation-receipts--the-second-ledger)
 - [The math library](#the-math-library)
 - [Actions and events](#actions-and-events)

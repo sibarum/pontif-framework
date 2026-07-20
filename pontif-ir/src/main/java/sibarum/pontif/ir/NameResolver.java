@@ -47,9 +47,9 @@ public final class NameResolver {
     private static final Set<String> PRIMITIVES = Set.of(
             "Int", "Bool", "Decimal", "_", "_record", "_tuple",
             // Builtin dispatch/algebra type names — global, never module-qualified, so the
-            // metareference sort stamp + runtime Metaref value + the Algebraic trait agree on
-            // one spelling (docs/dispatch-method-elimination.md §2). Mirrors
-            // SortChecker.MARKER_SORT_NAMES.
+            // metareference sort stamp + runtime Metaref value + the Algebraic trait all agree
+            // on one bare spelling (docs/dispatch-method-elimination.md §2). Recognized like a
+            // primitive; only name RECOGNITION, not behavior (that is capability data).
             "Algebraic", "DispatchBase", "AlgebraicDispatch");
 
     private NameResolver() {}

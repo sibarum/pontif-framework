@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 /**
  * AlgebraicDispatch (docs/dispatch-method-elimination.md E2): a metareference whose
@@ -25,9 +26,7 @@ class AlgebraicDispatchTest {
     @Test
     void algebraicMetareference_fitsAnAlgebraicParameter_andReflects() {
         // An algebraic metareference fits an `Algebraic` param and its `.ast` reflects —
-        // end-to-end through a function boundary. (Static REJECTION of a non-algebraic ref
-        // at such a param is the deferred §1d propagation gate; the DIRECT `$f[…].ast`
-        // guarantee is statically enforced — see AlgebraAstSurfaceTest.)
+        // end-to-end through a function boundary.
         assertEquals("true", run("""
                 requires pontif.algebra.{eval, Algebraic}
                 function poly(x:Decimal):Decimal -> x*x + 1.0
@@ -36,5 +35,21 @@ class AlgebraicDispatchTest {
                   eval(f.ast, x)
                 reflectAndEval($poly[Decimal], 5.0) == poly(5.0)
                 """));
+    }
+
+    @Test
+    void nonAlgebraicMetareference_isRejectedAtAnAlgebraicParameter() {
+        // The §1d propagation gate: the algebraic guarantee is a TYPE, so a plain
+        // metareference (Dispatch, not AlgebraicDispatch) passed where Algebraic is required
+        // is a COMPILE error — the guarantee travelling THROUGH a parameter, not just the
+        // direct `$f[…].ast`.
+        var r = compiler.compileAlt("""
+                requires pontif.algebra.{eval, Algebraic}
+                function inc(x:Decimal):Decimal -> x + 1.0
+                function reflectAndEval(f:Algebraic, x:Decimal):Decimal -> eval(f.ast, x)
+                reflectAndEval($inc[Decimal], 1.0)
+                """, "algdispatch.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
+                "a non-algebraic reference must not satisfy an Algebraic parameter, got " + r);
     }
 }
