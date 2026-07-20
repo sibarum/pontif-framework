@@ -146,6 +146,45 @@ public final class SortChecker {
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs, algebraicFunctions);
         checkMetareferencePropagation(module, traitContracts, overloads, algebraicFunctions);
+        validateProofMarkers(module, structDefs, traitContracts);
+    }
+
+    /**
+     * A {@code proof f = Marker(…)} / {@code assign proof f:Marker} statement names a TYPE
+     * as its marker — the head that picks the proof system ({@code Algebraic}, {@code
+     * DataConservative}, {@code Split}, …). That marker must be in scope like any other type
+     * reference: a declared struct/trait, or one imported with {@code requires}. Proof-tree
+     * heads are the one place a type name is written but never flows through {@link
+     * #validateSortNames} (a proof tree is an expression, not a sort), so without this the
+     * globally-recognized builtin markers ({@code Algebraic} and future ones, kept spellable
+     * bare by {@link NameResolver}) could be used with no import — the reference narrows and
+     * then its members fail far away with a misleading "no member" error. Checking the marker
+     * here closes that hole generally: nothing is keyed on a specific marker name; any marker
+     * whose type isn't in scope gets the ordinary {@link #unknownSort} error, so a metareference
+     * proven {@code Algebraic} without {@code requires pontif.algebra} is rejected at the claim.
+     */
+    private static void validateProofMarkers(
+            IrModule module, Map<String, IrSort.Structural> structDefs,
+            Map<String, IrSort.Trait> traitContracts) throws CompileException {
+        // The names of every type in scope, compared by MEMBER name (the segment after any
+        // `module/` prefix). A marker head is FQN'd by the linker's call-name rule while the
+        // matching declaration may stay bare (a builtin marker like `Algebraic` is kept bare
+        // by NameResolver), so a raw-key lookup would spuriously miss; the member name is the
+        // stable identity across that asymmetry and across the bare single-file path.
+        Set<String> inScope = new HashSet<>();
+        for (String k : structDefs.keySet()) inScope.add(sibarum.pontif.core.QualifiedName.memberOf(k));
+        for (String k : traitContracts.keySet()) inScope.add(sibarum.pontif.core.QualifiedName.memberOf(k));
+        for (IrStmt stmt : module.statements()) {
+            if (!(stmt instanceof IrStmt.Proof p)) continue;
+            String head = switch (p.proofTree()) {
+                case IrExpr.Record r -> r.typeName();
+                case IrExpr.Call c -> c.functionName();
+                default -> null;   // a non-nominal proof tree carries no marker type to check
+            };
+            if (head == null) continue;
+            String marker = sibarum.pontif.core.QualifiedName.memberOf(head);
+            if (!inScope.contains(marker)) throw unknownSort(marker, p.origin());
+        }
     }
 
     /**
@@ -874,6 +913,16 @@ public final class SortChecker {
         return e instanceof IrExpr.Lit || e instanceof IrExpr.Dec;
     }
 
+    /** The one "this name is not a type in scope" diagnostic — shared by sort-name
+     *  validation and the proof-marker check, so both read identically. */
+    private static CompileException unknownSort(String name, sibarum.pontif.core.Origin origin) {
+        return new CompileException(
+                "Unknown sort '" + name + "' — not a primitive, a declared "
+                        + "struct or trait, or a type parameter in scope. Did you "
+                        + "misspell it, or forget to declare or import it?",
+                origin);
+    }
+
     private static void validateSortNames(IrSort sort, Map<String, IrSort.Structural> structDefs)
             throws CompileException {
         validateSortNames(sort, structDefs, Set.of(), Set.of());
@@ -939,11 +988,7 @@ public final class SortChecker {
                                         + "builtin Stream, add `requires pontif.core.{Stream}`.",
                                 n.origin());
                     }
-                    throw new CompileException(
-                            "Unknown sort '" + n.name() + "' — not a primitive, a declared "
-                                    + "struct or trait, or a type parameter in scope. Did you "
-                                    + "misspell it, or forget to declare or import it?",
-                            n.origin());
+                    throw unknownSort(n.name(), n.origin());
                 }
                 // Type arguments of a parametric application (`Element[Int]`,
                 // `Element[T]`) are themselves sorts — validate each in scope.

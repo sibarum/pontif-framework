@@ -34,6 +34,7 @@ class AlgebraicMarkerTest {
     @Test
     void polynomial_isAlgebraic() {
         assertCompiles("""
+                requires pontif.algebra.{Algebraic}
                 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
                 assign proof poly:Algebraic
                 poly(3.0)
@@ -43,6 +44,7 @@ class AlgebraicMarkerTest {
     @Test
     void nestedCallToAnotherAlgebraicFunction_isAlgebraic() {
         assertCompiles("""
+                requires pontif.algebra.{Algebraic}
                 function sq(x:Decimal):Decimal -> x*x
                 assign proof sq:Algebraic
                 function poly(x:Decimal):Decimal -> sq(x) + 1.0
@@ -54,6 +56,7 @@ class AlgebraicMarkerTest {
     @Test
     void divisionAndPower_areAlgebraic() {
         assertCompiles("""
+                requires pontif.algebra.{Algebraic}
                 function f(x:Decimal):Decimal -> x^3.0 / 2.0
                 assign proof f:Algebraic
                 f(4.0)
@@ -63,6 +66,7 @@ class AlgebraicMarkerTest {
     @Test
     void comparisonBody_isRejected() {
         String err = assertRejected("""
+                requires pontif.algebra.{Algebraic}
                 function f(x:Int):Bool -> x > 0
                 assign proof f:Algebraic
                 42
@@ -74,6 +78,7 @@ class AlgebraicMarkerTest {
     @Test
     void matchBody_isRejected() {
         String err = assertRejected("""
+                requires pontif.algebra.{Algebraic}
                 function f(x:Int):Int -> match x {
                   [@>0] -> 1
                   [_]   -> 0
@@ -88,6 +93,7 @@ class AlgebraicMarkerTest {
     @Test
     void callToNonAlgebraicFunction_isRejected() {
         String err = assertRejected("""
+                requires pontif.algebra.{Algebraic}
                 function sq(x:Decimal):Decimal -> x*x
                 function poly(x:Decimal):Decimal -> sq(x) + 1.0
                 assign proof poly:Algebraic
@@ -100,6 +106,7 @@ class AlgebraicMarkerTest {
     @Test
     void directRecursion_isRejected() {
         String err = assertRejected("""
+                requires pontif.algebra.{Algebraic}
                 function f(x:Int):Int -> f(x) + 1
                 assign proof f:Algebraic
                 42
@@ -111,6 +118,7 @@ class AlgebraicMarkerTest {
     @Test
     void mutualRecursion_isRejected() {
         String err = assertRejected("""
+                requires pontif.algebra.{Algebraic}
                 function f(x:Int):Int -> g(x) + 1
                 assign proof f:Algebraic
                 function g(x:Int):Int -> f(x) + 1
