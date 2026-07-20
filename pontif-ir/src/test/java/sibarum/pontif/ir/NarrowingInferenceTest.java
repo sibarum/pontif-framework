@@ -65,6 +65,69 @@ class NarrowingInferenceTest {
         assertNull(result);
     }
 
+    // --- Effective (accumulated) sort ---------------------------------------
+
+    @Test
+    void effectiveSort_projectsUseSiteBoundUnderHypotheses() {
+        // docs/type-records.md's own example: n - 1 under n:[Int:@>0] accumulates to [Int:@>=0].
+        // infer alone yields only the raw pin [Int:@==n-1]; effectiveSort projects it at the use site.
+        IrSort nGt0 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        InferenceContext ctx = InferenceContext.of(Map.of("n", nGt0));
+        IrExpr nMinus1 = IrExpr.binOp(IrExpr.Op.SUB, IrExpr.var("n"), IrExpr.lit(1));
+        assertEquals(intPin(nMinus1), NarrowingInference.infer(nMinus1, ctx));
+        assertEquals(intGe(0), NarrowingInference.effectiveSort(nMinus1, ctx));
+    }
+
+    @Test
+    void effectiveSort_unboundedProjection_fallsToBareBase() {
+        // a + b, both bare Int: nothing bounds the sum → the effective sort is bare Int,
+        // never a pin leaking the free variables a, b into the consuming scope.
+        InferenceContext ctx = InferenceContext.of(Map.of(
+                "a", IrSort.named("Int"), "b", IrSort.named("Int")));
+        IrExpr aPlusB = IrExpr.binOp(IrExpr.Op.ADD, IrExpr.var("a"), IrExpr.var("b"));
+        assertEquals(IrSort.named("Int"), NarrowingInference.effectiveSort(aPlusB, ctx));
+    }
+
+    @Test
+    void effectiveSort_composesFieldInvariantWithGuard() {
+        // Account.balance is [Int:@>=0]. Under a guard n:[Int:@>0], the effective sort of
+        // `this.balance + n` composes to [Int:@>=1]: the field invariant participates only as
+        // this.balance's own effective sort (no hand-injected hypothesis) — BoundAnalysis sums.
+        IrSort.Structural account = new IrSort.Structural(
+                "Account", Map.of("balance", intGe(0)), null, Map.of(), Origin.NONE);
+        IrSort nGt0 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        InferenceContext ctx = new InferenceContext(
+                Map.of("this", IrSort.named("Account"), "n", nGt0),
+                Map.of(), Map.of("Account", account),
+                Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+        IrExpr balancePlusN = IrExpr.binOp(IrExpr.Op.ADD,
+                new IrExpr.FieldAccess(IrExpr.var("this"), "balance", Origin.NONE),
+                IrExpr.var("n"));
+        assertEquals(intGe(1), NarrowingInference.effectiveSort(balancePlusN, ctx));
+    }
+
+    @Test
+    void effectiveSort_usesNarrowedReceiverField_notDeclared() {
+        // A narrowed receiver [Account:@.balance>5] tightens this.balance's EFFECTIVE sort to
+        // [Int:@>5], so `this.balance + n` (n>0) bounds to [Int:@>=7] — proving the field invariant
+        // is the field's effective sort, not the declared [Int:@>=0] (which would give [Int:@>=1]).
+        IrSort.Structural account = new IrSort.Structural(
+                "Account", Map.of("balance", intGe(0)), null, Map.of(), Origin.NONE);
+        IrSort narrowedReceiver = IrSort.refined("Account", IrExpr.binOp(IrExpr.Op.GT,
+                new IrExpr.FieldAccess(IrExpr.self(), "balance", Origin.NONE), IrExpr.lit(5)));
+        IrSort nGt0 = IrSort.refined("Int",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        InferenceContext ctx = new InferenceContext(
+                Map.of("this", narrowedReceiver, "n", nGt0),
+                Map.of(), Map.of("Account", account),
+                Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+        IrExpr balancePlusN = IrExpr.binOp(IrExpr.Op.ADD,
+                new IrExpr.FieldAccess(IrExpr.var("this"), "balance", Origin.NONE), IrExpr.var("n"));
+        assertEquals(intGe(7), NarrowingInference.effectiveSort(balancePlusN, ctx));
+    }
+
     // --- Match: the headline slice -------------------------------------------
 
     /**

@@ -1057,6 +1057,28 @@ public final class NarrowingInference {
     }
 
     /**
+     * The <em>effective</em> (accumulated) sort of an expression at its use site — the
+     * Inferred record of {@code docs/type-records.md}. It is {@link #infer}'s narrowing with
+     * every in-scope variable projected out to a variable-free bound under the env's
+     * hypotheses: the same projection {@link #closeOver} performs at scope boundaries, applied
+     * here at <em>every</em> position, so a consumer (a construction/claim gate, or an IDE
+     * hover) reads the fully accumulated sort rather than a raw pin. {@code n - 1} under
+     * {@code n:[Int:@>0]} is {@code [Int:@>=0]}, not {@code [Int:@==n-1]}. Falls back to the
+     * bare base when the projection is unbounded (the pin cannot survive without its free
+     * variables); returns {@code null} exactly when {@link #infer} does.
+     */
+    public static IrSort effectiveSort(IrExpr expr, InferenceContext ctx) {
+        IrSort narrowing = infer(expr, ctx);
+        if (narrowing == null) return null;
+        IrSort projected = closeOver(narrowing, ctx.typeEnv().keySet(), ctx);
+        if (projected != null) return projected;
+        // Unbounded projection: a pin still mentioning free vars would leak them into the
+        // consuming scope, so the honest effective sort is the bare base.
+        String base = baseName(narrowing);
+        return base != null ? IrSort.named(base) : narrowing;
+    }
+
+    /**
      * Closes a narrowing over variables that are leaving the consuming scope: any
      * value-pin / predicate referencing an {@code escaping} variable is re-projected
      * to a variable-free numeric bound via {@link BoundAnalysis} (a bound IS a pin
@@ -1106,20 +1128,51 @@ public final class NarrowingInference {
     }
 
     /**
-     * Turns the env's refined bindings into {@link BoundAnalysis}
-     * hypotheses: a binding {@code x → [Int:@>=1]} becomes the fact
-     * {@code x >= 1} (the refinement predicate with {@code @} bound to the
-     * var). Non-refined bindings contribute nothing.
+     * Every fact the env's bindings imply, as {@link BoundAnalysis} hypotheses. A refined binding
+     * {@code x → [Int:@>=1]} implies {@code x >= 1}. A struct-typed binding implies each of its
+     * refined fields' invariants: {@code this → Account} with {@code balance:[Int:@>=0]} implies
+     * {@code this.balance >= 0}. A field invariant is nothing more than the field's own declared sort
+     * surfaced as a fact about {@code name.field} — so an expression over {@code this.balance} bounds
+     * through it, and {@link BoundAnalysis} still does all the arithmetic (this only sources the
+     * operand bounds, never composes them). One field level; nested-struct fields are not unrolled.
      */
-    private static List<SymExpr> hypothesesFromEnv(InferenceContext ctx) throws CompileException {
+    private static List<SymExpr> hypothesesFromEnv(InferenceContext ctx) {
         List<SymExpr> hypotheses = new ArrayList<>();
         for (Map.Entry<String, IrSort> binding : ctx.typeEnv().entrySet()) {
-            if (binding.getValue() instanceof IrSort.Refined refined) {
-                SymExpr predicate = IrCompiler.compileSymExpr(refined.predicate());
-                hypotheses.add(Substitute.applySelf(predicate, SymExpr.var(binding.getKey())));
+            String name = binding.getKey();
+            IrSort sort = binding.getValue();
+            if (sort instanceof IrSort.Refined refined) {
+                addFact(hypotheses, refined.predicate(), IrExpr.var(name));
+            } else if (ctx.structDefs().get(baseName(sort)) instanceof IrSort.Structural struct) {
+                for (String field : struct.members().keySet()) {
+                    IrExpr access = new IrExpr.FieldAccess(IrExpr.var(name), field, Origin.NONE);
+                    // The field's EFFECTIVE sort, via the field-access inference itself: for a
+                    // narrowed receiver ([Account:@.balance>5]) this projects the tightened field
+                    // sort [Int:@>5], not the declared [Int:@>=0]; for a bare receiver it falls back
+                    // to the declared sort. Reuses inferFieldAccess rather than re-reading the struct.
+                    if (infer(access, ctx) instanceof IrSort.Refined fieldEffective) {
+                        addFact(hypotheses, fieldEffective.predicate(), access);
+                    }
+                }
             }
         }
         return hypotheses;
+    }
+
+    /**
+     * Adds "{@code subject} satisfies {@code predicate}" (the predicate with {@code @} bound to
+     * {@code subject}) to {@code out} — the one place a refinement becomes a {@link BoundAnalysis}
+     * hypothesis, shared by variable and field-access subjects. Best-effort: a predicate or subject
+     * outside the linear kernel is omitted, never thrown (a missing hypothesis only weakens a bound,
+     * it can never fabricate one).
+     */
+    private static void addFact(List<SymExpr> out, IrExpr predicate, IrExpr subject) {
+        try {
+            out.add(Substitute.applySelf(
+                    IrCompiler.compileSymExpr(predicate), IrCompiler.compileSymExpr(subject)));
+        } catch (CompileException | RuntimeException outsideKernel) {
+            // omit — best-effort
+        }
     }
 
     /**
