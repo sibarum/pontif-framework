@@ -147,6 +147,29 @@ class ConstructionGateTest {
     }
 
     @Test
+    void structWidenAtConstruction_fits_withNoRuntimeCheck() throws Exception {
+        // Phase-1 delegation delta (roadmap §4.3): a field declared at a BASE struct, constructed
+        // with a DERIVED struct, is a proven widen — Point3D is-a Point. The retired hand-rolled base
+        // leg compared base NAMES ("Point3D" != "Point", both concrete) and wrongly ruled this
+        // DISJOINT (a compile error); the Assignability nominal leg rules it a widen → FITS with no
+        // runtime check. Pins the engine as the single decider for the nominal question.
+        String widen = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                struct Holder(p:Point)
+                """;
+        RunResult r = run(widen + "let h = Holder(Point3D(1, 2, 3))\nh.p.x", Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "widen-at-construction must compile and run; got: " + r.text());
+        assertEquals("1", r.text());
+
+        IrExpr.Record construction = findConstruction(
+                compiled(widen + "let h = Holder(Point3D(1, 2, 3))\n42"), "Holder");
+        assertNotNull(construction, "expected the Holder construction");
+        assertTrue(construction.runtimeChecks().isEmpty(),
+                () -> "a proven widen must not be stamped; got: " + construction.runtimeChecks());
+    }
+
+    @Test
     void overlapCase_isActuallyStamped() throws Exception {
         // The third verdict is a real stamp, not a coincidence of leniency.
         CompiledModule module = compiled(LIFT + """

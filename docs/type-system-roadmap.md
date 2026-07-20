@@ -92,11 +92,20 @@ remaining stamp into line is the law; every surviving stamp is a flagged violati
 check to runtime) is **not built**, and the intent is to avoid needing it. So in practice the
 default outcome for "can't prove it" is a **compile error**, not a deferral.
 
-**Enforcement — audit item (deferred, not yet run):** sweep the tree for every site that
-stamps a can-throw runtime check without a discharged proof or an explicit `[!!]`, and flag
-each. The construction `UNKNOWN` stamp is the known one; there are likely others
-(`IrExpr.Record.runtimeChecks` producers, any `executeChecks`/`RuntimeCheckException` path
-reached on an unproven claim). Enumerate before eliminating.
+**Enforcement — audit RUN (2026-07-20; Phase 0 of the C3 finish-line plan).** Findings:
+`ConstructionGate` is the **sole** producer of `IrExpr.Record.runtimeChecks` (every other site
+only consumes/propagates: `IrCompiler:344`, `IrInterpreter:231`, `TruffleLowering:185`,
+`MethodOperatorResolver:260`). Exactly **two live stamp sites** violate §1d — the field path
+[ConstructionGate.java:421] (`gateRecord`, `UNKNOWN → checks.put`) and the non-dependent
+let-claim path [ConstructionGate.java:241] (`gateClaim`, `UNKNOWN → stamp claim`) — plus **one
+sanctioned exception**, the parametric-`Stream` element check [ConstructionGate.java:208] (§8.6;
+the genuine `[!!]` candidate). The dependent-claim sub-path [ConstructionGate.java:225-233]
+already proves-or-errors and never stamps — that is the model the two violators must adopt. The
+`classify` verdicts feeding the stamp (→ must become prove-via-`Refinements`-else-compile-error):
+refined same-base not-provably-total [:653], predicate outside the arithmetic fragment [:640],
+`Int`→*refined*-`Decimal` [:625], arg-sort-unknown [:604]. Out of construction scope (noted, not
+yet classified): arithmetic `Div`/`Mod`/`Pow`, `Closure.java:16`, `match` totality — genuine
+runtime hazards or proven-total determinations, not unproven-fit stamps.
 
 ---
 
@@ -226,7 +235,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Decision | Site | Action | Size |
 |---|---|---|---|
 | struct↔struct `let` assign | [AltParser.java:2098] | landed (Slice 1) | — |
-| all other `let` coercions | [AltParser.java:1883] / `:4576` (`coercionFor` → `CoercionResolver`) | re-point → engine; delete `CoercionResolver`/`CoercionContext`/`Coercion` | **L, C2-Phase-2-blocked** |
+| all other `let` coercions | [AltParser.java:1888] / `:4605` (`coercionFor` → `CoercionResolver`) | **Phase 0 audit (2026-07-20) split this:** 4 of 6 `CoercionResolver` cases are trait-free — `IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None` — migratable **pre-C2** (Phase 5); `Autobox` (tuple→`Stream`) re-homes to the generics slice (Phase 4, retire `isStreamName`); only **`TraitCast`** is C2-Phase-2-blocked — it needs *eager* satisfaction (the parser has `isTrait` but not the post-link impl closure; `CoercionResolver` today is *permissive* and defers). Net: shrink `CoercionResolver` to a trait-upcast stub now; delete it with the residue post-C2. | **M pre-C2 + S residue behind C2** |
 | construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | fit → single-engine query (`Assignability`+`Refinements`); **drop the `UNKNOWN → runtimeChecks` stamp** (§1d) — unprovable = compile error / `[!!]`. Remaining orchestration (dependent-claims, type-params) stays; **demotion projection is removed** (§6.5 — demotion is a view now). | M (context cheap here) |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
 | cast legality | `IrInterpreter.evalCast` ([:1189]) + `IrExpr.Cast` producers | new wiring for `Assignability.cast` | M (mostly new) |
@@ -255,12 +264,46 @@ with C2; only step 6 serializes behind C2 Phase 2.*
 2. ~~DoD + differential harness (§4.1)~~ **DONE** (`fe4d48d`).
 3. ~~Close the cheap engine gaps~~ **DONE** — intersection (`c0fbfa3`), `Int→Decimal`/`COERCE`
    (`90b6b74`), refinement-precise (`759b9c5`); plus Method/Dispatch function-sorts (`03bd09b`).
-4. **Migrate `ConstructionGate`'s base leg** — a real deletion that never touches the parser. ← *next candidate*
+4. ~~**Migrate `ConstructionGate`'s base leg**~~ **DONE (2026-07-20, Phase 1)** — nominal fit now
+   delegates to `Assignability` (see §4.6); refinement leg stays. A real consolidation that never
+   touched the parser.
 5. **Wire static-cast legality** through `Assignability.cast`.
 6. **Defer** the `CoercionResolver` parser deletion until **C2 Phase 2** lands (post-link
    trait context) — or consciously accept the struct-only slice until then.
 
-### 4.6 Progress & resume point (updated 2026-07-18)
+### 4.6 Progress & resume point (updated 2026-07-20)
+
+**Phase 0 DONE (2026-07-20) — the finish-line plan's measure-twice step.** Full `mvn test` green
+baseline confirmed (maven exit 0). Both audits ran: the §1d stamp sweep (findings folded into §1d
+above — two violators + one `[!!]` candidate, all in `ConstructionGate`) and the parser-side
+trait-dependency audit (findings in §4.3 — the C2-blocked residue is a single leg, `TraitCast`).
+Sizing updated by the measurements: the §1d construct-two-way cut is **M** (two sites, one file,
+with the dependent-claim path as the working template), and `CoercionResolver` can be gutted
+**pre-C2**. The agreed finish-line plan drives Phases 1–5 (C3-independent) to an engine-complete
+state and queues Phase 6 (the `CoercionResolver` deletion) behind C2 Phase 2.
+
+**Phase 1 DONE (2026-07-20; full `mvn test` green) — `ConstructionGate`'s nominal base leg now
+delegates to `Assignability`.** `ConstructionGate.classify` kept its three-way shape
+(FITS/DISJOINT/UNKNOWN) but its hand-rolled base-name compare (the retired `argConcrete &&
+fieldConcrete → DISJOINT` heuristic, plus the dead `PRIMITIVES` set) is replaced by a single
+`Assignability.assign(stripRefinement(arg), stripRefinement(field))` query; the genuinely
+three-way **refinement leg** (PredicateArithmetic) stays in the gate because the engine is two-way
+and abstains. Context is `AssignabilityContext.fromModule` (module in hand — cheap, trait closure
+included), threaded through `rewriteExpr`/`gateRecord`/`gateClaim`/`classify`. **The nominal
+question ignores refinements on BOTH sides** — the one bug found in-flight: stripping only the
+field made `assign(Decimal[==100], Decimal)` return `ILLEGAL` (engine `sameType` is
+refinement-aware + primitive-tag short-circuit) → a spurious DISJOINT that skipped the
+Decimal-outside-kernel refinement leg (16 failures); stripping both fixed it. **Reachability note:
+the engine only decides GATED fields** (`gated()`: refined, known-struct `Named`, unions/intersections
+thereof, parametric `Stream`) — **trait fields are NOT gated at construction**, so the "non-satisfying
+trait → compile-error" §1d delta does *not* fire here (it belongs to the call/let-gate slices). The
+reachable, pinned improvement is the **struct widen** (`Point3D → Point` field): the old base-name
+compare wrongly ruled it DISJOINT; the engine rules it a widen → FITS, no stamp
+(`ConstructionGateTest.structWidenAtConstruction_fits_withNoRuntimeCheck`). **Next: Phase 2** — the
+§1d construct-two-way cut (kill the `UNKNOWN → stamp` at [ConstructionGate.java:421] / `:241`), now
+that the fit query already flows through the engine.
+
+
 
 **Landed this session (all on master, each green):** the differential harness + four
 `Assignability` engine-capability gaps — **intersection**, **`Int→Decimal` (`COERCE`)**,

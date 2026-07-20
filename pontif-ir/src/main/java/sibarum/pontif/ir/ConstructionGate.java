@@ -1,5 +1,8 @@
 package sibarum.pontif.ir;
 
+import sibarum.pontif.types.Assignability;
+import sibarum.pontif.types.Assignability.Assignment;
+import sibarum.pontif.types.AssignabilityContext;
 import sibarum.pontif.types.TypeSystem;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.Substitute;
@@ -50,26 +53,29 @@ import java.util.Set;
  */
 final class ConstructionGate {
 
-    private static final Set<String> PRIMITIVES = Set.of("Int", "Bool", "Char", "Decimal", "String");
-
     private ConstructionGate() {}
 
     static IrModule rewrite(IrModule module) throws CompileException {
         Map<String, IrSort.Structural> structs =
                 sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
+        // The single nominal-subtype decider (roadmap §4.3): the base-name/nominal fit leg of
+        // classify() delegates to Assignability, which knows widen/demotion/trait satisfaction the
+        // old hand-rolled base compare did not. fromModule is cheap here (module in hand) and carries
+        // the trait closure the parser lacks (roadmap §4.4).
+        AssignabilityContext actx = AssignabilityContext.fromModule(module);
         InferenceContext base = InferenceContext.fromModule(module);
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt stmt : module.statements()) {
             out.add(switch (stmt) {
-                case IrStmt.FunctionDecl fd -> rewriteFunction(fd, base, structs);
+                case IrStmt.FunctionDecl fd -> rewriteFunction(fd, base, structs, actx);
                 case IrStmt.TraitImpl ti -> {
                     List<IrStmt.FunctionDecl> methods = new ArrayList<>(ti.methods().size());
                     for (IrStmt.FunctionDecl m : ti.methods()) {
-                        methods.add(rewriteFunction(m, base, structs));
+                        methods.add(rewriteFunction(m, base, structs, actx));
                     }
                     List<IrStmt.FunctionDecl> attrs = new ArrayList<>(ti.attributeProducers().size());
                     for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
-                        attrs.add(rewriteFunction(a, base, structs));
+                        attrs.add(rewriteFunction(a, base, structs, actx));
                     }
                     yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, attrs,
                             ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
@@ -79,20 +85,20 @@ final class ConstructionGate {
         }
         IrExpr main = module.main() == null
                 ? null
-                : rewriteExpr(module.main(), base, structs);
+                : rewriteExpr(module.main(), base, structs, actx);
         return new IrModule(module.name(), out, main);
     }
 
     private static IrStmt.FunctionDecl rewriteFunction(
             IrStmt.FunctionDecl fd, InferenceContext base,
-            Map<String, IrSort.Structural> structs) throws CompileException {
+            Map<String, IrSort.Structural> structs, AssignabilityContext actx) throws CompileException {
         InferenceContext ctx = base;
         for (IrParam p : fd.params()) {
             if (p.sort() != null) ctx = ctx.withVar(p.name(), p.sort());
         }
         return new IrStmt.FunctionDecl(
                 fd.name(), fd.params(), fd.returnSort(),
-                rewriteExpr(fd.body(), ctx, structs), fd.origin(), fd.topLevelLet(),
+                rewriteExpr(fd.body(), ctx, structs, actx), fd.origin(), fd.topLevelLet(),
                 fd.typeParams());
     }
 
@@ -104,7 +110,7 @@ final class ConstructionGate {
      */
     private static IrExpr rewriteExpr(
             IrExpr e, InferenceContext ctx,
-            Map<String, IrSort.Structural> structs) throws CompileException {
+            Map<String, IrSort.Structural> structs, AssignabilityContext actx) throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
@@ -116,11 +122,11 @@ final class ConstructionGate {
             case IrExpr.DispatchRef d -> d;
             case IrExpr.BinOp op -> new IrExpr.BinOp(
                     op.op(),
-                    rewriteExpr(op.left(), ctx, structs),
-                    rewriteExpr(op.right(), ctx, structs),
+                    rewriteExpr(op.left(), ctx, structs, actx),
+                    rewriteExpr(op.right(), ctx, structs, actx),
                     op.origin());
             case IrExpr.LetIn l -> {
-                IrExpr value = rewriteExpr(l.value(), ctx, structs);
+                IrExpr value = rewriteExpr(l.value(), ctx, structs, actx);
                 // §6.5 (docs/type-system-roadmap.md): demotion is a VIEW, not a re-stamp. A
                 // `let flat:Point = p3d` where the value's concrete type is-a the claim's base
                 // is a proven widen — the concrete `Point3D` value is RETAINED (no projection,
@@ -131,18 +137,18 @@ final class ConstructionGate {
                     IrSort declared = l.claim();
                     InferenceContext viewCtx = ctx.withVar(l.name(), declared);
                     yield new IrExpr.LetIn(l.name(), declared, value,
-                            rewriteExpr(l.body(), viewCtx, structs), l.origin(), null);
+                            rewriteExpr(l.body(), viewCtx, structs, actx), l.origin(), null);
                 }
                 IrSort inferred = TypeSystem.standard().infer(l.value(), ctx);
                 IrSort bound = inferred != null ? inferred : l.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(l.name(), bound) : ctx;
                 yield new IrExpr.LetIn(l.name(), l.declaredSort(), value,
-                        rewriteExpr(l.body(), bodyCtx, structs), l.origin(),
-                        gateClaim(l, value, ctx, structs));
+                        rewriteExpr(l.body(), bodyCtx, structs, actx), l.origin(),
+                        gateClaim(l, value, ctx, structs, actx));
             }
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
-                for (IrExpr a : c.args()) args.add(rewriteExpr(a, ctx, structs));
+                for (IrExpr a : c.args()) args.add(rewriteExpr(a, ctx, structs, actx));
                 yield new IrExpr.Call(c.functionName(), args, c.origin());
             }
             case IrExpr.Lambda lam -> {
@@ -151,15 +157,15 @@ final class ConstructionGate {
                     if (p.sort() != null) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
                 }
                 yield new IrExpr.Lambda(lam.params(), lam.returnSort(),
-                        rewriteExpr(lam.body(), bodyCtx, structs), lam.origin());
+                        rewriteExpr(lam.body(), bodyCtx, structs, actx), lam.origin());
             }
             case IrExpr.Apply app -> {
                 List<IrExpr> args = new ArrayList<>(app.args().size());
-                for (IrExpr a : app.args()) args.add(rewriteExpr(a, ctx, structs));
-                yield new IrExpr.Apply(rewriteExpr(app.fn(), ctx, structs), args, app.origin());
+                for (IrExpr a : app.args()) args.add(rewriteExpr(a, ctx, structs, actx));
+                yield new IrExpr.Apply(rewriteExpr(app.fn(), ctx, structs, actx), args, app.origin());
             }
             case IrExpr.Match m -> {
-                IrExpr scrutinee = rewriteExpr(m.scrutinee(), ctx, structs);
+                IrExpr scrutinee = rewriteExpr(m.scrutinee(), ctx, structs, actx);
                 List<IrExpr.MatchBranch> branches = new ArrayList<>(m.branches().size());
                 for (IrExpr.MatchBranch b : m.branches()) {
                     InferenceContext armCtx =
@@ -167,22 +173,22 @@ final class ConstructionGate {
                                     ? ctx.withVar(v.name(), b.pattern())
                                     : ctx;
                     branches.add(new IrExpr.MatchBranch(
-                            b.pattern(), rewriteExpr(b.result(), armCtx, structs)));
+                            b.pattern(), rewriteExpr(b.result(), armCtx, structs, actx)));
                 }
                 yield new IrExpr.Match(scrutinee, branches, m.origin());
             }
-            case IrExpr.Record r -> gateRecord(r, ctx, structs);
+            case IrExpr.Record r -> gateRecord(r, ctx, structs, actx);
             case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
-                    rewriteExpr(fa.base(), ctx, structs), fa.fieldName(), fa.origin());
+                    rewriteExpr(fa.base(), ctx, structs, actx), fa.fieldName(), fa.origin());
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "ConstructionGate");
             // REVISIT (docs/iteration.md §10): no construction-claim gating inside
             // the source / arm writes yet (slice 1 builds those explicitly).
             case IrExpr.Iterate it -> it;
             case IrExpr.Emit em -> new IrExpr.Emit(
-                    rewriteExpr(em.event(), ctx, structs),
-                    rewriteExpr(em.body(), ctx, structs), em.origin());
+                    rewriteExpr(em.event(), ctx, structs, actx),
+                    rewriteExpr(em.body(), ctx, structs, actx), em.origin());
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
-                    rewriteExpr(cast.value(), ctx, structs), cast.origin());
+                    rewriteExpr(cast.value(), ctx, structs, actx), cast.origin());
         };
     }
 
@@ -199,7 +205,7 @@ final class ConstructionGate {
      */
     private static IrSort gateClaim(
             IrExpr.LetIn l, IrExpr value, InferenceContext ctx,
-            Map<String, IrSort.Structural> structs) throws CompileException {
+            Map<String, IrSort.Structural> structs, AssignabilityContext actx) throws CompileException {
         IrSort claim = l.claim();
         if (claim == null || !gated(claim, structs)) return null;
         // A parametric Stream[T] claim is kept for the runtime element check (§8.6):
@@ -231,7 +237,7 @@ final class ConstructionGate {
                             + " — narrow the referenced binding's sort so it entails the claim.",
                     value.origin());
         }
-        return switch (classify(arg, resolved, structs)) {
+        return switch (classify(arg, resolved, structs, actx)) {
             case FITS -> null;  // discharged — provable fit, no runtime check
             case DISJOINT -> throw new CompileException(
                     "let '" + l.name() + "' can never satisfy its declared sort "
@@ -384,10 +390,10 @@ final class ConstructionGate {
 
     private static IrExpr gateRecord(
             IrExpr.Record r, InferenceContext ctx,
-            Map<String, IrSort.Structural> structs) throws CompileException {
+            Map<String, IrSort.Structural> structs, AssignabilityContext actx) throws CompileException {
         Map<String, IrExpr> members = new LinkedHashMap<>();
         for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
-            members.put(en.getKey(), rewriteExpr(en.getValue(), ctx, structs));
+            members.put(en.getKey(), rewriteExpr(en.getValue(), ctx, structs, actx));
         }
         IrSort.Structural decl = r.typeName() == null ? null : structs.get(r.typeName());
         if (decl == null && r.typeName() != null && NativeConstructors.has(r.typeName())) {
@@ -409,7 +415,7 @@ final class ConstructionGate {
             if (field == null) continue;  // arity/field mismatches are the parser's beat
             if (!nativeTarget && !gated(field, structs)) continue;  // bare unregistered names stay lenient
             IrSort arg = argSort(en.getValue(), ctx, structs);
-            switch (classify(arg, field, structs)) {
+            switch (classify(arg, field, structs, actx)) {
                 case FITS -> { }
                 case DISJOINT -> throw new CompileException(
                         "Constructor argument '" + en.getKey() + "' of '" + r.typeName()
@@ -581,12 +587,13 @@ final class ConstructionGate {
      * UNKNOWN — the runtime check's territory.
      */
     private static Fit classify(
-            IrSort arg, IrSort field, Map<String, IrSort.Structural> structs) {
+            IrSort arg, IrSort field, Map<String, IrSort.Structural> structs,
+            AssignabilityContext actx) {
         // Field-side composition first: a union fits if any branch fits.
         if (field instanceof IrSort.Union u) {
             boolean allDisjoint = true;
             for (IrSort b : u.branches()) {
-                Fit f = classify(arg, b, structs);
+                Fit f = classify(arg, b, structs, actx);
                 if (f == Fit.FITS) return Fit.FITS;
                 if (f != Fit.DISJOINT) allDisjoint = false;
             }
@@ -595,7 +602,7 @@ final class ConstructionGate {
         if (field instanceof IrSort.Intersection i) {
             boolean allFit = true;
             for (IrSort b : i.branches()) {
-                Fit f = classify(arg, b, structs);
+                Fit f = classify(arg, b, structs, actx);
                 if (f == Fit.DISJOINT) return Fit.DISJOINT;
                 if (f != Fit.FITS) allFit = false;
             }
@@ -607,7 +614,7 @@ final class ConstructionGate {
             boolean allFit = true;
             boolean allDisjoint = true;
             for (IrSort b : u.branches()) {
-                Fit f = classify(b, field, structs);
+                Fit f = classify(b, field, structs, actx);
                 allFit &= f == Fit.FITS;
                 allDisjoint &= f == Fit.DISJOINT;
             }
@@ -616,21 +623,34 @@ final class ConstructionGate {
 
         String argBase = baseName(arg);
         String fieldBase = baseName(field);
+        // A non-nominal or "_"-unknown base is genuinely undecidable — defer (never delegate a
+        // guess to the engine, which would read "_" as a concrete unknown name and rule DISJOINT).
         if (argBase == null || fieldBase == null) return Fit.UNKNOWN;
-        if (!argBase.equals(fieldBase)) {
-            // The lossless Int→Decimal embedding: every Int inhabits an
-            // UNREFINED Decimal (provable fit — no runtime check); against a
-            // refined Decimal the predicate still decides at runtime.
-            if (argBase.equals("Int") && fieldBase.equals("Decimal")) {
-                return field instanceof IrSort.Refined ? Fit.UNKNOWN : Fit.FITS;
-            }
-            boolean argConcrete = PRIMITIVES.contains(argBase) || structs.containsKey(argBase);
-            boolean fieldConcrete = PRIMITIVES.contains(fieldBase) || structs.containsKey(fieldBase);
-            return argConcrete && fieldConcrete ? Fit.DISJOINT : Fit.UNKNOWN;
+
+        // NOMINAL LEG — the single decider (roadmap §4.3). Assignability answers whether the
+        // argument's concrete type can inhabit the field's *nominal* type: widen (`Point3D → Point`),
+        // trait satisfaction, union membership, and the `Int → Decimal` numeric coercion. This is
+        // strictly stronger than the retired base-name-equality compare, which missed valid widens
+        // and — for a non-satisfying trait field — stamped an unprovable runtime check (a §1d lie).
+        // The refinement predicate (if any) is judged in the leg below, so the nominal question
+        // ignores refinements on BOTH sides — a refined value's fit against its own bare base is a
+        // pure widen (EXACT), and any predicate mismatch is the refinement leg's call, not a nominal
+        // DISJOINT. (Comparing a refined arg against a bare base via the full engine would wrongly
+        // read the refined/bare mismatch as not-is-a for primitive tags.)
+        Assignment nominal = Assignability.assign(stripRefinement(arg), stripRefinement(field), actx);
+        if (nominal == Assignment.ILLEGAL || nominal == Assignment.NEEDS_CAST) {
+            // No implicit value of the argument's type inhabits the field's nominal type (ILLEGAL),
+            // and none is bridged by an implicit coercion (NEEDS_CAST wants an explicit cast the
+            // author didn't write) — a provable miss. §1d: this is the honest compile-time DISJOINT
+            // that replaces the old UNKNOWN→runtime-stamp for a non-satisfying trait / sibling field.
+            return Fit.DISJOINT;
         }
-        // Same base. An unrefined field accepts the whole base.
+        // Nominal fits (EXACT / WIDEN / COERCE). An unrefined field accepts the whole nominal.
         if (!(field instanceof IrSort.Refined refinedField)) return Fit.FITS;
 
+        // Refined field — the genuinely three-way refinement leg stays in the gate: Assignability is
+        // two-way and abstains, whereas "does this value satisfy the predicate" is a runtime-decidable
+        // question owned by PredicateArithmetic (the same kernel match totality uses).
         SymExpr fieldPred;
         Sort domain;
         try {
@@ -651,6 +671,15 @@ final class ConstructionGate {
             return Fit.DISJOINT;
         }
         return Fit.UNKNOWN;
+    }
+
+    /** The bare nominal base of a sort — a refined sort's underlying named base, else the sort itself.
+     *  Used to ask the nominal-subtype engine the base-name question without the refinement predicate,
+     *  which the gate's refinement leg judges separately. */
+    private static IrSort stripRefinement(IrSort s) {
+        return s instanceof IrSort.Refined r
+                ? new IrSort.Named(r.name(), r.typeArgs(), r.origin())
+                : s;
     }
 
     private static String baseName(IrSort sort) {
