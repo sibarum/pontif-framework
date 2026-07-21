@@ -113,7 +113,7 @@ final class DispatchResolver {
         if (res instanceof StaticDispatch.Result.Resolved r) {
             return new DispatchResult.Resolved(r.decl());
         }
-        return switch (StaticDispatch.classify(overloads, argSorts, registry)) {
+        return switch (StaticDispatch.classify(overloads, argSorts, registry, ctx.traitImpls())) {
             case FAILED -> new DispatchResult.Unsatisfiable(
                     "no target satisfies '" + query.selector() + "' at the given argument sorts");
             case PASSED -> new DispatchResult.Ambiguous(overloads);

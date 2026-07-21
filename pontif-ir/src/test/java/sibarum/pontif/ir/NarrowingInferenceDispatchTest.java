@@ -109,7 +109,8 @@ class NarrowingInferenceDispatchTest {
         // Add a fallback declared return.
         Map<String, IrSort> returns = Map.of("sign", IrSort.named("Int"));
         ctx = new InferenceContext(ctx.typeEnv(), returns, ctx.structDefs(), ctx.overloads(),
-                ctx.returnProofs(), ctx.operatorOverloads(), ctx.methodKeys(), ctx.algebraicFunctions());
+                ctx.returnProofs(), ctx.operatorOverloads(), ctx.methodKeys(), ctx.algebraicFunctions(),
+                ctx.traitImpls());
 
         IrSort result = NarrowingInference.infer(
                 IrExpr.call("sign",
@@ -189,7 +190,8 @@ class NarrowingInferenceDispatchTest {
                 Map.of("proveBranch", List.of(pNeg, pPos)),
                 Map.of(),
                 java.util.Set.of(),
-                java.util.Set.of());
+                java.util.Set.of(),
+                Map.of());
     }
 
     @Test

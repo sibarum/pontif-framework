@@ -2514,7 +2514,8 @@ public final class SortChecker {
                 Map.of(),
                 Map.of(),
                 java.util.Set.of(),
-                algebraicFunctions);
+                algebraicFunctions,
+                Map.of());
     }
 
     private static <V> Map<String, V> stripNullValues(Map<String, V> m) {

@@ -41,6 +41,15 @@ public record AssignabilityContext(TypeCatalog catalog, Map<String, Set<String>>
      * walked per query as the registry does) because the engine only reads a flat membership set.
      */
     public static AssignabilityContext fromModule(IrModule module) {
+        return new AssignabilityContext(TypeCatalog.fromModule(module), traitImplsOf(module));
+    }
+
+    /**
+     * The <em>closed</em> {@code typeName → traits it satisfies} view of a module (see
+     * {@link #fromModule}) — extracted so the dispatch context ({@code InferenceContext}) can carry
+     * the same relation the engine reads, without rebuilding the whole catalog just to get it.
+     */
+    public static Map<String, Set<String>> traitImplsOf(IrModule module) {
         // trait → its immediate base trait (already null-normalized in IrSort.Trait).
         Map<String, String> baseOf = new HashMap<>();
         for (IrStmt stmt : module.statements()) {
@@ -62,7 +71,7 @@ public record AssignabilityContext(TypeCatalog catalog, Map<String, Set<String>>
                 }
             }
         }
-        return new AssignabilityContext(TypeCatalog.fromModule(module), traitImpls);
+        return traitImpls;
     }
 
     /** Whether {@code typeName} satisfies {@code traitName} (a directly-registered impl). */

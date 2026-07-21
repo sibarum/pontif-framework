@@ -2066,7 +2066,7 @@ public final class AltParser {
         typeEnv.values().removeIf(java.util.Objects::isNull);
         functionReturns.values().removeIf(java.util.Objects::isNull);
         return new InferenceContext(typeEnv, functionReturns, types.structShapes(), Map.of(), Map.of(),
-                Map.of(), java.util.Set.of(), java.util.Set.of());
+                Map.of(), java.util.Set.of(), java.util.Set.of(), Map.of());
     }
 
     /**

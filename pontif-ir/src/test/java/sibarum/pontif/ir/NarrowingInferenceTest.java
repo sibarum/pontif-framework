@@ -101,7 +101,7 @@ class NarrowingInferenceTest {
         InferenceContext ctx = new InferenceContext(
                 Map.of("this", IrSort.named("Account"), "n", nGt0),
                 Map.of(), Map.of("Account", account),
-                Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+                Map.of(), Map.of(), Map.of(), Set.of(), Set.of(), Map.of());
         IrExpr balancePlusN = IrExpr.binOp(IrExpr.Op.ADD,
                 new IrExpr.FieldAccess(IrExpr.var("this"), "balance", Origin.NONE),
                 IrExpr.var("n"));
@@ -122,7 +122,7 @@ class NarrowingInferenceTest {
         InferenceContext ctx = new InferenceContext(
                 Map.of("this", narrowedReceiver, "n", nGt0),
                 Map.of(), Map.of("Account", account),
-                Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+                Map.of(), Map.of(), Map.of(), Set.of(), Set.of(), Map.of());
         IrExpr balancePlusN = IrExpr.binOp(IrExpr.Op.ADD,
                 new IrExpr.FieldAccess(IrExpr.var("this"), "balance", Origin.NONE), IrExpr.var("n"));
         assertEquals(intGe(7), NarrowingInference.effectiveSort(balancePlusN, ctx));
@@ -498,7 +498,7 @@ class NarrowingInferenceTest {
                 "poly", List.of(IrSort.named("Decimal")), Origin.NONE);
         InferenceContext ctx = new InferenceContext(
                 Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Set.of(), Set.of("poly"));
+                Set.of(), Set.of("poly"), Map.of());
 
         IrSort result = NarrowingInference.infer(ref, ctx);
 

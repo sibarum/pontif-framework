@@ -35,7 +35,11 @@ public record InferenceContext(
         Map<String, List<IrStmt.ReturnProof>> returnProofs,
         Map<String, List<IrStmt.FunctionDecl>> operatorOverloads,
         Set<String> methodKeys,
-        Set<String> algebraicFunctions) {
+        Set<String> algebraicFunctions,
+        // The closed `typeName → traits it satisfies` view (docs/type-system-roadmap.md §4.3): the
+        // nominal decider StaticDispatch's gate reads so it never excludes a struct arg from a trait
+        // param it satisfies (`Parabola` → `Curve2D`). Sourced once from the module's trait impls.
+        Map<String, Set<String>> traitImpls) {
 
     public InferenceContext {
         typeEnv = Map.copyOf(typeEnv);
@@ -48,6 +52,7 @@ public record InferenceContext(
         operatorOverloads = copyOfLists(operatorOverloads);
         methodKeys = Set.copyOf(methodKeys);
         algebraicFunctions = Set.copyOf(algebraicFunctions);
+        traitImpls = copyOfSets(traitImpls);
     }
 
     private static <T> Map<String, List<T>> copyOfLists(Map<String, List<T>> m) {
@@ -58,15 +63,23 @@ public record InferenceContext(
         return Map.copyOf(copy);
     }
 
+    private static Map<String, Set<String>> copyOfSets(Map<String, Set<String>> m) {
+        Map<String, Set<String>> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Set<String>> e : m.entrySet()) {
+            copy.put(e.getKey(), Set.copyOf(e.getValue()));
+        }
+        return Map.copyOf(copy);
+    }
+
     public static InferenceContext empty() {
         return new InferenceContext(
-                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of(), Map.of());
     }
 
     /** Convenience for tests / callers with just an env. */
     public static InferenceContext of(Map<String, IrSort> typeEnv) {
         return new InferenceContext(
-                typeEnv, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+                typeEnv, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of(), Map.of());
     }
 
     /** Convenience for callers with an env and function-return map. */
@@ -74,7 +87,7 @@ public record InferenceContext(
             Map<String, IrSort> typeEnv,
             Map<String, IrSort> functionReturns) {
         return new InferenceContext(
-                typeEnv, functionReturns, Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of());
+                typeEnv, functionReturns, Map.of(), Map.of(), Map.of(), Map.of(), Set.of(), Set.of(), Map.of());
     }
 
     /**
@@ -158,7 +171,8 @@ public record InferenceContext(
         Map<String, IrSort.Structural> structs =
                 sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         return new InferenceContext(Map.of(), returns, structs, overloads, returnProofs,
-                operatorOverloads, methodKeys, algebraicFunctions);
+                operatorOverloads, methodKeys, algebraicFunctions,
+                sibarum.pontif.types.AssignabilityContext.traitImplsOf(module));
     }
 
     /** The local (module-stripped) head-constructor name of a {@code proof} tree, or null. */
@@ -224,7 +238,7 @@ public record InferenceContext(
         Map<String, IrSort> extended = new HashMap<>(typeEnv);
         extended.put(name, sort);
         return new InferenceContext(extended, functionReturns, structDefs, overloads, returnProofs,
-                operatorOverloads, methodKeys, algebraicFunctions);
+                operatorOverloads, methodKeys, algebraicFunctions, traitImpls);
     }
 
     /** A new context with each of {@code params} bound to its declared sort (params with no declared
@@ -241,13 +255,13 @@ public record InferenceContext(
     /** Returns a new context with the struct-defs map replaced. */
     public InferenceContext withStructDefs(Map<String, IrSort.Structural> defs) {
         return new InferenceContext(typeEnv, functionReturns, defs, overloads, returnProofs,
-                operatorOverloads, methodKeys, algebraicFunctions);
+                operatorOverloads, methodKeys, algebraicFunctions, traitImpls);
     }
 
     /** Returns a new context with the overload map replaced. */
     public InferenceContext withOverloads(Map<String, List<IrStmt.FunctionDecl>> ovs) {
         return new InferenceContext(typeEnv, functionReturns, structDefs, ovs, returnProofs,
-                operatorOverloads, methodKeys, algebraicFunctions);
+                operatorOverloads, methodKeys, algebraicFunctions, traitImpls);
     }
 
     /**

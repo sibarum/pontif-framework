@@ -137,6 +137,14 @@ public final class StaticDispatch {
         return classify(overloads, argNarrowings, java.util.Map.of());
     }
 
+    /** As {@link #classify(List, List, java.util.Map, java.util.Map)} with no trait-impl view. */
+    public static Verdict classify(
+            List<IrStmt.FunctionDecl> overloads,
+            List<IrSort> argNarrowings,
+            java.util.Map<String, Sort> registry) {
+        return classify(overloads, argNarrowings, registry, java.util.Map.of());
+    }
+
     /**
      * The call-level three-way verdict (see {@link Verdict}). Reuses the same
      * per-overload {@link #matchStatus} {@link #resolve} uses, then combines:
@@ -158,7 +166,8 @@ public final class StaticDispatch {
     public static Verdict classify(
             List<IrStmt.FunctionDecl> overloads,
             List<IrSort> argNarrowings,
-            java.util.Map<String, Sort> registry) {
+            java.util.Map<String, Sort> registry,
+            java.util.Map<String, java.util.Set<String>> traitImpls) {
         boolean anyArityMatch = false;
         boolean anyMatch = false;
         boolean anyUndecided = false;
@@ -167,7 +176,7 @@ public final class StaticDispatch {
                 continue;  // arity mismatch — not a refinement failure; abstain below
             }
             anyArityMatch = true;
-            switch (gateFit(ov, argNarrowings, registry)) {
+            switch (gateFit(ov, argNarrowings, registry, traitImpls)) {
                 case MATCHES -> anyMatch = true;
                 case UNDECIDED -> anyUndecided = true;
                 case EXCLUDED -> { /* arg provably disjoint from this overload */ }
@@ -193,7 +202,8 @@ public final class StaticDispatch {
     private enum OverloadFit { MATCHES, EXCLUDED, UNDECIDED }
 
     private static OverloadFit gateFit(IrStmt.FunctionDecl ov, List<IrSort> args,
-                                       java.util.Map<String, Sort> registry) {
+                                       java.util.Map<String, Sort> registry,
+                                       java.util.Map<String, java.util.Set<String>> traitImpls) {
         Simplifier simp = new Simplifier(List.of()).withRegistry(registry);
         Sort[] argSorts = new Sort[args.size()];
         Map<String, SymExpr> siblingValues = new HashMap<>();
@@ -224,7 +234,7 @@ public final class StaticDispatch {
                     continue;
                 }
                 allPassed = false;
-                if (provablyDisjoint(argSort, paramSort, simp)) {
+                if (provablyDisjoint(argSort, paramSort, simp, traitImpls)) {
                     return OverloadFit.EXCLUDED;  // arg ∩ this param = ∅ → can't route here
                 }
             } catch (CompileException ce) {
@@ -244,13 +254,27 @@ public final class StaticDispatch {
      * which the slice-2 hardening already made mean provably-disjoint for
      * struct/union/kind pairings. Sound and conservative: an undecidable case yields
      * {@code false} (not disjoint → the gate abstains), never a false exclusion.
+     *
+     * <p><b>Trait satisfaction (roadmap §4.3).</b> {@link Refinements} is a refinement engine — it
+     * cannot see that a struct satisfies a trait, so {@code imply(Parabola, Curve2D)} is {@code Failed}
+     * even though {@code Parabola is-a Curve2D}. Reading that as disjoint would wrongly exclude a
+     * satisfying struct from its trait parameter. So the nominal decider (the {@code traitImpls} view)
+     * is consulted first: an arg whose type satisfies the param trait is <em>not</em> disjoint. A
+     * struct that does <em>not</em> satisfy the trait still falls through to the {@code Failed} check
+     * and is correctly excluded — a genuine misroute the gate should catch.
      */
-    private static boolean provablyDisjoint(Sort arg, Sort param, Simplifier simp) {
+    private static boolean provablyDisjoint(Sort arg, Sort param, Simplifier simp,
+                                            java.util.Map<String, java.util.Set<String>> traitImpls) {
         if (isIntRefined(arg) && isIntRefined(param)) {
             SymExpr self = SymExpr.var("·self");  // synthetic binder, won't collide
             return BoundAnalysis.bound(self, List.of(
                     Substitute.applySelf(arg.predicate(), self),
                     Substitute.applySelf(param.predicate(), self))).isEmpty();
+        }
+        // The arg's type satisfies the param trait (nominal is-a) → not disjoint. Refinements can't
+        // see this relation, so its Failed would otherwise mis-read a satisfying struct as excluded.
+        if (traitImpls.getOrDefault(arg.name(), java.util.Set.of()).contains(param.name())) {
+            return false;
         }
         return Refinements.imply(arg, param, simp) instanceof ProofResult.Failed;
     }
