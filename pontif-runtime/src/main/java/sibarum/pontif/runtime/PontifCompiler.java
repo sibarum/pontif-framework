@@ -286,6 +286,14 @@ public final class PontifCompiler {
         if (unprovableCall.isPresent()) {
             return new CompileResult.Failed(RunResult.error(unprovableCall.get()));
         }
+        // Cast gate — C3 §4.5 item 3: a `(Target:value)` cast with no runtime-executable path
+        // (not a String render, no matching user `cast Target:(Source)` coercion) is a compile error
+        // rather than a runtime "No coercion"/"cannot render" throw (§1d). Abstains when the value
+        // sort is statically unknown (never a false reject).
+        Optional<String> illegalCast = firstIllegalCast(module);
+        if (illegalCast.isPresent()) {
+            return new CompileResult.Failed(RunResult.error(illegalCast.get()));
+        }
         // Return-refinement gate: reject a declared return the proof system
         // can't discharge (and no proof is supplied). Sound but incomplete —
         // it only rejects on a positive NOT-DISCHARGED verdict over a graph
@@ -510,6 +518,36 @@ public final class PontifCompiler {
                 + "refinement(s) of every overload. Prove it (narrow the arguments), "
                 + "supply a proof, weaken the parameter sort, or mark the parameter "
                 + "[!!Sort] to defer the check to runtime.");
+    }
+
+    /**
+     * C3 §4.5 item 3 — the cast gate: the first {@code (Target:value)} cast with no runtime-executable
+     * path (not a {@code String} render from a renderable primitive, and no declared
+     * {@code cast Target:(x:Source)} coercion whose source the value satisfies), as an error message;
+     * empty when every cast is legal or its value sort is statically unknown (abstain, never a false
+     * reject). Turns the runtime "No coercion"/"cannot render" throw into a compile error (§1d).
+     * Abstain-on-throw, like the sibling gates.
+     */
+    private static Optional<String> firstIllegalCast(IrModule module) {
+        Optional<sibarum.pontif.ir.IrExpr.Cast> illegal;
+        try {
+            illegal = sibarum.pontif.ir.CastGate.firstIllegal(module);
+        } catch (Exception | StackOverflowError e) {
+            return Optional.empty();  // outside the gate's scope → abstain
+        }
+        return illegal.map(c -> "Cannot cast to '" + castTargetName(c.targetSort()) + "' at "
+                + c.origin() + " — no such cast: the value is not renderable to String and no "
+                + "`cast " + castTargetName(c.targetSort()) + ":(x:Source) -> …` coercion applies. "
+                + "Define the coercion, or cast to a renderable type.");
+    }
+
+    /** A readable head name for a cast target sort. */
+    private static String castTargetName(sibarum.pontif.ir.IrSort sort) {
+        return switch (sort) {
+            case sibarum.pontif.ir.IrSort.Named n -> n.name();
+            case sibarum.pontif.ir.IrSort.Refined r -> r.name();
+            default -> String.valueOf(sort);
+        };
     }
 
     private static Optional<String> firstUnprovableReturn(IrModule module) {

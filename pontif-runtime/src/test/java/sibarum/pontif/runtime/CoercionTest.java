@@ -170,4 +170,32 @@ class CoercionTest {
                 """);
         assertTrue(err.contains("exactly one source binder"), () -> err);
     }
+
+    // --- the cast gate (C3 §4.5 item 3): a cast with no path is a compile error, not a runtime throw ---
+
+    @Test
+    void castWithNoCoercion_isCompileError() throws Exception {
+        // No `cast Int:(String)` is declared and Int isn't a String render — so `(Int:"abc")` has no
+        // runtime-executable path. The gate rejects it at compile time (§1d) instead of the runtime
+        // "No coercion" throw.
+        String err = compileError("(Int:\"abc\")");
+        assertTrue(err.contains("Cannot cast") && err.contains("no such cast"), () -> err);
+    }
+
+    @Test
+    void castOfUnrenderableToString_isCompileError() throws Exception {
+        // A struct isn't renderable to String and no `cast String:(Point)` applies (String targets
+        // render, never dispatch a coercion) — a compile error, not a runtime "cannot render" throw.
+        String err = compileError("""
+                struct Point(x:Int, y:Int)
+                (String:Point(1, 2))
+                """);
+        assertTrue(err.contains("Cannot cast"), () -> err);
+    }
+
+    @Test
+    void renderableCast_isAllowed() throws Exception {
+        // The gate must NOT reject a legal String render (Int is renderable).
+        assertEquals("\"12\"", run("(String:12)"));
+    }
 }
