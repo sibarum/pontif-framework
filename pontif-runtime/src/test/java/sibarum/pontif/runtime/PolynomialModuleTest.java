@@ -54,7 +54,7 @@ class PolynomialModuleTest {
                   [Add(l, r)] -> countTerms(l) + countTerms(r)
                   [_] -> 1.0
                 }
-                countTerms(simplify(Pow(Add(Param("x"), Const(1.0)), Const(2.0)), "x"))
+                countTerms(simplify(Pow(Add(Param("x"), Const(1.0)), Const(2.0))))
                 """));
     }
 
@@ -65,7 +65,30 @@ class PolynomialModuleTest {
                 requires pontif.poly.{simplify}
                 requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, eval}
                 let src:AlgExpr = Mul(Add(Mul(Const(2.0), Param("x")), Const(1.0)), Sub(Param("x"), Const(3.0)))
-                eval(simplify(src, "x"), 5.0) == eval(src, 5.0)
+                eval(simplify(src), 5.0) == eval(src, 5.0)
+                """));
+    }
+
+    @Test
+    void simplify_leavesNonPolynomialTermsUnchanged() {
+        // simplify(x + sin(x)) must stay eval-equal to x + sin(x) — sin(x) is an opaque atom,
+        // NOT collapsed into a constant. At x = 0: 0 + sin(0) = 0 (the old degree-based bug gave 1).
+        assertEquals("true", run("""
+                requires pontif.poly.{simplify}
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Sin, eval}
+                let src:AlgExpr = Add(Param("x"), Sin(Param("x")))
+                eval(simplify(src), 0.0) == eval(src, 0.0)
+                """));
+    }
+
+    @Test
+    void simplify_combinesRepeatedAtoms() {
+        // sin(x) + sin(x) -> 2 sin(x): a single term, eval-equal to 2*sin(x).
+        assertEquals("true", run("""
+                requires pontif.poly.{simplify}
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Mul, Sin, eval}
+                let src:AlgExpr = Add(Sin(Param("x")), Sin(Param("x")))
+                eval(simplify(src), 1.0) == eval(Mul(Const(2.0), Sin(Param("x"))), 1.0)
                 """));
     }
 
@@ -108,7 +131,7 @@ class PolynomialModuleTest {
                 requires pontif.poly.{Expression}
                 requires pontif.algebra.{Const, Param, Add, Pow}
                 Expression(Pow(Add(Param("x"), Const(1.0)), Const(2.0)))
-                  .differentiate("x").simplify("x").eval(3.0) == 8.0
+                  .differentiate("x").simplify().eval(3.0) == 8.0
                 """));
     }
 
@@ -120,7 +143,7 @@ class PolynomialModuleTest {
                 requires pontif.poly.{Expression}
                 requires pontif.algebra.{Const, Param, Add, Pow}
                 Expression(Pow(Add(Param("x"), Const(1.0)), Const(2.0)))
-                  .expand().simplify("x").eval(3.0) == 16.0
+                  .expand().simplify().eval(3.0) == 16.0
                 """));
     }
 

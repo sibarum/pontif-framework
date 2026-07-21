@@ -13,9 +13,10 @@ package sibarum.pontif.runtime.module;
  *   <li>{@code expand(e)} — multiply out: distribute {@code Mul} over {@code Add}, unroll an
  *       integer {@code Pow}, and normalize {@code Sub} to add-a-negation. Result is a flat
  *       sum-of-products.</li>
- *   <li>{@code simplify(e, name)} — combine like terms. <b>Univariate</b> (v1): groups the
- *       expanded terms of the single variable {@code name} by degree and sums their coefficients.
- *       Eval-preserving.</li>
+ *   <li>{@code simplify(e)} — combine like terms by <b>monomial</b>: two expanded terms merge only
+ *       when their non-constant parts are the same monomial, so a non-polynomial subtree (e.g.
+ *       {@code sin(x)}) is an opaque atom that survives untouched. Variable-agnostic (multivariate)
+ *       and eval-preserving — "can't combine" means "left unchanged", never a fabricated value.</li>
  *   <li>{@code differentiate(e, x)} — symbolic derivative w.r.t. {@code x} by structural recursion
  *       (sum / product / quotient / power / chain rules + the transcendental pushforwards). Total;
  *       the result is correct but unsimplified — pipe through {@code simplify} for a tidy form.</li>
@@ -95,68 +96,70 @@ public final class PolynomialExtension implements Extension {
               [_] -> e
             }
 
-            # simplify: combine like terms (univariate — group expanded terms by degree).
-            function maxOf(a:Decimal, b:Decimal):Decimal -> match (a >= b) { [Bool:true] -> a  [Bool:false] -> b }
+            # simplify: combine like terms by MONOMIAL. Two expanded terms combine only when their
+            # non-constant parts (their monomial) are the same; anything that isn't the same monomial
+            # is left alone. So a non-polynomial subtree (sin(x), …) is an opaque atom — its own
+            # monomial — and survives untouched. Eval-preserving; variable-agnostic (multivariate).
 
-            # degree of a single product term (sum of variable exponents).
-            function deg(e:AlgExpr):Decimal -> match e {
-              [Param(_)]  -> 1.0
-              [Const(_)]  -> 0.0
-              [Mul(l, r)] -> deg(l) + deg(r)
-              [Pow(b, x)] -> match x { [Const(k)] -> k * deg(b)  [_] -> 0.0 }
-              [_] -> 0.0
+            function both(a:Bool, b:Bool):Bool -> match a { [Bool:true] -> b  [Bool:false] -> false }
+
+            # structural equality of two expressions (used to compare monomials).
+            function sameExpr(a:AlgExpr, b:AlgExpr):Bool -> match a {
+              [Const(x)]   -> match b { [Const(y)] -> x == y  [_] -> false }
+              [Param(x)]   -> match b { [Param(y)] -> x == y  [_] -> false }
+              [Add(a1,a2)] -> match b { [Add(b1,b2)] -> both(sameExpr(a1,b1), sameExpr(a2,b2))  [_] -> false }
+              [Sub(a1,a2)] -> match b { [Sub(b1,b2)] -> both(sameExpr(a1,b1), sameExpr(a2,b2))  [_] -> false }
+              [Mul(a1,a2)] -> match b { [Mul(b1,b2)] -> both(sameExpr(a1,b1), sameExpr(a2,b2))  [_] -> false }
+              [Div(a1,a2)] -> match b { [Div(b1,b2)] -> both(sameExpr(a1,b1), sameExpr(a2,b2))  [_] -> false }
+              [Pow(a1,a2)] -> match b { [Pow(b1,b2)] -> both(sameExpr(a1,b1), sameExpr(a2,b2))  [_] -> false }
+              [Sin(a1)]    -> match b { [Sin(b1)] -> sameExpr(a1,b1)  [_] -> false }
+              [Cos(a1)]    -> match b { [Cos(b1)] -> sameExpr(a1,b1)  [_] -> false }
+              [Tan(a1)]    -> match b { [Tan(b1)] -> sameExpr(a1,b1)  [_] -> false }
+              [Exp(a1)]    -> match b { [Exp(b1)] -> sameExpr(a1,b1)  [_] -> false }
+              [Log(a1)]    -> match b { [Log(b1)] -> sameExpr(a1,b1)  [_] -> false }
+              [_] -> false
             }
 
-            # numeric coefficient of a single product term (product of its Const factors).
-            function coef(e:AlgExpr):Decimal -> match e {
-              [Param(_)]  -> 1.0
-              [Const(v)]  -> v
-              [Mul(l, r)] -> coef(l) * coef(r)
-              [Pow(b, x)] -> coef(b)
+            # coefficient of a term = product of its Const factors.
+            function coeffOf(t:AlgExpr):Decimal -> match t {
+              [Const(v)] -> v
+              [Mul(a,b)] -> coeffOf(a) * coeffOf(b)
               [_] -> 1.0
             }
-
-            # the monomial name^d as a canonical product (name^0 = Const(1)).
-            function monomial(name:String, d:Decimal):AlgExpr -> match (d <= 0.0) {
-              [Bool:true]  -> Const(1.0)
-              [Bool:false] -> Mul(Param(name), monomial(name, d - 1.0))
+            # monomial of a term = product of its non-Const factors (Const(1.0) if none).
+            function mulMono(a:AlgExpr, b:AlgExpr):AlgExpr -> match a {
+              [Const(_)] -> b
+              [_] -> match b { [Const(_)] -> a  [_] -> Mul(a, b) }
+            }
+            function monoOf(t:AlgExpr):AlgExpr -> match t {
+              [Const(_)] -> Const(1.0)
+              [Mul(a,b)] -> mulMono(monoOf(a), monoOf(b))
+              [_] -> t
             }
 
-            function term(name:String, c:Decimal, d:Decimal):AlgExpr -> Mul(Const(c), monomial(name, d))
+            # a canonical term is Mul(Const(coeff), monomial).
+            function makeTerm(c:Decimal, m:AlgExpr):AlgExpr -> Mul(Const(c), m)
+            function monoPart(t:AlgExpr):AlgExpr -> match t { [Mul(_, m)] -> m  [_] -> Const(1.0) }
+            function coeffPart(t:AlgExpr):Decimal -> match t { [Mul(Const(c), _)] -> c  [_] -> 1.0 }
 
-            # prepend a term, treating a Const(0) accumulator as the empty sum (no leading +0).
-            function addTerm(acc:AlgExpr, t:AlgExpr):AlgExpr -> match acc {
-              [Const(z)] -> match (z == 0.0) { [Bool:true] -> t  [Bool:false] -> Add(t, acc) }
-              [_]        -> Add(t, acc)
-            }
-
-            # sum of the coefficients of every term whose degree == d.
-            function coefAtDeg(e:AlgExpr, d:Decimal):Decimal -> match e {
-              [Add(l, r)] -> coefAtDeg(l, d) + coefAtDeg(r, d)
-              [_] -> match (deg(e) == d) { [Bool:true] -> coef(e)  [Bool:false] -> 0.0 }
-            }
-
-            function maxDeg(e:AlgExpr):Decimal -> match e {
-              [Add(l, r)] -> maxOf(maxDeg(l), maxDeg(r))
-              [_] -> deg(e)
-            }
-
-            # assemble degrees d..0 (descending) into `acc`, dropping zero-coefficient terms.
-            function assemble(e:AlgExpr, name:String, d:Decimal, acc:AlgExpr):AlgExpr -> match (d < 0.0) {
-              [Bool:true]  -> acc
-              [Bool:false] -> (
-                let c:Decimal = coefAtDeg(e, d)
-                match (c == 0.0) {
-                  [Bool:true]  -> assemble(e, name, d - 1.0, acc)
-                  [Bool:false] -> assemble(e, name, d - 1.0, addTerm(acc, term(name, c, d)))
+            # insert coeff*monomial into the accumulated sum, merging into a like-monomial term.
+            function insertTerm(acc:AlgExpr, c:Decimal, m:AlgExpr):AlgExpr -> match acc {
+              [Const(_)] -> makeTerm(c, m)
+              [Add(head, rest)] -> match sameExpr(monoPart(head), m) {
+                  [Bool:true]  -> Add(makeTerm(coeffPart(head) + c, m), rest)
+                  [Bool:false] -> Add(head, insertTerm(rest, c, m))
                 }
-              )
+              [_] -> match sameExpr(monoPart(acc), m) {
+                  [Bool:true]  -> makeTerm(coeffPart(acc) + c, m)
+                  [Bool:false] -> Add(makeTerm(c, m), acc)
+                }
+            }
+            function foldTerms(e:AlgExpr, acc:AlgExpr):AlgExpr -> match e {
+              [Add(l, r)] -> foldTerms(r, foldTerms(l, acc))
+              [_] -> insertTerm(acc, coeffOf(e), monoOf(e))
             }
 
-            function simplify(e:AlgExpr, name:String):AlgExpr -> (
-              let ex:AlgExpr = expand(e)
-              assemble(ex, name, maxDeg(ex), Const(0.0))
-            )
+            function simplify(e:AlgExpr):AlgExpr -> foldTerms(expand(e), Const(0.0))
 
             # differentiate: symbolic derivative w.r.t. `x`, by structural recursion — one rule per
             # node (sum/product/quotient/power/chain, plus the transcendental pushforwards). Total.
@@ -191,7 +194,7 @@ public final class PolynomialExtension implements Extension {
             struct Expression(ast:AlgExpr)
             method Expression.substitute(name:String, r:AlgExpr):Expression -> Expression(substitute(this.ast, name, r))
             method Expression.expand():Expression -> Expression(expand(this.ast))
-            method Expression.simplify(name:String):Expression -> Expression(simplify(this.ast, name))
+            method Expression.simplify():Expression -> Expression(simplify(this.ast))
             method Expression.differentiate(x:String):Expression -> Expression(differentiate(this.ast, x))
             method Expression.eval(x:Decimal):Decimal -> eval(this.ast, x)
 
