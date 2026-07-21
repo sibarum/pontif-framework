@@ -118,7 +118,7 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 |---|---|---|---|---|
 | C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
 | C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ **core landed** (phases 1–4 + Cluster 4 — resolution IS post-link); remaining = the cross-module **visibility** model | `dispatch-unification.md`, `cross-module-dispatch.md` |
-| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine, gates, let-coercion & type-args landed** (§1d, effective-sort, `CoercionResolver` deleted §4.5 item 1, parametric invariance §4.5 item 2); remaining = static-cast (+ item-2 follow-ups: inference-carries-type-args, Stream retirement) | **this doc** (§4) |
+| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **is-a/assign/construct/coercion/type-args/cast-gate all landed** (§4.5 items 1–3); remaining = the aspirational structural-cast *law* (needs runtime retag) + Stream retirement | **this doc** (§4) |
 | C4 | **Three-records model** | Declared / Inferred / Value split | ☑ **effectively landed** (audited 2026-07-21) — landed incidentally through C2/C3; residual = doc reconciliation only (§ notes) | `type-records.md` |
 | C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ **per-facet** (audited 2026-07-21): generics + sub-traits ☑, dependent-sorts + Type-fragments ◐, structural traits ☐ | `TODO.md` "4 facets", `dependent-sorts.md`, `feature-matrix.md` |
 
@@ -149,9 +149,12 @@ war docs.
   Slice 0/1, the §4.2 engine gaps, Phase 0/1 (ConstructionGate nominal leg → engine), the §1d
   stamp-kill, the effective-sort consumption across the construction/claim/**call** gates
   (§4.6+ archive), **let-coercion (§4.5 item 1, `22578bf`): `CoercionResolver` deleted, the parser
-  decides trait-free coercion via `Assignability`**, and **parametric type-args (§4.5 item 2,
-  `88e3aec`): invariant `Box[Int]`≠`Box[Bool]`, parser routes parametric lets through the engine.**
-  Remaining: static-cast wiring; item-2 follow-ups (inference-carries-type-args, Stream retirement).
+  decides trait-free coercion via `Assignability`**, **parametric type-args (§4.5 item 2, `88e3aec`
+  + follow-up `448b19f`): invariant `Box[Int]`≠`Box[Bool]`, parser routes parametric lets through the
+  engine, construction inference carries derived args**, and **the cast gate (§4.5 item 3, `f803d23`):
+  a cast with no runtime path is a compile error, not a runtime throw.** Remaining: the aspirational
+  structural-cast *law* (needs runtime retag before `Assignability.cast` can gate it) + Stream
+  retirement — both follow-ups, not finish-line blockers.
   This doc is its plan-of-record (§4).
 - **C4 (three-records) — effectively landed (audited 2026-07-21); code is ahead of `type-records.md`.**
   The split is realized as three distinct artifacts: **Declared** = `LetIn.claim()` / param
@@ -276,7 +279,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Generics / type-args (`Box[Int]`) | ✅ **DONE** (2026-07-21, `88e3aec`) | L | Invariant type-args in `sameType` + a same-head `isA` arm (type-var arg = slot); parser bail dropped. Follow-up: inference doesn't yet carry derived type-args (a direct `let b:Box[Int] = Box(5)` is rejected) |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
 | Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **NB (2026-07-19):** these two arms are exactly what the Dispatch/Method elimination (`docs/dispatch-method-elimination.md`, §5) makes **capability-driven** — Stage E1 replaces the `instanceof Method`/`instanceof Dispatch` selection here with a call-kind-capability lookup on the unified `CallSig` node (behavior-preserving) |
-| Static-cast legality wiring | decision present, unwired | M | currently decided *nowhere*; `IrExpr.Cast` legality is implicit-at-runtime |
+| Static-cast legality wiring | ✅ **DONE** (2026-07-21, `f803d23`) | M | Compile-time `CastGate` (§4.5 item 3): a cast with no runtime path is a compile error, not a runtime throw. Matches the runtime (render + user-coercion), not `Assignability.cast` — structural retag isn't runtime-implemented (follow-up) |
 
 ### 4.3 Migration targets (wire onto the engine, then delete)
 
@@ -286,7 +289,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | all other `let` coercions | `AltParser.nominalBinding` (was `coercionFor` → `CoercionResolver`) | ✅ **DONE (2026-07-21, `22578bf`).** The trait-free nominal cases (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`, primitives) are decided at the parser **via `Assignability`** (no trait closure needed); `Autobox` stays a parser-local sentinel (re-homes to the generics slice later); only **`TraitCast`** legality is deferred post-link (permissive, as before — eager satisfaction is the C2-adjacent follow-up). `CoercionResolver` deleted. | — |
 | construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | ✅ **DONE (2026-07-21, `5eb9aaa`)** — fit is a single-engine query (`Assignability`+`Refinements`) reading the effective-sort lens; the `UNKNOWN → runtimeChecks` stamp is dropped (§1d); demotion projection removed (§6.5). Dependent-claims/type-params orchestration stays. | — |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
-| cast legality | `IrInterpreter.evalCast` ([:1189]) + `IrExpr.Cast` producers | new wiring for `Assignability.cast` | M (mostly new) |
+| cast legality | `CastGate` (pontif-ir) + `PontifCompiler.compileAlt` | ✅ **DONE (2026-07-21, `f803d23`).** Compile-time gate matching the runtime's real cast paths (String render / user coercion via `Assignability.isA`); rejects a no-path cast. NB not `Assignability.cast` — the runtime does coercion-dispatch, not structural retag (the cast *law* is a follow-up needing runtime retag). Runtime throws kept as backstops. | — |
 
 Note `IrStmt.Coercion` / `CoercionCheck` (user-defined `cast Target:(x:Source)->…`) is a
 **different axis** (runtime execution of author coercions), *not* a copy to absorb.
@@ -335,9 +338,18 @@ finish line is now **two C3-internal items, none blocked on C2** (C2 Phase 2 has
    (doesn't carry the derived arg); §1d-honest but a false rejection until `inferRecord` stamps
    derived type-args (pinned by `parametricLet_directConstruction_isRejected_KNOWN_LIMITATION`).
    (b) *Stream/`Autobox` retirement* stays deferred (see below).
-3. **Static-cast legality wiring** through `Assignability.cast` (`IrExpr.Cast` legality is
-   implicit-at-runtime today; §4.2, §4.3 `cast legality` row). **Size: M** (mostly new wiring). *The
-   sole remaining C3 finish-line item.*
+3. ✅ **DONE (2026-07-21, `f803d23`) — the cast gate.** A `(Target:value)` cast with no
+   runtime-executable path is now a compile error (§1d), not a runtime "No coercion"/"cannot render"
+   throw. **As-built discrepancy (verified):** the roadmap framed this as "wire `Assignability.cast`"
+   (structural retag — sibling/narrow), but the runtime (`IrInterpreter.evalCast`) does NOT implement
+   structural retags — it only renders to `String` or dispatches a user `cast Target:(Source)` coercion.
+   So gating via `Assignability.cast` would accept casts the runtime then fails. The new `CastGate`
+   (pontif-ir, wired in `PontifCompiler.compileAlt`) instead matches the runtime's real criteria
+   (render-from-renderable-primitive OR a declared coercion whose source the value satisfies via
+   `Assignability.isA`), abstaining when the value sort is unknown. The runtime throws remain as
+   defense-in-depth backstops (raw `IrCompiler` path). **Follow-up:** the aspirational structural-cast
+   *law* (sibling re-tag / narrow via `Assignability.cast`) needs the runtime to implement structural
+   retag first — a separate slice; only then does `Assignability.cast` become the gate criterion.
 
 **Deferred from item 2 — retire `isStreamName`/`Autobox`.** Entangled and out of the is-a path: the
 parametric-`Stream` runtime element deferral (`ConstructionGate` — the one sanctioned §1d runtime
