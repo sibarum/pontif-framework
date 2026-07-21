@@ -58,4 +58,50 @@ class TypeParameterConstructionTest {
                         && f.error().text().contains("disagree"),
                 () -> f.error().text());
     }
+
+    // --- parametric let assignment routes through Assignability (roadmap §4.5 item 2) ---
+
+    @Test
+    void parametricLet_matchingTypeArg_compilesAndRuns() {
+        // A declared parametric let sort is now decided by the type-arg-aware engine; a matching
+        // instantiation (b:Box[Int] into x:Box[Int]) is EXACT and binds. (The value carries the
+        // applied sort via the param; a direct `let b:Box[Int] = Box(5)` is a separate case — see
+        // parametricLet_directConstruction below — because construction inference yields a bare Box.)
+        assertEquals("5", run("""
+                struct Box[type T](value:T)
+                function unwrap(b:Box[Int]):Int -> ( let x:Box[Int] = b
+                 x.value )
+                unwrap(Box(5))
+                """));
+    }
+
+    @Test
+    void parametricLet_mismatchedTypeArg_isRejected() {
+        // Invariance: a Box[Bool]-typed value cannot bind a Box[Int] let. Before item 2 the engine
+        // was type-arg-blind and this slipped through; now the parser rejects it via Assignability.
+        PontifCompiler.CompileResult.Failed f = rejects("""
+                struct Box[type T](value:T)
+                function first(b:Box[Bool]):Int -> ( let x:Box[Int] = b
+                 0 )
+                first(Box(true))
+                """);
+        assertTrue(f.error().text().toLowerCase().contains("different types"),
+                () -> f.error().text());
+    }
+
+    @Test
+    void parametricLet_directConstruction_isRejected_KNOWN_LIMITATION() {
+        // KNOWN LIMITATION (roadmap §4.5 item 2 follow-up), NOT desired behavior: `Box(5)` IS a
+        // Box[Int], but construction inference yields a bare `Box` (it doesn't carry the derived
+        // type-arg), so the now-type-arg-aware engine rejects the unproven `bare Box → Box[Int]`
+        // narrowing. This pins the current state; it should FLIP to success once inference stamps
+        // derived type-args onto a parametric construction's sort.
+        PontifCompiler.CompileResult.Failed f = rejects("""
+                struct Box[type T](value:T)
+                let b:Box[Int] = Box(5)
+                b.value
+                """);
+        assertTrue(f.error().text().toLowerCase().contains("different types"),
+                () -> f.error().text());
+    }
 }

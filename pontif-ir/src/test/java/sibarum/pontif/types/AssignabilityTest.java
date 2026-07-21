@@ -98,6 +98,43 @@ class AssignabilityTest {
         assertFalse(Assignability.isA(tuple3(), tuple2(), ctx()));
     }
 
+    // --- parametric type-args (invariant — roadmap §4.5 item 2) ------------
+
+    /** An applied {@code Box[arg]}. */
+    private static IrSort boxOf(IrSort arg) {
+        return new IrSort.Named("Box", List.of(arg), Origin.NONE);
+    }
+
+    @Test
+    void parametric_sameArgs_isExact() {
+        assertTrue(Assignability.isA(boxOf(INT), boxOf(INT), ctx()));
+        assertEquals(Assignability.Assignment.EXACT,
+                Assignability.assign(boxOf(INT), boxOf(INT), ctx()));
+    }
+
+    @Test
+    void parametric_differentConcreteArgs_isIllegal() {
+        // Invariance: Box[Int] is not usable where Box[Bool] is required, and no cast retags one
+        // instantiation as another. (The pre-item-2 engine was type-arg-blind and returned EXACT.)
+        assertFalse(Assignability.isA(boxOf(INT), boxOf(BOOL), ctx()));
+        assertEquals(Assignability.Assignment.ILLEGAL,
+                Assignability.assign(boxOf(INT), boxOf(BOOL), ctx()));
+    }
+
+    @Test
+    void parametric_typeVariableArg_isASlot() {
+        // A type-variable arg (an undeclared bare Named) is a slot bound by the derivation machinery,
+        // so Box[Int] is-a Box[T] — this keeps a Box[T] struct field usable by a Box[Int] argument.
+        assertTrue(Assignability.isA(boxOf(INT), boxOf(named("T")), ctx()));
+    }
+
+    @Test
+    void parametric_bareVsApplied_widensByName() {
+        // A bare Box (arity 0) is the existential "Box of anything"; Box[Int] widens to it — the
+        // invariance arm fires only on equal, non-empty arity, so this keeps its name-only behavior.
+        assertTrue(Assignability.isA(boxOf(INT), named("Box"), ctx()));
+    }
+
     // --- assign ------------------------------------------------------------
 
     @Test

@@ -2082,7 +2082,7 @@ public final class AltParser {
     private IrSort nominalBinding(IrSort inferred, IrSort declared, String name, Origin origin)
             throws ParseException {
         if (declared == null) return inferred;  // no claim — the plain agreement; keep the narrowing
-        if (!(declared instanceof IrSort.Named dn) || !dn.typeArgs().isEmpty()) return null;
+        if (!(declared instanceof IrSort.Named)) return null;  // refined/union/etc. → gate judges it
         String declaredBase = baseSortName(declared);
         String inferredBase = baseSortName(inferred);
         if (declaredBase == null || inferredBase == null) return null;   // unknown floor → defer

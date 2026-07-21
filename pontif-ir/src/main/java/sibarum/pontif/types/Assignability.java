@@ -79,6 +79,17 @@ public final class Assignability {
             return false;
         }
 
+        // Parametric invariance (roadmap §4.2): two applications of the same head relate only through
+        // their type-args, decided HERE — before the nominal-base widen below, which would drop the args
+        // and name-match Box[Int] with Box[Bool]. Fires only for same-head plain-Named applications of
+        // equal, non-empty arity; a bare-vs-applied pair (arity 0 vs n) falls through to the existing
+        // name-only widen (a bare Box is the existential "Box of anything"). A type-variable arg is a
+        // slot (its binding is the derivation machinery's job), so it matches — keeping Box[T] fields
+        // usable by Box[Int] args at construction.
+        if (sameHeadApplied(sub, sup)) {
+            return typeArgsInvariant(typeArgsOf(sub), typeArgsOf(sup), ctx);
+        }
+
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
         boolean supIsTrait = isTrait(sup, ctx);
         if (supIsTrait && ctx.satisfies(baseName(sub), baseName(sup))) return true;
@@ -99,6 +110,10 @@ public final class Assignability {
         // The numeric tower's lossless auto-conversion (Int -> Decimal) — a convenience/compatibility
         // coercion for primitives only. NOT an is-a, and it never applies to structs (roadmap §6.4).
         if (isNumericWidening(from, to)) return Assignment.COERCE;
+        // A same-head parametric pair that isn't is-a has incompatible invariant type-args — no cast
+        // retags one instantiation as another, so it is ILLEGAL, not NEEDS_CAST. (bottomStructure below
+        // drops the args and would otherwise see Box[Int] and Box[Bool] as one castable shape.)
+        if (sameHeadApplied(from, to)) return Assignment.ILLEGAL;
         // Not is-a: legal only through an explicit cast, and only if the underlying structures are
         // compatible (a down/lateral/lossless retag). Otherwise there is no cast that could produce it.
         return sameType(bottomStructure(from, ctx), bottomStructure(to, ctx))
@@ -325,6 +340,9 @@ public final class Assignability {
         String an = baseName(a);
         String bn = baseName(b);
         if (an == null || !an.equals(bn)) return false;
+        // Invariant type-args: two applications of the same head are the SAME type only if their
+        // type-args are identical — Box[Int] is not Box[Bool] (recurses via sameType).
+        if (!typeArgsEqual(typeArgsOf(a), typeArgsOf(b))) return false;
         boolean aRef = a instanceof IrSort.Refined;
         boolean bRef = b instanceof IrSort.Refined;
         if (aRef != bRef) return false;
@@ -347,5 +365,57 @@ public final class Assignability {
             case IrSort.CallSig c -> c.typeName();   // §4: the head type name is the base
             default -> null;
         };
+    }
+
+    // --- parametric type-arguments (invariant — the only variance the language has) ------------------
+
+    /** The applied type-arguments of a sort ({@code Named}/{@code Refined} carry them), else empty. */
+    private static List<IrSort> typeArgsOf(IrSort s) {
+        return switch (s) {
+            case IrSort.Named n -> n.typeArgs();
+            case IrSort.Refined r -> r.typeArgs();
+            default -> List.of();
+        };
+    }
+
+    /** Positional identity of two type-arg lists (for {@link #sameType}): same arity, each pair the
+     *  SAME type — strict, no type-variable leniency (identity, not usability). */
+    private static boolean typeArgsEqual(List<IrSort> a, List<IrSort> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            if (!sameType(a.get(i), b.get(i))) return false;
+        }
+        return true;
+    }
+
+    /** Invariant compatibility for an is-a between same-head applications (for {@link #isA}): same
+     *  arity, and each positional pair compatible — a type <em>variable</em> (an undeclared bare
+     *  {@code Named} — a slot) matches anything, else the args must be the SAME type (invariance,
+     *  matching {@code SortChecker.enforceParametricBase}). */
+    private static boolean typeArgsInvariant(List<IrSort> a, List<IrSort> b, AssignabilityContext ctx) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            IrSort x = a.get(i);
+            IrSort y = b.get(i);
+            if (isTypeVar(x, ctx) || isTypeVar(y, ctx)) continue;
+            if (!sameType(x, y)) return false;
+        }
+        return true;
+    }
+
+    /** A type variable: a bare {@code Named} the catalog knows as neither a declared type nor a
+     *  primitive — a type-parameter slot, not a concrete type (its binding is the derivation
+     *  machinery's job, not this engine's). */
+    private static boolean isTypeVar(IrSort s, AssignabilityContext ctx) {
+        return s instanceof IrSort.Named n && n.typeArgs().isEmpty()
+                && !ctx.catalog().isDeclared(n.name()) && !ctx.catalog().isPrimitive(n.name());
+    }
+
+    /** Two same-head applied parametric sorts of equal, non-empty arity (both plain {@code Named}) —
+     *  the shape the invariance arm judges by type-args. */
+    private static boolean sameHeadApplied(IrSort a, IrSort b) {
+        return a instanceof IrSort.Named na && b instanceof IrSort.Named nb
+                && na.name().equals(nb.name())
+                && !na.typeArgs().isEmpty() && na.typeArgs().size() == nb.typeArgs().size();
     }
 }
