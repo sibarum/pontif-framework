@@ -16,6 +16,11 @@ package sibarum.pontif.runtime.module;
  *   <li>{@code simplify(e, name)} — combine like terms. <b>Univariate</b> (v1): groups the
  *       expanded terms of the single variable {@code name} by degree and sums their coefficients.
  *       Eval-preserving.</li>
+ *   <li>{@code Expression} — a chainable wrapper struct around an {@code AlgExpr} exposing the
+ *       transforms as methods ({@code Expression(t).expand().simplify("x").eval(3.0)}). Use a bare
+ *       {@code AlgExpr} when you only want the tree; wrap it to build a transformation pipeline.
+ *       The methods are thin wrappers over the free functions; this module owns the struct, so the
+ *       coherence rule is satisfied without pushing operations down into {@code pontif.algebra}.</li>
  * </ul>
  *
  * <p><b>Scope (v1):</b> tame polynomials. A degree-100 blow-up is acceptable (beyond the 80%
@@ -44,8 +49,8 @@ public final class PolynomialExtension implements Extension {
     }
 
     private static final String SOURCE = """
-            requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow}
-            exports @.{substitute, expand, simplify}
+            requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, eval}
+            exports @.{substitute, expand, simplify, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -148,6 +153,17 @@ public final class PolynomialExtension implements Extension {
               let ex:AlgExpr = expand(e)
               assemble(ex, name, maxDeg(ex), Const(0.0))
             )
+
+            # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
+            # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,
+            # build by hand, $f[Decimal].ast); wrap it in an Expression to chain transforms. Each
+            # transform returns a new Expression; `.ast` drops back to the raw tree, `.eval(x)` ends
+            # a chain with a value. The methods are thin wrappers over the free functions above.
+            struct Expression(ast:AlgExpr)
+            method Expression.substitute(name:String, r:AlgExpr):Expression -> Expression(substitute(this.ast, name, r))
+            method Expression.expand():Expression -> Expression(expand(this.ast))
+            method Expression.simplify(name:String):Expression -> Expression(simplify(this.ast, name))
+            method Expression.eval(x:Decimal):Decimal -> eval(this.ast, x)
 
             0
             """;

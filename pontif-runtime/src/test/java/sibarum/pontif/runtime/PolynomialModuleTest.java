@@ -77,4 +77,38 @@ class PolynomialModuleTest {
         assertNotNull(src, "pontif.poly source must be retained for inspection");
         assertTrue(src.contains("function simplify"), "source should contain the simplify definition");
     }
+
+    @Test
+    void expressionWrapper_chainsTransforms() {
+        // Expression wraps an AlgExpr and exposes the transforms as chainable methods.
+        // (x+1)^2 -> expand -> simplify -> eval at 3 => 16.
+        assertEquals("true", run("""
+                requires pontif.poly.{Expression}
+                requires pontif.algebra.{Const, Param, Add, Pow}
+                Expression(Pow(Add(Param("x"), Const(1.0)), Const(2.0)))
+                  .expand().simplify("x").eval(3.0) == 16.0
+                """));
+    }
+
+    @Test
+    void expressionWrapper_substituteThenEval() {
+        // 3x + 1, substitute x := 5, eval => 16.
+        assertEquals("true", run("""
+                requires pontif.poly.{Expression}
+                requires pontif.algebra.{Const, Param, Add, Mul}
+                Expression(Add(Mul(Const(3.0), Param("x")), Const(1.0)))
+                  .substitute("x", Const(5.0)).eval(0.0) == 16.0
+                """));
+    }
+
+    @Test
+    void expressionWrapper_astDropsBackToTheRawTree() {
+        // `.ast` returns the wrapped AlgExpr, so you can match / hand it to a free function.
+        assertEquals("1", run("""
+                requires pontif.poly.{Expression}
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Pow}
+                let e:AlgExpr = Expression(Pow(Add(Param("x"), Const(1.0)), Const(2.0))).expand().ast
+                match e { [Add(_, _)] -> 1  [_] -> 0 }
+                """));
+    }
 }
