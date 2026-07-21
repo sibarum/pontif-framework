@@ -129,6 +129,19 @@ class AssignabilityTest {
     }
 
     @Test
+    void refinedNominalWidensToItsBareBase() {
+        // A refinement widens to its bare base even when the base is a REGISTERED nominal (a Native
+        // like Decimal, or a struct/alias) — [Vec3:@…] is-a Vec3. Regression: the isNominalTag guard
+        // short-circuited this to false, so `let d:Decimal = 0.0` (value narrows to [Decimal:@==0.0])
+        // wrongly failed once item 1 routed it through `assign` instead of the old same-base path.
+        IrSort refinedVec3 = IrSort.refined("Vec3",
+                IrExpr.binOp(IrExpr.Op.GT, IrExpr.self(), IrExpr.lit(0)));
+        assertTrue(Assignability.isA(refinedVec3, named("Vec3"), ctx()));
+        assertEquals(Assignability.Assignment.WIDEN,
+                Assignability.assign(refinedVec3, named("Vec3"), ctx()));
+    }
+
+    @Test
     void parametric_bareVsApplied_widensByName() {
         // A bare Box (arity 0) is the existential "Box of anything"; Box[Int] widens to it — the
         // invariance arm fires only on equal, non-empty arity, so this keeps its name-only behavior.

@@ -93,6 +93,15 @@ public final class Assignability {
             return !(sup instanceof IrSort.Refined) || refinementImplies(sub, sup);
         }
 
+        // A refinement widens to its own bare base — drop the predicate: [Decimal:@==0] is-a Decimal,
+        // [Int:@>0] is-a Int, [Point:@.x>0] is-a Point. structurallySubsumes agrees, but the
+        // isNominalTag/trait guard below would short-circuit a registered base (a Native like Decimal,
+        // a struct) to false before reaching it. (Parametric same-head pairs are already handled above.)
+        if (sub instanceof IrSort.Refined && !(sup instanceof IrSort.Refined)
+                && baseName(sub) != null && baseName(sub).equals(baseName(sup))) {
+            return true;
+        }
+
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
         boolean supIsTrait = isTrait(sup, ctx);
         if (supIsTrait && ctx.satisfies(baseName(sub), baseName(sup))) return true;

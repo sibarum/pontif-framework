@@ -156,6 +156,19 @@ class LetClaimGateTest {
         }
     }
 
+    @Test
+    void bareDecimalClaim_acceptsRefinedDecimalValue() {
+        // Regression (item 1): a Decimal literal narrows to [Decimal:@==0.0]; binding it to a BARE
+        // `Decimal` claim must widen (drop the refinement), not fail. Decimal is a registered Native,
+        // so `Assignability` needed the explicit refinement→bare-base widen; without it this threw
+        // "declared Decimal but its value is Decimal — different types".
+        for (Engine engine : Engine.values()) {
+            RunResult r = run("let d:Decimal = 0.0\nd", engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("0.0", r.text(), engine.toString());
+        }
+    }
+
     // --- the Int→Decimal embedding at a let boundary -------------------------
 
     @Test
