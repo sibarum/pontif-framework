@@ -130,10 +130,15 @@ memory `project_type_spec_layering`.*
   use site, dodging the contextual-base gap). **Smallest / gentlest** way to first
   exercise local type-level binding. Scope v1 to nullary fragments (no params); a
   *parametric* fragment is a generic and is the next rung.
-- **Sub-traits.** `trait Indexed[type T]:Stream[T]{…}` — the `:Super` slot the rename
-  freed. To satisfy `B`, also satisfy `A`; a `B`-satisfier is accepted where `A` is
-  expected. Needs the `Stream` trait first (streams slice 2b). **QoL, deprioritized
-  by James — not critical path.**
+- **Sub-traits.** ✅ **LANDED (audited 2026-07-21).** `trait B : A` (the `:Super` slot the
+  rename freed): to satisfy `B` also satisfy `A`; a `B`-satisfier is accepted where `A` is
+  expected, with transitive base-param dispatch. Implemented via `SortChecker.flattenTrait`;
+  covered end-to-end by `TraitExtendsTest` (base-contract enforcement, both-methods-callable,
+  transitive dispatch, unknown-base reject). **This landed independently of the `Stream`
+  substrate** — the earlier "needs `Stream` first (streams slice 2b) / deprioritized" note was
+  stale (the test exercises it with toy traits). The `Indexed[type T]:Stream[T]` *specialization*
+  (a parametric sub-trait of `Stream`) still waits on the `Stream` trait, but the sub-trait
+  machinery itself is done.
 
 ## Value-in-a-type: local-`let` references in a refinement predicate — RESOLVED 2026-07-12
 
@@ -336,9 +341,11 @@ capability for storage-backed sequences. `Array` is the first implementor. Spell
 - **FOUNDATIONS GAP (found 2026-06-19, blocks Slice 1 as originally scoped).** Three
   Slice-1 assumptions do not exist in code: (1) there is **no `Stream` trait** —
   `std.stream` is flat free-functions over `[Element|Leaf]` (`BuiltinModules.java:116`),
-  the trait is doc-only (streams slice 2b); (2) there is **no sub-trait machinery** —
-  `IrSort.Trait` has no supertrait field, no parser syntax, trait inheritance deferred
-  (`traits.md:282`), so `Indexed : Stream` is inexpressible; (3) there is **no `Array`**
+  the trait is doc-only (streams slice 2b); (2) ~~there is **no sub-trait machinery**~~
+  **RESOLVED (2026-07-21): sub-trait machinery has since landed** — `IrSort.Trait.baseTrait()`,
+  `trait B : A` parser syntax, `SortChecker.flattenTrait`, covered by `TraitExtendsTest`. Only the
+  parametric `Indexed[T] : Stream[T]` *specialization* still waits on the `Stream` trait itself
+  (point 1); (3) there is **no `Array`**
   (ruled out at the semantic level, depends on unbuilt actions). What DOES exist and is
   usable: trait DATA attributes (`count` as attribute), unions + bare-arm match
   (`[Present|OutOfRange]`), and — the reframe — **tuples are the natural first

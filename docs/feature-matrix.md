@@ -195,9 +195,13 @@ the receipt-graph report). So `@`/`let`/`function`/`;` get `/`. What is **not** 
 field's value** (`f(x:Int, i:[Int:@<x])`, `struct Window(n, data:[Indexed:@.count==n])`);
 **receiver-relative** bounds (`at(i:[Int:@<this.count])`); **value-indexed struct
 sorts** (`OutOfRange(i)`); and **named-parameter method sorts** in contracts
-(`[Method(i:Int):…i…]`, currently rejected at `AltParser`). Zero tests for any of
-these — confirmed across the suite. See `docs/indexed-streams.md`; the dependent-sorts
-war doc is the home for the design.
+(`[Method(i:Int):…i…]`, currently rejected at `AltParser`). **Update (2026-07-21):** the
+**sibling-parameter** case at a *call* site is now landed and tested — `StaticDispatch.substituteSiblings`
++ `StaticDispatchTest`/`CallGateTest` (e.g. `g(5,7)` provable-fail), and the dependent-`let` claim via
+`ConstructionGate.gateClaim`/`dischargesUnderScope` + `DependentLetClaimTest`. The "zero tests"
+statement remains true only for the **struct-field**, **receiver-relative**, **value-indexed**, and
+**named-parameter-method-contract** cases. See `docs/indexed-streams.md`; the dependent-sorts war doc
+is the home for the design.
 
 **N2 — Trait satisfaction is Nominal-only; Structural is unwired (`!`).** A type
 satisfies a trait today via explicit `assign trait T:Tr` (registry-backed) — fully

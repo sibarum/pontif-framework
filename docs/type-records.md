@@ -1,9 +1,16 @@
 # Type records: Declared, Inferred, Value
 
-*Status: DRAFT (2026-07-07). The designed end-state for how Pontif represents "the type of a
-position," to be migrated onto piecemeal via the `sibarum.pontif.types.TypeSystem` facade
-(design-first, then strangle — see `project_typesystem_api`). Filename provisional (`type-records`
-vs `sort-records` vs `type-triad` — TBD with James).*
+*Status: MODEL LANDED (drafted 2026-07-07; audited 2026-07-21). The three-records split is realized
+in code — Declared = `LetIn.claim` / param sorts, Inferred = `NarrowingInference` materialized as the
+`EffectiveSortLens` on `CompiledModule`, Value = runtime `SymExpr.Record.typeName`. The migration
+items below shipped **incidentally, threaded through the C2 (post-link dispatch) and C3
+(`Assignability`/effective-sort) campaigns** (see `docs/type-system-roadmap.md` §2 C4). Two residuals,
+both documented at the migration path below: (a) the facade never grew a named `declaredSortOf` — the
+Declared record is threaded via `LetIn.claim` instead; (b) **item 2's declared-first rule is only
+half-implemented** — the shipped `MethodOperatorResolver` is inferred-head-first and consults Declared
+only for anonymous aggregates, so a **demoted** binding leaks the concrete type's methods (a view leak;
+roadmap §6.6 — a code fix, not a model change). Filename still provisional (`type-records` vs
+`sort-records` vs `type-triad` — TBD with James).*
 
 > **Syntax note (2026-07-11, James): the top-level `type Name:[Sort]` alias/nominal-subtype
 > declaration was DROPPED.** The `type` keyword is kept only as the associated-type / type-parameter
@@ -204,31 +211,41 @@ gets in the way.
 The `TypeSystem` facade should expose the two static records explicitly, so callers stop reading one
 `IrSort` and guessing:
 
-- `declaredSortOf(position)` — the annotation, or empty (nominal-dispatch source).
-- `infer(expr, ctx)` — the Inferred Sort (already exists; the refinement source).
-- nominal-dispatch entry that reads Declared-then-Inferred-head per the fallback rule (today
-  `MethodOperatorResolver` reads only the inferred head — the first migration target).
+- `declaredSortOf(position)` — the annotation, or empty (nominal-dispatch source). **Not built as a
+  named facade method** (audit 2026-07-21) — the Declared record is threaded via `LetIn.claim` and
+  `MethodOperatorResolver.declaredReturns` instead. Either implement it or strike it from the facade
+  target; the goal it served is met.
+- `infer(expr, ctx)` — the Inferred Sort (already exists; the refinement source). Now also
+  *materialized* as the `EffectiveSortLens` on `CompiledModule`.
+- nominal-dispatch entry that reads Declared-then-Inferred-head per the fallback rule (see item 2 —
+  landed only for the anonymous-aggregate fallback; the general declared-first leg is still open).
 
 The Value Type stays where it is — the runtime `DispatchTable` on concrete `SymExpr` values.
 
 ## Migration path
 
-1. **This doc** — fix the model. *(here)*
-2. Teach nominal (method/accessor) dispatch to read the **Declared Sort** with the computed-receiver
-   fallback, instead of `baseName(infer(receiver))`. This alone makes methods-on-aliases resolve,
-   with no `parseLet` collapse to undo — the Declared Sort (`LetIn.claim`, param sorts) already
-   carries the name.
-3. Stop the `parseLet` `None → inferredSort` rule from *discarding* the Declared Sort — carry both
-   records forward rather than collapsing to one. (Sequenced after 2 so the consumer exists first.)
-4. Methods-on-aliases (`project_type_aliases`) then lands as a thin feature on top: `AliasResolver`
-   keeps a method-hosting alias nominal; the rest is already served. **Concrete-receiver** method calls
-   (`let v:Vec3 = …; v.sum()`) work at this point via static linking on the Declared Sort — no runtime
-   stamp needed.
-5. **Re-stamp discipline** (later slice, only for the polymorphic same-structure case): make a
-   transparent nominal rebind (`let c:Color = v`) re-tag the value to its Declared Sort, so a
-   subsequent trait upcast dispatches correctly at runtime. Not needed for concrete-receiver dispatch;
-   sequenced when the polymorphic case is exercised. Fail-fast fallback per above if the re-tag is
-   fragile: carry Declared as runtime metadata instead.
+*Status audited 2026-07-21 — see `docs/type-system-roadmap.md` §2 (C4 row) / §6.6.*
+
+1. ✅ **This doc** — fix the model. *(here)*
+2. ◐ **Partial.** Nominal (method/accessor) dispatch reading the **Declared Sort** is implemented
+   *only* for the computed/anonymous case: `MethodOperatorResolver.nominalReceiverSort` prefers the
+   Inferred head and recovers Declared (from `declaredReturns`) *only* when inference lost the name
+   (`_tuple`). That resolves methods-on-aliases (`let v:Vec3 = {…}`), but the **general declared-first
+   rule is NOT implemented** — a demoted binding (`let b:Point = point3dValue`, Inferred head
+   `Point3D`) routes methods on the concrete `Point3D`, not the declared `Point`. That contradicts
+   §"Declared Sort" (`b` should have only `Point`'s methods) and roadmap §6.5 (view restricts static
+   access) — a **view leak / code bug**, tracked at roadmap §6.6.
+3. ✅ **Done.** The `parseLet` `None → inferredSort` rule no longer *discards* the Declared Sort: the
+   binding sort is the Inferred record, the annotation rides `LetIn.claim` — both records are carried
+   ([AltParser.java:1923-1928] / `:4632`). (Field-naming caveat: `LetIn.declaredSort` actually holds
+   the *inferred binding* sort; `LetIn.claim` holds the *declared* annotation — a rename would prevent
+   misreadings.)
+4. ✅ **Done.** Methods-on-aliases resolve (via item 2's `_tuple` fallback); concrete-receiver method
+   calls link on the receiver sort post-link (C2 Phase 2). No runtime stamp needed.
+5. ⊘ **Superseded / retired.** Re-stamp discipline was dropped in favor of **demotion-as-view**
+   (roadmap §6.5, James 2026-07-18): the concrete value is retained, not re-tagged; `projectDemotion`
+   is gone; runtime trait dispatch reads the concrete `SymExpr.Record.typeName` directly. See the
+   SUPERSEDED note below.
 
 ## Relationships
 
