@@ -76,4 +76,28 @@ class ReusableSortTest {
                         || err.toLowerCase().contains("parse"),
                 () -> "expected a Type[...]-with-value rejection; got: " + err);
     }
+
+    @Test
+    void aliasOverUnknownSort_isRejected() {
+        // Regression: a reusable-sort alias whose target names an undeclared sort was silently
+        // accepted (only trait aliases were validated). Now `Type[Aaaazzz]` is a compile error.
+        String err = assertRejected("""
+                let Alias:Type[Aaaazzz]
+                42
+                """);
+        assertTrue(err.contains("Unknown sort") && err.contains("Aaaazzz"),
+                () -> "expected an unknown-sort rejection; got: " + err);
+    }
+
+    @Test
+    void aliasOverAnotherAlias_compiles() {
+        // A reusable alias may reference another alias by name (the decl target keeps the name); the
+        // validation must recognize declared aliases, not just structs.
+        assertCompiles("""
+                let A:Type[[Int:@>0]]
+                let B:Type[A]
+                let x:B = 5
+                x
+                """);
+    }
 }

@@ -100,6 +100,15 @@ public final class SortChecker {
                 satisfies.add(t.typeName() + " " + t.traitName());
             }
         }
+        // Declared type-alias names — a reusable-sort alias may reference another alias
+        // (`let B:Type[A]`); AliasResolver does not inline names inside an alias declaration's own
+        // target, so validating those targets (below) must treat a declared alias name as known.
+        Set<String> aliasNames = new HashSet<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.TypeAlias ta) {
+                aliasNames.add(ta.name());
+            }
+        }
 
         // Struct is-a relationships (`struct Name:[Base:rel](fields)`): the base
         // must resolve, and a struct-base morphism must functionally pin every
@@ -142,6 +151,15 @@ public final class SortChecker {
                 // of validateSortNames). Catches `[Method():Undeclared]` while
                 // admitting `[Method():T]` for a declared `type T`.
                 validateSortNames(tr, structDefs, Set.of(), traitContracts.keySet());
+            } else if (stmt instanceof IrStmt.TypeAlias ta
+                    && !(ta.sort() instanceof IrSort.Structural)) {
+                // A reusable-sort alias (`let Name:Type[sortExpr]`): its target sort's names must
+                // resolve — primitives, declared structs/traits, applied type-args. Transparent
+                // aliases are recognized via aliasNames (a `let B:Type[A]` target keeps the name `A`).
+                // Previously unvalidated, so `let A:Type[Garbage]` silently compiled. (Structural
+                // aliases are struct declarations — base validated above, fields via the struct's own
+                // path; trait aliases handled by the branch above.)
+                validateSortNames(ta.sort(), structDefs, aliasNames, traitContracts.keySet());
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs, algebraicFunctions);
