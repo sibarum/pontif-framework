@@ -78,7 +78,7 @@ public final class IrCompiler {
         // runtime check stamped on the record (enforced by the interpreter and
         // the Truffle lowering). Runs after the promotions so it judges the
         // promoted members.
-        resolved = ConstructionGate.rewrite(resolved);
+        resolved = ConstructionGate.rewrite(resolved, effectiveSorts);
 
         // Static sort propagation: catch field-access typos and missing-field
         // references before they reach runtime. Best-effort; the runtime still

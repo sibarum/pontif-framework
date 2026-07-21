@@ -63,11 +63,15 @@ class StructNarrowingTest {
     }
 
     @Test
-    void recordLiteral_allSymbolic_returnsNull() {
+    void recordLiteral_allSymbolic_narrowsToBareStructType() {
+        // Point(a, b) with symbolic fields carries no field-predicate conjunct, but the
+        // construction's narrowing is at LEAST its own concrete struct type — the value IS a
+        // Point (roadmap §6.5, the concrete identity). So this narrows to the bare `Point`,
+        // not null (the old under-approximation).
         IrExpr point = IrExpr.record("Point",
                 ordered("x", IrExpr.var("a"), "y", IrExpr.var("b")));
 
-        assertNull(NarrowingInference.infer(point, ctxWithPoint()));
+        assertEquals(IrSort.named("Point"), NarrowingInference.infer(point, ctxWithPoint()));
     }
 
     @Test

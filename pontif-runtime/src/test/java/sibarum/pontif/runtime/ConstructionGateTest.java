@@ -15,17 +15,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The claim rule at construction sites (the {@code ConstructionGate}),
- * three-way per constructor argument against its declared field sort:
+ * judging each constructor argument against its declared field sort under
+ * the §1d no-unproven-runtime-check law (roadmap §1d, ratified 2026-07-18):
  * <ul>
  *   <li><b>provable fit</b> — passes with NO runtime check (the proof
  *       discharged it),</li>
- *   <li><b>provable miss</b> — compile-time error (the value would be
- *       born lying),</li>
- *   <li><b>genuine overlap / undecidable</b> — compiles, with a runtime
- *       check at construction.</li>
+ *   <li><b>anything else (provable miss OR undecidable overlap)</b> —
+ *       a compile-time error. The compiler must prove the runtime will
+ *       succeed; an unprovable fit is not silently stamped for the runtime
+ *       (the old third verdict). The only sanctioned deferral is the
+ *       parametric-{@code Stream} element check ({@code [!!]}).</li>
  * </ul>
- * Pins the 2026-06-05 ruling on the {@code Lift(base:[[Int:0]|Omega])}
- * examples, on both engines.
+ * Pins the §1d ruling on the {@code Lift(base:[[Int:0]|Omega])} examples,
+ * on both engines.
  */
 class ConstructionGateTest {
 
@@ -49,12 +51,47 @@ class ConstructionGateTest {
         return ok.program().module();
     }
 
+    @org.junit.jupiter.api.Test
+    void effectiveSortCallRouting_fourCases() {
+        // Only bark(Dog) exists (no fallback) — so this is pure static resolution on the EFFECTIVE
+        // sort, no specificity/runtime dispatch involved. James's four cases:
+        String p = """
+                trait Animal{ noise:[Method():String] }
+                struct Dog()
+                struct Cat()
+                assign trait Dog:Animal { noise():String -> "woof" }
+                assign trait Cat:Animal { noise():String -> "meow" }
+                function bark(d:Dog):String -> "bark!"
+                """;
+        // 1: dog:Animal = Dog()  → effective Dog → should ROUTE.
+        RunResult c1 = run(p + "let dog:Animal = Dog()\nbark(dog)", Engine.INTERPRETER);
+        // 2: bark(a) with a:Animal param → should COMPILE-FAIL.
+        CompileResult c2 = compiler.compileAlt(
+                p + "function speak(a:Animal):String -> bark(a)\n42", "t.ptf");
+        // 4: cat:Animal = Cat() → effective Cat, not-a Dog → should COMPILE-FAIL.
+        CompileResult c4 = compiler.compileAlt(p + "let cat:Animal = Cat()\nbark(cat)", "t.ptf");
+        // Assert the EXPECTED behavior; failures reveal current-vs-expected.
+        assertFalse(c1.isError(), () -> "case 1 (effective Dog) should route; got: " + c1.text());
+        assertInstanceOf(CompileResult.Failed.class, c2, "case 2 (Animal param) should compile-fail");
+        assertInstanceOf(CompileResult.Failed.class, c4, "case 4 (effective Cat) should compile-fail");
+    }
+
     private void assertCompileError(String src) {
         CompileResult result = compiler.compileAlt(src, "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("can never satisfy"),
                 () -> "Expected the disjoint-construction error; got: " + failed.error().text());
+    }
+
+    /** §1d: an undecidable (overlap / outside-the-kernel) construction fit is a compile
+     *  error — "cannot be proved to satisfy" — not a silently stamped runtime check. */
+    private void assertUnprovableConstruction(String src) {
+        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
+                "expected a compile-time rejection (§1d: no silent runtime stamp)");
+        assertTrue(failed.error().text().contains("cannot be proved to satisfy"),
+                () -> "Expected the unprovable-construction error; got: " + failed.error().text());
     }
 
     // --- provable miss → compile error --------------------------------------
@@ -81,13 +118,27 @@ class ConstructionGateTest {
         assertCompileError(LIFT + "let five = 5\nlet z = Lift(five)\n42");
     }
 
-    // --- genuine overlap → compiles, runtime check --------------------------
+    // --- genuine overlap → compile error (§1d), not a runtime stamp ----------
 
     @Test
-    void overlappingDeclaredVar_compilesAndPassesWhenValueFits() {
-        // [Int:@<=1] overlaps @==0 without implying it → runtime check; 0 passes.
-        String src = LIFT + """
+    void overlappingParamAtUnionField_isCompileError() {
+        // [Int:@<=1] overlaps the @==0 branch without implying it, and misses the
+        // Omega branch — an undecidable fit. §1d: no silent runtime stamp; the
+        // construction is a compile error inside mk's own body, whether or not mk
+        // is ever called. (Formerly this compiled and stamped a runtime check.)
+        assertUnprovableConstruction(LIFT + """
                 function mk(overlap:[Int:@<=1]):Lift -> Lift(overlap)
+                mk(0)
+                """);
+    }
+
+    @Test
+    void provenParamAtUnionField_compilesAndRuns() {
+        // The §1d way to make an overlapping construction legal: narrow the value
+        // so the fit is PROVEN. [Int:@==0] implies the @==0 branch → FITS,
+        // discharged with no runtime check; mk(0).base runs to 0 on both engines.
+        String src = LIFT + """
+                function mk(zero:[Int:@==0]):Lift -> Lift(zero)
                 mk(0).base
                 """;
         for (Engine engine : Engine.values()) {
@@ -98,21 +149,17 @@ class ConstructionGateTest {
     }
 
     @Test
-    void overlappingDeclaredVar_failsAtConstructionWhenValueMisses() {
-        // 1 satisfies [Int:@<=1] (dispatch passes) but not the field sort —
-        // the construction check catches it, on both engines.
-        String src = LIFT + """
-                function mk(overlap:[Int:@<=1]):Lift -> Lift(overlap)
-                mk(1)
-                """;
-        for (Engine engine : Engine.values()) {
-            RunResult r = run(src, engine);
-            assertTrue(r.isError(), () -> engine + ": expected a construction failure");
-            assertTrue(r.text().contains("Construction claim violated"),
-                    () -> engine + " got: " + r.text());
-            assertTrue(r.text().contains("Lift.base"),
-                    () -> engine + " got: " + r.text());
-        }
+    void provenParamAtUnionField_isNotStamped() throws Exception {
+        // The discriminating half: the proven fit carries NO runtime check — §1d
+        // leaves the record clean (the retired third verdict would have stamped it).
+        CompiledModule module = compiled(LIFT + """
+                function mk(zero:[Int:@==0]):Lift -> Lift(zero)
+                mk(0)
+                """);
+        IrExpr.Record construction = findConstruction(module, "Lift");
+        assertNotNull(construction, "expected the Lift construction in mk's body");
+        assertTrue(construction.runtimeChecks().isEmpty(),
+                () -> "a proven fit must not be stamped; got: " + construction.runtimeChecks());
     }
 
     // --- provable fit → passes with NO runtime check -------------------------
@@ -169,40 +216,23 @@ class ConstructionGateTest {
                 () -> "a proven widen must not be stamped; got: " + construction.runtimeChecks());
     }
 
-    @Test
-    void overlapCase_isActuallyStamped() throws Exception {
-        // The third verdict is a real stamp, not a coincidence of leniency.
-        CompiledModule module = compiled(LIFT + """
-                function mk(overlap:[Int:@<=1]):Lift -> Lift(overlap)
-                mk(0)
-                """);
-        IrExpr.Record construction = findConstruction(module, "Lift");
-        assertNotNull(construction, "expected the Lift construction in mk's body");
-        assertTrue(construction.runtimeChecks().containsKey("base"),
-                () -> "overlap must be stamped for the runtime; got: "
-                        + construction.runtimeChecks());
-    }
-
     // --- the README flagship, now honest -------------------------------------
 
     @Test
-    void decimalRefinedField_checkedAtConstruction() {
-        // Decimal predicates are outside the compile-time kernel (for now), so
-        // the gate stamps a runtime check — a negative balance dies at the
-        // construction site instead of living until a dispatch boundary.
+    void decimalRefinedField_provableFitCompiles_missIsCompileError() {
+        // A Decimal-literal fit IS decided at compile time (Refinements kernel):
+        // Account(100.0, …) discharges [Decimal:@==100.0] ⊑ [Decimal:@>=0]. A miss
+        // (-5.0) is outside the integer kernel's DISJOINT reach, so it lands as
+        // "cannot be proved" — and §1d rejects it at compile time rather than
+        // stamping a runtime check that dies at a later boundary.
         String accounts = """
                 struct Account(balance:[Decimal:@>=0], rate:Decimal)
                 """;
         for (Engine engine : Engine.values()) {
             RunResult ok = run(accounts + "let a = Account(100.0, 0.05)\na.rate", engine);
             assertFalse(ok.isError(), () -> engine + " got: " + ok.text());
-
-            // a.rate forces the (lazy) top-level binding to evaluate.
-            RunResult bad = run(accounts + "let a = Account(-5.0, 0.05)\na.rate", engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a construction failure");
-            assertTrue(bad.text().contains("Construction claim violated"),
-                    () -> engine + " got: " + bad.text());
         }
+        assertUnprovableConstruction(accounts + "let a = Account(-5.0, 0.05)\na.rate");
     }
 
     /** The named construction anywhere in the module — function bodies first, then main. */

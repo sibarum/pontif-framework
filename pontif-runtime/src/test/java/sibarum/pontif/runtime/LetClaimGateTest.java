@@ -17,14 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The claim rule's binding half: a declared sort at a {@code let} is a claim
  * made where the binding is made, judged by the {@code ConstructionGate}
- * exactly like a constructor argument — three-way:
+ * exactly like a constructor argument, under the §1d no-unproven-runtime-check
+ * law (roadmap §1d):
  * <ul>
  *   <li><b>provable fit</b> — passes with NO runtime check (the claim is
  *       stripped from the IR; the proof discharged it),</li>
- *   <li><b>provable miss</b> — compile-time error (the binding would be
- *       born lying),</li>
- *   <li><b>genuine overlap / undecidable</b> — compiles, with a runtime
- *       check at bind.</li>
+ *   <li><b>anything else (provable miss OR undecidable overlap)</b> —
+ *       a compile-time error. The compiler must prove the binding's value
+ *       satisfies the claim; an unprovable claim is not silently stamped for
+ *       the runtime (the retired third verdict).</li>
  * </ul>
  * Before this gate, the declared sort was silently dropped at parse time —
  * {@code let z:[Decimal:@==0] = 1.0} ran clean, a leniency that lied. Both
@@ -57,6 +58,16 @@ class LetClaimGateTest {
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("can never satisfy"),
                 () -> "Expected the disjoint-binding error; got: " + failed.error().text());
+    }
+
+    /** §1d: an undecidable (overlap / outside-the-kernel) claim is a compile error —
+     *  "cannot be proved to satisfy" — not a silently stamped runtime check. */
+    private void assertUnprovable(String src) {
+        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
+                "expected a compile-time rejection (§1d: no silent runtime stamp)");
+        assertTrue(failed.error().text().contains("cannot be proved to satisfy"),
+                () -> "Expected the unprovable-claim error; got: " + failed.error().text());
     }
 
     // --- provable miss → compile error --------------------------------------
@@ -101,46 +112,37 @@ class LetClaimGateTest {
         }
     }
 
-    // --- genuine overlap → compiles, runtime check at bind -------------------
+    // --- genuine overlap → compile error (§1d), not a runtime stamp ----------
 
     @Test
-    void overlapClaim_isActuallyStamped() {
-        // The value is a bare-Int param — overlaps @==0 without implying it.
-        CompiledModule module = compiled(
-                "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)");
-        IrExpr.LetIn let = findLet(module, "a");
-        assertNotNull(let, "expected the let binding in g's body");
-        assertNotNull(let.claim(), "overlap must keep the claim for the runtime");
+    void overlapClaim_isCompileError() {
+        // The value is a bare-Int param — overlaps @==0 without implying it. §1d:
+        // the claim can't be proved from a bare Int, so it is a compile error
+        // inside g's own body. (Formerly this compiled and kept the claim as a
+        // runtime check; there is no third "stamp" verdict anymore.)
+        assertUnprovable("function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)");
     }
 
     @Test
-    void overlapClaim_passesWhenValueFits_failsWhenItMisses() {
-        String fits = "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)";
-        String misses = "function g(v:Int):Int -> ( let a:[Int:@==0] = v\n a )\ng(1)";
+    void provenClaim_overNarrowedParam_compilesAndRuns() {
+        // The §1d way to make it legal: narrow the param so the claim is PROVEN.
+        // [Int:@==0] implies [Int:@==0] → discharged; g(0) runs to 0.
+        String src = "function g(v:[Int:@==0]):Int -> ( let a:[Int:@==0] = v\n a )\ng(0)";
         for (Engine engine : Engine.values()) {
-            RunResult ok = run(fits, engine);
-            assertFalse(ok.isError(), () -> engine + " got: " + ok.text());
-            assertEquals("0", ok.text(), engine.toString());
-
-            RunResult bad = run(misses, engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a binding-claim failure");
-            assertTrue(bad.text().contains("claim violated"),
-                    () -> engine + " got: " + bad.text());
+            RunResult r = run(src, engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("0", r.text(), engine.toString());
         }
     }
 
-    // --- Decimal claims: outside the compile-time kernel → runtime ----------
+    // --- Decimal claims: a miss is unprovable → compile error (§1d) ----------
 
     @Test
-    void decimalClaim_misses_atRuntime() {
-        // Decimal predicates are outside the compile-time kernel (for now),
-        // so the miss is caught by the bind check — previously it ran clean.
-        for (Engine engine : Engine.values()) {
-            RunResult bad = run("let z:[Decimal:@==0] = 1.0\nz", engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a binding-claim failure");
-            assertTrue(bad.text().contains("claim violated"),
-                    () -> engine + " got: " + bad.text());
-        }
+    void decimalClaim_misses_isCompileError() {
+        // [Decimal:@==1.0] does not imply [Decimal:@==0], and the miss is outside
+        // the integer kernel's DISJOINT reach — so it lands as "cannot be proved".
+        // §1d rejects it at compile time (it formerly ran clean, then was stamped).
+        assertUnprovable("let z:[Decimal:@==0] = 1.0\nz");
     }
 
     @Test
@@ -180,76 +182,55 @@ class LetClaimGateTest {
                 () -> "Expected the parser's base check; got: " + failed.error().text());
     }
 
-    // --- the Inquisition: top-level lets force-evaluate at program start ----
+    // --- §1d: claims are compile-checked regardless of reference / reachability -
 
     @Test
-    void unreferencedTopLevelLet_isStillNotarized() {
-        // The lazy ruling's loophole, closed (2026-06-07): nothing references
-        // `zero`, but the binding force-evaluates before main and its claim
-        // check fires anyway. No unnotarized lies.
-        for (Engine engine : Engine.values()) {
-            RunResult bad = run("let zero:[Decimal:@==0.0] = 1\n42", engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a binding-claim failure");
-            assertTrue(bad.text().contains("claim violated"),
-                    () -> engine + " got: " + bad.text());
-        }
+    void unreferencedTopLevelLet_claimIsCompileChecked() {
+        // Nothing references `zero`, yet its claim is judged at compile time —
+        // reachability is irrelevant to a compile error. §1d: the unprovable
+        // Decimal claim is rejected before the program ever runs. (Formerly this
+        // slipped past parse-time and was caught only by runtime forcing.)
+        assertUnprovable("let zero:[Decimal:@==0.0] = 1\n42");
     }
 
     @Test
-    void unreferencedTopLevelLet_constructionChecksAlsoFire() {
-        // Same closure for construction claims living inside a let's value.
-        String src = """
+    void unreferencedTopLevelLet_constructionClaimsAreCompileChecked() {
+        // Same for a construction claim living inside an unreferenced let's value.
+        assertUnprovable("""
                 struct Account(balance:[Decimal:@>=0], rate:Decimal)
                 let a = Account(-5.0, 0.05)
                 42
-                """;
-        for (Engine engine : Engine.values()) {
-            RunResult bad = run(src, engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a construction failure");
-            assertTrue(bad.text().contains("Construction claim violated"),
-                    () -> engine + " got: " + bad.text());
-        }
+                """);
     }
 
     @Test
-    void genuineZeroArgFunctions_areNotForced() {
-        // Forcing is for LETS. A 0-arg FUNCTION with a failing body is
-        // legitimate until applied — main never calls it, program runs.
-        String src = """
+    void unprovableConstructionInUnusedFunction_isStillCompileError() {
+        // §1d checks every function body unconditionally: `mk`'s Pos(o) is an
+        // undecidable fit ([Int:@<=1] overlaps [Int:@>0] without implying it), so
+        // `mk` is a compile error even though main never calls it. (Formerly the
+        // body compiled with a runtime stamp that only fired if `mk` was applied.)
+        assertUnprovable("""
                 struct Pos(v:[Int:@>0])
                 function mk(o:[Int:@<=1]):Pos -> Pos(o)
                 function unused():Pos -> mk(1)
                 42
-                """;
-        for (Engine engine : Engine.values()) {
-            RunResult r = run(src, engine);
-            assertFalse(r.isError(), () -> engine + " got: " + r.text());
-            assertEquals("42", r.text(), engine.toString());
-        }
+                """);
     }
 
     @Test
-    void forcing_chainsThroughDependentLets() {
-        // Declaration-order forcing: `a` computes through `b` (lets stay
-        // callable functions, so the dependency just evaluates — pure means
-        // the double evaluation is invisible), and a's claim checks at force.
-        // (Decimal chain: an Int chain trips a PRE-EXISTING return-prover
-        // limitation — `let a = b + 1` infers [Int:@==b+1], whose obligation
-        // keeps raw `b` while the body equation hoists the call. Unrelated
-        // to forcing; see the chained-lets note.)
+    void dependentLetChain_provenFitCompiles_missIsCompileError() {
+        // `a`'s claim is decided from `b`'s EFFECTIVE sort (the effective-sort lens
+        // threads the pinned value of the preceding let). b=2.0 gives a's value the
+        // narrowing [Decimal:@==2.0], which discharges [Decimal:@>0] — compiles and
+        // runs. b=-2.0 gives [Decimal:@==-2.0], which cannot be proved to satisfy
+        // [Decimal:@>0] → §1d compile error (formerly caught by runtime forcing).
         String fits = "let b = 2.0\nlet a:[Decimal:@>0] = b\na";
-        String misses = "let b = -2.0\nlet a:[Decimal:@>0] = b\n42";
         for (Engine engine : Engine.values()) {
             RunResult r = run(fits, engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("2.0", r.text(), engine.toString());
-
-            // The chained claim is notarized at force, unreferenced by main.
-            RunResult bad = run(misses, engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a binding-claim failure");
-            assertTrue(bad.text().contains("claim violated"),
-                    () -> engine + " got: " + bad.text());
         }
+        assertUnprovable("let b = -2.0\nlet a:[Decimal:@>0] = b\n42");
     }
 
     /** The named let binding anywhere in the module — function bodies first, then main. */

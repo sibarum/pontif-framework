@@ -87,10 +87,31 @@ class RecursiveTraitTest {
     }
 
     @Test
-    void recursiveTrait_implementedAndUsed() {
-        // A concrete type implements the recursive trait; its method returns the
-        // trait (here, itself coerced to Expr). The result downcasts back.
-        assertEquals("5", run("""
+    void recursiveTrait_implementedAndCalled_atTheTraitView() {
+        // A concrete type implements the recursive trait; simplify() returns the trait
+        // (here `this` coerced to Expr). The trait-typed result is usable AS Expr — the
+        // impl compiles and the method call runs.
+        assertEquals("0", run("""
+                trait Expr{
+                  simplify:[Method():Expr]
+                }
+                struct Lit(value:Int)
+                assign trait Lit:Expr {
+                  simplify():Expr -> this
+                }
+                let e:Expr = Lit(5)
+                let s:Expr = e.simplify()
+                0
+                """));
+    }
+
+    @Test
+    void recursiveTrait_concreteDowncastOfMethodReturn_isCompileError() {
+        // Downcasting the method result back to the concrete Lit is rejected: a method
+        // return is a "could-be" (simplify():Expr — the concrete behind the Expr can't be
+        // proved), so its effective sort is Expr, not Lit. Per James's rule, trait→struct
+        // is valid only when the effective sort IS the struct; here it isn't → compile error.
+        reject("""
                 trait Expr{
                   simplify:[Method():Expr]
                 }
@@ -101,6 +122,15 @@ class RecursiveTraitTest {
                 let e:Expr = Lit(5)
                 let back:Lit = e.simplify()
                 back.value
-                """));
+                """, "cannot be proved to satisfy");
+    }
+
+    /** Asserts a program is rejected at compile time with an error containing {@code needle}. */
+    private void reject(String src, String needle) {
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "rec.ptf");
+        PontifCompiler.CompileResult.Failed failed = assertInstanceOf(
+                PontifCompiler.CompileResult.Failed.class, r, "expected a compile-time rejection");
+        assertTrue(failed.error().text().contains(needle),
+                () -> "expected '" + needle + "'; got: " + failed.error().text());
     }
 }

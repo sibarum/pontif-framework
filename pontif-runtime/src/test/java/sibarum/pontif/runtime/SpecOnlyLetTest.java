@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * carries its witness as an expression, so the parser synthesizes the body
  * verbatim from the pin — {@code let zero:[Decimal:@==0.0];} means
  * {@code zero = 0.0}. The synthesized binding rides everything a written one
- * does: the claim wrapper (notarized at force — the synthesis-bug detector),
- * Int→Decimal promotion, and the Inquisition's force-evaluation. A {@code ;} on
+ * does: the claim wrapper (compile-checked like any claim — the synthesis-bug
+ * detector), Int→Decimal promotion, and the Inquisition's force-evaluation. A {@code ;} on
  * a sort that doesn't pin a unique witness ({@code [Int:@>0]}, self-referential
  * pins) is an honest "does not pin" error — not a silent NoOp.
  */
@@ -151,17 +151,16 @@ class SpecOnlyLetTest {
     }
 
     @Test
-    void synthesizedBinding_isForcedLikeAnyOther() {
-        // The synthesized let is a top-level let: the Inquisition forces it.
-        // A pin whose witness violates a SECOND constraint elsewhere proves
-        // the wrapper claim still notarizes — here the claim is the pin
-        // itself, so it trivially passes; the force is observable through
-        // the chained binding's claim instead.
+    void synthesizedBinding_claimIsCompileCheckedLikeAnyOther() {
+        // The synthesized let is a top-level let, judged like any written one. Its
+        // pinned witness (zero = 0.0) flows into the chained binding's claim via the
+        // effective-sort lens: `bad`'s value is [Decimal:@==0.0], which cannot be
+        // proved to satisfy [Decimal:@>0]. §1d: a compile error, not a runtime force.
         String misses = "let zero:[Decimal:@==0.0];\nlet bad:[Decimal:@>0] = zero\n42";
         for (Engine engine : Engine.values()) {
             RunResult bad = run(misses, engine);
-            assertTrue(bad.isError(), () -> engine + ": expected a binding-claim failure");
-            assertTrue(bad.text().contains("claim violated"),
+            assertTrue(bad.isError(), () -> engine + ": expected a compile-time rejection");
+            assertTrue(bad.text().contains("cannot be proved to satisfy"),
                     () -> engine + " got: " + bad.text());
         }
     }

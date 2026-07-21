@@ -203,10 +203,38 @@ public final class NarrowingInference {
      * reject; see {@code StaticDispatch.gateFit}.)
      */
     public static IrSort inferArg(IrExpr arg, InferenceContext ctx) {
-        IrSort narrowing = infer(arg, ctx);
+        IrSort narrowing = inferThroughLets(arg, ctx, Set.of());
         if (narrowing == null) return null;
         IrSort closed = closeOver(narrowing, ctx.typeEnv().keySet(), ctx);
         return closed != null ? closed : narrowing;
+    }
+
+    /**
+     * The narrowing of an expression, seeing <em>through</em> a reference to a top-level {@code let}
+     * (a 0-arg function lowered from {@code let x = …}) to its value's own narrowing — the
+     * <em>effective</em> sort James's routing/claim rules read. A top-level let bound to a
+     * construction narrows to that concrete type: {@code let dog:Animal = Dog()} narrows to
+     * {@code Dog}, so {@code bark(dog)} routes to {@code bark(d:Dog)} and {@code let back:Rect = b}
+     * (with {@code b} a let holding a {@code Rect}) proves. Everything else — a parameter, a general
+     * function/method call — keeps {@link #infer}'s declared answer: a param {@code a:Animal} is only
+     * a "could-be" {@code Dog}, and a return {@code human.pet():Animal} likewise, so those stay
+     * {@code Animal} (and their downcasts are rejected). Cycle-guarded by {@code resolving} so a
+     * mutually-referential let chain (a malformed cycle) can't loop.
+     */
+    private static IrSort inferThroughLets(IrExpr expr, InferenceContext ctx, Set<String> resolving) {
+        if (expr instanceof IrExpr.Call c && c.args().isEmpty()) {
+            List<IrStmt.FunctionDecl> ovs = ctx.overloads().get(c.functionName());
+            if (ovs != null && ovs.size() == 1) {
+                IrStmt.FunctionDecl fd = ovs.get(0);
+                if (fd.topLevelLet() && fd.params().isEmpty() && !resolving.contains(fd.name())) {
+                    Set<String> next = new HashSet<>(resolving);
+                    next.add(fd.name());
+                    IrSort value = inferThroughLets(fd.body(), ctx, next);
+                    if (value != null) return value;
+                }
+            }
+        }
+        return infer(expr, ctx);
     }
 
     /**
@@ -606,7 +634,8 @@ public final class NarrowingInference {
      *
      * <p>Anonymous records (no typeName) return {@code null} — we have
      * no nominal target to refine. If no members have inferrable
-     * narrowings, returns {@code null}.
+     * narrowings, the narrowing floor is the bare struct type (the value
+     * is at least a {@code TypeName}; roadmap §6.5).
      */
     private static IrSort inferRecord(IrExpr.Record r, InferenceContext ctx) {
         if (r.typeName() == null) return null;
@@ -620,7 +649,10 @@ public final class NarrowingInference {
             if (!(memberNarrowing instanceof IrSort.Refined refined)) continue;
             conjuncts.add(substituteSelfWithFieldAccess(refined.predicate(), entry.getKey()));
         }
-        if (conjuncts.isEmpty()) return null;
+        // A construction's narrowing is at LEAST its own concrete struct type — the value IS a
+        // `TypeName` (roadmap §6.5, the concrete identity), even when no field carries a refinement
+        // (e.g. a String field). Only the extra field-predicate conjuncts are optional.
+        if (conjuncts.isEmpty()) return IrSort.named(r.typeName());
         return new IrSort.Refined(r.typeName(), conjunctAnd(conjuncts), Origin.NONE);
     }
 
@@ -1061,7 +1093,9 @@ public final class NarrowingInference {
      * variables); returns {@code null} exactly when {@link #infer} does.
      */
     public static IrSort effectiveSort(IrExpr expr, InferenceContext ctx) {
-        IrSort narrowing = infer(expr, ctx);
+        // See through a top-level-let reference to its value's narrowing (the effective sort) —
+        // the same move inferArg makes for the call gate, shared so both gates read one answer.
+        IrSort narrowing = inferThroughLets(expr, ctx, Set.of());
         if (narrowing == null) return null;
         // closeOver recurses over the narrowing's predicate; run at every position, a pathologically
         // deep predicate (a long operator chain in generated code) would risk overflowing. Cap it —
