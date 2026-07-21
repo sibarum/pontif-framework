@@ -643,17 +643,56 @@ public final class NarrowingInference {
         // narrowings (@.unscaled==25) would claim projections that don't exist
         // until the bijection's other half lands. Bare nominal sort only.
         if (NativeConstructors.has(r.typeName())) return IrSort.named(r.typeName());
+        Map<String, IrSort> memberNarrowings = new LinkedHashMap<>();
         List<IrExpr> conjuncts = new ArrayList<>();
         for (Map.Entry<String, IrExpr> entry : r.members().entrySet()) {
             IrSort memberNarrowing = infer(entry.getValue(), ctx);
-            if (!(memberNarrowing instanceof IrSort.Refined refined)) continue;
-            conjuncts.add(substituteSelfWithFieldAccess(refined.predicate(), entry.getKey()));
+            memberNarrowings.put(entry.getKey(), memberNarrowing);
+            if (memberNarrowing instanceof IrSort.Refined refined) {
+                conjuncts.add(substituteSelfWithFieldAccess(refined.predicate(), entry.getKey()));
+            }
         }
+        // Carry the derived type-args (Box(5) → Box[Int]): the type-arg-aware Assignability (roadmap
+        // §4.5 item 2) needs them to decide `let b:Box[Int] = Box(5)`. Empty for a non-parametric struct.
+        List<IrSort> typeArgs = deriveConstructionTypeArgs(r.typeName(), memberNarrowings, ctx);
         // A construction's narrowing is at LEAST its own concrete struct type — the value IS a
         // `TypeName` (roadmap §6.5, the concrete identity), even when no field carries a refinement
         // (e.g. a String field). Only the extra field-predicate conjuncts are optional.
-        if (conjuncts.isEmpty()) return IrSort.named(r.typeName());
-        return new IrSort.Refined(r.typeName(), conjunctAnd(conjuncts), Origin.NONE);
+        if (conjuncts.isEmpty()) {
+            return typeArgs.isEmpty() ? IrSort.named(r.typeName())
+                    : new IrSort.Named(r.typeName(), typeArgs, Origin.NONE);
+        }
+        return new IrSort.Refined(r.typeName(), typeArgs, conjunctAnd(conjuncts), Origin.NONE);
+    }
+
+    /**
+     * The type-arguments a parametric construction binds, base-reduced ({@code Box(5)} → {@code [Int]}):
+     * reusing {@link #unifyTypeArgs} — "the field is the witness" — each field sort mentioning a
+     * {@code type T} is matched against its argument's narrowing, and the bound narrowing is reduced to
+     * its base type ({@code Int}, not the {@code [Int:@==5]} narrowing) so the invariant match
+     * {@code Box[Int] == Box[Int]} holds; the field predicates stay in the refinement. Empty when the
+     * struct is non-parametric / unregistered, or a parameter is left unbound (a partial derivation
+     * would produce a malformed applied sort — the construction gate reports the real conflict/leak).
+     */
+    private static List<IrSort> deriveConstructionTypeArgs(
+            String typeName, Map<String, IrSort> memberNarrowings, InferenceContext ctx) {
+        IrSort.Structural struct = ctx.structDefs().get(typeName);
+        if (struct == null || struct.typeParams().isEmpty()) return List.of();
+        Set<String> params = struct.typeParams().keySet();
+        Map<String, IrSort> bound = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort> entry : memberNarrowings.entrySet()) {
+            IrSort field = struct.members().get(entry.getKey());
+            if (field != null && entry.getValue() != null) {
+                unifyTypeArgs(field, entry.getValue(), params, bound);
+            }
+        }
+        List<IrSort> args = new ArrayList<>(params.size());
+        for (String p : params) {
+            String base = bound.containsKey(p) ? baseName(bound.get(p)) : null;
+            if (base == null) return List.of();   // unbound / non-nominal → don't stamp a partial sort
+            args.add(IrSort.named(base));
+        }
+        return args;
     }
 
     // --- Field-access narrowing (Phase C) ----------------------------------

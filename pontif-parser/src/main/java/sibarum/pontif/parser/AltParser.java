@@ -2023,12 +2023,21 @@ public final class AltParser {
         // (James 2026-06-18). Members and every other form type through the one
         // core engine, so there's no divergent reasoner — only a shape choice.
         if (expr instanceof IrExpr.Record r) {
-            Map<String, IrSort> members = new LinkedHashMap<>();
-            for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
-                members.put(e.getKey(), inferMaximalSort(e.getValue()));
+            // A named PARAMETRIC-struct record routes through the core engine so its narrowing carries
+            // the derived type-args (Box(5) → [Box[Int]:@.value==5]) — the type-arg-aware Assignability
+            // (roadmap §4.5 item 2) needs them to decide `let b:Box[Int] = Box(5)`. The refinement form
+            // is interchangeable with the structural aggregate shape (James 2026-06-18); other records
+            // keep the structural shape.
+            boolean parametricNamed = r.typeName() != null
+                    && types.shapeOf(r.typeName()).map(s -> !s.typeParams().isEmpty()).orElse(false);
+            if (!parametricNamed) {
+                Map<String, IrSort> members = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
+                    members.put(e.getKey(), inferMaximalSort(e.getValue()));
+                }
+                return new IrSort.Structural(
+                        r.typeName() != null ? r.typeName() : "_record", members, r.origin());
             }
-            return new IrSort.Structural(
-                    r.typeName() != null ? r.typeName() : "_record", members, r.origin());
         }
         IrSort inferred = sibarum.pontif.types.TypeSystem.standard().inferFloor(expr, parseInferenceContext());
         // The parser's floor for "no narrowing" is the unknown sort "_", not null.

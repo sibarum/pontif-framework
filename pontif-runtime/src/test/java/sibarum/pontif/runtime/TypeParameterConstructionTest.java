@@ -90,15 +90,23 @@ class TypeParameterConstructionTest {
     }
 
     @Test
-    void parametricLet_directConstruction_isRejected_KNOWN_LIMITATION() {
-        // KNOWN LIMITATION (roadmap §4.5 item 2 follow-up), NOT desired behavior: `Box(5)` IS a
-        // Box[Int], but construction inference yields a bare `Box` (it doesn't carry the derived
-        // type-arg), so the now-type-arg-aware engine rejects the unproven `bare Box → Box[Int]`
-        // narrowing. This pins the current state; it should FLIP to success once inference stamps
-        // derived type-args onto a parametric construction's sort.
-        PontifCompiler.CompileResult.Failed f = rejects("""
+    void parametricLet_directConstruction_carriesDerivedTypeArg() {
+        // Construction inference now stamps the derived type-arg (Box(5) → Box[Int]), so a direct
+        // `let b:Box[Int] = Box(5)` proves EXACT and runs (roadmap §4.5 item 2 follow-up — this was a
+        // known false-rejection while inference yielded a bare Box).
+        assertEquals("5", run("""
                 struct Box[type T](value:T)
                 let b:Box[Int] = Box(5)
+                b.value
+                """));
+    }
+
+    @Test
+    void parametricLet_directConstruction_wrongTypeArg_isRejected() {
+        // The derived type-arg is now checked: Box(true) is Box[Bool], not the declared Box[Int].
+        PontifCompiler.CompileResult.Failed f = rejects("""
+                struct Box[type T](value:T)
+                let b:Box[Int] = Box(true)
                 b.value
                 """);
         assertTrue(f.error().text().toLowerCase().contains("different types"),

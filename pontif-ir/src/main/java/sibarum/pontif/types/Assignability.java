@@ -87,7 +87,10 @@ public final class Assignability {
         // slot (its binding is the derivation machinery's job), so it matches — keeping Box[T] fields
         // usable by Box[Int] args at construction.
         if (sameHeadApplied(sub, sup)) {
-            return typeArgsInvariant(typeArgsOf(sub), typeArgsOf(sup), ctx);
+            if (!typeArgsInvariant(typeArgsOf(sub), typeArgsOf(sup), ctx)) return false;
+            // Args are invariantly compatible; a refined target adds a predicate obligation the
+            // refinement-precise leg decides ([Box[Int]:@.v==5] is-a Box[Int], but not vice-versa).
+            return !(sup instanceof IrSort.Refined) || refinementImplies(sub, sup);
         }
 
         // is-a a trait: sub's type directly satisfies it (inherited impls ride the nominal-base widen below).
@@ -411,11 +414,18 @@ public final class Assignability {
                 && !ctx.catalog().isDeclared(n.name()) && !ctx.catalog().isPrimitive(n.name());
     }
 
-    /** Two same-head applied parametric sorts of equal, non-empty arity (both plain {@code Named}) —
-     *  the shape the invariance arm judges by type-args. */
+    /** Two same-head applied parametric sorts of equal, non-empty arity — the shape the invariance
+     *  arm judges by type-args. Accepts {@code Named} and {@code Refined} (a refined parametric like
+     *  {@code [Box[Int]:@.v==5]}, the narrowing of a parametric construction, carries type-args too);
+     *  a non-parametric refined sort ({@code [Int:@>0]}, empty type-args) is not matched. */
     private static boolean sameHeadApplied(IrSort a, IrSort b) {
-        return a instanceof IrSort.Named na && b instanceof IrSort.Named nb
-                && na.name().equals(nb.name())
-                && !na.typeArgs().isEmpty() && na.typeArgs().size() == nb.typeArgs().size();
+        if (!isAppliedNominal(a) || !isAppliedNominal(b)) return false;
+        List<IrSort> aa = typeArgsOf(a);
+        return baseName(a).equals(baseName(b))
+                && !aa.isEmpty() && aa.size() == typeArgsOf(b).size();
+    }
+
+    private static boolean isAppliedNominal(IrSort s) {
+        return s instanceof IrSort.Named || s instanceof IrSort.Refined;
     }
 }
