@@ -417,6 +417,45 @@ works today; the `[Dog] -> bark(a)` (reuse the scrutinee, narrowed) form is the 
 step 3 green; (2) the call-gate effective-sort consumption (the four cases); (3) the docs above; the
 dispatch-specificity bug is its own separate track.
 
+### 4.8 Effective-sort landing — session close (2026-07-21, cont.)
+
+All three items above are **done**; full `mvn test` green. Two commits (step 3 and the call gate merged,
+because James's refined downcast ruling below made them share one mechanism):
+
+- **`d9a320b` — dispatch gate consults trait satisfaction.** The vetting of `inferRecord` (step 1)
+  surfaced a latent gap: once a fieldless construction narrows to its bare struct type (`Dog()` → `Dog`,
+  no longer `null`), that concrete arg reaches the call gate, whose disjointness leg
+  (`StaticDispatch.provablyDisjoint`) read `Refinements.imply(arg, param) == Failed` as "provably
+  disjoint". Refinements can't see trait satisfaction, so `imply(Parabola, Curve2D)` is `Failed` even
+  though `Parabola is-a Curve2D` — wrongly excluding a satisfying struct from its trait param (13 plot
+  tests). Fix (roadmap §4.3, nominal decider): thread the closed `typeName → traits` view (extracted as
+  `AssignabilityContext.traitImplsOf`) through `InferenceContext` into the gate; a satisfying struct is
+  not disjoint, a non-satisfying one still is (genuine misroute still caught).
+- **`5eb9aaa` — gates consume the effective sort (§1d stamp-kill + top-level-let see-through).** The
+  stashed step-3 work (construction/claim gate reads the lens, `UNKNOWN → stamp` replaced by
+  compile-error) + `inferRecord` (bare struct floor) + the 15 churn flips, PLUS the call gate:
+  `NarrowingInference.inferThroughLets` (shared by `inferArg` and `effectiveSort`) sees a reference to a
+  top-level let (a 0-arg lowering) through to its value's sort, so `bark(dog)` routes on the effective
+  `Dog`. The four-cases probe passes; case 2 (`bark(a)`, `a:Animal`) already compile-fails via the
+  nominal checker (`SortChecker`), not this gate.
+
+**James's refined downcast ruling (the reframing that merged steps 2 and 3).** A struct coerces to a
+trait it satisfies (upcast, always). A trait coerces **back** to a struct **only when the effective sort
+IS the struct** — `let dog:Animal = Dog()` (effective `Dog`) downcasts; `let dog:Dog = human.pet()` where
+`pet():Animal` does **not** (a method return is only a "could-be"). So the handoff's "3 downcasts →
+compile-error" was mis-grouped: only `RecursiveTraitTest.recursiveTrait_…` (a method-return downcast)
+flips to compile-error; `readmeTraitCoercionSnippet` and `traitDowncastToConcreteStruct_recoversFields`
+are **valid** (effective sort is the struct) and now pass via the see-through — **the README's
+bidirectional-coercion example stays correct**, no README change.
+
+**Still open (unchanged from §4.7, own tracks):**
+- **Dispatch-specificity bug** — no specificity rules anywhere; a *total* overload set (`bark(Dog)` +
+  `bark(Animal)`) throws runtime "Ambiguous dispatch" on a concrete `Dog` instead of preferring
+  `bark(Dog)`. Compile-time `OverloadOverlap` allows the overlap; compile/runtime disagree. Lives in
+  `DispatchTable`. (Not blocking the four cases — those use a single `bark(Dog)`.)
+- **`match`-arm effective-sort refinement (low priority)** — `[d:Dog] -> bark(d)` works; the
+  scrutinee-reuse form `[Dog] -> bark(a)` (narrow the bound scrutinee `a`) is the nice-to-have.
+
 ## 5. Motivating first customer — `AlgebraicDispatch` → the Dispatch/Method elimination
 
 The differential-programming work (`assign proof f:Algebraic` + runtime `pontif.algebra`
