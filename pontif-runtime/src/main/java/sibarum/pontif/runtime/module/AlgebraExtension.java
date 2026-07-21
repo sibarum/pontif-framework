@@ -9,9 +9,12 @@ import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.NativeCalls;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.MathContext;
+import java.math.RoundingMode;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * The builtin <b>algebra extension</b> ({@code pontif.algebra}) — the runtime side of
@@ -26,7 +29,12 @@ import java.util.Map;
  *       {@code Algebraic} claim is the static guarantee; this walk is the mechanism and
  *       fails closed on any non-algebraic node it meets.</li>
  *   <li>{@code eval(e, x)} — evaluates an {@code AlgExpr} over a single variable {@code x}
- *       to a {@code Decimal}, in exact {@code BigDecimal} arithmetic (DECIMAL128 division).</li>
+ *       to a {@code Decimal}, in exact {@code BigDecimal} arithmetic (DECIMAL128 division). A
+ *       fractional power ({@code Pow} with a rational exponent — the way a square root is
+ *       written, {@code Pow(x, 0.5)}) is exact when the result is a terminating decimal (perfect
+ *       roots: {@code 4^0.5 = 2}, {@code 8^(1/3) = 2}) and correctly rounded to DECIMAL128
+ *       otherwise; the exponent is read as an exact rational from the tree, and an even root of a
+ *       negative number fails closed (no {@code double}, no silent NaN).</li>
  * </ul>
  *
  * <p>The AST is an ordinary Pontif trait union, so a program can {@code match} on it and
@@ -196,8 +204,12 @@ public final class AlgebraExtension implements Extension {
                     .multiply(evalNode(r.members().get("right"), env));
             case "Div" -> evalNode(r.members().get("left"), env)
                     .divide(evalNode(r.members().get("right"), env), MathContext.DECIMAL128);
-            case "Pow" -> pow(evalNode(r.members().get("base"), env),
-                    evalNode(r.members().get("exponent"), env));
+            // The exponent is read as an EXACT rational straight from the node tree (so
+            // `Pow(x, Div(1,3))` keeps 1/3 exactly, not a truncated decimal) — the base^(p/q)
+            // evaluation is then exact when the result is a terminating decimal (perfect roots)
+            // and correctly rounded to DECIMAL128 otherwise. Never `Math.pow` (double).
+            case "Pow" -> powRat(evalNode(r.members().get("base"), env),
+                    ratOf(r.members().get("exponent"), env));
             default -> throw new RuntimeCheckException(
                     "eval: unknown AlgExpr node '" + r.typeName() + "'", Origin.NONE);
         };
@@ -209,16 +221,161 @@ public final class AlgebraExtension implements Extension {
         return n instanceof StringValue s ? s.content() : String.valueOf(n);
     }
 
-    private static BigDecimal pow(BigDecimal base, BigDecimal exp) {
-        try {
-            int e = exp.intValueExact();
-            if (e >= 0) {
-                return base.pow(e, MathContext.DECIMAL128);
+    // --- exact / precision-honest fractional powers ---------------------------
+    //
+    // base^(num/den): exact when the true value is a terminating decimal (integer powers,
+    // perfect roots like 4^0.5=2, 8^(1/3)=2, 2.25^0.5=1.5), and correctly rounded to
+    // DECIMAL128 when it is irrational or a non-terminating rational. No `double` anywhere:
+    // the exponent is an exact rational and the root is taken in exact integer / BigDecimal
+    // arithmetic, so results are accurate to the full claimed (DECIMAL128) precision.
+
+    /** The precision `eval` claims for an inexact result (matches the Div path). */
+    private static final MathContext CLAIMED = MathContext.DECIMAL128;
+    /** Working precision for Newton iteration — guard digits above the claimed precision. */
+    private static final MathContext WORK =
+            new MathContext(CLAIMED.getPrecision() + 8, RoundingMode.HALF_EVEN);
+    /** Largest root index we evaluate exactly; beyond this we fail closed rather than lie. */
+    private static final int MAX_ROOT = 1_000_000;
+
+    /** An exact rational, kept in lowest terms with a positive denominator. */
+    private record Rational(BigInteger num, BigInteger den) {
+        static Rational reduce(BigInteger n, BigInteger d) {
+            if (d.signum() == 0) {
+                throw new RuntimeCheckException("eval: division by zero in an exponent", Origin.NONE);
             }
-            return BigDecimal.ONE.divide(base.pow(-e, MathContext.DECIMAL128), MathContext.DECIMAL128);
-        } catch (ArithmeticException notInteger) {
-            return BigDecimal.valueOf(Math.pow(base.doubleValue(), exp.doubleValue()));
+            if (d.signum() < 0) { n = n.negate(); d = d.negate(); }
+            BigInteger g = n.gcd(d);
+            return g.signum() == 0 ? new Rational(n, d) : new Rational(n.divide(g), d.divide(g));
         }
+        static Rational of(BigDecimal v) {
+            BigInteger u = v.unscaledValue();
+            int s = v.scale();
+            return s >= 0 ? reduce(u, BigInteger.TEN.pow(s))
+                          : reduce(u.multiply(BigInteger.TEN.pow(-s)), BigInteger.ONE);
+        }
+        Rational mul(Rational o) { return reduce(num.multiply(o.num), den.multiply(o.den)); }
+        Rational div(Rational o) { return reduce(num.multiply(o.den), den.multiply(o.num)); }
+        Rational add(Rational o) {
+            return reduce(num.multiply(o.den).add(o.num.multiply(den)), den.multiply(o.den));
+        }
+        Rational sub(Rational o) {
+            return reduce(num.multiply(o.den).subtract(o.num.multiply(den)), den.multiply(o.den));
+        }
+    }
+
+    /**
+     * Read a numeric sub-expression as an EXACT rational from the node tree. Arithmetic over
+     * integer/decimal {@code Const}s and {@code Div}/{@code Mul}/{@code Add}/{@code Sub} stays
+     * exact (so {@code Div(1,3)} is 1/3, not a truncated decimal); anything else falls back to
+     * the node's evaluated {@code BigDecimal} (itself an exact decimal fraction).
+     */
+    private static Rational ratOf(Object node, Function<String, BigDecimal> env) {
+        if (!(node instanceof RecordValue r) || r.typeName() == null) {
+            return Rational.of(evalNode(node, env));
+        }
+        Map<String, Object> m = r.members();
+        return switch (QualifiedName.memberOf(r.typeName())) {
+            case "Const" -> Rational.of(decimal(m.get("value")));
+            case "Param" -> Rational.of(env.apply(paramName(r)));
+            case "Div" -> ratOf(m.get("left"), env).div(ratOf(m.get("right"), env));
+            case "Mul" -> ratOf(m.get("left"), env).mul(ratOf(m.get("right"), env));
+            case "Add" -> ratOf(m.get("left"), env).add(ratOf(m.get("right"), env));
+            case "Sub" -> ratOf(m.get("left"), env).sub(ratOf(m.get("right"), env));
+            default -> Rational.of(evalNode(node, env));
+        };
+    }
+
+    /** {@code base} raised to the exact rational {@code e}. */
+    private static BigDecimal powRat(BigDecimal base, Rational e) {
+        BigInteger num = e.num(), den = e.den();          // den > 0, lowest terms
+        if (num.signum() == 0) return BigDecimal.ONE;      // x^0 = 1 (incl. 0^0 = 1, by convention)
+        int n = intRoot(den);
+        int baseSign = base.signum();
+        if (baseSign == 0) {
+            if (num.signum() < 0) {
+                throw new RuntimeCheckException("eval: zero raised to a negative power", Origin.NONE);
+            }
+            return BigDecimal.ZERO;
+        }
+        int p = intRoot(num.abs());
+        BigDecimal powered = base.abs().pow(p);            // exact integer power of the magnitude
+        if (num.signum() < 0) {                            // reciprocal: exact if terminating
+            try { powered = BigDecimal.ONE.divide(powered); }
+            catch (ArithmeticException nonTerminating) { powered = BigDecimal.ONE.divide(powered, CLAIMED); }
+        }
+        BigDecimal magnitude = rootOf(powered, n);
+        if (baseSign < 0) {
+            if (n % 2 == 0) {
+                throw new RuntimeCheckException(
+                        "eval: even root of a negative number is not real (base " + base
+                                + ", exponent " + num + "/" + den + ")", Origin.NONE);
+            }
+            if (num.testBit(0)) magnitude = magnitude.negate();   // odd numerator keeps the sign
+        }
+        return magnitude;
+    }
+
+    /** The {@code n}-th root of a non-negative {@code v}: exact if a terminating decimal, else DECIMAL128. */
+    private static BigDecimal rootOf(BigDecimal v, int n) {
+        if (n == 1 || v.signum() == 0) return v;
+        // Exact rational A/B of v, then integer n-th roots of numerator and denominator.
+        BigInteger A = v.unscaledValue();
+        int s = v.scale();
+        BigInteger B;
+        if (s >= 0) { B = BigInteger.TEN.pow(s); }
+        else { A = A.multiply(BigInteger.TEN.pow(-s)); B = BigInteger.ONE; }
+        Rational red = Rational.reduce(A, B);
+        BigInteger[] rn = iroot(red.num(), n);
+        BigInteger[] rd = iroot(red.den(), n);
+        if (rn[1].signum() != 0 && rd[1].signum() != 0) {         // both perfect n-th powers
+            BigDecimal exact = new BigDecimal(rn[0]);
+            BigDecimal denom = new BigDecimal(rd[0]);
+            try { return exact.divide(denom); }                   // exact terminating decimal
+            catch (ArithmeticException nonTerminating) { return exact.divide(denom, CLAIMED); }
+        }
+        return nthRoot(v, n);                                      // irrational — correctly rounded
+    }
+
+    /** Floor integer {@code n}-th root of {@code a >= 0}, with an exactness flag as element [1] (1/0). */
+    private static BigInteger[] iroot(BigInteger a, int n) {
+        if (a.signum() == 0) return new BigInteger[]{BigInteger.ZERO, BigInteger.ONE};
+        if (n == 1) return new BigInteger[]{a, BigInteger.ONE};
+        BigInteger x = BigInteger.valueOf((long) Math.max(1.0, Math.pow(a.doubleValue(), 1.0 / n)));
+        BigInteger N = BigInteger.valueOf(n), n1 = BigInteger.valueOf(n - 1);
+        while (true) {                                            // integer Newton descent
+            BigInteger next = n1.multiply(x).add(a.divide(x.pow(n - 1))).divide(N);
+            if (next.compareTo(x) >= 0) break;
+            x = next;
+        }
+        while (x.pow(n).compareTo(a) > 0) x = x.subtract(BigInteger.ONE);
+        while (x.add(BigInteger.ONE).pow(n).compareTo(a) <= 0) x = x.add(BigInteger.ONE);
+        return new BigInteger[]{x, x.pow(n).equals(a) ? BigInteger.ONE : BigInteger.ZERO};
+    }
+
+    /** The {@code n}-th root of {@code v > 0} correctly rounded to the claimed precision (Newton). */
+    private static BigDecimal nthRoot(BigDecimal v, int n) {
+        if (n == 2) return v.sqrt(CLAIMED);                       // JDK built-in, correctly rounded
+        double seed = Math.pow(v.doubleValue(), 1.0 / n);
+        BigDecimal x = (Double.isFinite(seed) && seed > 0) ? BigDecimal.valueOf(seed) : BigDecimal.ONE;
+        BigDecimal N = BigDecimal.valueOf(n), n1 = BigDecimal.valueOf(n - 1);
+        for (int i = 0; i < 200; i++) {
+            BigDecimal next = n1.multiply(x, WORK)
+                    .add(v.divide(x.pow(n - 1, WORK), WORK), WORK)
+                    .divide(N, WORK);
+            if (x.subtract(next).abs().compareTo(next.ulp().movePointRight(1)) < 0) { x = next; break; }
+            x = next;
+        }
+        return x.round(CLAIMED);
+    }
+
+    /** An index that must fit a plain {@code int} root; beyond {@link #MAX_ROOT} we fail closed. */
+    private static int intRoot(BigInteger v) {
+        if (v.bitLength() > 31 || v.compareTo(BigInteger.valueOf(MAX_ROOT)) > 0) {
+            throw new RuntimeCheckException(
+                    "eval: exponent numerator/denominator " + v + " is too large for exact evaluation "
+                            + "(limit " + MAX_ROOT + ")", Origin.NONE);
+        }
+        return v.intValueExact();
     }
 
     private static BigDecimal decimal(Object v) {
