@@ -51,6 +51,15 @@ public final class MethodOperatorResolver {
      *  `Vec3`. Kept SEPARATE from the binding — reading it here never disturbs the transparent inferred
      *  sort the gates/refinement see. */
     private final Map<String, IrSort> declaredReturns = new LinkedHashMap<>();
+    /** In-scope LOCAL binding name → its DECLARED claim (the annotation on a {@code let}), the Declared
+     *  record for a param/local — the counterpart of {@link #declaredReturns} for non-top-level bindings.
+     *  Maintained by the tree walk (pushed on a {@link IrExpr.LetIn}, cleared for a shadowing lambda
+     *  param, isolated per function) so it always reflects the receiver binding's OWN annotation, never a
+     *  name-collision. Nominal (method) dispatch reads it declared-first so a demoted {@code let b:Point =
+     *  point3dValue} exposes only {@code Point}'s methods, even though the binding's Inferred sort (kept in
+     *  the {@code InferenceContext} for transparency/refinement) is the concrete {@code Point3D}
+     *  (docs/type-records.md; docs/type-system-roadmap.md §6.5/§6.6). */
+    private final Map<String, IrSort> localClaims = new LinkedHashMap<>();
     /** Inference AND name-routing both go through the type-system facade (the single answerer): the
      *  operator/method routing tables now live on {@link InferenceContext} and are consulted via
      *  {@code dispatch()}, so this pass no longer keeps its own copies. */
@@ -173,7 +182,17 @@ public final class MethodOperatorResolver {
         // resolve(...) paths, or the per-module scope set by resolvePerModule.
         InferenceContext bodyCtx = ctx;
         for (IrParam p : fd.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
-        IrExpr body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);
+        // A function body is its own lexical scope — it never sees another declaration's locals. Isolate
+        // the local-claim scope so a `let` claim from one function/top-level-let can't leak into another.
+        Map<String, IrSort> outerClaims = new LinkedHashMap<>(localClaims);
+        localClaims.clear();
+        IrExpr body;
+        try {
+            body = fd.body() == null ? null : rewriteExpr(fd.body(), bodyCtx);
+        } finally {
+            localClaims.clear();
+            localClaims.putAll(outerClaims);
+        }
         return new IrStmt.FunctionDecl(fd.name(), fd.params(), fd.returnSort(),
                 body, fd.origin(), fd.topLevelLet(), fd.typeParams());
     }
@@ -214,8 +233,23 @@ public final class MethodOperatorResolver {
                 IrSort bound = types.infer(value, ctx);
                 if (bound == null) bound = let.declaredSort();
                 InferenceContext bodyCtx = bound != null ? ctx.withVar(let.name(), bound) : ctx;
+                // The binding's own Declared claim governs nominal (method) dispatch through it in the
+                // body (docs/type-records.md). A claimless local shadows any outer claim of the same name,
+                // so record the (possibly absent) claim and restore on exit — the map tracks THIS
+                // binding's annotation, never a name-collision with a top-level let or outer local.
+                IrSort savedClaim = localClaims.get(let.name());
+                boolean hadClaim = localClaims.containsKey(let.name());
+                if (let.claim() != null) localClaims.put(let.name(), let.claim());
+                else localClaims.remove(let.name());
+                IrExpr newBody;
+                try {
+                    newBody = rewriteExpr(let.body(), bodyCtx);
+                } finally {
+                    if (hadClaim) localClaims.put(let.name(), savedClaim);
+                    else localClaims.remove(let.name());
+                }
                 yield new IrExpr.LetIn(let.name(), let.declaredSort(), value,
-                        rewriteExpr(let.body(), bodyCtx), let.origin(), let.claim());
+                        newBody, let.origin(), let.claim());
             }
             case IrExpr.Call c -> {
                 List<IrExpr> args = new ArrayList<>(c.args().size());
@@ -238,7 +272,22 @@ public final class MethodOperatorResolver {
             case IrExpr.Lambda lam -> {
                 InferenceContext bodyCtx = ctx;
                 for (IrParam p : lam.params()) bodyCtx = bodyCtx.withVar(p.name(), p.sort());
-                yield new IrExpr.Lambda(lam.params(), lam.returnSort(), rewriteExpr(lam.body(), bodyCtx), lam.origin());
+                // A lambda closes over outer locals (keep their claims visible) but its OWN params must
+                // not inherit an outer claim of the same name — a param routes on its declared sort (the
+                // Inferred head), not a shadowed local's view. Drop param claims for the body, restore after.
+                Map<String, IrSort> shadowed = new LinkedHashMap<>();
+                for (IrParam p : lam.params()) {
+                    if (localClaims.containsKey(p.name())) shadowed.put(p.name(), localClaims.get(p.name()));
+                    localClaims.remove(p.name());
+                }
+                IrExpr lbody;
+                try {
+                    lbody = rewriteExpr(lam.body(), bodyCtx);
+                } finally {
+                    for (IrParam p : lam.params()) localClaims.remove(p.name());
+                    localClaims.putAll(shadowed);
+                }
+                yield new IrExpr.Lambda(lam.params(), lam.returnSort(), lbody, lam.origin());
             }
             case IrExpr.Apply app -> {
                 List<IrExpr> args = new ArrayList<>(app.args().size());
@@ -589,23 +638,35 @@ public final class MethodOperatorResolver {
     }
 
     /**
-     * The receiver's NOMINAL identity for method dispatch (docs/type-records.md). Prefer the Inferred
-     * sort's head when it is a concrete nominal name; only when inference lost the name — an anonymous
-     * aggregate ({@code _tuple}) — and the receiver names a top-level {@code let} do we recover the
-     * Declared sort from {@link #declaredReturns}. This is the "read Declared, else the Inferred head"
-     * rule, applied surgically so a concrete inferred receiver (and a shadowing local of the same name)
-     * is never overridden.
+     * The receiver's NOMINAL identity for method dispatch — <b>declared-first</b> (docs/type-records.md
+     * "Which record each consumer reads"; docs/type-system-roadmap.md §6.5/§6.6). A binding's methods
+     * follow the sort it was <em>declared</em> at, so a demoted {@code let b:Point = point3dValue} exposes
+     * only {@code Point}'s methods even though the value is a {@code Point3D} — demotion is a view that
+     * restricts static access. The Declared record is read from where it lives for that binding kind, and
+     * only from a source that is unambiguously THIS binding's (never a name-collision):
+     * <ul>
+     *   <li>A param/local reference lowers to a {@link IrExpr.Var}; its Declared claim (if any) is in
+     *       {@link #localClaims}, tracked with lexical scope. Read it first — this closes the demoted-local
+     *       view leak (roadmap §6.6). A param, or a {@code let} with no annotation, has no claim and falls
+     *       through to the Inferred head (which for a param already IS its declared sort).</li>
+     *   <li>A top-level {@code let} / 0-arg function reference lowers to a 0-arg {@link IrExpr.Call}; its
+     *       binding sort is already the declared narrowing, so the Inferred head suffices, EXCEPT when
+     *       inference lost the name (a transparent-alias binding whose Inferred sort is {@code _tuple}) —
+     *       then recover the Declared name from {@link #declaredReturns}. That map is name-keyed and holds
+     *       only top-level lets, so it is safe here: only a {@code Call} names one; a shadowing local is a
+     *       {@code Var}, handled above and never routed through it.</li>
+     * </ul>
      */
     private IrSort nominalReceiverSort(IrExpr receiver, IrSort inferred) {
+        if (receiver instanceof IrExpr.Var v) {
+            IrSort claim = localClaims.get(v.name());
+            return claim != null ? claim : inferred;   // the local binding's OWN declared view, else Inferred head
+        }
         String inferredBase = baseName(inferred);
         if (inferredBase != null && !"_tuple".equals(inferredBase)) {
-            return inferred;  // inference already has a nominal head — use it
+            return inferred;  // top-level/computed receiver with a nominal head — use it
         }
-        String name = switch (receiver) {
-            case IrExpr.Call c -> c.functionName();
-            case IrExpr.Var v -> v.name();
-            default -> null;
-        };
+        String name = receiver instanceof IrExpr.Call c ? c.functionName() : null;
         IrSort declared = name == null ? null : declaredReturns.get(name);
         return declared != null ? declared : inferred;
     }

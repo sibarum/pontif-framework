@@ -160,16 +160,18 @@ war docs.
   (i) nominal dispatch consults the Declared record via `MethodOperatorResolver.nominalReceiverSort`;
   (ii) the `parseLet None→inferredSort` collapse no longer *discards* the Declared sort (both records
   are carried — the binding sort is the Inferred, the annotation rides `LetIn.claim`); (iii) the
-  re-stamp discipline is retired (demotion is a view, §6.5 — `projectDemotion` is gone). **Residual:
-  a latent code bug** — item 2 (declared-first method routing) is only *half*-implemented:
-  `MethodOperatorResolver.nominalReceiverSort` ([:599-611], verified) is Inferred-**head**-first and
-  consults Declared only when inference lost the name (`_tuple`). Both `type-records.md` (§"Declared
-  Sort": *"`b` has only `Point`'s methods even though the value is a `Point3D`"*) **and** §6.5 (a view
-  *restricts* static access to the declared interface) mandate **declared-first**, so a demoted binding
-  routing methods on the concrete `Point3D` is a **view leak**, not a design choice — the docs are
-  right, the code is the outlier. Fix is in the code (§6.6), and needs care (`declaredReturns` is
-  keyed by name → must not mis-hit a shadowing local). The named `declaredSortOf` facade was never
-  built (goal met via `LetIn.claim`).
+  re-stamp discipline is retired (demotion is a view, §6.5 — `projectDemotion` is gone). Item 2
+  (declared-first method routing) **landed 2026-07-21** — `MethodOperatorResolver.nominalReceiverSort`
+  is now declared-first (§6.6). The audit's diagnosis was directionally right but mislocated the leak:
+  a *top-level* demoted `let b:Point = point3dValue` never leaked — its binding sort is narrowed to the
+  declared `Point` at parse time (`AltParser.nominalBinding`), so inference already yields the `Point`
+  head. The real leak was in **local** bindings: `MethodOperatorResolver` re-infers the value sort and
+  binds the local var to the concrete Inferred sort (`Point3D`), so a local demoted `let` routed methods
+  on `Point3D`. The fix reads a `Var` receiver's own Declared claim from a lexically-scoped `localClaims`
+  map (sourced from `LetIn.claim`, cleared for shadowing lambda params, isolated per function), else the
+  Inferred head; the top-level `Call`/`declaredReturns`/`_tuple` path is unchanged. The name-collision
+  care point dissolves: a shadowing local is a `Var` carrying its own lexical entry, never a name-hit in
+  `declaredReturns`. The named `declaredSortOf` facade was never built (goal met via `LetIn.claim`).
 - **C5 (binding substrate) — per-facet (audited 2026-07-21).** Tracked in `feature-matrix.md`;
   independent of C3's finish-line except where generics touch `Assignability` type-args (§4 gap).
   - **Generics / type-args — ☑ landed** in the shipping engines (`NarrowingInference.unifyTypeArgs`,
@@ -444,19 +446,26 @@ stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays
    (3) revise the cast-law prose (`README` / `univocal`) — pending. (4) suite = safety net,
    green. NB: the observable payoffs (free downcast recovery, concrete-based trait dispatch)
    are follow-on — (1) delivers immutable concrete identity, the foundation they build on.*
-6. **Demoted-binding method routing is a view leak (code bug, surfaced by the 2026-07-21 C4 audit;
-   direction re-verified).** Both `type-records.md:62-65,104-107` (*"`b` has only `Point`'s methods
-   even though the value is a `Point3D`"*, and "read Declared when present, else the Inferred head")
-   **and** §6.5 (a view *restricts* static access to the declared interface) mandate **declared-first**
-   method routing. The shipped `MethodOperatorResolver.nominalReceiverSort` ([:599-611], verified)
-   does the opposite — Inferred-head-first, consulting Declared only when inference lost the name
-   (`_tuple`) — so `let b:Point = point3dValue` routes methods on the concrete `Point3D` and exposes
-   `Point3D`-only methods a `Point` view must not. This is not a semantic fork (declared-first is
-   ratified twice); it's an **unintended divergence to fix in the code**. **Not a decision so much as a
-   confirmation:** fix `nominalReceiverSort` to prefer the binding's *own* Declared sort when present.
-   The care point is that `declaredReturns` is keyed by name, so the fix must read the binding's own
-   annotation (not name-collide with a shadowing local — the reason the original stayed surgical). *No
-   code blocked on this; tracked as its own follow-up (spawned).* Independent of C3 Item 1.
+6. **Demoted-binding method routing was a view leak — FIXED 2026-07-21.** Both
+   `type-records.md:62-65,104-107` (*"`b` has only `Point`'s methods even though the value is a
+   `Point3D`"*, and "read Declared when present, else the Inferred head") **and** §6.5 (a view
+   *restricts* static access to the declared interface) mandate **declared-first** method routing.
+   `MethodOperatorResolver.nominalReceiverSort` is now declared-first, and the leak's true location was
+   pinned down in the process: a **top-level** demoted `let b:Point = point3dValue` never leaked — its
+   binding sort is narrowed to the declared `Point` at parse time (`AltParser.nominalBinding` returns the
+   declared sort for a WIDEN/demotion verdict), so inference already gives the `Point` head; a top-level
+   let / 0-arg fn / computed receiver lowers to a 0-arg `Call`. The leak was in **local** bindings (which
+   lower to a `Var`): the pass re-infers the value sort and binds the local var to the concrete Inferred
+   sort (`Point3D`), so a local demoted `let` routed methods on `Point3D` — exposing `Point3D`-only
+   methods (and *hiding* `Point`'s own). **The fix:** for a `Var` receiver, read the binding's own
+   Declared claim from a lexically-scoped `localClaims` map — sourced from `LetIn.claim`, cleared for a
+   shadowing lambda param, isolated per function — falling back to the Inferred head when there is no
+   claim (a param already narrows to its declared sort); the top-level `Call`/`declaredReturns`/`_tuple`
+   path is unchanged. The care point dissolves: `declaredReturns` is name-keyed, but a shadowing local is
+   a `Var` carrying its OWN lexical claim entry and is never routed through `declaredReturns`, so no
+   name-collision is possible. Regression tests: `MethodResolutionTest`
+   (`localDemotedBinding_doesNotLeakConcreteOnlyMethod` + three guards). Full reactor suite green.
+   Independent of C3 Item 1.
 
 ---
 

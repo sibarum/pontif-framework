@@ -227,14 +227,14 @@ The Value Type stays where it is — the runtime `DispatchTable` on concrete `Sy
 *Status audited 2026-07-21 — see `docs/type-system-roadmap.md` §2 (C4 row) / §6.6.*
 
 1. ✅ **This doc** — fix the model. *(here)*
-2. ◐ **Partial.** Nominal (method/accessor) dispatch reading the **Declared Sort** is implemented
-   *only* for the computed/anonymous case: `MethodOperatorResolver.nominalReceiverSort` prefers the
-   Inferred head and recovers Declared (from `declaredReturns`) *only* when inference lost the name
-   (`_tuple`). That resolves methods-on-aliases (`let v:Vec3 = {…}`), but the **general declared-first
-   rule is NOT implemented** — a demoted binding (`let b:Point = point3dValue`, Inferred head
-   `Point3D`) routes methods on the concrete `Point3D`, not the declared `Point`. That contradicts
-   §"Declared Sort" (`b` should have only `Point`'s methods) and roadmap §6.5 (view restricts static
-   access) — a **view leak / code bug**, tracked at roadmap §6.6.
+2. ✅ **Done (2026-07-21).** Nominal (method/accessor) dispatch is **declared-first**:
+   `MethodOperatorResolver.nominalReceiverSort` reads a binding's own Declared record before the
+   Inferred head. A top-level `let` (a 0-arg `Call` receiver) already had its binding sort narrowed to
+   the declared sort at parse time, so it never leaked; the fix was for **local** bindings (a `Var`
+   receiver), which the pass had been binding to the concrete Inferred sort — so a local demoted
+   `let b:Point = point3dValue` routed methods on `Point3D`. Now a `Var` receiver reads its own claim
+   from a lexically-scoped `localClaims` map (from `LetIn.claim`), so `b` has only `Point`'s methods, as
+   §"Declared Sort" and roadmap §6.5/§6.6 require. Methods-on-aliases (`let v:Vec3 = {…}`) still resolve.
 3. ✅ **Done.** The `parseLet` `None → inferredSort` rule no longer *discards* the Declared Sort: the
    binding sort is the Inferred record, the annotation rides `LetIn.claim` — both records are carried
    ([AltParser.java:1923-1928] / `:4632`). (Field-naming caveat: `LetIn.declaredSort` actually holds

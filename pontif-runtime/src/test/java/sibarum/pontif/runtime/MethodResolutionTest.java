@@ -109,4 +109,69 @@ class MethodResolutionTest {
         String err = f.error().text();
         assertTrue(err.contains("No method 'nope'") && err.contains("Point"), () -> err);
     }
+
+    @Test
+    void localDemotedBinding_doesNotLeakConcreteOnlyMethod() {
+        // The view leak (roadmap §6.6): a LOCAL demoted `let flat:Point = <Point3D value>` is a
+        // VIEW that restricts static access to the declared `Point` interface (docs/type-records.md
+        // §"Declared Sort"; roadmap §6.5). Method dispatch must route on the DECLARED claim, so a
+        // `Point3D`-only method (`depth`) is NOT reachable through `flat` — even though the value's
+        // concrete type is `Point3D`. Before the fix, nominalReceiverSort read the local binding's
+        // Inferred head (`Point3D`) and this compiled, exposing `depth`.
+        PontifCompiler.CompileResult.Failed f = reject("""
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                method Point3D.depth():Int -> this.z
+                function f():Int ->
+                  let flat:Point = Point3D(2, 3, 5)
+                  flat.depth()
+                f()
+                """);
+        String err = f.error().text();
+        assertTrue(err.contains("No method 'depth'") && err.contains("'Point'"), () -> err);
+    }
+
+    @Test
+    void topLevelDemotedBinding_doesNotLeakConcreteOnlyMethod() {
+        // Invariant guard: a top-level demoted `let` already routes on the declared sort (its
+        // binding sort is narrowed to `Point` at parse time), so the concrete-only `depth` is
+        // unreachable through `flat` here too.
+        PontifCompiler.CompileResult.Failed f = reject("""
+                struct Point(x:Int, y:Int)
+                struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
+                method Point3D.depth():Int -> this.z
+                let p = Point3D(2, 3, 5)
+                let flat:Point = p
+                flat.depth()
+                """);
+        String err = f.error().text();
+        assertTrue(err.contains("No method 'depth'") && err.contains("'Point'"), () -> err);
+    }
+
+    @Test
+    void localDeclaredAlias_stillResolvesMethod() {
+        // The dual of the leak test — the view restricts, it must not OVER-restrict. A local
+        // `let v:Point = {…}` takes its nominal identity from its declared claim `Point`, so a
+        // method that IS on `Point` resolves through `v`. (Declared-first for locals.)
+        assertEquals("3", run("""
+                struct Point(x:Int, y:Int)
+                method Point.sum():Int -> this.x + this.y
+                function f():Int ->
+                  let v:Point = {x=1, y=2}
+                  v.sum()
+                f()
+                """));
+    }
+
+    @Test
+    void topLevelDeclaredAlias_stillResolvesMethod() {
+        // Methods-on-aliases at the top level must keep resolving: `v`'s declared sort `Point`
+        // provides the method even though its value is an anonymous aggregate.
+        assertEquals("3", run("""
+                struct Point(x:Int, y:Int)
+                method Point.sum():Int -> this.x + this.y
+                let v:Point = {x=1, y=2}
+                v.sum()
+                """));
+    }
 }
