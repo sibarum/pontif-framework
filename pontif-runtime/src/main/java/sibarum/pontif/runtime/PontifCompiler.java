@@ -16,6 +16,7 @@ import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.parser.Parser;
 import sibarum.pontif.ir.AliasResolver;
+import sibarum.pontif.runtime.module.AlgebraExtension;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.Drafter;
 import sibarum.pontif.receipts.GraphReference;
@@ -369,7 +370,7 @@ public final class PontifCompiler {
             }
             decls.put(name, fds.get(0));
         }
-        return AlgebraicCheck.check(claimed, decls);
+        return AlgebraicCheck.check(claimed, decls, AlgebraExtension.ALGEBRAIC_PRIMITIVES);
     }
 
     /** The local (module-stripped) head-constructor name of a {@code proof} tree, or null. */

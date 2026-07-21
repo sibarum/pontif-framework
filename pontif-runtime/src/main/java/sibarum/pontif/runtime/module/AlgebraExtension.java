@@ -13,7 +13,9 @@ import java.math.BigInteger;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -131,6 +133,11 @@ public final class AlgebraExtension implements Extension {
                 yield walk(let.body(), extended, ctx);
             }
             case IrExpr.Call call -> {
+                // A reflectable math primitive (sqrt, sin, …) translates DIRECTLY to an AST node
+                // — it is never inlined, because its native body is a placeholder. Everything else
+                // is inlined by reflecting its (algebraic) body.
+                RecordValue prim = primitive(call.functionName(), call.args(), env, ctx);
+                if (prim != null) yield prim;
                 NativeCalls.ReflectedFunction callee =
                         ctx.reflectFunctionByName(call.functionName(), call.args().size());
                 if (callee == null) {
@@ -184,6 +191,52 @@ public final class AlgebraExtension implements Extension {
         return new RecordValue(qn("Param"), m);
     }
 
+    // --- reflectable math primitives -------------------------------------------
+    //
+    // Selected `pontif.math` functions are "algebraic primitives": a call to one is admitted by
+    // AlgebraicCheck (via {@link #ALGEBRAIC_PRIMITIVES}) and translated here to an AST node,
+    // instead of inlining the function's placeholder native body. The power family maps onto the
+    // existing exact {@code Pow} node; the transcendentals get dedicated unary nodes evaluated in
+    // double precision (see {@link #dbl}).
+
+    /** The qualified `pontif.math` names AlgebraicCheck admits as algebraic primitives. */
+    public static final Set<String> ALGEBRAIC_PRIMITIVES = Set.of(
+            "pontif.math/sqrt", "pontif.math/inverseSqrt", "pontif.math/exp2", "pontif.math/pow",
+            "pontif.math/sin", "pontif.math/cos", "pontif.math/tan", "pontif.math/exp", "pontif.math/log");
+
+    /** The AST node a math-primitive call reflects to, or {@code null} if the call isn't a primitive. */
+    private static RecordValue primitive(
+            String name, List<IrExpr> args, Map<String, RecordValue> env, NativeCalls.Context ctx) {
+        return switch (name) {
+            // Power family — exact, reusing the Pow node (eval handles fractional powers exactly).
+            case "pontif.math/sqrt"        -> powNode(walk(args.get(0), env, ctx), constNode(new BigDecimal("0.5")));
+            case "pontif.math/inverseSqrt" -> powNode(walk(args.get(0), env, ctx), constNode(new BigDecimal("-0.5")));
+            case "pontif.math/exp2"        -> powNode(constNode(BigDecimal.valueOf(2)), walk(args.get(0), env, ctx));
+            case "pontif.math/pow"         -> powNode(walk(args.get(0), env, ctx), walk(args.get(1), env, ctx));
+            // Transcendentals — dedicated nodes, evaluated in double precision.
+            case "pontif.math/sin" -> unaryNode("Sin", args.get(0), env, ctx);
+            case "pontif.math/cos" -> unaryNode("Cos", args.get(0), env, ctx);
+            case "pontif.math/tan" -> unaryNode("Tan", args.get(0), env, ctx);
+            case "pontif.math/exp" -> unaryNode("Exp", args.get(0), env, ctx);
+            case "pontif.math/log" -> unaryNode("Log", args.get(0), env, ctx);
+            default -> null;
+        };
+    }
+
+    private static RecordValue powNode(RecordValue base, RecordValue exponent) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("base", base);
+        m.put("exponent", exponent);
+        return new RecordValue(qn("Pow"), m);
+    }
+
+    private static RecordValue unaryNode(
+            String type, IrExpr arg, Map<String, RecordValue> env, NativeCalls.Context ctx) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("arg", walk(arg, env, ctx));
+        return new RecordValue(qn(type), m);
+    }
+
     // --- AlgExpr AST evaluation ------------------------------------------------
 
     private static BigDecimal evalNode(
@@ -210,6 +263,13 @@ public final class AlgebraExtension implements Extension {
             // and correctly rounded to DECIMAL128 otherwise. Never `Math.pow` (double).
             case "Pow" -> powRat(evalNode(r.members().get("base"), env),
                     ratOf(r.members().get("exponent"), env));
+            // Transcendentals are evaluated in double precision (by ruling); `dbl` emits a Decimal
+            // with an honest number of significant digits, not 34 that would overstate it.
+            case "Sin" -> dbl(Math.sin(evalNode(r.members().get("arg"), env).doubleValue()));
+            case "Cos" -> dbl(Math.cos(evalNode(r.members().get("arg"), env).doubleValue()));
+            case "Tan" -> dbl(Math.tan(evalNode(r.members().get("arg"), env).doubleValue()));
+            case "Exp" -> dbl(Math.exp(evalNode(r.members().get("arg"), env).doubleValue()));
+            case "Log" -> dbl(Math.log(evalNode(r.members().get("arg"), env).doubleValue()));
             default -> throw new RuntimeCheckException(
                     "eval: unknown AlgExpr node '" + r.typeName() + "'", Origin.NONE);
         };
@@ -385,8 +445,29 @@ public final class AlgebraExtension implements Extension {
         throw new RuntimeCheckException("eval: expected a Decimal, got " + v, Origin.NONE);
     }
 
+    /**
+     * The significant digits an IEEE-754 {@code double} honestly carries (DBL_DIG = 15 — the most
+     * that survive a decimal→double→decimal round trip). Transcendentals evaluate in double
+     * precision (by ruling), so their result is rounded to this many significant digits: the
+     * emitted {@code Decimal} neither overstates precision (34 DECIMAL128 digits) nor exposes the
+     * 17-digit round-trip artifact.
+     */
+    private static final MathContext DOUBLE_SIG = new MathContext(15, RoundingMode.HALF_EVEN);
+
+    /** A double result as a Decimal with honest significant digits; a non-finite value fails closed. */
+    private static BigDecimal dbl(double d) {
+        if (!Double.isFinite(d)) {
+            throw new RuntimeCheckException(
+                    "eval: transcendental produced a non-finite result (" + d
+                            + ") — outside its real domain", Origin.NONE);
+        }
+        BigDecimal r = new BigDecimal(d, DOUBLE_SIG).stripTrailingZeros();
+        return r.scale() < 0 ? r.setScale(0) : r;   // keep integers as "2", not "2E+0"
+    }
+
     private static final String SOURCE = """
-            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, Algebraic, eval, evalAt}
+            exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
+                       Sin, Cos, Tan, Exp, Log, Algebraic, eval, evalAt}
 
             trait AlgExpr{}
 
@@ -397,6 +478,13 @@ public final class AlgebraExtension implements Extension {
             struct Mul(left:AlgExpr, right:AlgExpr)
             struct Div(left:AlgExpr, right:AlgExpr)
             struct Pow(base:AlgExpr, exponent:AlgExpr)
+            # Transcendental primitives — reflected from the pontif.math functions of the same
+            # name (sqrt/pow/exp2/inverseSqrt reflect to Pow instead). Evaluated in double precision.
+            struct Sin(arg:AlgExpr)
+            struct Cos(arg:AlgExpr)
+            struct Tan(arg:AlgExpr)
+            struct Exp(arg:AlgExpr)
+            struct Log(arg:AlgExpr)
 
             assign trait Const:AlgExpr{}
             assign trait Param:AlgExpr{}
@@ -405,6 +493,11 @@ public final class AlgebraExtension implements Extension {
             assign trait Mul:AlgExpr{}
             assign trait Div:AlgExpr{}
             assign trait Pow:AlgExpr{}
+            assign trait Sin:AlgExpr{}
+            assign trait Cos:AlgExpr{}
+            assign trait Tan:AlgExpr{}
+            assign trait Exp:AlgExpr{}
+            assign trait Log:AlgExpr{}
 
             # Algebraic: the trait a metareference proven algebraic is-a. Its `ast` attribute
             # IS the AST surface — `$f[Decimal].ast` reads it (docs/dispatch-method-elimination

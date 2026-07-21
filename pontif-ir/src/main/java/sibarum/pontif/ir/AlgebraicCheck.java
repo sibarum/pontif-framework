@@ -35,6 +35,19 @@ public final class AlgebraicCheck {
      */
     public static Optional<String> check(
             Set<String> algebraic, Map<String, IrStmt.FunctionDecl> functionsByName) {
+        return check(algebraic, functionsByName, Set.of());
+    }
+
+    /**
+     * As {@link #check(Set, Map)}, plus a set of built-in <b>algebraic primitives</b> — qualified
+     * names (e.g. {@code pontif.math/sin}) an algebraic body may call even though they are not
+     * themselves {@code assign proof}-claimed. A primitive is a leaf: it reflects to a dedicated
+     * AST node rather than being inlined, so it has no algebraic body of its own to verify and
+     * never participates in the recursion (acyclicity) check.
+     */
+    public static Optional<String> check(
+            Set<String> algebraic, Map<String, IrStmt.FunctionDecl> functionsByName,
+            Set<String> primitives) {
         for (String name : algebraic) {
             IrStmt.FunctionDecl fd = functionsByName.get(name);
             if (fd == null) {
@@ -42,7 +55,7 @@ public final class AlgebraicCheck {
             }
             Set<String> params = new HashSet<>();
             for (IrParam p : fd.params()) params.add(p.name());
-            Optional<String> frag = checkFragment(fd.body(), name, params, algebraic);
+            Optional<String> frag = checkFragment(fd.body(), name, params, algebraic, primitives);
             if (frag.isPresent()) return frag;
         }
         return acyclic(algebraic, functionsByName);
@@ -57,7 +70,7 @@ public final class AlgebraicCheck {
     }
 
     private static Optional<String> checkFragment(
-            IrExpr expr, String fn, Set<String> bound, Set<String> algebraic) {
+            IrExpr expr, String fn, Set<String> bound, Set<String> algebraic, Set<String> primitives) {
         switch (expr) {
             case IrExpr.Lit l -> { return Optional.empty(); }
             case IrExpr.Dec d -> { return Optional.empty(); }
@@ -72,25 +85,25 @@ public final class AlgebraicCheck {
                 if (!isAlgebraicOp(op.op())) {
                     return reject(fn, "uses the non-algebraic operator '" + op.op() + "'");
                 }
-                Optional<String> l = checkFragment(op.left(), fn, bound, algebraic);
+                Optional<String> l = checkFragment(op.left(), fn, bound, algebraic, primitives);
                 if (l.isPresent()) return l;
-                return checkFragment(op.right(), fn, bound, algebraic);
+                return checkFragment(op.right(), fn, bound, algebraic, primitives);
             }
             case IrExpr.LetIn let -> {
-                Optional<String> v = checkFragment(let.value(), fn, bound, algebraic);
+                Optional<String> v = checkFragment(let.value(), fn, bound, algebraic, primitives);
                 if (v.isPresent()) return v;
                 Set<String> extended = new HashSet<>(bound);
                 extended.add(let.name());
-                return checkFragment(let.body(), fn, extended, algebraic);
+                return checkFragment(let.body(), fn, extended, algebraic, primitives);
             }
             case IrExpr.Call c -> {
-                if (!algebraic.contains(c.functionName())) {
+                if (!algebraic.contains(c.functionName()) && !primitives.contains(c.functionName())) {
                     return reject(fn, "calls '" + c.functionName()
-                            + "', which is not marked algebraic (nested calls are allowed only "
-                            + "to other algebraic functions)");
+                            + "', which is not marked algebraic (nested calls are allowed only to "
+                            + "other algebraic functions or built-in algebraic primitives)");
                 }
                 for (IrExpr arg : c.args()) {
-                    Optional<String> a = checkFragment(arg, fn, bound, algebraic);
+                    Optional<String> a = checkFragment(arg, fn, bound, algebraic, primitives);
                     if (a.isPresent()) return a;
                 }
                 return Optional.empty();
@@ -98,7 +111,7 @@ public final class AlgebraicCheck {
             case IrExpr.FieldAccess fa -> {
                 // Field access is algebraic only over a parameter/local (e.g. a struct
                 // param's `v.x`); the base carries the burden of proof.
-                return checkFragment(fa.base(), fn, bound, algebraic);
+                return checkFragment(fa.base(), fn, bound, algebraic, primitives);
             }
             default -> {
                 return reject(fn, "contains a non-algebraic construct ("
