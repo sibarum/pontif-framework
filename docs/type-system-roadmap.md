@@ -118,7 +118,7 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 |---|---|---|---|---|
 | C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
 | C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ **core landed** (phases 1–4 + Cluster 4 — resolution IS post-link); remaining = the cross-module **visibility** model | `dispatch-unification.md`, `cross-module-dispatch.md` |
-| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine + gates landed** (Phase 0/1, §1d stamp-kill, effective-sort); remaining = generics, static-cast, coercion relocation (§4.5) | **this doc** (§4) |
+| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine, gates & let-coercion landed** (Phase 0/1, §1d, effective-sort, `CoercionResolver` deleted — §4.5 item 1); remaining = generics, static-cast | **this doc** (§4) |
 | C4 | **Three-records model** | Declared / Inferred / Value split | ☑ **effectively landed** (audited 2026-07-21) — landed incidentally through C2/C3; residual = doc reconciliation only (§ notes) | `type-records.md` |
 | C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ **per-facet** (audited 2026-07-21): generics + sub-traits ☑, dependent-sorts + Type-fragments ◐, structural traits ☐ | `TODO.md` "4 facets", `dependent-sorts.md`, `feature-matrix.md` |
 
@@ -144,13 +144,13 @@ war docs.
   (import-by-association under the orphan rule) — its own war, `cross-module-dispatch.md`. **NB
   (2026-07-21):** Phase 2 landing means the roadmap's old "C3 blocked until C2 Phase 2" edge (§3)
   is **discharged** — see the reframed §3.
-- **C3 (nominal-subtype) — engine + gates landed.** `Assignability`
+- **C3 (nominal-subtype) — engine, gates & let-coercion landed.** `Assignability`
   ([pontif-ir/types/Assignability.java]) is a pure engine over `IrSort` + a `TypeCatalog`. Landed:
   Slice 0/1, the §4.2 engine gaps, Phase 0/1 (ConstructionGate nominal leg → engine), the §1d
-  stamp-kill, and the effective-sort consumption across the construction/claim/**call** gates
-  (§4.5, §4.6+ archive). Remaining: generics/type-args, static-cast wiring, and the parser-side
-  `CoercionResolver` **relocation** (now a C3-internal move, not a C2 dependency — §4.5). This doc
-  is its plan-of-record (§4).
+  stamp-kill, the effective-sort consumption across the construction/claim/**call** gates
+  (§4.6+ archive), and **let-coercion (§4.5 item 1, `22578bf`): `CoercionResolver` deleted, the parser
+  decides trait-free coercion via `Assignability`.** Remaining: generics/type-args, static-cast wiring
+  (§4.5). This doc is its plan-of-record (§4).
 - **C4 (three-records) — effectively landed (audited 2026-07-21); code is ahead of `type-records.md`.**
   The split is realized as three distinct artifacts: **Declared** = `LetIn.claim()` / param
   `sort()` (+ `MethodOperatorResolver.declaredReturns`); **Inferred** = `NarrowingInference`,
@@ -279,7 +279,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Decision | Site | Action | Size |
 |---|---|---|---|
 | struct↔struct `let` assign | [AltParser.java:2098] | landed (Slice 1) | — |
-| all other `let` coercions | [AltParser.java:1888] / `:4605` (`coercionFor` → `CoercionResolver`, **still parser-invoked**) | The blocker is now C3-internal (§3): the coercion *decision* must **relocate** off the parser to a post-link gate (where `AssignabilityContext.fromModule` has the trait closure), then `CoercionResolver` is deleted. Phase 0 audit split the cases: 4 of 6 are trait-free (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`) — pure engine delegation once relocated; `Autobox` (tuple→`Stream`) re-homes to the generics slice; only **`TraitCast`** touches C2 — its *eager-satisfaction permissiveness* interacts with the cross-module visibility model. | **M (relocation) + S `TraitCast` nuance** |
+| all other `let` coercions | `AltParser.nominalBinding` (was `coercionFor` → `CoercionResolver`) | ✅ **DONE (2026-07-21, `22578bf`).** The trait-free nominal cases (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`, primitives) are decided at the parser **via `Assignability`** (no trait closure needed); `Autobox` stays a parser-local sentinel (re-homes to the generics slice later); only **`TraitCast`** legality is deferred post-link (permissive, as before — eager satisfaction is the C2-adjacent follow-up). `CoercionResolver` deleted. | — |
 | construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | ✅ **DONE (2026-07-21, `5eb9aaa`)** — fit is a single-engine query (`Assignability`+`Refinements`) reading the effective-sort lens; the `UNKNOWN → runtimeChecks` stamp is dropped (§1d); demotion projection removed (§6.5). Dependent-claims/type-params orchestration stays. | — |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
 | cast legality | `IrInterpreter.evalCast` ([:1189]) + `IrExpr.Cast` producers | new wiring for `Assignability.cast` | M (mostly new) |
@@ -305,20 +305,30 @@ Therefore:
 Everything through the effective-sort landing is **done** (differential harness §4.1; the §4.2
 engine gaps; Phase 0/1 nominal-leg delegation; the §1d stamp-kill; effective-sort consumption
 across the construction, claim, and call gates — see the archived session-logs, Appendix A). The
-finish line is now **three C3-internal items, none blocked on C2** (C2 Phase 2 has landed):
+finish line is now **two C3-internal items, none blocked on C2** (C2 Phase 2 has landed):
 
-1. **Relocate the coercion decision off the parser, then delete `CoercionResolver`.** The former
-   "blocked on C2" step (§3), now C3-internal: move parse-time `coercionFor` ([AltParser.java:1888]
-   / `:4605`) to a post-link gate that builds `AssignabilityContext.fromModule` (the trait closure),
-   exactly as `ConstructionGate` runs today. 4 of 6 cases are trait-free (pure engine delegation);
-   `Autobox` re-homes to item 2; only `TraitCast`'s eager-satisfaction permissiveness touches C2's
-   visibility model. **Size: M** (relocation) **+ S** (`TraitCast` nuance). *Suggested next — highest
-   consolidation payoff (deletes the largest copy).*
+1. ✅ **DONE (2026-07-21, `22578bf`) — `CoercionResolver` deleted; `Assignability` decides let coercion.**
+   The `let`-binding coercion was a second engine parallel to `Assignability`, made at parse time via
+   `coercionFor` → `CoercionResolver`. *As-built (adjusted from the original plan):* a trait-free
+   legality question needs no trait closure, so the parser decides it **via `Assignability`** and
+   rejects a provable mismatch there (generalizing the slice-1 `structAssignBinding` → `nominalBinding`
+   to all trait-free nominal pairs incl. `Int→Decimal`); only trait-dependent legality stays deferred
+   post-link (permissive, as before — eager trait-satisfaction is a follow-up). The aggregate sentinels
+   (`_record`→`AggregatePromotion`, `_tuple`→`Stream` autobox) stay as parser-local lowering checks.
+   Deleted: `CoercionResolver`, `Coercion`, `CoercionContext`, `TypeSystem.coercionFor`, and the
+   `AssignabilityDifferentialTest` license-to-delete harness. *(The plan's "widen `gated()` + defer to
+   the post-link gate" mechanism was tried and reverted — it over-reached into `gateRecord`, regressing
+   valid unknown-sort construction args and colliding with transform-chain lets. Deciding the trait-free
+   case at the parser is behavior-preserving and lower-risk.)*
 2. **Generics / type-args** in `Assignability` (`Box[Int]`; the parser guard currently skips
    type-args). Also retires `isStreamName`/`Autobox`. **Size: L.** Touches C5 where generics meet
    type-args.
 3. **Static-cast legality wiring** through `Assignability.cast` (`IrExpr.Cast` legality is
    implicit-at-runtime today; §4.2, §4.3 `cast legality` row). **Size: M** (mostly new wiring).
+
+**Follow-up (deferred from item 1):** *eager trait-satisfaction for `let`s* — a `let x:SomeTrait =
+nonSatisfier` is still permissive (deferred), as it was before; gating bare-trait claims so it errors is
+the C2-visibility-adjacent residue (needs the trait closure to be complete cross-module).
 
 **Loose ends (own tracks, not on the C3 finish line):**
 - **Dispatch-specificity bug** — no specificity rules anywhere; a *total* overload set (`bark(Dog)`
