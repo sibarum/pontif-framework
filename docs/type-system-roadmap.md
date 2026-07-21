@@ -119,8 +119,8 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 | C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
 | C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ **core landed** (phases 1–4 + Cluster 4 — resolution IS post-link); remaining = the cross-module **visibility** model | `dispatch-unification.md`, `cross-module-dispatch.md` |
 | C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine + gates landed** (Phase 0/1, §1d stamp-kill, effective-sort); remaining = generics, static-cast, coercion relocation (§4.5) | **this doc** (§4) |
-| C4 | **Three-records model** | Declared / Inferred / Value split | ◐ model settled, migration ☐ | `type-records.md` |
-| C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ per-facet (see `feature-matrix.md`) | `TODO.md` "4 facets", `dependent-sorts.md` |
+| C4 | **Three-records model** | Declared / Inferred / Value split | ☑ **effectively landed** (audited 2026-07-21) — landed incidentally through C2/C3; residual = doc reconciliation only (§ notes) | `type-records.md` |
+| C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ **per-facet** (audited 2026-07-21): generics + sub-traits ☑, dependent-sorts + Type-fragments ◐, structural traits ☐ | `TODO.md` "4 facets", `dependent-sorts.md`, `feature-matrix.md` |
 
 **Disambiguation.** The TODO cluster titled *"Type-system convergence — one scoped
 type-level binding substrate (4 facets)"* is **C5** — a parallel axis about *type-level
@@ -151,11 +151,43 @@ war docs.
   (§4.5, §4.6+ archive). Remaining: generics/type-args, static-cast wiring, and the parser-side
   `CoercionResolver` **relocation** (now a C3-internal move, not a C2 dependency — §4.5). This doc
   is its plan-of-record (§4).
-- **C4 (three-records) — status unconfirmed (owner to verify).** `type-records.md`'s migration
-  path (nominal dispatch reads the Declared sort; stop the `parseLet None→inferredSort` collapse;
-  re-stamp discipline) overlaps C2's post-link move; not audited this re-scope.
-- **C5 (binding substrate) — per-facet, status unconfirmed.** Tracked in `feature-matrix.md`;
+- **C4 (three-records) — effectively landed (audited 2026-07-21); code is ahead of `type-records.md`.**
+  The split is realized as three distinct artifacts: **Declared** = `LetIn.claim()` / param
+  `sort()` (+ `MethodOperatorResolver.declaredReturns`); **Inferred** = `NarrowingInference`,
+  materialized as the `EffectiveSortLens` on `CompiledModule`; **Value** = runtime
+  `SymExpr.Record.typeName()` read by `DispatchTable`. All three migration items shipped —
+  *incidentally, threaded through C2/C3 commits*, which is why the board was never checked off:
+  (i) nominal dispatch consults the Declared record via `MethodOperatorResolver.nominalReceiverSort`;
+  (ii) the `parseLet None→inferredSort` collapse no longer *discards* the Declared sort (both records
+  are carried — the binding sort is the Inferred, the annotation rides `LetIn.claim`); (iii) the
+  re-stamp discipline is retired (demotion is a view, §6.5 — `projectDemotion` is gone). **Residual is
+  documentation only**, plus one genuine open question: the item-2 rule *direction* is **inverted** vs
+  `type-records.md` — the code prefers the Inferred nominal head and consults Declared only when
+  inference lost the name (`_tuple`), so a **demoted** binding routes methods on the *concrete*
+  (`Point3D`), not the declared base (`Point`). That's arguably the correct reading under §6.5
+  (demotion retains the concrete), but it contradicts the `type-records.md` prose it was written
+  against — **needs a ruling + a `type-records.md` refresh** (still headed "DRAFT"; the named
+  `declaredSortOf` facade was never built — the goal was met via `LetIn.claim` instead).
+- **C5 (binding substrate) — per-facet (audited 2026-07-21).** Tracked in `feature-matrix.md`;
   independent of C3's finish-line except where generics touch `Assignability` type-args (§4 gap).
+  - **Generics / type-args — ☑ landed** in the shipping engines (`NarrowingInference.unifyTypeArgs`,
+    `ConstructionGate.deriveAndCheckTypeParams`, dispatch; ~13 `TypeParameter*Test`). **Ahead of C3**:
+    `Assignability` has *zero* type-arg support — building it in is **C3's item 2** (§4.5), not
+    duplicate work.
+  - **Sub-traits — ☑ landed** (`trait B : A`, transitive dispatch; `TraitExtendsTest`). *The
+    `TODO.md` cluster understates this as "deprioritized / needs Stream first" — stale; it landed
+    independently of the Stream substrate.*
+  - **Dependent sorts — ◐ partial**: the call-gate (`StaticDispatch.substituteSiblings`) and
+    let-claim gate (`ConstructionGate.gateClaim`/`dischargesUnderScope`) are landed + tested; the
+    struct-**field**, named-method-contract, and value-indexed cases are unbuilt. (`feature-matrix.md`
+    N1's "zero tests" note is now stale for the call case.)
+  - **Named Type fragments — ◐ partial**: complete-sort aliases work (`ReusableSortTest`); baseless
+    predicate fragments (`let gtz:Type=[@>0]` applied as `[Int:gtz]`) are unbuilt (N3).
+  - **Structural (anonymous) traits — ☐ parse-only**: `Type{…}` parses but method dispatch through
+    such a param is unwired (N2). *(Distinct from structural **sorts** — record width-subtyping —
+    which are landed; don't credit one for the other.)*
+  - `[!!Sort]` escape hatch is advertised in error messages but **not built** (parser rejects unary
+    `!`) — self-flagged in `TODO.md`, still open.
 
 ---
 
@@ -400,6 +432,19 @@ stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays
    (3) revise the cast-law prose (`README` / `univocal`) — pending. (4) suite = safety net,
    green. NB: the observable payoffs (free downcast recovery, concrete-based trait dispatch)
    are follow-on — (1) delivers immutable concrete identity, the foundation they build on.*
+6. **Method-routing sort for a demoted binding — concrete or declared? (NEW, surfaced by the
+   2026-07-21 C4 audit.)** `type-records.md:62-65,104-107` states the rule "read the **Declared**
+   sort when the position has one; else the Inferred nominal head" — so `let b:Point = point3dValue`
+   would route methods on `Point`. But the shipped code (`MethodOperatorResolver.nominalReceiverSort`)
+   does the **opposite**: Inferred-head-first, consulting Declared only when inference lost the name
+   (`_tuple`) — so a demoted binding routes on the **concrete** (`Point3D`). This is arguably the
+   *correct* behavior under §6.5 (demotion is a view that **retains** the concrete type), but it
+   contradicts the `type-records.md` prose. **Decision needed:** ratify the code's concrete-first
+   routing (and refresh `type-records.md` §"nominal dispatch" + drop its "DRAFT" header), or restore
+   Declared-first. Either way, `type-records.md`'s migration path should be flipped from
+   forward-looking to landed, and the unbuilt `declaredSortOf` facade target either implemented or
+   struck (the goal was met via `LetIn.claim`). *No code blocked on this — it's a semantics + docs
+   reconciliation.*
 
 ---
 
