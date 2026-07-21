@@ -136,6 +136,9 @@ class AltParserLetTest {
 
     @Test
     void let_explicitAnnotation_baseMismatch_throws() throws Exception {
+        // `let p:Int = Point(0,0)` is a trait-free provable mismatch (struct↔primitive) the parser
+        // rejects at parse via Assignability (roadmap §4.5 item 1 — the decider is now the engine,
+        // not the retired CoercionResolver; the diagnostic is unchanged).
         String src = "struct Point(x:Int, y:Int)\nlet p:Int = Point(0, 0)";
         ParseException ex = assertThrows(ParseException.class, () ->
                 AltParser.parseModule(src, "t"));

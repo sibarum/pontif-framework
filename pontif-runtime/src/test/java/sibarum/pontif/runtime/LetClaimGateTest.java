@@ -173,13 +173,14 @@ class LetClaimGateTest {
 
     @Test
     void nonEmbeddingBaseMismatch_staysAParseError() {
-        // The embedding exemption is Int→Decimal only — Bool against Int is
-        // still the parser's early rejection.
+        // The embedding exemption is Int→Decimal only (a COERCE) — Bool against Int is a trait-free
+        // provable mismatch the parser still rejects early, now via Assignability rather than the
+        // retired CoercionResolver (roadmap §4.5 item 1; the diagnostic is unchanged).
         CompileResult result = compiler.compileAlt("let m:Bool = 5\nm", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("different types"),
-                () -> "Expected the parser's base check; got: " + failed.error().text());
+                () -> "Expected the base-mismatch error; got: " + failed.error().text());
     }
 
     // --- §1d: claims are compile-checked regardless of reference / reachability -

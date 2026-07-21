@@ -45,9 +45,10 @@ import java.util.Set;
  *
  * <p>Deliberate leniencies, all in the substrate's existing direction:
  * a bare unregistered field sort (unrefined primitives) is not gated at
- * all (today's behavior); the Int→Decimal embedding is never ruled
- * disjoint; and a field sort the runtime cannot satisfy-check (Method,
- * Dispatch, inline structural) is never stamped.
+ * all (their legality is decided trait-free at the parser via
+ * {@code Assignability} — roadmap §4.5 item 1); the Int→Decimal embedding
+ * is never ruled disjoint; and a field sort the runtime cannot
+ * satisfy-check (Method, Dispatch, inline structural) is never stamped.
  *
  * <p>Runs after {@link AggregatePromotion} (anonymous literals are
  * already stamped with their struct names) and {@link DecimalPromotion}
@@ -195,13 +196,14 @@ final class ConstructionGate {
     /**
      * The claim rule's binding half: a declared sort at a let is judged
      * against the value's narrowing exactly like a constructor argument.
-     * Returns the claim the runtime must still check (UNKNOWN verdict),
-     * null when discharged (FITS) or absent, and throws on a provable miss.
+     * Returns null when discharged (FITS) or absent, throws on an unprovable
+     * or disjoint claim (§1d), and returns the claim only for the sanctioned
+     * parametric-{@code Stream} runtime element check.
      *
-     * <p>Same leniencies as the record gate, deliberately: a bare
-     * unregistered claim ({@code let x:Int = …}) is not gated at all
-     * (today's behavior — the parser's base check is the only judge), and
-     * a claim the runtime cannot satisfy-check is never kept.
+     * <p>Same leniencies as the record gate, deliberately: a bare unregistered
+     * claim ({@code let x:Int = …}) is not gated here — its legality is decided
+     * trait-free at the parser via {@code Assignability} (roadmap §4.5 item 1) —
+     * and a claim the runtime cannot satisfy-check is never kept.
      */
     private static IrSort gateClaim(
             IrExpr.LetIn l, IrExpr value, InferenceContext ctx, Map<String, IrSort.Structural> structs,
@@ -548,7 +550,9 @@ final class ConstructionGate {
      * Is this field sort worth gating at all? Bare unregistered names
      * (unrefined primitives, traits) keep today's leniency; refinements,
      * registered struct names, and compositions of them are claims the
-     * gate judges.
+     * gate judges. (Bare-primitive legality is decided trait-free at the
+     * parser via {@code Assignability} — roadmap §4.5 item 1 — not here,
+     * so the gate never faces an undetermined-base primitive.)
      */
     private static boolean gated(IrSort field, Map<String, IrSort.Structural> structs) {
         return switch (field) {

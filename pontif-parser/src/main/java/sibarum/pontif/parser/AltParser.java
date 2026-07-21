@@ -16,8 +16,6 @@ import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.types.Assignability;
 import sibarum.pontif.types.AssignabilityContext;
-import sibarum.pontif.types.Coercion;
-import sibarum.pontif.types.CoercionContext;
 import sibarum.pontif.types.TypeCatalog;
 import sibarum.pontif.types.TypeInfo;
 import sibarum.pontif.types.TypeSystem;
@@ -1879,39 +1877,30 @@ public final class AltParser {
         // binding sort). Everything else still routes through the coercion facade below.
         boolean recordPromotion = false;
         boolean streamAutobox = false;
-        IrSort binding = declaredSort == null
-                ? null
-                : structAssignBinding(inferredSort, declaredSort, name, start.origin());
+        // The nominal engine (Assignability) decides the binding sort AND legality for the trait-free
+        // cases (roadmap §4.5 item 1 — replacing the retired CoercionResolver); it throws on a provable
+        // mismatch. A null result defers to the aggregate sentinels / declared-claim below (trait cases,
+        // whose satisfaction is a post-link fact, are judged by the construction/claim gate).
+        IrSort binding = nominalBinding(inferredSort, declaredSort, name, start.origin());
         if (binding == null) {
-            Coercion coercion = declaredSort == null
-                    ? new Coercion.None()
-                    : TypeSystem.standard().coercionFor(inferredSort, declaredSort, coercionContext());
-            if (coercion instanceof Coercion.Mismatch mismatch) {
-                // The tuple-element gate supplies its own detail; otherwise phrase the generic message
-                // here, where the binding's name is in scope.
-                throw new ParseException(
-                        mismatch.detail() != null ? mismatch.detail()
-                                : "let '" + name + "' is declared " + describeSort(declaredSort)
-                                        + " but its value is " + describeSort(inferredSort)
-                                        + " — these are different types.",
-                        start.origin());
+            String inferredBase = baseSortName(inferredSort);
+            String declaredBase = baseSortName(declaredSort);
+            if ("_record".equals(inferredBase)) {
+                // Anonymous aggregate: AggregatePromotion stamps + validates it at IR time (the record's
+                // own construction-gate judgment IS the claim check), so no claim LetIn is emitted.
+                recordPromotion = true;
+                binding = declaredSort;
+            } else if ("_tuple".equals(inferredBase) && "Stream".equals(declaredBase)) {
+                // tuple → Stream[T] autobox (§8.6), gated at parse by the element check.
+                String elemError = streamElementError(declaredSort, inferredSort);
+                if (elemError != null) throw new ParseException(elemError, start.origin());
+                streamAutobox = true;
+                binding = declaredSort;
+            } else {
+                // Trait / alias / parametric / undecidable: bind at the declared claim and defer legality
+                // to the post-link gate (which has the trait closure the parser lacks).
+                binding = declaredSort;
             }
-            recordPromotion = coercion instanceof Coercion.RecordPromotion;
-            streamAutobox = coercion instanceof Coercion.Autobox;
-            // Promotion cases: a demote/trait/autobox/anonymous-aggregate binds at the declared sort
-            // (stamped/gated at IR time); an Int literal at a Decimal boundary takes BARE Decimal — the
-            // value promotes at IR time and the refined claim (if any) travels in the LetIn below, NOT
-            // in the 0-arg return sort, where it would be an obligation the integer-only discharge
-            // kernel can never prove. Otherwise keep the tighter inferred narrowing.
-            binding = switch (coercion) {
-                case Coercion.Demote d -> declaredSort;
-                case Coercion.TraitCast t -> declaredSort;
-                case Coercion.Autobox a -> declaredSort;
-                case Coercion.RecordPromotion r -> declaredSort;
-                case Coercion.IntToDecimal i -> new IrSort.Named("Decimal", declaredSort.origin());
-                case Coercion.None n -> inferredSort;
-                case Coercion.Mismatch m -> inferredSort;  // unreachable — thrown above
-            };
         }
         declaredTopLevelLets.put(name, binding);
         // A declared sort is a claim made where the binding is made. The
@@ -2070,35 +2059,39 @@ public final class AltParser {
     }
 
     /**
-     * The registries {@link TypeSystem#coercionFor} consults — the parser's live struct, trait, and
-     * sort-alias declarations. Handed to the type system so the coercion DECISION (demote / trait-cast /
-     * autobox / Int→Decimal / mismatch) lives behind the facade rather than in the let-lowering.
-     */
-    private CoercionContext coercionContext() {
-        return new CoercionContext(types);
-    }
-
-    /**
-     * Slice 1 of the nominal-subtype migration (docs/type-records.md): a struct↔struct let-binding's
-     * legality is decided by the isolated {@link Assignability} engine, composed with inference — which
-     * already produced {@code inferred}, the tighter binding sort. This is the engine's first live
-     * wiring. Returns the sort to bind, or {@code null} when the binding is NOT a plain struct↔struct
-     * case and must fall through to the {@link TypeSystem#coercionFor} path (traits — whose satisfaction
-     * is a post-link fact the parser lacks — plus record-promotion, Int→Decimal, and autobox, none of
-     * which are migrated yet). Throws when the engine rules the assignment illegal, with the same
-     * "different types" diagnostic the coercion path raised.
+     * The binding sort for a {@code let name:declared = value}, decided by the single nominal engine
+     * ({@link Assignability}) composed with inference (which produced {@code inferred}, the tighter
+     * sort). Generalizes the former {@code structAssignBinding} (slice 1, struct↔struct) to <b>all
+     * trait-free nominal pairs</b> — struct↔struct, primitives, and primitive↔struct, including the
+     * {@code Int→Decimal} embedding — so the retired {@code CoercionResolver} is not needed for them.
+     * A trait-free legality question needs no trait closure, so the parser decides it here (correctly
+     * and cheaply) and <b>throws on a provable mismatch</b> ({@code ILLEGAL}/{@code NEEDS_CAST}), the
+     * same "different types" diagnostic {@code CoercionResolver} raised. Only <b>trait-dependent</b>
+     * legality is deferred post-link (satisfaction is a fact the parser lacks): returns {@code null}
+     * when either side is a trait, an anonymous-aggregate sentinel ({@code _record}/{@code _tuple}),
+     * or otherwise not a decidable nominal pair (a type parameter, an alias, a parametric application,
+     * an unknown floor); the caller then binds at the declared sort (or applies the aggregate sentinel)
+     * and lets the post-link gate rule.
      *
-     * <p>Binding-sort rule: on {@code EXACT}/{@code WIDEN} keep the tighter {@code inferred} sort when
-     * the nominal identity is unchanged (the old {@code None} case — a plain agreement); bind at the
-     * {@code declared} sort only on a genuine widen to a different base (the old {@code Demote}).
+     * <p>Binding-sort rule: {@code COERCE} (a value that promotes at IR time, e.g. Int→Decimal) binds
+     * at the bare declared base — a refinement there would become a 0-arg-return obligation the integer
+     * kernel can't prove, so the claim rides the {@code LetIn} instead. A same-base agreement keeps the
+     * tighter {@code inferred} (the old {@code None}); a widen/demote to a different base binds at the
+     * declared sort.
      */
-    private IrSort structAssignBinding(IrSort inferred, IrSort declared, String name, Origin origin)
+    private IrSort nominalBinding(IrSort inferred, IrSort declared, String name, Origin origin)
             throws ParseException {
+        if (declared == null) return inferred;  // no claim — the plain agreement; keep the narrowing
         if (!(declared instanceof IrSort.Named dn) || !dn.typeArgs().isEmpty()) return null;
         String declaredBase = baseSortName(declared);
         String inferredBase = baseSortName(inferred);
-        if (declaredBase == null || inferredBase == null) return null;
-        if (!types.isStruct(declaredBase) || !types.isStruct(inferredBase)) return null;
+        if (declaredBase == null || inferredBase == null) return null;   // unknown floor → defer
+        if (types.isTrait(declaredBase) || types.isTrait(inferredBase)) return null;  // satisfaction is post-link
+        // Only a decidable nominal pair (struct or primitive on both sides) is judged here; anonymous
+        // aggregates (_record/_tuple), aliases, and type parameters fall through to the caller.
+        boolean lhsNominal = types.isStruct(declaredBase) || types.isPrimitive(declaredBase);
+        boolean rhsNominal = types.isStruct(inferredBase) || types.isPrimitive(inferredBase);
+        if (!lhsNominal || !rhsNominal) return null;
         Assignability.Assignment verdict =
                 Assignability.assign(inferred, declared, AssignabilityContext.of(types));
         if (verdict == Assignability.Assignment.NEEDS_CAST
@@ -2109,7 +2102,34 @@ public final class AltParser {
                             + " — these are different types.",
                     origin);
         }
+        if (verdict == Assignability.Assignment.COERCE) {
+            return new IrSort.Named(declaredBase, declared.origin());  // bare — the value promotes at IR time
+        }
         return declaredBase.equals(inferredBase) ? inferred : declared;
+    }
+
+    /**
+     * The tuple→{@code Stream[T]} element gate (docs/iteration.md §8.6, lifted from the retired
+     * {@code CoercionResolver}): every member of the tuple must be convertible to {@code T} (exact base,
+     * plus the lossless Int→Decimal embedding). Returns the specific error message, or {@code null} when
+     * every element converts.
+     */
+    private static String streamElementError(IrSort declaredStream, IrSort tupleSort) {
+        IrSort elemType = declaredStream instanceof IrSort.Named sn && !sn.typeArgs().isEmpty()
+                ? sn.typeArgs().get(0) : null;
+        String tBase = elemType == null ? null : baseSortName(elemType);
+        if (tBase == null || !(tupleSort instanceof IrSort.Structural st)) return null;
+        int idx = 0;
+        for (IrSort m : st.members().values()) {
+            String mBase = baseSortName(m);
+            boolean ok = tBase.equals(mBase) || ("Decimal".equals(tBase) && "Int".equals(mBase));
+            if (!ok) {
+                return "Cannot box this tuple as Stream[" + describeSort(elemType) + "]: element "
+                        + idx + " is " + describeSort(m) + ", not " + describeSort(elemType);
+            }
+            idx++;
+        }
+        return null;
     }
 
 
@@ -4585,36 +4605,24 @@ public final class AltParser {
             value = parseExpr();
         }
         IrSort inferred = inferMaximalSort(value);
-        // Same coercion QUERY as top-level parseLet — a `let` coerces identically wherever it
-        // sits, differing only in scope (James 2026-07-07). Routing here through the facade
-        // (docs/language-inventory.md §4) unifies the decision: the local let now honours the
-        // same Demote/TraitCast the top-level one does, not just the Int→Decimal/autobox/record
-        // subset it used to. The verdict shapes the binding sort + whether the claim rides the
-        // LetIn's claim slot.
-        //
-        // Slice 1 of the nominal-subtype migration: struct↔struct assignability is answered by the
-        // Assignability engine (legality) composed with the inference above (the tight binding sort);
-        // the remaining verdicts still route through the coercion facade.
+        // Same binding-sort decision as top-level parseLet — a `let` coerces identically wherever it
+        // sits, differing only in scope (James 2026-07-07). The nominal engine ({@link Assignability},
+        // via nominalBinding) decides the trait-free cases and throws on a provable mismatch (roadmap
+        // §4.5 item 1 — replacing CoercionResolver). A null result defers to the tuple-autobox sentinel
+        // / declared-claim below (trait cases judged post-link by the construction/claim gate).
         boolean streamAutobox = false;
-        IrSort binding = declaredSort == null
-                ? null
-                : structAssignBinding(inferred, declaredSort, name, start.origin());
+        IrSort binding = nominalBinding(inferred, declaredSort, name, start.origin());
         if (binding == null) {
-            Coercion coercion = declaredSort == null
-                    ? new Coercion.None()
-                    : TypeSystem.standard().coercionFor(inferred, declaredSort, coercionContext());
-            if (coercion instanceof Coercion.Mismatch mismatch) {
-                throw new ParseException(
-                        mismatch.detail() != null ? mismatch.detail()
-                                : "let '" + name + "' is declared " + describeSort(declaredSort)
-                                        + " but its value is " + describeSort(inferred)
-                                        + " — these are different types.",
-                        start.origin());
+            String inferredBase = baseSortName(inferred);
+            String declaredBase = baseSortName(declaredSort);
+            if ("_tuple".equals(inferredBase) && "Stream".equals(declaredBase)) {
+                String elemError = streamElementError(declaredSort, inferred);
+                if (elemError != null) throw new ParseException(elemError, start.origin());
+                streamAutobox = true;
             }
-            streamAutobox = coercion instanceof Coercion.Autobox;
-            // Every coercing verdict binds at the declared sort (the claim rides the LetIn below);
-            // only a plain agreement (None) keeps the tighter inferred narrowing.
-            binding = coercion instanceof Coercion.None ? inferred : declaredSort;
+            // Every deferred case (autobox, record-promotion, trait, undecidable) binds at the
+            // declared sort — the claim rides the LetIn below, judged post-link.
+            binding = declaredSort;
         }
         IrSort prevBinding = currentScope.get(name);
         boolean hadPrev = currentScope.containsKey(name);

@@ -162,7 +162,9 @@ class AltParserLetExprTest {
 
     @Test
     void letExpr_explicitSort_baseMismatch_throws() {
-        // value is Int, annotation says Bool — should error at parse time.
+        // value is Int, annotation says Bool — a trait-free provable mismatch the parser rejects at
+        // parse via Assignability (roadmap §4.5 item 1 — the decider is now the engine, not the
+        // retired CoercionResolver; the diagnostic is unchanged).
         ParseException ex = assertThrows(ParseException.class, () ->
                 parseFunctionBody("let m:Bool = 5 m"));
         assertTrue(ex.getMessage().toLowerCase().contains("different types"),

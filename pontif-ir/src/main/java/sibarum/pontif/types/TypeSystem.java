@@ -15,9 +15,10 @@ import sibarum.pontif.ir.InferenceContext;
  * <ul>
  *   <li><b>One answerer.</b> There is a single {@link #infer} — "what is this value, exactly?" — so no
  *       shadow inferencer can drift out of agreement with it.</li>
- *   <li><b>Coercion is a query, not an insertion.</b> When it lands, {@code coercionFor(from, to)} will
- *       <em>return</em> the coercion a caller should emit (demote / trait-cast / widen / autobox /
- *       none / error) instead of the parser deciding and baking it in inline.</li>
+ *   <li><b>One nominal decider.</b> {@link Assignability} answers is-a / assign / construct / cast;
+ *       the {@code let}-binding coercion legality it once shared with the parser now lives behind it —
+ *       decided at the post-link construction/claim gate ({@code ConstructionGate.gateClaim}), not
+ *       re-derived inline (roadmap §4.5 item 1; the {@code CoercionResolver} copy was deleted).</li>
  * </ul>
  *
  * <p><b>Migration status (strangler-fig).</b> Today this is a thin, behaviour-preserving facade over
@@ -29,7 +30,6 @@ import sibarum.pontif.ir.InferenceContext;
  *
  * <p><b>Roadmap surface</b> (added slice by slice as clients migrate, each grounded in a concrete
  * call site it replaces): {@code satisfies(value, claim, ctx)} (subsumption — {@code Refinements});
- * {@code coercionFor(from, to, ctx)} (the parser's let-binding coercion block, as a query);
  * {@code resolveSort(name)} / {@code structOf(name)} (the alias/struct/trait registries);
  * {@code resolveMethod(recv, name, ctx)} / {@code resolveOverload(name, args, ctx)} (dispatch);
  * {@code discharge(obligation)} (the {@code pontif-predicates} kernels).
@@ -57,16 +57,6 @@ public interface TypeSystem {
      * widened deliberately rather than discarded.
      */
     IrSort inferFloor(IrExpr expr, InferenceContext ctx);
-
-    /**
-     * Which coercion (if any) applies when a value of sort {@code from} is bound where sort {@code to} is
-     * claimed — the query that replaces the parser deciding coercion inline (docs/language-inventory.md
-     * §4). Returns a {@link Coercion} verdict (none / Int→Decimal / record promotion / demote / trait-cast
-     * / autobox / mismatch); the caller emits the corresponding IR (the recorded binding sort, whether the
-     * claim travels on a construction-gate {@code LetIn}) rather than the type logic living at the call
-     * site. See {@link Coercion} for what each verdict means and how the caller should act on it.
-     */
-    Coercion coercionFor(IrSort from, IrSort to, CoercionContext ctx);
 
     /**
      * Resolves a {@link DispatchQuery} — the one dispatch answerer, unifying static and dynamic dispatch

@@ -127,6 +127,13 @@ public final class TypeCatalog {
         return byName.get(name) instanceof TypeInfo.Alias;
     }
 
+    /** Whether {@code name} is a built-in scalar ({@code Int}/{@code Bool}/{@code Decimal}/
+     *  {@code Char}/{@code String}) — the one home for that fact, so callers (e.g. the parser's
+     *  binding-sort decision) don't restate the set. */
+    public boolean isPrimitive(String name) {
+        return PRIMITIVES.contains(name);
+    }
+
     // --- bulk view ----------------------------------------------------------
 
     /**
