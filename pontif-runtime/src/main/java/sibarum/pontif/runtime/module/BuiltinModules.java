@@ -87,6 +87,11 @@ public final class BuiltinModules {
         // `assign proof f:Algebraic` function's body into a first-class AST and evaluates
         // it. The runtime substrate for differential programming (docs/metatypes.md).
         Extensions.install(AlgebraExtension.INSTANCE);
+        // The polynomial extension (pontif.poly) is a pure-Pontif CAS core over pontif.algebra's
+        // AlgExpr — substitute / expand / simplify for tame polynomials. It backs no native calls
+        // (every function has a real body), so it must be installed AFTER pontif.algebra, which its
+        // source requires.
+        Extensions.install(PolynomialExtension.INSTANCE);
         // External extensions (GUI, plot, shape, net, …) self-register: every one found on the
         // classpath via ServiceLoader is installed here, so no entry point has to hand-wire them.
         // A context whose classpath omits an extension module (the lean CLI) simply doesn't find it.
