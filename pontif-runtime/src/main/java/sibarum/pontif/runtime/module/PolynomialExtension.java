@@ -16,6 +16,9 @@ package sibarum.pontif.runtime.module;
  *   <li>{@code simplify(e, name)} — combine like terms. <b>Univariate</b> (v1): groups the
  *       expanded terms of the single variable {@code name} by degree and sums their coefficients.
  *       Eval-preserving.</li>
+ *   <li>{@code differentiate(e, x)} — symbolic derivative w.r.t. {@code x} by structural recursion
+ *       (sum / product / quotient / power / chain rules + the transcendental pushforwards). Total;
+ *       the result is correct but unsimplified — pipe through {@code simplify} for a tidy form.</li>
  *   <li>{@code Expression} — a chainable wrapper struct around an {@code AlgExpr} exposing the
  *       transforms as methods ({@code Expression(t).expand().simplify("x").eval(3.0)}). Use a bare
  *       {@code AlgExpr} when you only want the tree; wrap it to build a transformation pipeline.
@@ -49,8 +52,9 @@ public final class PolynomialExtension implements Extension {
     }
 
     private static final String SOURCE = """
-            requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, eval}
-            exports @.{substitute, expand, simplify, Expression}
+            requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
+                                     Sin, Cos, Tan, Exp, Log, eval}
+            exports @.{substitute, expand, simplify, differentiate, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -154,6 +158,31 @@ public final class PolynomialExtension implements Extension {
               assemble(ex, name, maxDeg(ex), Const(0.0))
             )
 
+            # differentiate: symbolic derivative w.r.t. `x`, by structural recursion — one rule per
+            # node (sum/product/quotient/power/chain, plus the transcendental pushforwards). Total.
+            # The result is correct but unsimplified (e.g. d(x^2) = 2*x^1*1) — pipe through simplify.
+            function differentiate(e:AlgExpr, x:String):AlgExpr -> match e {
+              [Const(_)]  -> Const(0.0)
+              [Param(n)]  -> match (n == x) { [Bool:true] -> Const(1.0)  [Bool:false] -> Const(0.0) }
+              [Add(a, b)] -> Add(differentiate(a, x), differentiate(b, x))
+              [Sub(a, b)] -> Sub(differentiate(a, x), differentiate(b, x))
+              [Mul(a, b)] -> Add(Mul(differentiate(a, x), b), Mul(a, differentiate(b, x)))
+              [Div(a, b)] -> Div(Sub(Mul(differentiate(a, x), b), Mul(a, differentiate(b, x))), Mul(b, b))
+              [Pow(a, b)] -> match b {
+                # power rule for a literal exponent; general a^b via the log rule otherwise.
+                [Const(n)] -> Mul(Mul(Const(n), Pow(a, Const(n - 1.0))), differentiate(a, x))
+                [_]        -> Mul(Pow(a, b),
+                                  Add(Mul(differentiate(b, x), Log(a)),
+                                      Div(Mul(b, differentiate(a, x)), a)))
+              }
+              [Sin(a)]    -> Mul(Cos(a), differentiate(a, x))
+              [Cos(a)]    -> Mul(Sub(Const(0.0), Sin(a)), differentiate(a, x))
+              [Tan(a)]    -> Div(differentiate(a, x), Mul(Cos(a), Cos(a)))
+              [Exp(a)]    -> Mul(Exp(a), differentiate(a, x))
+              [Log(a)]    -> Div(differentiate(a, x), a)
+              [_]         -> Const(0.0)
+            }
+
             # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
             # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,
             # build by hand, $f[Decimal].ast); wrap it in an Expression to chain transforms. Each
@@ -163,6 +192,7 @@ public final class PolynomialExtension implements Extension {
             method Expression.substitute(name:String, r:AlgExpr):Expression -> Expression(substitute(this.ast, name, r))
             method Expression.expand():Expression -> Expression(expand(this.ast))
             method Expression.simplify(name:String):Expression -> Expression(simplify(this.ast, name))
+            method Expression.differentiate(x:String):Expression -> Expression(differentiate(this.ast, x))
             method Expression.eval(x:Decimal):Decimal -> eval(this.ast, x)
 
             0

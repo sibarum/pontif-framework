@@ -79,6 +79,40 @@ class PolynomialModuleTest {
     }
 
     @Test
+    void differentiate_polynomial() {
+        // d/dx (x^3 + 2x) = 3x^2 + 2; at x = 2 -> 14.
+        assertEquals("true", run("""
+                requires pontif.poly.{differentiate}
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Mul, Pow, eval}
+                let f:AlgExpr = Add(Pow(Param("x"), Const(3.0)), Mul(Const(2.0), Param("x")))
+                eval(differentiate(f, "x"), 2.0) == 14.0
+                """));
+    }
+
+    @Test
+    void differentiate_quotientAndTranscendental() {
+        // d/dx (1/x) = -1/x^2; at x = 2 -> -0.25.  d/dx sin(x) = cos(x); at x = 0 -> 1.
+        assertEquals("true", run("""
+                requires pontif.poly.{differentiate}
+                requires pontif.algebra.{AlgExpr, Const, Param, Div, Sin, eval}
+                let recip:AlgExpr = Div(Const(1.0), Param("x"))
+                let s:AlgExpr = Sin(Param("x"))
+                eval(differentiate(recip, "x"), 2.0) == -0.25
+                """));
+    }
+
+    @Test
+    void differentiate_asChainedExpressionMethod() {
+        // (x+1)^2 -> differentiate -> simplify -> eval.  d = 2x + 2; at x = 3 -> 8.
+        assertEquals("true", run("""
+                requires pontif.poly.{Expression}
+                requires pontif.algebra.{Const, Param, Add, Pow}
+                Expression(Pow(Add(Param("x"), Const(1.0)), Const(2.0)))
+                  .differentiate("x").simplify("x").eval(3.0) == 8.0
+                """));
+    }
+
+    @Test
     void expressionWrapper_chainsTransforms() {
         // Expression wraps an AlgExpr and exposes the transforms as chainable methods.
         // (x+1)^2 -> expand -> simplify -> eval at 3 => 16.
