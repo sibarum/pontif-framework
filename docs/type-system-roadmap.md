@@ -117,8 +117,8 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 | # | Campaign | Owns | Status | Doc |
 |---|---|---|---|---|
 | C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
-| C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ in progress | `dispatch-unification.md`, `cross-module-dispatch.md` |
-| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ Slice 1 landed, else ☐ | **this doc** (§4) |
+| C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ **core landed** (phases 1–4 + Cluster 4 — resolution IS post-link); remaining = the cross-module **visibility** model | `dispatch-unification.md`, `cross-module-dispatch.md` |
+| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine + gates landed** (Phase 0/1, §1d stamp-kill, effective-sort); remaining = generics, static-cast, coercion relocation (§4.5) | **this doc** (§4) |
 | C4 | **Three-records model** | Declared / Inferred / Value split | ◐ model settled, migration ☐ | `type-records.md` |
 | C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ per-facet (see `feature-matrix.md`) | `TODO.md` "4 facets", `dependent-sorts.md` |
 
@@ -136,47 +136,57 @@ war docs.
   through it; TODO marks Cluster 5 done. **Precondition SATISFIED (verified 2026-07-18):**
   `war/scope-aware-narrowing` is fully subsumed by master (master 0 behind / 207 ahead), so
   C3 already builds on the unified state — no merge needed.
-- **C2 (dispatch) — in progress.** Cluster 4 (operators route once, drop method-form
-  operators) + Phases 2–4 (methods resolve on the receiver sort **post-typecheck / post-link**;
-  trait dispatch becomes receiver-sort resolution; parser de-blinding). **Phase 2 is the
-  linchpin for C3** (see §3).
-- **C3 (nominal-subtype) — the undocumented one.** `Assignability`
-  ([pontif-ir/types/Assignability.java]) is a pure engine over `IrSort` + a `TypeCatalog`.
-  Slice 0 (the `fromModule` context adapter) and Slice 1 (struct↔struct `let`-binding assign,
-  live at [AltParser.java:2098]) landed; `isA`/`construct`/`cast` exist but are **test-only**.
-  Everything else still flows through `CoercionResolver` / `ConstructionGate`. This doc is its
-  plan-of-record (§4).
-- **C4 (three-records) — model settled, migration pending.** `type-records.md`'s migration
-  path (nominal dispatch reads the Declared sort; stop the `parseLet None→inferredSort`
-  collapse; re-stamp discipline) overlaps C2's post-link move.
-- **C5 (binding substrate) — per-facet.** Tracked in `feature-matrix.md`; independent of C3's
-  finish-line except where generics touch `Assignability` type-args (§4 gap).
+- **C2 (dispatch) — core landed; visibility model remains.** Cluster 4 + Phases 1–4 all
+  shipped (per `dispatch-unification.md`, which now marks the phase list closed): operators route
+  post-link by both operands, **methods resolve on the receiver sort post-link** (Phase 2 — the
+  parse-time `methodNameForReceiver` is gone), trait dispatch is receiver-sort resolution, and the
+  parser is de-blinded. The **one remaining C2 piece** is the cross-module **visibility** model
+  (import-by-association under the orphan rule) — its own war, `cross-module-dispatch.md`. **NB
+  (2026-07-21):** Phase 2 landing means the roadmap's old "C3 blocked until C2 Phase 2" edge (§3)
+  is **discharged** — see the reframed §3.
+- **C3 (nominal-subtype) — engine + gates landed.** `Assignability`
+  ([pontif-ir/types/Assignability.java]) is a pure engine over `IrSort` + a `TypeCatalog`. Landed:
+  Slice 0/1, the §4.2 engine gaps, Phase 0/1 (ConstructionGate nominal leg → engine), the §1d
+  stamp-kill, and the effective-sort consumption across the construction/claim/**call** gates
+  (§4.5, §4.6+ archive). Remaining: generics/type-args, static-cast wiring, and the parser-side
+  `CoercionResolver` **relocation** (now a C3-internal move, not a C2 dependency — §4.5). This doc
+  is its plan-of-record (§4).
+- **C4 (three-records) — status unconfirmed (owner to verify).** `type-records.md`'s migration
+  path (nominal dispatch reads the Declared sort; stop the `parseLet None→inferredSort` collapse;
+  re-stamp discipline) overlaps C2's post-link move; not audited this re-scope.
+- **C5 (binding substrate) — per-facet, status unconfirmed.** Tracked in `feature-matrix.md`;
+  independent of C3's finish-line except where generics touch `Assignability` type-args (§4 gap).
 
 ---
 
 ## 3. The dependency graph (the part written down nowhere until now)
 
 ```
-C1 inference ✔ ──────────────► (on master) ──► everything builds on the unified state
-                                                        │
-C2 dispatch ◐ ── Phase 2 (post-link resolution) ───────┤
-     │                                                  │
-     │  UNBLOCKS: the parser can see trait satisfaction │
-     ▼                                                  ▼
-C3 Assignability ── parser-side CoercionResolver deletion  (BLOCKED until C2 Phase 2)
-     │
-     ├─ gate-side ConstructionGate delegation   (NOT blocked — module in hand)
-     ├─ engine gaps (refinement-precise, Int→Decimal, intersection, function-sorts)  (NOT blocked)
-     └─ static-cast wiring                       (NOT blocked)
+C1 inference ✔ ──► (on master) ──► everything builds on the unified state
+                                            │
+C2 dispatch ── Phase 2 (post-link resolution) ✔ LANDED
+     │            (methods/traits resolve post-link — the enabling infra exists)
+     │  remaining: cross-module VISIBILITY model (own war; not a C3 blocker)
+     ▼
+C3 Assignability
+     ├─ gate-side ConstructionGate delegation        ✔ (Phase 0/1, §1d, effective-sort)
+     ├─ engine gaps (refinement, Int→Decimal, intersection, function-sorts)  ✔
+     ├─ generics / type-args                          ☐ (NOT blocked)
+     ├─ static-cast wiring                            ☐ (NOT blocked)
+     └─ CoercionResolver deletion  ── needs: RELOCATE the coercion decision off the
+            parser to post-link (a C3-internal move — the post-link infra now exists)
 ```
 
-**The one hard cross-campaign gate:** the largest copy `Assignability` must absorb,
-`CoercionResolver`, is invoked at the **parser** ([AltParser.java:1883] / `:4576`). The
-parser cannot see trait satisfaction — that is a **post-link** fact
-([AssignabilityContext.of] carries *no* trait impls; only [AssignabilityContext.fromModule]
-does, and it needs a finished `IrModule`). So the parser-side migration is **capped at the
-struct↔struct slice already shipped until C2 Phase 2 moves method/trait resolution
-post-link**. Everything else in C3 (below) is independent of C2 and can proceed now.
+**The former "one hard cross-campaign gate" is discharged.** The reasoning was: `CoercionResolver`
+is invoked at the **parser** ([AltParser.java:1888] / `:4605`, still true), and the parser cannot
+see trait satisfaction — a **post-link** fact ([AssignabilityContext.fromModule] needs a finished
+`IrModule`). The roadmap treated this as *"blocked until C2 Phase 2 moves resolution post-link."*
+**C2 Phase 2 has landed** — but Phase 2 moved *dispatch resolution* post-link, it did **not** move
+the *coercion decision* off the parser. So the real remaining step is a **C3-internal relocation**:
+move the parse-time `coercionFor` decision to a post-link gate (exactly as `ConstructionGate`
+already runs post-link with `AssignabilityContext.fromModule`), then delete `CoercionResolver`. This
+no longer waits on C2; it waits on doing the relocation (§4.5). Only the `TraitCast` *permissiveness*
+nuance (§4.3) genuinely touches C2's visibility model.
 
 **C1 is on master** (the `war/scope-aware-narrowing` branch is fully subsumed — master 0
 behind / 207 ahead, verified 2026-07-18), so C3 already builds on the single-engine narrowing
@@ -224,7 +234,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 |---|---|---|---|
 | Refinement-precise leaf subsumption | ✅ **DONE** (2026-07-18) | M | `structurallySubsumes` delegates a refined-`sup` leaf to `Refinements.imply` (compile both sorts, abstain on non-linear predicates). Also fixed a latent unsoundness: `sameType` was predicate-blind (equated `[Int:@>=0]` with `[Int:@>0]`) — now compares predicates. Pinned by `AssignabilityTest.refinementPreciseSubsumption` |
 | `Int→Decimal` / primitive coercion | ✅ **DONE** (2026-07-18) | S | new `Assignment.COERCE` outcome — a lossless primitive conversion (concrete changes), distinct from view-`WIDEN`; structs never get it. Pinned by `AssignabilityTest.numericTowerCoerces_butStructsDoNot` |
-| `construct` fit as a **two-way** prove/reject decision | partial (nominal only, no refinement) | M | §1d: do **not** grow a `UNKNOWN → stamp` tier — fit delegates to `Refinements`; unprovable → compile error (or `[!!]`), never a runtime stamp |
+| `construct` fit as a **two-way** prove/reject decision | ✅ **DONE** (2026-07-21) | M | §1d stamp-kill landed (`5eb9aaa`): the construction/claim gate discharges via `Assignability`+`Refinements` or compile-errors — the `UNKNOWN → runtimeChecks` stamp is gone (sole deferral: parametric `Stream` `[!!]`). Gates now read the materialized effective-sort lens |
 | Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
 | Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **NB (2026-07-19):** these two arms are exactly what the Dispatch/Method elimination (`docs/dispatch-method-elimination.md`, §5) makes **capability-driven** — Stage E1 replaces the `instanceof Method`/`instanceof Dispatch` selection here with a call-kind-capability lookup on the unified `CallSig` node (behavior-preserving) |
@@ -235,8 +245,8 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Decision | Site | Action | Size |
 |---|---|---|---|
 | struct↔struct `let` assign | [AltParser.java:2098] | landed (Slice 1) | — |
-| all other `let` coercions | [AltParser.java:1888] / `:4605` (`coercionFor` → `CoercionResolver`) | **Phase 0 audit (2026-07-20) split this:** 4 of 6 `CoercionResolver` cases are trait-free — `IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None` — migratable **pre-C2** (Phase 5); `Autobox` (tuple→`Stream`) re-homes to the generics slice (Phase 4, retire `isStreamName`); only **`TraitCast`** is C2-Phase-2-blocked — it needs *eager* satisfaction (the parser has `isTrait` but not the post-link impl closure; `CoercionResolver` today is *permissive* and defers). Net: shrink `CoercionResolver` to a trait-upcast stub now; delete it with the residue post-C2. | **M pre-C2 + S residue behind C2** |
-| construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | fit → single-engine query (`Assignability`+`Refinements`); **drop the `UNKNOWN → runtimeChecks` stamp** (§1d) — unprovable = compile error / `[!!]`. Remaining orchestration (dependent-claims, type-params) stays; **demotion projection is removed** (§6.5 — demotion is a view now). | M (context cheap here) |
+| all other `let` coercions | [AltParser.java:1888] / `:4605` (`coercionFor` → `CoercionResolver`, **still parser-invoked**) | The blocker is now C3-internal (§3): the coercion *decision* must **relocate** off the parser to a post-link gate (where `AssignabilityContext.fromModule` has the trait closure), then `CoercionResolver` is deleted. Phase 0 audit split the cases: 4 of 6 are trait-free (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`) — pure engine delegation once relocated; `Autobox` (tuple→`Stream`) re-homes to the generics slice; only **`TraitCast`** touches C2 — its *eager-satisfaction permissiveness* interacts with the cross-module visibility model. | **M (relocation) + S `TraitCast` nuance** |
+| construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | ✅ **DONE (2026-07-21, `5eb9aaa`)** — fit is a single-engine query (`Assignability`+`Refinements`) reading the effective-sort lens; the `UNKNOWN → runtimeChecks` stamp is dropped (§1d); demotion projection removed (§6.5). Dependent-claims/type-params orchestration stays. | — |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
 | cast legality | `IrInterpreter.evalCast` ([:1189]) + `IrExpr.Cast` producers | new wiring for `Assignability.cast` | M (mostly new) |
 
@@ -252,24 +262,171 @@ Therefore:
 - **Gates / checkers** (post-link, module in hand): `.fromModule` is cheap — *easiest place to
   migrate first* (`ConstructionGate` already builds `TypeCatalog.fromModule`).
 - **Parser**: has the `TypeCatalog` cheaply but **no trait impls at parse time** → the wall in
-  §3. Blocked on C2 Phase 2.
+  §3. The fix is to stop deciding coercion at the parser: relocate it to a post-link gate (where
+  `.fromModule` is cheap), the same move `ConstructionGate` already made. No longer a C2 dependency.
 - **Runtime cast** (`IrInterpreter`, a `CompiledModule`): needs a catalog adapter. M.
 
-### 4.5 Recommended order (front-load the unblocked, safe wins)
+### 4.5 C3 — remaining work (re-scoped 2026-07-21)
 
-*Sequencing decision (§6.2): after step 1, steps 2–5 are C2-independent and run in parallel
-with C2; only step 6 serializes behind C2 Phase 2.*
+Everything through the effective-sort landing is **done** (differential harness §4.1; the §4.2
+engine gaps; Phase 0/1 nominal-leg delegation; the §1d stamp-kill; effective-sort consumption
+across the construction, claim, and call gates — see the archived session-logs, Appendix A). The
+finish line is now **three C3-internal items, none blocked on C2** (C2 Phase 2 has landed):
 
-1. ~~Merge C1~~ **DONE** — C1 is already on master (war branch fully subsumed).
-2. ~~DoD + differential harness (§4.1)~~ **DONE** (`fe4d48d`).
-3. ~~Close the cheap engine gaps~~ **DONE** — intersection (`c0fbfa3`), `Int→Decimal`/`COERCE`
-   (`90b6b74`), refinement-precise (`759b9c5`); plus Method/Dispatch function-sorts (`03bd09b`).
-4. ~~**Migrate `ConstructionGate`'s base leg**~~ **DONE (2026-07-20, Phase 1)** — nominal fit now
-   delegates to `Assignability` (see §4.6); refinement leg stays. A real consolidation that never
-   touched the parser.
-5. **Wire static-cast legality** through `Assignability.cast`.
-6. **Defer** the `CoercionResolver` parser deletion until **C2 Phase 2** lands (post-link
-   trait context) — or consciously accept the struct-only slice until then.
+1. **Relocate the coercion decision off the parser, then delete `CoercionResolver`.** The former
+   "blocked on C2" step (§3), now C3-internal: move parse-time `coercionFor` ([AltParser.java:1888]
+   / `:4605`) to a post-link gate that builds `AssignabilityContext.fromModule` (the trait closure),
+   exactly as `ConstructionGate` runs today. 4 of 6 cases are trait-free (pure engine delegation);
+   `Autobox` re-homes to item 2; only `TraitCast`'s eager-satisfaction permissiveness touches C2's
+   visibility model. **Size: M** (relocation) **+ S** (`TraitCast` nuance). *Suggested next — highest
+   consolidation payoff (deletes the largest copy).*
+2. **Generics / type-args** in `Assignability` (`Box[Int]`; the parser guard currently skips
+   type-args). Also retires `isStreamName`/`Autobox`. **Size: L.** Touches C5 where generics meet
+   type-args.
+3. **Static-cast legality wiring** through `Assignability.cast` (`IrExpr.Cast` legality is
+   implicit-at-runtime today; §4.2, §4.3 `cast legality` row). **Size: M** (mostly new wiring).
+
+**Loose ends (own tracks, not on the C3 finish line):**
+- **Dispatch-specificity bug** — no specificity rules anywhere; a *total* overload set (`bark(Dog)`
+  + `bark(Animal)`) throws runtime "Ambiguous dispatch" on a concrete `Dog` instead of preferring
+  the specific overload, while compile-time `OverloadOverlap` allows the overlap. Lives in
+  `DispatchTable`.
+- **`match`-arm effective-sort refinement (low pri)** — `[d:Dog] -> bark(d)` works; the
+  scrutinee-reuse form `[Dog] -> bark(a)` (narrow the bound scrutinee) is the nice-to-have.
+
+**Definition of done** is unchanged (§4.0): all four decisions made by the engine; `CoercionResolver`
++ the `ConstructionGate` fit legs deleted/thinned (item 1 is the last of these); harness green.
+
+## 5. Motivating first customer — `AlgebraicDispatch` → the Dispatch/Method elimination
+
+The differential-programming work (`assign proof f:Algebraic` + runtime `pontif.algebra`
+reflection, landed 2026-07-18) wants a compile-time-safe `$f[Decimal].ast` — a `Dispatch` value
+that *statically* carries "algebraic," so `.ast` is a type error on a non-algebraic function.
+
+**This has its own plan of record now: [`docs/dispatch-method-elimination.md`](dispatch-method-elimination.md).**
+Building `.ast` surfaced that `Method`/`Dispatch` are hardcoded (parser keywords + two bespoke
+`IrSort` kinds + name/`instanceof` logic at ~40 sites) *in a way that makes the type system hard
+to extend*. Ratified with James (2026-07-19): the right move is to **remove that hardcoding**, not
+to bolt `.ast` onto it. So the plan pivoted from the earlier "`AlgebraicDispatch <: Dispatch`
+intersection view" (a stepping stone — see the note below) to:
+
+- **One generic `IrSort.CallSig(typeName, paramSorts, paramNames, returnSort)`** replacing
+  `IrSort.Method` + `IrSort.Dispatch`; `typeName` is data.
+- **Two builtin call-kind capability traits** (function-style / dispatch-style) that *drive*
+  subtyping + value-satisfaction, selected by which the head type is-a — never by name. `Dispatch`
+  and `Method` become ordinary types carrying a capability; the `Type(Args):Return` syntax is
+  attribute-driven and parser discrimination is purely syntactic (trailing `:Return`).
+- **Acid test:** adding a future callable type touches *no* type-system code. `.ast` is then
+  Stage E2 — purely additive on the general machinery, which *proves* the acid test.
+
+Sequencing: **Stage E1** (the elimination, behavior-preserving) then **Stage E2** (`.ast`). Both
+are C2-independent (the `.ast` gate is post-link). Slices A + B (below, `1890fda`) are the
+substrate; Slice B's `Algebraic` marker + `[Dispatch & Algebraic]` intersection are stepping
+stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays until E2 makes
+`astOf` non-exported behind `.ast`.
+
+> **Superseded (kept for provenance):** the earlier §5 framing represented `AlgebraicDispatch` as
+> a nominal `AlgebraicDispatch <: Dispatch` trait-view *layered on the existing structural
+> `IrSort.Dispatch`*. That relocates rather than removes the hardcoding (it keeps the two special
+> sort kinds), which fails the acid test — hence the CallSig/capability design above.
+
+---
+
+## 6. Open decisions (for James)
+
+1. ~~**Filename** — separate doc vs folding into `type-records.md`.~~ **RESOLVED (2026-07-18,
+   James):** kept separate (roadmap vs model), named `type-system-roadmap.md` — "convergence"
+   belongs to the C5 goal, which is related but separate.
+2. ~~**C3 vs C2 sequencing** — parallel or strictly after C2 Phase 2?~~ **RESOLVED (2026-07-18):**
+   mostly parallel. After the C1 merge, the C2-independent C3 slices (engine-internal gaps,
+   the `ConstructionGate`-side harness + base-leg delegation, static-cast wiring — all
+   gate/runtime-stage, module in hand) proceed in parallel with C2; **only** the
+   `CoercionResolver` parser-side harness + deletion serializes behind C2 Phase 2 (the one leg
+   with a real post-link-trait-context dependency). Follow the dependency graph, don't
+   over-serialize. **Update (2026-07-21):** C2 Phase 2 has since **landed**, so even that leg no
+   longer waits on C2 — the remaining step is a C3-internal relocation of the coercion decision
+   to a post-link gate (§3, §4.5). The sequencing question is fully discharged.
+3. ~~**`construct` three-way tier** — grow the UNKNOWN/runtime-check tier or keep it in the
+   gate?~~ **RESOLVED (2026-07-18, James):** dissolved by §1d. **Eliminate the stamp** — the fit
+   is a single-engine subsumption query (`Assignability`+`Refinements`); on unprovable the gate
+   **errors** (as its own let-claim path already does), it does not stamp; `[!!]` is the only
+   deferral. `ConstructionGate` stays as the orchestrator (demotion, dependent-claims,
+   type-params), consulting the one decider for fit.
+4. ~~**Static-cast home** — compile-time gate vs implicit-at-runtime?~~ **RESOLVED (2026-07-18):
+   compile-time**, forced by §1d. `Assignability.cast` proves the coercion path exists (+
+   `Refinements` when the target narrows); provable → the runtime only *executes* a coercion
+   known to succeed; unprovable → compile error (or `[!!]`), never a runtime throw.
+   Identity-preserving downcasts stay legal with no check (a proven determination, not a
+   can-throw check). This clarified the **cast / coercion / view distinction** — three-way, not
+   two-way:
+   - **view only** (variable sort changes, concrete preserved): free `WIDEN` / trait upcast —
+     **no cast, no coercion**.
+   - **concrete change, lose-freely / lossless**: **implicit coercion** at the binding, **no
+     cast** — `Int→Decimal`, autobox. *(Demotion is NOT here — see §6.5: it's a view.)*
+   - **concrete change, not-obviously-safe**: **explicit `(Target:value)` cast** — render
+     (`(String:12)`), sibling re-tag (`Vec3`↔`Color`), narrow.
+
+   `(Target:value)` is the *explicit* concrete-type changer — **not** the only one (the implicit
+   lossless coercions above also change the concrete value without a cast).
+5. ~~**Demotion — view-widen or value-changing re-stamp?**~~ **RESOLVED (2026-07-18, James):
+   view-based — leave the concrete type as-is.** The concrete identity is **immutable**;
+   rebinding to a coarser type is a **view** (the mainstream model — `Animal a = dog` never
+   mutates the `Dog`). Demotion (`Point3D → Point`) is a `WIDEN` that **retains** the value's
+   concrete `Point3D` and restricts access to the declared `Point` interface — it does **not**
+   forget `z` and does **not** re-stamp. **Concrete type changes only by construction or an
+   explicit `(Target:value)` cast.** Consequences ratified with it:
+   - The **re-stamp discipline is retired** (`type-records.md` §132+), and with it the
+     same-structure stale-stamp gap — a demoted value's concrete type is always honest, so
+     runtime trait dispatch ([DispatchTable.java:227], reads the concrete name) is correct by
+     construction (verified 2026-07-18). This is *why* re-stamp existed; it's now unnecessary.
+   - The **cast law shifts** from "lose-freely = *clean forget*" to "**restrict the view,
+     retain the data**." Observable: a pin-less downcast `let back:Point3D = flat` becomes a
+     free **identity-recovery** (recovers `z`), not a fabrication. Requires deliberate prose
+     updates in `README.md` / `docs/univocal-language-design.md`.
+   - The **implicit sibling / same-structure coercion is forbidden** (`Vec3→Color` needs an
+     explicit cast) — which `Assignability` already enforces (`NEEDS_CAST`); a legacy
+     `CoercionResolver` hole to close.
+   - `Assignment.WIDEN` is uniformly view-only (never changes the concrete type), which
+     **simplifies** the C3 engine.
+   *Work status (2026-07-18): (1) **DONE** — demotion made a view; `ConstructionGate`
+   retains the concrete value (no projection/re-stamp), views it at the declared base sort;
+   the projection machinery (`projectDemotion` + helpers) was removed. Full ir+runtime+demo
+   suite green (~1290 tests), README pins intact. (2) **already satisfied** for the nominal
+   case — a same-structure sibling struct assign is already rejected: `Assignability.assign`
+   returns `NEEDS_CAST` and `structAssignBinding` throws ([AltParser.java:2099]); the legacy
+   `CoercionResolver` returns `Mismatch` too. The only residual implicit same-structure
+   coercion is between **transparent aliases**, which is correct under view-based (no concrete
+   change — same structural type) and is tied to `project_type_aliases`, not this ruling.
+   (3) revise the cast-law prose (`README` / `univocal`) — pending. (4) suite = safety net,
+   green. NB: the observable payoffs (free downcast recovery, concrete-based trait dispatch)
+   are follow-on — (1) delivers immutable concrete identity, the foundation they build on.*
+
+---
+
+## 7. Relationships
+
+- `docs/type-records.md` — the Declared/Inferred/Value **model** (C4); the representation half
+  of §1.
+- `docs/inference-unification.md` — C1, the narrowing engine (done).
+- `docs/dispatch-unification.md` + `docs/cross-module-dispatch.md` — C2; phases 1–4 landed
+  (Phase 2's post-link move discharged the old C3 gate — §3), remaining = the visibility model.
+- `docs/dependent-sorts.md`, `docs/feature-matrix.md` — C5, the binding substrate (parallel
+  axis).
+- `docs/univocal-language-design.md` — the cast law (lose-freely / fabricate-never) governing
+  the nominal axis.
+- Engine source: `pontif-ir/types/{Assignability, AssignabilityContext, TypeCatalog, TypeInfo,
+  CoercionResolver}.java`; `pontif-core/symbolic/Refinements.java`;
+  `pontif-ir/{NarrowingInference, ConstructionGate, SortChecker}.java`.
+- Memory: `project_typesystem_api` (the facade/strangler intent, referenced from
+  `TypeSystem.java`), `project_type_spec_layering` (C5), `feedback_declare_war_divide_conquer`
+  (the campaign method).
+
+---
+
+## Appendix A — C3 landed history (archived session handoffs)
+
+*Superseded by §4.5 (the current remaining-work list); kept for provenance — these were the
+live progress boards and session handoffs recorded as C3 advanced (2026-07-20 → 2026-07-21).*
 
 ### 4.6 Progress & resume point (updated 2026-07-20)
 
@@ -456,124 +613,3 @@ bidirectional-coercion example stays correct**, no README change.
 - **`match`-arm effective-sort refinement (low priority)** — `[d:Dog] -> bark(d)` works; the
   scrutinee-reuse form `[Dog] -> bark(a)` (narrow the bound scrutinee `a`) is the nice-to-have.
 
-## 5. Motivating first customer — `AlgebraicDispatch` → the Dispatch/Method elimination
-
-The differential-programming work (`assign proof f:Algebraic` + runtime `pontif.algebra`
-reflection, landed 2026-07-18) wants a compile-time-safe `$f[Decimal].ast` — a `Dispatch` value
-that *statically* carries "algebraic," so `.ast` is a type error on a non-algebraic function.
-
-**This has its own plan of record now: [`docs/dispatch-method-elimination.md`](dispatch-method-elimination.md).**
-Building `.ast` surfaced that `Method`/`Dispatch` are hardcoded (parser keywords + two bespoke
-`IrSort` kinds + name/`instanceof` logic at ~40 sites) *in a way that makes the type system hard
-to extend*. Ratified with James (2026-07-19): the right move is to **remove that hardcoding**, not
-to bolt `.ast` onto it. So the plan pivoted from the earlier "`AlgebraicDispatch <: Dispatch`
-intersection view" (a stepping stone — see the note below) to:
-
-- **One generic `IrSort.CallSig(typeName, paramSorts, paramNames, returnSort)`** replacing
-  `IrSort.Method` + `IrSort.Dispatch`; `typeName` is data.
-- **Two builtin call-kind capability traits** (function-style / dispatch-style) that *drive*
-  subtyping + value-satisfaction, selected by which the head type is-a — never by name. `Dispatch`
-  and `Method` become ordinary types carrying a capability; the `Type(Args):Return` syntax is
-  attribute-driven and parser discrimination is purely syntactic (trailing `:Return`).
-- **Acid test:** adding a future callable type touches *no* type-system code. `.ast` is then
-  Stage E2 — purely additive on the general machinery, which *proves* the acid test.
-
-Sequencing: **Stage E1** (the elimination, behavior-preserving) then **Stage E2** (`.ast`). Both
-are C2-independent (the `.ast` gate is post-link). Slices A + B (below, `1890fda`) are the
-substrate; Slice B's `Algebraic` marker + `[Dispatch & Algebraic]` intersection are stepping
-stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays until E2 makes
-`astOf` non-exported behind `.ast`.
-
-> **Superseded (kept for provenance):** the earlier §5 framing represented `AlgebraicDispatch` as
-> a nominal `AlgebraicDispatch <: Dispatch` trait-view *layered on the existing structural
-> `IrSort.Dispatch`*. That relocates rather than removes the hardcoding (it keeps the two special
-> sort kinds), which fails the acid test — hence the CallSig/capability design above.
-
----
-
-## 6. Open decisions (for James)
-
-1. ~~**Filename** — separate doc vs folding into `type-records.md`.~~ **RESOLVED (2026-07-18,
-   James):** kept separate (roadmap vs model), named `type-system-roadmap.md` — "convergence"
-   belongs to the C5 goal, which is related but separate.
-2. ~~**C3 vs C2 sequencing** — parallel or strictly after C2 Phase 2?~~ **RESOLVED (2026-07-18):**
-   mostly parallel. After the C1 merge, the C2-independent C3 slices (engine-internal gaps,
-   the `ConstructionGate`-side harness + base-leg delegation, static-cast wiring — all
-   gate/runtime-stage, module in hand) proceed in parallel with C2; **only** the
-   `CoercionResolver` parser-side harness + deletion serializes behind C2 Phase 2 (the one leg
-   with a real post-link-trait-context dependency). Follow the dependency graph, don't
-   over-serialize.
-3. ~~**`construct` three-way tier** — grow the UNKNOWN/runtime-check tier or keep it in the
-   gate?~~ **RESOLVED (2026-07-18, James):** dissolved by §1d. **Eliminate the stamp** — the fit
-   is a single-engine subsumption query (`Assignability`+`Refinements`); on unprovable the gate
-   **errors** (as its own let-claim path already does), it does not stamp; `[!!]` is the only
-   deferral. `ConstructionGate` stays as the orchestrator (demotion, dependent-claims,
-   type-params), consulting the one decider for fit.
-4. ~~**Static-cast home** — compile-time gate vs implicit-at-runtime?~~ **RESOLVED (2026-07-18):
-   compile-time**, forced by §1d. `Assignability.cast` proves the coercion path exists (+
-   `Refinements` when the target narrows); provable → the runtime only *executes* a coercion
-   known to succeed; unprovable → compile error (or `[!!]`), never a runtime throw.
-   Identity-preserving downcasts stay legal with no check (a proven determination, not a
-   can-throw check). This clarified the **cast / coercion / view distinction** — three-way, not
-   two-way:
-   - **view only** (variable sort changes, concrete preserved): free `WIDEN` / trait upcast —
-     **no cast, no coercion**.
-   - **concrete change, lose-freely / lossless**: **implicit coercion** at the binding, **no
-     cast** — `Int→Decimal`, autobox. *(Demotion is NOT here — see §6.5: it's a view.)*
-   - **concrete change, not-obviously-safe**: **explicit `(Target:value)` cast** — render
-     (`(String:12)`), sibling re-tag (`Vec3`↔`Color`), narrow.
-
-   `(Target:value)` is the *explicit* concrete-type changer — **not** the only one (the implicit
-   lossless coercions above also change the concrete value without a cast).
-5. ~~**Demotion — view-widen or value-changing re-stamp?**~~ **RESOLVED (2026-07-18, James):
-   view-based — leave the concrete type as-is.** The concrete identity is **immutable**;
-   rebinding to a coarser type is a **view** (the mainstream model — `Animal a = dog` never
-   mutates the `Dog`). Demotion (`Point3D → Point`) is a `WIDEN` that **retains** the value's
-   concrete `Point3D` and restricts access to the declared `Point` interface — it does **not**
-   forget `z` and does **not** re-stamp. **Concrete type changes only by construction or an
-   explicit `(Target:value)` cast.** Consequences ratified with it:
-   - The **re-stamp discipline is retired** (`type-records.md` §132+), and with it the
-     same-structure stale-stamp gap — a demoted value's concrete type is always honest, so
-     runtime trait dispatch ([DispatchTable.java:227], reads the concrete name) is correct by
-     construction (verified 2026-07-18). This is *why* re-stamp existed; it's now unnecessary.
-   - The **cast law shifts** from "lose-freely = *clean forget*" to "**restrict the view,
-     retain the data**." Observable: a pin-less downcast `let back:Point3D = flat` becomes a
-     free **identity-recovery** (recovers `z`), not a fabrication. Requires deliberate prose
-     updates in `README.md` / `docs/univocal-language-design.md`.
-   - The **implicit sibling / same-structure coercion is forbidden** (`Vec3→Color` needs an
-     explicit cast) — which `Assignability` already enforces (`NEEDS_CAST`); a legacy
-     `CoercionResolver` hole to close.
-   - `Assignment.WIDEN` is uniformly view-only (never changes the concrete type), which
-     **simplifies** the C3 engine.
-   *Work status (2026-07-18): (1) **DONE** — demotion made a view; `ConstructionGate`
-   retains the concrete value (no projection/re-stamp), views it at the declared base sort;
-   the projection machinery (`projectDemotion` + helpers) was removed. Full ir+runtime+demo
-   suite green (~1290 tests), README pins intact. (2) **already satisfied** for the nominal
-   case — a same-structure sibling struct assign is already rejected: `Assignability.assign`
-   returns `NEEDS_CAST` and `structAssignBinding` throws ([AltParser.java:2099]); the legacy
-   `CoercionResolver` returns `Mismatch` too. The only residual implicit same-structure
-   coercion is between **transparent aliases**, which is correct under view-based (no concrete
-   change — same structural type) and is tied to `project_type_aliases`, not this ruling.
-   (3) revise the cast-law prose (`README` / `univocal`) — pending. (4) suite = safety net,
-   green. NB: the observable payoffs (free downcast recovery, concrete-based trait dispatch)
-   are follow-on — (1) delivers immutable concrete identity, the foundation they build on.*
-
----
-
-## 7. Relationships
-
-- `docs/type-records.md` — the Declared/Inferred/Value **model** (C4); the representation half
-  of §1.
-- `docs/inference-unification.md` — C1, the narrowing engine (done).
-- `docs/dispatch-unification.md` + `docs/cross-module-dispatch.md` — C2; Phase 2 is the C3
-  linchpin.
-- `docs/dependent-sorts.md`, `docs/feature-matrix.md` — C5, the binding substrate (parallel
-  axis).
-- `docs/univocal-language-design.md` — the cast law (lose-freely / fabricate-never) governing
-  the nominal axis.
-- Engine source: `pontif-ir/types/{Assignability, AssignabilityContext, TypeCatalog, TypeInfo,
-  CoercionResolver}.java`; `pontif-core/symbolic/Refinements.java`;
-  `pontif-ir/{NarrowingInference, ConstructionGate, SortChecker}.java`.
-- Memory: `project_typesystem_api` (the facade/strangler intent, referenced from
-  `TypeSystem.java`), `project_type_spec_layering` (C5), `feedback_declare_war_divide_conquer`
-  (the campaign method).
