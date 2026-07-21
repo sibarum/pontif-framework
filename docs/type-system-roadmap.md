@@ -347,6 +347,76 @@ elimination doc (a fresh context was intended for it).
 
 ---
 
+### 4.7 Effective-sort work — session handoff (2026-07-21)
+
+This session pivoted C3 from the §4.5 sequencing into James's **effective-sort** requirement (the
+Inferred record of `type-records.md`, i.e. the *accumulated* sort at each position). Full narrative
+below; **read this before resuming**.
+
+**LANDED on master (each committed, full `mvn test` green):**
+- `2d213d3` — ConstructionGate nominal fit leg → `Assignability` (Phase 1).
+- `b77ebf1` — `NarrowingInference.effectiveSort(expr, ctx)` (use-site projection) + `hypothesesFromEnv`
+  widened to **field invariants**, sourced from the field's *effective* sort (reuses `inferFieldAccess`).
+- `0de9003` — `NarrowingInference.effectiveSorts(root, ctx) → Map<Origin.Span, IrSort>` (lens over a
+  tree) + shared env-threading helpers `letBodyCtx`/`matchArmCtx`/`lambdaBodyCtx` (infer reuses them).
+- `0ca02a0` — **materialize**: `EffectiveSortLens.of(module)` → the lens carried on `CompiledModule`
+  (new `effectiveSorts` field + back-compat ctor); computed in `IrCompiler` after promotions, before
+  the gate. Robustness: `effectiveSort` caps projection at a predicate-depth bound (`predicateDepthWithin`,
+  iterative) — dense projection over the plot module overflowed `closeOver`'s recursive predicate walk.
+
+**STASHED — `git stash list` → `stash@{0}` "phase3-wip …":** the construction/claim gate CONSUMING the
+lens + §1d stamp-kill. Correct and working (the README-opener `Account(this.balance+n)` now *proves* at
+compile time via the accumulated `[Int:@>=1]`), but NOT committed because it needs the churn below +
+vetting. Contents: `ConstructionGate` gains `effectiveArg` (reads `lens.get(span)`, inference fallback),
+routes `argSort`→`effectiveArg` in `gateRecord`/`gateClaim`, threads `lens` through `rewriteExpr`; the
+`UNKNOWN → stamp` is replaced by a **compile error** (except the parametric-`Stream` `[!!]` defer);
+`classify` gains a `refinementFits` fallback (Int+Decimal via `Refinements.imply`) so Decimal-literal
+fits discharge; `IrCompiler` calls `ConstructionGate.rewrite(resolved, effectiveSorts)`; plus an
+`inferRecord` fix (a plain construction with no refined fields now infers the bare struct type, not
+null) and a 4-case call-gate probe test. `InferenceContext.withParams` helper added.
+
+**To land the stash (next session, step 3 finish):** pop it, then resolve the **15 churn tests** — all
+the agreed §1d change (unprovable/overlap → compile error), NOT regressions:
+- 12 §1d flips → expect compile-error: `ConstructionGateTest` {`decimalRefinedField`, `overlapCase_isActuallyStamped`,
+  `overlappingDeclaredVar_compilesAndPasses…`, `…failsAtConstruction…`}; `LetClaimGateTest`
+  {`decimalClaim_misses`, `forcing_chainsThroughDependentLets`, `genuineZeroArgFunctions`, `overlapClaim_isActuallyStamped`,
+  `overlapClaim_passesWhenValueFits…`, `unreferencedTopLevelLet_constructionChecksAlsoFire`, `…isStillNotarized`};
+  `SpecOnlyLetTest.synthesizedBinding_isForcedLikeAnyOther`.
+- 3 top-level downcasts → **compile-error** (James's ruling: unchecked downcast is *wrong*):
+  `TraitAttributeTest.traitDowncastToConcreteStruct_recoversFields`, `RecursiveTraitTest.recursiveTrait_implementedAndUsed`,
+  `ReadmeSnippetTest.readmeTraitCoercionSnippet_roundTripsTo4`. (These were top-level lets lowered to
+  0-arg functions, so the downcast crosses a declared-return contract — genuinely unprovable; they only
+  worked before via the killed runtime stamp.) Then vet the `inferRecord` change against the full suite.
+
+**THE KEY OPEN REQUIREMENT (James, the real "next"): the CALL gate must consume the effective sort.**
+Today the call/dispatch gate (`SortChecker`/`StaticDispatch`) resolves on the **declared** sort, not the
+effective one — so James's four cases fail where they should pass. With only `bark(d:Dog)` (no fallback
+— pure static resolution, no specificity needed):
+```
+let dog:Animal = Dog()             # effective Dog → bark(dog) SHOULD route    — currently FAILS ("cannot prove routes")
+function speak(a:Animal)->bark(a)  # a is just Animal → SHOULD compile-error   — currently fails (correctly)
+let dog:Animal = Husky()           # effective Husky is-a Dog → SHOULD route   — currently fails
+let cat:Animal = Cat()             # effective Cat not-a Dog → SHOULD compile-error
+```
+Fix = the same move as step 3, applied to the call path: thread the effective-sort lens into the call
+gate so `bark(dog)` sees `dog`'s effective `Dog`. The probe `ConstructionGateTest.effectiveSortCallRouting_fourCases`
+(in the stash) is the regression target. My earlier "declared-view" mis-analysis was a red herring —
+dispatch already routes on the concrete at *runtime*; the gap is purely the *static* call gate reading
+the declared label.
+
+**Separate latent bug (NOT needed for the four cases, note for later):** there are **no specificity
+rules anywhere**. With a *total* overload set (`bark(Dog)` + `bark(Animal)`), a concrete `Dog` matches
+both and runtime dispatch throws **"Ambiguous dispatch between 2 candidates"** instead of preferring the
+more-specific `bark(Dog)`. The compile-time `OverloadOverlap` check *allows* these overlapping overloads
+(assuming specificity resolves them), so compile-time and runtime disagree. Lives in `DispatchTable`.
+
+**Also document (low priority):** effective-sort refinement in a `match` arm — `[d:Dog] -> bark(d)`
+works today; the `[Dog] -> bark(a)` (reuse the scrutinee, narrowed) form is the nice-to-have.
+
+**Recommended next-session order:** (1) pop the stash, resolve the 15 churn + vet `inferRecord`, commit
+step 3 green; (2) the call-gate effective-sort consumption (the four cases); (3) the docs above; the
+dispatch-specificity bug is its own separate track.
+
 ## 5. Motivating first customer — `AlgebraicDispatch` → the Dispatch/Method elimination
 
 The differential-programming work (`assign proof f:Algebraic` + runtime `pontif.algebra`
