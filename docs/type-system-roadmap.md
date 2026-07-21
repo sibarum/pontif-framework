@@ -118,7 +118,7 @@ Status markers: ☐ not started · ◐ in progress · ☑ landed.
 |---|---|---|---|---|
 | C1 | **Inference unification** | narrowing = one engine (`NarrowingInference`) | ☑ landed (on master) | `inference-unification.md` |
 | C2 | **Dispatch unification** | method/operator/trait resolution → post-link | ◐ **core landed** (phases 1–4 + Cluster 4 — resolution IS post-link); remaining = the cross-module **visibility** model | `dispatch-unification.md`, `cross-module-dispatch.md` |
-| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine, gates & let-coercion landed** (Phase 0/1, §1d, effective-sort, `CoercionResolver` deleted — §4.5 item 1); remaining = generics, static-cast | **this doc** (§4) |
+| C3 | **Nominal-subtype / `Assignability`** | is-a / assign / construct / cast = one engine | ◐ **engine, gates, let-coercion & type-args landed** (§1d, effective-sort, `CoercionResolver` deleted §4.5 item 1, parametric invariance §4.5 item 2); remaining = static-cast (+ item-2 follow-ups: inference-carries-type-args, Stream retirement) | **this doc** (§4) |
 | C4 | **Three-records model** | Declared / Inferred / Value split | ☑ **effectively landed** (audited 2026-07-21) — landed incidentally through C2/C3; residual = doc reconciliation only (§ notes) | `type-records.md` |
 | C5 | **Scoped type-level binding substrate** | dependent sorts, structural traits, Type fragments, sub-traits, generics | ◐ **per-facet** (audited 2026-07-21): generics + sub-traits ☑, dependent-sorts + Type-fragments ◐, structural traits ☐ | `TODO.md` "4 facets", `dependent-sorts.md`, `feature-matrix.md` |
 
@@ -144,13 +144,15 @@ war docs.
   (import-by-association under the orphan rule) — its own war, `cross-module-dispatch.md`. **NB
   (2026-07-21):** Phase 2 landing means the roadmap's old "C3 blocked until C2 Phase 2" edge (§3)
   is **discharged** — see the reframed §3.
-- **C3 (nominal-subtype) — engine, gates & let-coercion landed.** `Assignability`
+- **C3 (nominal-subtype) — engine, gates, let-coercion & type-args landed.** `Assignability`
   ([pontif-ir/types/Assignability.java]) is a pure engine over `IrSort` + a `TypeCatalog`. Landed:
   Slice 0/1, the §4.2 engine gaps, Phase 0/1 (ConstructionGate nominal leg → engine), the §1d
   stamp-kill, the effective-sort consumption across the construction/claim/**call** gates
-  (§4.6+ archive), and **let-coercion (§4.5 item 1, `22578bf`): `CoercionResolver` deleted, the parser
-  decides trait-free coercion via `Assignability`.** Remaining: generics/type-args, static-cast wiring
-  (§4.5). This doc is its plan-of-record (§4).
+  (§4.6+ archive), **let-coercion (§4.5 item 1, `22578bf`): `CoercionResolver` deleted, the parser
+  decides trait-free coercion via `Assignability`**, and **parametric type-args (§4.5 item 2,
+  `88e3aec`): invariant `Box[Int]`≠`Box[Bool]`, parser routes parametric lets through the engine.**
+  Remaining: static-cast wiring; item-2 follow-ups (inference-carries-type-args, Stream retirement).
+  This doc is its plan-of-record (§4).
 - **C4 (three-records) — effectively landed (audited 2026-07-21); code is ahead of `type-records.md`.**
   The split is realized as three distinct artifacts: **Declared** = `LetIn.claim()` / param
   `sort()` (+ `MethodOperatorResolver.declaredReturns`); **Inferred** = `NarrowingInference`,
@@ -271,7 +273,7 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 | Refinement-precise leaf subsumption | ✅ **DONE** (2026-07-18) | M | `structurallySubsumes` delegates a refined-`sup` leaf to `Refinements.imply` (compile both sorts, abstain on non-linear predicates). Also fixed a latent unsoundness: `sameType` was predicate-blind (equated `[Int:@>=0]` with `[Int:@>0]`) — now compares predicates. Pinned by `AssignabilityTest.refinementPreciseSubsumption` |
 | `Int→Decimal` / primitive coercion | ✅ **DONE** (2026-07-18) | S | new `Assignment.COERCE` outcome — a lossless primitive conversion (concrete changes), distinct from view-`WIDEN`; structs never get it. Pinned by `AssignabilityTest.numericTowerCoerces_butStructsDoNot` |
 | `construct` fit as a **two-way** prove/reject decision | ✅ **DONE** (2026-07-21) | M | §1d stamp-kill landed (`5eb9aaa`): the construction/claim gate discharges via `Assignability`+`Refinements` or compile-errors — the `UNKNOWN → runtimeChecks` stamp is gone (sole deferral: parametric `Stream` `[!!]`). Gates now read the materialized effective-sort lens |
-| Generics / type-args (`Box[Int]`) | absent (parser guard skips type-args) | L | |
+| Generics / type-args (`Box[Int]`) | ✅ **DONE** (2026-07-21, `88e3aec`) | L | Invariant type-args in `sameType` + a same-head `isA` arm (type-var arg = slot); parser bail dropped. Follow-up: inference doesn't yet carry derived type-args (a direct `let b:Box[Int] = Box(5)` is rejected) |
 | Intersection sorts | ✅ **DONE** (2026-07-18) | S | `isA` gained the dual-of-union arms (is-a ∩ = every branch; ∩ is-a X = some branch); pinned by `AssignabilityTest.intersectionSubtyping` |
 | Method / Dispatch function-sorts | ✅ **DONE** (2026-07-18) | M | `isA` arms: **Method** delegates to `Refinements.imply` (contra-params / covariant-return); **Dispatch** decided directly (same keys, covariant return — imply has no dispatch arm); the two never cross-assign. Pinned by `AssignabilityTest.method/dispatchSortSubtyping`. **NB (2026-07-19):** these two arms are exactly what the Dispatch/Method elimination (`docs/dispatch-method-elimination.md`, §5) makes **capability-driven** — Stage E1 replaces the `instanceof Method`/`instanceof Dispatch` selection here with a call-kind-capability lookup on the unified `CallSig` node (behavior-preserving) |
 | Static-cast legality wiring | decision present, unwired | M | currently decided *nowhere*; `IrExpr.Cast` legality is implicit-at-runtime |
@@ -322,11 +324,26 @@ finish line is now **two C3-internal items, none blocked on C2** (C2 Phase 2 has
    the post-link gate" mechanism was tried and reverted — it over-reached into `gateRecord`, regressing
    valid unknown-sort construction args and colliding with transform-chain lets. Deciding the trait-free
    case at the parser is behavior-preserving and lower-risk.)*
-2. **Generics / type-args** in `Assignability` (`Box[Int]`; the parser guard currently skips
-   type-args). Also retires `isStreamName`/`Autobox`. **Size: L.** Touches C5 where generics meet
-   type-args.
+2. ✅ **DONE (2026-07-21, `88e3aec`) — `Assignability` judges parametric type-args (invariant).**
+   `sameType` requires identical type-args; a same-head `isA` arm (before the nominal-base widen)
+   decides applied sorts by their args, with a type-**variable** arg treated as a slot (matches
+   anything, so `Box[T]` fields still accept `Box[Int]` at construction); `assign` returns ILLEGAL
+   (not NEEDS_CAST) for a same-head parametric mismatch. The parser's `nominalBinding` type-arg bail
+   is dropped, so a parametric `let x:Box[Int] = …` is decided by the engine.
+   **Two follow-ups (pinned/deferred, not blocking):** (a) *inference-carries-type-args* — a direct
+   `let b:Box[Int] = Box(5)` is currently rejected because construction inference yields a bare `Box`
+   (doesn't carry the derived arg); §1d-honest but a false rejection until `inferRecord` stamps
+   derived type-args (pinned by `parametricLet_directConstruction_isRejected_KNOWN_LIMITATION`).
+   (b) *Stream/`Autobox` retirement* stays deferred (see below).
 3. **Static-cast legality wiring** through `Assignability.cast` (`IrExpr.Cast` legality is
-   implicit-at-runtime today; §4.2, §4.3 `cast legality` row). **Size: M** (mostly new wiring).
+   implicit-at-runtime today; §4.2, §4.3 `cast legality` row). **Size: M** (mostly new wiring). *The
+   sole remaining C3 finish-line item.*
+
+**Deferred from item 2 — retire `isStreamName`/`Autobox`.** Entangled and out of the is-a path: the
+parametric-`Stream` runtime element deferral (`ConstructionGate` — the one sanctioned §1d runtime
+check), the tuple→`Stream` `Autobox` *coercion* (not an is-a; `streamElementError`'s Int→Decimal rule),
+and `gated()` gating only parametric `Stream`. Its own slice with its own regressions; the type-arg
+engine work did not need it.
 
 **Follow-up (deferred from item 1):** *eager trait-satisfaction for `let`s* — a `let x:SomeTrait =
 nonSatisfier` is still permissive (deferred), as it was before; gating bare-trait claims so it errors is
