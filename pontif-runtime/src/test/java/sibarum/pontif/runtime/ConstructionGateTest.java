@@ -36,6 +36,16 @@ class ConstructionGateTest {
             struct Lift(base:[[Int:0]|Omega])
             """;
 
+    /** Struct-only unions for the union-arg-vs-union-field trichotomy (Case C). */
+    private static final String UNIONS = """
+            struct A()
+            struct B()
+            struct C()
+            struct D()
+            struct WrapAB(inner:[A|B])
+            struct WrapABC(inner:[A|B|C])
+            """;
+
     private final PontifCompiler compiler = new PontifCompiler();
     private final PontifRunner runner = new PontifRunner();
 
@@ -214,6 +224,56 @@ class ConstructionGateTest {
         assertNotNull(construction, "expected the Holder construction");
         assertTrue(construction.runtimeChecks().isEmpty(),
                 () -> "a proven widen must not be stamped; got: " + construction.runtimeChecks());
+    }
+
+    // --- Case C: a UNION argument at a UNION field (the classify reorder) -----
+    // classify() tests `arg instanceof Union` BEFORE `field instanceof Union`, so a
+    // union arg is decomposed branch-by-branch against the field union. This is the
+    // only arg/field combination the ordering changes, and it is the whole reason
+    // reflexive/subset union subsumption (U ⊑ U) is provable at construction — the
+    // AlgExpr-returned-into-an-AlgExpr-field scenario. The two FITS tests turn red if
+    // the reorder is reverted (they revert to a spurious "cannot be proved" error);
+    // the two error tests pin the soundness edges the reorder must NOT breach.
+
+    @Test
+    void unionArgEqualsUnionField_fitsReflexively() {
+        // arg [A|B] into field [A|B]: each arg branch (A, B) is a member of the field
+        // union → allFit → FITS. Pre-reorder this asked "does the whole [A|B] fit a
+        // single field branch?" for every branch → UNKNOWN → a spurious compile error.
+        CompileResult r = compiler.compileAlt(
+                UNIONS + "function w(x:[A|B]):WrapAB -> WrapAB(x)\nw(A())", "u.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "reflexive union subsumption at construction must compile; got: " + errorText(r));
+    }
+
+    @Test
+    void unionArgSubsetOfUnionField_fits() {
+        // arg [A|B] into field [A|B|C]: a proper subset — both arg branches are members
+        // of the field union → FITS.
+        CompileResult r = compiler.compileAlt(
+                UNIONS + "function w(x:[A|B]):WrapABC -> WrapABC(x)\nw(A())", "u.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "subset union subsumption must compile; got: " + errorText(r));
+    }
+
+    @Test
+    void unionArgFullyDisjointFromUnionField_isCompileError() {
+        // arg [C|D] into field [A|B]: EVERY arg branch is disjoint from the whole field
+        // union → allDisjoint → DISJOINT → "can never satisfy". The reorder must not
+        // turn a provable miss into a wrong accept.
+        assertCompileError(UNIONS + "function w(x:[C|D]):WrapAB -> WrapAB(x)\nw(C())");
+    }
+
+    @Test
+    void unionArgPartiallyCoveredByUnionField_isUnprovable() {
+        // arg [A|C] into field [A|B]: A fits, C is disjoint → neither allFit nor
+        // allDisjoint → UNKNOWN → §1d "cannot be proved to satisfy". A wrong FITS here
+        // would unsoundly admit a value that might be a C.
+        assertUnprovableConstruction(UNIONS + "function w(x:[A|C]):WrapAB -> WrapAB(x)\nw(A())");
+    }
+
+    private static String errorText(CompileResult r) {
+        return r instanceof CompileResult.Failed f ? f.error().text() : "(compiled clean)";
     }
 
     // --- the README flagship, now honest -------------------------------------

@@ -92,6 +92,29 @@ class CallGateTest {
     }
 
     @Test
+    void unionAliasParam_memberArg_isNotWronglyRejected() {
+        // firstUnprovableCall resolves type aliases (AliasResolver.resolve) BEFORE
+        // walking the gate. Without that step the param sort `U` reaches the gate as a
+        // bare Named the refinement kernel can't relate to member A, so f(A()) reads as
+        // a provable misroute (imply(A, U) → Failed) and is WRONGLY rejected. With
+        // resolution, U ↦ [A|B], A is a member → the call routes → compiles.
+        //
+        // This is the inverse failure mode of the abstain tests above: here the gate
+        // must NOT fire on a call that genuinely routes. Reverting the alias-resolve
+        // line turns this red with a spurious "Cannot prove the call to 'f'".
+        CompileResult r = compiler.compileAlt("""
+                module m
+                struct A()
+                struct B()
+                let U:Type[A|B]
+                function f(x:U):Int -> 0
+                f(A())""", "alias.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "a member arg at a union-alias param must route, not be rejected; got: "
+                        + (r instanceof CompileResult.Failed f ? f.error().text() : r));
+    }
+
+    @Test
     void abstainsOnResidualCall() {
         // pass(n) where n:Int is unrefined: the arg can't be proven to satisfy
         // @>0, but it isn't provably disjoint either → RESIDUAL → the gate
