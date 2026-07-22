@@ -704,13 +704,13 @@ class PlotExtensionTest {
     }
 
     @Test
-    void reliableSpans_isolatedPole_breaksInsteadOfDrawingAcrossIt() {
-        // curve, curve, POLE, curve, curve — the lone pole must NOT render (a break), so only the
-        // four curve columns become series. No solid line spanning the discontinuity.
+    void reliableSpans_isolatedPole_breaksTheCurveIntoTwoConnectedPolylines() {
+        // curve, curve, POLE, curve, curve — the two curve stretches connect into ONE polyline each,
+        // and the lone pole is a break between them (not a line across it). So exactly two series.
         var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0), span(1, 0.0, 0.0),
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0)));
-        assertEquals(4, series.size(), "isolated pole breaks — only the 4 curve columns draw");
+        assertEquals(2, series.size(), "one connected polyline on each side of the broken pole");
     }
 
     @Test

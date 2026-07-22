@@ -215,11 +215,14 @@ public final class DasumBridge {
     }
 
     /**
-     * Turn per-column interval spans into vertical line series over {@code [xlo, xhi]}. Framing
-     * policy (v1, native-side): a ROBUST y-range (2nd–98th percentile of the bounded columns'
-     * bounds) so a near-pole spike can't flatten the plot. A pole column fills that range (the
-     * block), an empty column is omitted (the break), a curve column is a clamped vertical segment
-     * (with a small height floor so a flat curve still reads as a line). Package-visible test seam.
+     * Turn per-column interval spans into readable line series over {@code [xlo, xhi]}. Each maximal
+     * run of consecutive CURVE columns becomes ONE connected polyline through the column midpoints
+     * (clamped to the viewport) — so the plot reads as a curve, not a field of vertical dashes.
+     * A break (an empty column, or an isolated pole) ends the current polyline; the curve resumes as
+     * a fresh one on the far side — so an asymptote is a clean gap, never a line drawn across it. A
+     * DENSE pole run (unresolvable detail) still fills as full-height bars. The y-range is a ROBUST
+     * 2nd–98th percentile of the bounded columns so a near-pole spike can't flatten the plot.
+     * Package-visible test seam.
      */
     static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue) {
         List<ReliableSpan> spans = parseSpans(spansValue);
@@ -229,27 +232,40 @@ public final class DasumBridge {
         for (ReliableSpan s : spans) if (s.kind() == 0) { bounds.add(s.lo()); bounds.add(s.hi()); }
         double[] yr = robustRange(bounds);
         double ymin = yr[0], ymax = yr[1];
-        double minH = (ymax - ymin) * 0.004;   // height floor so a flat curve still reads as a line
         double dx = (xhi - xlo) / n;
         boolean[] fillPole = densePoleRuns(spans);   // which pole columns are a dense (fillable) run
         List<Series> out = new ArrayList<>();
+        List<Double> runX = new ArrayList<>(), runY = new ArrayList<>();   // the polyline in progress
         for (int i = 0; i < n; i++) {
             ReliableSpan s = spans.get(i);
-            if (s.kind() == 2) continue;                         // empty → break (draw nothing)
             double x = xlo + (i + 0.5) * dx;
-            double ylo, yhi;
-            if (s.kind() == 1) {                                 // pole
-                if (!fillPole[i]) continue;                      // isolated asymptote → BREAK, not a
-                ylo = ymin; yhi = ymax;                          // line across it; only a dense run fills
-            } else {                                             // curve → clamped vertical segment
-                ylo = Math.max(ymin, s.lo());
-                yhi = Math.min(ymax, s.hi());
-                if (yhi < ylo) continue;                         // wholly outside the viewport
-                if (yhi - ylo < minH) { double m = (ylo + yhi) / 2; ylo = m - minH / 2; yhi = m + minH / 2; }
+            if (s.kind() == 0) {                                 // curve → a point on the polyline
+                runX.add(x);
+                runY.add(clampTo((s.lo() + s.hi()) / 2.0, ymin, ymax));
+                continue;
             }
-            out.add(Series.line(new double[]{x, x}, new double[]{ylo, yhi}, SERIES_COLOR));
+            flushRun(runX, runY, out);                           // pole/empty breaks the polyline
+            if (s.kind() == 1 && fillPole[i]) {                  // dense pole → fill (the block)
+                out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, SERIES_COLOR));
+            }
         }
+        flushRun(runX, runY, out);
         return out;
+    }
+
+    /** Emit the accumulated points as one polyline (if it has ≥ 2 of them) and reset the buffer. */
+    private static void flushRun(List<Double> xs, List<Double> ys, List<Series> out) {
+        if (xs.size() >= 2) {
+            double[] ax = new double[xs.size()], ay = new double[ys.size()];
+            for (int i = 0; i < ax.length; i++) { ax[i] = xs.get(i); ay[i] = ys.get(i); }
+            out.add(Series.line(ax, ay, SERIES_COLOR));
+        }
+        xs.clear();
+        ys.clear();
+    }
+
+    private static double clampTo(double v, double lo, double hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
     }
 
     /** A run of consecutive {@code Unbounded} pole columns this long or longer is a DENSE region
