@@ -633,8 +633,55 @@ class PlotExtensionTest {
 
         assertFalse(r.isError(), () -> "auto-plot sample should run; got " + r.text());
         List<DasumBridge.ReliableSpan> spans = DasumBridge.parseSpans(captured[0]);
-        assertEquals(256, spans.size(), "256 columns over the default [-10,10] domain");
+        assertEquals(256, spans.size(), "256 columns over the auto-framed domain");
         assertTrue(spans.stream().anyMatch(s -> s.kind() == 1),
                 "1/(x^2-1) must produce pole columns (Unbounded) at x = ±1");
+    }
+
+    /** Runs a no-domain plotExpr program and returns the auto-framed window [xlo, xhi] the native
+     *  received (or null if renderReliable wasn't reached). Exercises the whole end-to-end path:
+     *  autoFrame's evalInterval scan → framing → the render boundary. No window opens. */
+    private static double[] capturedWindow(String body) {
+        Extensions.install(new PlotExtension());
+        double[] win = new double[2];
+        boolean[] got = {false};
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            win[0] = ((java.math.BigDecimal) args.get(0)).doubleValue();
+            win[1] = ((java.math.BigDecimal) args.get(1)).doubleValue();
+            got[0] = true;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderReliable", stub);
+        NativeCalls.register("pontif.plot/renderReliable", stub);
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt(body, "autoframe.ptf"), PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "auto-framed plotExpr should run; got " + r.text());
+        assertTrue(got[0], "renderReliable should have been reached");
+        return win;
+    }
+
+    @Test
+    void plotExpr_autoFramesToBracketThePolynomialsRoots() {
+        // (x-2)(x+3) = x^2 + x - 6: sign changes at x = -3 and x = 2, so the numeric auto-window
+        // (no domain given) must contain both roots — the "specify f, get a framed plot" path.
+        double[] win = capturedWindow("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{plotExpr}
+                function p(x:Decimal):Decimal -> x*x + x - 6.0
+                assign proof p:Algebraic
+                plotExpr($p[Decimal].ast)""");
+        assertTrue(win[0] <= -3.0, "window should bracket the root at -3; lo=" + win[0]);
+        assertTrue(win[1] >= 2.0, "window should bracket the root at 2; hi=" + win[1]);
+    }
+
+    @Test
+    void plotExpr_autoFrameFallsBackWhenThereAreNoFeatures() {
+        // A nonzero constant has no roots and no poles → the default [-10, 10] window.
+        double[] win = capturedWindow("""
+                requires pontif.algebra.{AlgExpr, Const}
+                requires pontif.plot.{plotExpr}
+                plotExpr(Const(5.0))""");
+        assertEquals(-10.0, win[0], 1e-9, "fallback lo");
+        assertEquals(10.0, win[1], 1e-9, "fallback hi");
     }
 }

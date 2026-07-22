@@ -251,6 +251,21 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   `Expression` convenience overload is **deferred** until the transitive-union linking bug is fixed
   (a recursive-union / module-linking issue, adjacent to the `ba22576` work). On-ramp meanwhile:
   `plotExpr($f[Decimal].ast)`, a hand-built tree, or `plotExpr(myExpr.ast)`.
+- **Slice 4a — numeric auto-framing (LANDED 2026-07-22).** `plotExpr(e)` with no domain now
+  chooses its x-window by scanning the probe range `[-32, 32]` with `evalInterval`: a column is a
+  FEATURE if it's `Unbounded` (a pole) or its midpoint sign differs from the previous real column's
+  (a root crossing), and the window is the feature span padded (fallback `[-10, 10]`). Uses only
+  `pontif.algebra` — no `pontif.poly`, so it **sidesteps the transitive-import bug**, and it is
+  strictly more robust than roots-based framing: it brackets irrational and transcendental features
+  the rational root-finder can't reach. Verified end-to-end by `PlotExtensionTest`
+  (`plotExpr(x²+x−6)` brackets roots −3 and 2; a constant falls back). **This closes the
+  "specify a function → nicely-framed reliable plot" loop.**
 - **Still ahead:** slice 3 (adaptive subdivision — sharpens fat/tall columns, gives partial-domain
-  tightness for free), slice 4 (feature-aware framing once a root-finder exists; the `Expression`
-  overload once the linking bug lands), slice 5 (affine arithmetic).
+  tightness for free), slice 4b (EXACT feature marking — dotted asymptotes, labeled intercepts —
+  using `pontif.poly`'s `roots()`, once the transitive-import bug is fixed; the numeric framing
+  above needs neither), slice 5 (affine arithmetic).
+
+**Root-finding (`pontif.poly`, the exact-intercept CAS — independent of framing):** `integerScale`
+(denominator clearing) and `integerRoots` (RRT band + eval-test) LANDED 2026-07-22; rational `p/q`
+roots, deflation, quadratic residual, and the re-expansion verifier remain. Not on the plotting
+critical path — numeric framing (4a) supersedes it there — but the exact roots feed 4b's marking.

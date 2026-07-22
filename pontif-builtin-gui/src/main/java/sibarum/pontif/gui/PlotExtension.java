@@ -39,10 +39,11 @@ public final class PlotExtension implements Extension {
         return """
                 requires pontif.core.{Stream}
                 requires pontif.algebra.{AlgExpr, Interval, Unbounded, Undefined, evalInterval}
+                requires pontif.math.{sign, min, max}
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
                            fade, cmap, wire, scene, Curve, curve, color, chart,
-                           Volume3D, Volume, volume, normals, plotExpr}
+                           Volume3D, Volume, volume, normals, plotExpr, autoFrame}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -325,8 +326,82 @@ public final class PlotExtension implements Extension {
                   renderReliable(xlo, xhi, spans)
                 )
 
-                # Same, over the default domain [-10, 10].
-                function plotExpr(e:AlgExpr):Stream[String] -> plotExpr(e, -10.0, 10.0)
+                # --- Auto-framing: find the interesting x-window NUMERICALLY ----------------------
+                # "Where is the action?" answered by scanning the domain with evalInterval — no CAS /
+                # root-finder (that path is blocked by the transitive pontif.poly bug, and it's less
+                # robust). A column is a FEATURE if its enclosure is Unbounded (a pole) or its midpoint
+                # sign differs from the previous column's (a root crossing) — so this catches
+                # irrational and transcendental features exact rational roots never could. The window
+                # is the feature span, padded; with no features it falls back to [-10, 10].
+
+                # Bool AND (matches its Bool parameter — a computed comparison can't be a match subject).
+                function andB(a:Bool, b:Bool):Bool -> match a { [Bool:true] -> b  [Bool:false] -> false }
+
+                # A column's sign proxy: -1/0/1 from the enclosure midpoint, 2 = pole (Unbounded),
+                # 7 = skip (Undefined — off-domain, not a feature and doesn't carry a sign).
+                function colSign(e:AlgExpr, xa:Decimal, xb:Decimal):Decimal -> match evalInterval(e, xa, xb) {
+                  [Interval(lo, hi)] -> sign((lo + hi) / 2.0)
+                  [Unbounded]        -> 2.0
+                  [Undefined]        -> 7.0
+                }
+
+                # Wrap comparisons in :Bool functions — only a computed comparison used as a match
+                # SUBJECT trips totality; a :Bool return or a Bool parameter is fine.
+                function isPole(s:Decimal):Bool -> s == 2.0
+                function isReal(s:Decimal):Bool -> s < 1.5
+                function differ(a:Decimal, b:Decimal):Bool -> a != b
+                function atEnd(i:Int):Bool -> i >= 256
+
+                # A feature boundary: a pole column, or a genuine sign flip between two real columns.
+                function isFeature(prev:Decimal, cur:Decimal):Bool -> match isPole(cur) {
+                  [Bool:true]  -> true
+                  [Bool:false] -> andB(andB(isReal(prev), isReal(cur)), differ(prev, cur))
+                }
+
+                # The previous REAL sign to carry forward (skip/pole columns don't overwrite it).
+                function nextPrev(prev:Decimal, s:Decimal):Decimal -> match isReal(s) {
+                  [Bool:true]  -> s
+                  [Bool:false] -> prev
+                }
+
+                # The left edge of probe column i: 256 columns of width 0.25 over [-32, 32].
+                function colX(i:Int):Decimal -> 0.0 - 32.0 + i * 0.25
+
+                # Merge this column's feature into the recursive tail {loX, hiX, found}.
+                function combine(x:Decimal, feat:Bool, rest:[{Decimal, Decimal, Bool}]):[{Decimal, Decimal, Bool}] ->
+                  match feat {
+                    [Bool:true]  -> ( let [{rlo, rhi, rany}] = rest  {min(x, rlo), max(x, rhi), true} )
+                    [Bool:false] -> rest
+                  }
+
+                # Scan probe columns i..255, carrying the last real sign; return the feature x-span.
+                function scanFrom(e:AlgExpr, i:Int, prev:Decimal):[{Decimal, Decimal, Bool}] -> match atEnd(i) {
+                  [Bool:true]  -> {1000000.0, 0.0 - 1000000.0, false}   # empty: lo=+big, hi=-big, none
+                  [Bool:false] -> (
+                    let xa = colX(i)
+                    let s = colSign(e, xa, xa + 0.25)
+                    let rest = scanFrom(e, i + 1, nextPrev(prev, s))
+                    combine(xa, isFeature(prev, s), rest)
+                  )
+                }
+
+                # Turn the feature span into a padded window; no features → the [-10, 10] default.
+                function frameOf(lo:Decimal, hi:Decimal, any:Bool):[{Decimal, Decimal}] -> match any {
+                  [Bool:true]  -> ( let pad = max((hi - lo) * 0.15, 1.0)  {lo - pad, hi + pad} )
+                  [Bool:false] -> {0.0 - 10.0, 10.0}
+                }
+
+                # autoFrame: the numeric x-window for an expression (prev starts at 7 = "no sign yet").
+                function autoFrame(e:AlgExpr):[{Decimal, Decimal}] -> (
+                  let [{lo, hi, any}] = scanFrom(e, 0, 7.0)
+                  frameOf(lo, hi, any)
+                )
+
+                # Plot with NO domain now AUTO-FRAMES to the interesting region (was fixed [-10, 10]).
+                function plotExpr(e:AlgExpr):Stream[String] -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  plotExpr(e, xlo, xhi)
+                )
 
                 0
                 """;
