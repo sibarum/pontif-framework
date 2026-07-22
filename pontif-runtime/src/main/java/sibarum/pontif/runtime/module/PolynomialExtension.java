@@ -56,7 +56,7 @@ public final class PolynomialExtension implements Extension {
             requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
                                      Sin, Cos, Tan, Exp, Log, eval}
             requires pontif.core.{Stream}
-            exports @.{substitute, expand, simplify, differentiate, gradient, Expression}
+            exports @.{substitute, expand, simplify, differentiate, gradient, degree, coeff, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -195,6 +195,41 @@ public final class PolynomialExtension implements Extension {
             # vars]`, in order. Multivariate by construction.
             function gradient(f:AlgExpr, vars:Stream[String]):[Stream[AlgExpr]] ->
               &vars:[ (v:String) -> differentiate(f, v) ]
+
+            # --- Univariate coefficient extraction (root-finding substrate) -------------------
+            # degree/coeff read a UNIVARIATE polynomial's shape in variable `x`. They assume the
+            # expression is a polynomial in `x` — other variables make a coefficient non-numeric
+            # (out of scope). Both simplify first, so the input may be any algebraic form. There is
+            # NO coefficient array: coeff(e,x,d) folds the term-sum for degree d on demand (no random
+            # access — the Pontif grain), and a caller drives it with a degree counter.
+
+            function maxInt(a:Int, b:Int):Int -> match (a >= b) { [Bool:true] -> a  [Bool:false] -> b }
+
+            # degree of `x` within one simplified MONOMIAL = how many x-factors it has. `expand`
+            # unrolls an integer Pow into a Mul-chain, so a monomial is a product of Params.
+            function degMono(m:AlgExpr, x:String):Int -> match m {
+              [Param(n)]  -> match (n == x) { [Bool:true] -> 1  [Bool:false] -> 0 }
+              [Mul(a, b)] -> degMono(a, x) + degMono(b, x)
+              [_]         -> 0
+            }
+
+            # degree: the highest power of `x` in the polynomial (over the simplified term-sum).
+            function degSum(e:AlgExpr, x:String):Int -> match e {
+              [Add(l, r)] -> maxInt(degSum(l, x), degSum(r, x))
+              [_]         -> degMono(monoOf(e), x)
+            }
+            function degree(e:AlgExpr, x:String):Int -> degSum(simplify(e), x)
+
+            # coeff: the Decimal coefficient of x^d — sum the coefficients of every simplified term
+            # whose monomial has degree exactly d in `x`. (Random access by folding, not indexing.)
+            function coeffSum(e:AlgExpr, x:String, d:Int):Decimal -> match e {
+              [Add(l, r)] -> coeffSum(l, x, d) + coeffSum(r, x, d)
+              [_]         -> match (degMono(monoOf(e), x) == d) {
+                  [Bool:true]  -> coeffOf(e)
+                  [Bool:false] -> 0.0
+                }
+            }
+            function coeff(e:AlgExpr, x:String, d:Int):Decimal -> coeffSum(simplify(e), x, d)
 
             # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
             # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,

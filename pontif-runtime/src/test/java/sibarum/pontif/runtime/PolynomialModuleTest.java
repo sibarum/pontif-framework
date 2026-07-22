@@ -45,6 +45,57 @@ class PolynomialModuleTest {
     }
 
     @Test
+    void degree_readsHighestPowerOfTheVariable() {
+        // 3x^3 - x + 5 → degree 3. Built as a function and reflected, so expand/simplify run.
+        assertEquals("true", run("""
+                requires pontif.poly.{degree}
+                requires pontif.algebra.{Algebraic}
+                function p(x:Decimal):Decimal -> 3.0*x*x*x - x + 5.0
+                assign proof p:Algebraic
+                degree($p[Decimal].ast, "x") == 3
+                """));
+    }
+
+    @Test
+    void degree_ofAConstantIsZero() {
+        assertEquals("true", run("""
+                requires pontif.poly.{degree}
+                requires pontif.algebra.{AlgExpr, Const}
+                degree(Const(7.0), "x") == 0
+                """));
+    }
+
+    @Test
+    void coeff_extractsEachDegreesCoefficient() {
+        // 3x^3 - x + 5: coeff@3 = 3, coeff@2 = 0 (no x^2 term), coeff@1 = -1, coeff@0 = 5.
+        String prog = """
+                requires pontif.poly.{coeff}
+                requires pontif.algebra.{Algebraic}
+                function p(x:Decimal):Decimal -> 3.0*x*x*x - x + 5.0
+                assign proof p:Algebraic
+                coeff($p[Decimal].ast, "x", %d) == %s
+                """;
+        assertEquals("true", run(String.format(prog, 3, "3.0")));
+        assertEquals("true", run(String.format(prog, 2, "0.0")));
+        assertEquals("true", run(String.format(prog, 1, "-1.0")));
+        assertEquals("true", run(String.format(prog, 0, "5.0")));
+    }
+
+    @Test
+    void coeff_combinesLikeTermsBeforeReading() {
+        // (x+1)^2 = x^2 + 2x + 1 — coeff@1 must be 2 (the two x terms summed), coeff@2 = 1.
+        String prog = """
+                requires pontif.poly.{coeff}
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Pow}
+                let sq:AlgExpr = Pow(Add(Param("x"), Const(1.0)), Const(2.0))
+                coeff(sq, "x", %d) == %s
+                """;
+        assertEquals("true", run(String.format(prog, 2, "1.0")));
+        assertEquals("true", run(String.format(prog, 1, "2.0")));
+        assertEquals("true", run(String.format(prog, 0, "1.0")));
+    }
+
+    @Test
     void simplify_combinesLikeTerms() {
         // (x+1)^2 -> x^2 + 2x + 1: exactly 3 terms (expand alone would leave 4: x*x + x + x + 1).
         assertEquals("3.0", run("""
