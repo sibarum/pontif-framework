@@ -111,6 +111,22 @@ class PolynomialModuleTest {
     }
 
     @Test
+    void integerRoots_findsTheIntegerRootsOfAPolynomial() {
+        // (x-2)(x+3) = x^2 + x - 6 → integer roots {2, -3}; their sum is -1. fold sums the stream.
+        assertEquals("true", run("""
+                requires pontif.poly.{integerRoots}
+                requires pontif.algebra.{Algebraic}
+                requires pontif.core.{Stream, Nothing}
+                function p(x:Decimal):Decimal -> x*x + x - 6.0
+                assign proof p:Algebraic
+                let null:Nothing = Nothing()
+                let sum:[ (el:Decimal, total:Decimal) -> {null, el + total} ]
+                let roots:Stream[Decimal] = integerRoots($p[Decimal].ast, "x")
+                sum(&roots, 0.0)._1 == 0.0 - 1.0
+                """));
+    }
+
+    @Test
     void simplify_combinesLikeTerms() {
         // (x+1)^2 -> x^2 + 2x + 1: exactly 3 terms (expand alone would leave 4: x*x + x + x + 1).
         assertEquals("3.0", run("""

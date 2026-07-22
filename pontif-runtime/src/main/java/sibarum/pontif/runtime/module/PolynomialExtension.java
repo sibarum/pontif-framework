@@ -55,10 +55,10 @@ public final class PolynomialExtension implements Extension {
     private static final String SOURCE = """
             requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
                                      Sin, Cos, Tan, Exp, Log, eval}
-            requires pontif.core.{Stream}
-            requires pontif.math.{floor}
+            requires pontif.core.{Stream, Nothing}
+            requires pontif.math.{floor, abs}
             exports @.{substitute, expand, simplify, differentiate, gradient, degree, coeff,
-                       integerScale, Expression}
+                       integerScale, integerRoots, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -258,6 +258,30 @@ public final class PolynomialExtension implements Extension {
 
             # integerScale: the multiplier that turns the polynomial's coefficients into integers.
             function integerScale(e:AlgExpr, x:String):Decimal -> scaleFrom(e, x, 1.0)
+
+            # --- Integer roots (root-finding steps 2–3) --------------------------------------
+            # By the rational root theorem an INTEGER root divides the (cleared) constant term, so
+            # |root| ≤ |a₀·scale|. Test every integer in that band with an exact eval and keep the
+            # zeros. The candidate band is a Decimal range built by concatenation (no array); the
+            # spread drops non-roots via `Nothing`. (Rational p/q roots + the quadratic residual are
+            # the next sub-steps; this is the integer case, the common one.)
+
+            # rangeD: the integer-valued Decimals {lo, lo+1, …, hi} (empty when lo > hi).
+            function rangeD(lo:Decimal, hi:Decimal):[Stream[Decimal]] -> match (lo > hi) {
+              [Bool:true]  -> {}
+              [Bool:false] -> {lo} + rangeD(lo + 1.0, hi)
+            }
+
+            # isRoot: does the polynomial vanish at c? (Body is a comparison — fine; only match
+            # SCRUTINEES over a computed comparison trip totality, not returned Bools.)
+            function isRoot(e:AlgExpr, c:Decimal):Bool -> eval(e, c) == 0.0
+
+            function integerRoots(e:AlgExpr, x:String):[Stream[Decimal]] -> (
+              let null:Nothing = Nothing()   # bound out here — a constructor doesn't resolve inside a fragment
+              let bound = abs(coeff(e, x, 0) * integerScale(e, x))
+              &rangeD(0.0 - bound, bound):[ (c:Decimal) ->
+                match isRoot(e, c) { [Bool:true] -> c  [Bool:false] -> null } ]
+            )
 
             # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
             # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,
