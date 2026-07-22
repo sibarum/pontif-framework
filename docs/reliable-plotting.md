@@ -251,11 +251,17 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   - **Connected-polyline rendering (LANDED 2026-07-22).** The prototype also showed the original
     one-vertical-segment-per-column style was unreadable — stacked short verticals read as a
     dashed / "doubled" line, not a curve. Now each maximal run of curve columns is drawn as ONE
-    connected polyline through the column midpoints (clamped to the viewport), and a break (empty
-    column or isolated pole) ends it so the curve resumes fresh on the far side. The reliability is
-    unchanged (poles still found by interval arithmetic, still broken, dense runs still filled); the
-    midpoint is just the readable representative of each column's enclosure. Showing the enclosure
-    *width* as a ribbon is a possible later enhancement; the midpoint polyline is the default.
+    connected polyline through the column midpoints, and a break (empty column or isolated pole)
+    ends it so the curve resumes fresh on the far side. The reliability is unchanged (poles still
+    found by interval arithmetic, still broken, dense runs still filled); the midpoint is just the
+    readable representative of each column's enclosure. Showing the enclosure *width* as a ribbon is
+    a possible later enhancement; the midpoint polyline is the default.
+  - **Edge clipping (LANDED 2026-07-22).** The 2nd prototype (`1/(x²−1)`) showed horizontal "serif"
+    ticks where a near-pole run of off-screen midpoints piled up along the frame edge (an artifact
+    of clamping each point into the viewport). Fixed by *clipping* rather than clamping: a segment
+    crossing the top/bottom edge is cut at the interpolated crossing point (correct slope) and the
+    polyline breaks there, so a spike reaches the edge cleanly and off-screen stretches draw
+    nothing. (`DasumBridge.clipRunToBand`.)
 - **`plotExpr` takes a bare `AlgExpr`, not `Expression` (adjustment to Q4).** Making `pontif.plot`
   `requires pontif.poly` (for `Expression`) exposed a **compiler bug**: under that *transitive*
   double-import (a program → `pontif.plot` → both `pontif.algebra` and `pontif.poly`, which itself

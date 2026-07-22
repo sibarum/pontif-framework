@@ -235,26 +235,65 @@ public final class DasumBridge {
         double dx = (xhi - xlo) / n;
         boolean[] fillPole = densePoleRuns(spans);   // which pole columns are a dense (fillable) run
         List<Series> out = new ArrayList<>();
-        List<Double> runX = new ArrayList<>(), runY = new ArrayList<>();   // the polyline in progress
+        List<Double> runX = new ArrayList<>(), runY = new ArrayList<>();   // UN-clamped polyline points
         for (int i = 0; i < n; i++) {
             ReliableSpan s = spans.get(i);
             double x = xlo + (i + 0.5) * dx;
             if (s.kind() == 0) {                                 // curve → a point on the polyline
                 runX.add(x);
-                runY.add(clampTo((s.lo() + s.hi()) / 2.0, ymin, ymax));
+                runY.add((s.lo() + s.hi()) / 2.0);               // true midpoint; clipped, not clamped
                 continue;
             }
-            flushRun(runX, runY, out);                           // pole/empty breaks the polyline
+            clipRunToBand(runX, runY, ymin, ymax, out);          // pole/empty breaks the polyline
+            runX.clear();
+            runY.clear();
             if (s.kind() == 1 && fillPole[i]) {                  // dense pole → fill (the block)
                 out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, SERIES_COLOR));
             }
         }
-        flushRun(runX, runY, out);
+        clipRunToBand(runX, runY, ymin, ymax, out);
         return out;
     }
 
+    /**
+     * Clip a polyline to the horizontal band {@code [ymin, ymax]} and emit the in-band pieces as
+     * series. Where a segment crosses an edge the crossing point is interpolated (correct slope),
+     * so a curve heading off-screen reaches the frame edge and stops — no pile-up along the edge
+     * (the "serif" the clamp-to-viewport version produced). Off-screen stretches draw nothing.
+     */
+    private static void clipRunToBand(List<Double> xs, List<Double> ys,
+                                      double ymin, double ymax, List<Series> out) {
+        List<Double> cx = new ArrayList<>(), cy = new ArrayList<>();
+        for (int i = 0; i < xs.size(); i++) {
+            double x = xs.get(i), y = ys.get(i);
+            boolean in = y >= ymin && y <= ymax;
+            if (i > 0) {
+                double px = xs.get(i - 1), py = ys.get(i - 1);
+                boolean pin = py >= ymin && py <= ymax;
+                if (pin && !in) {                                // exiting the band → cut at the edge
+                    double edge = y > ymax ? ymax : ymin;
+                    cx.add(px + (edge - py) * (x - px) / (y - py));
+                    cy.add(edge);
+                    flushPts(cx, cy, out);
+                } else if (!pin && in) {                         // entering → start at the edge
+                    double edge = py > ymax ? ymax : ymin;
+                    cx.add(px + (edge - py) * (x - px) / (y - py));
+                    cy.add(edge);
+                } else if (!pin && ((py < ymin && y > ymax) || (py > ymax && y < ymin))) {
+                    double e1 = py < ymin ? ymin : ymax;         // crosses the whole band (very steep)
+                    double e2 = py < ymin ? ymax : ymin;
+                    cx.add(px + (e1 - py) * (x - px) / (y - py)); cy.add(e1);
+                    cx.add(px + (e2 - py) * (x - px) / (y - py)); cy.add(e2);
+                    flushPts(cx, cy, out);
+                }
+            }
+            if (in) { cx.add(x); cy.add(y); }
+        }
+        flushPts(cx, cy, out);
+    }
+
     /** Emit the accumulated points as one polyline (if it has ≥ 2 of them) and reset the buffer. */
-    private static void flushRun(List<Double> xs, List<Double> ys, List<Series> out) {
+    private static void flushPts(List<Double> xs, List<Double> ys, List<Series> out) {
         if (xs.size() >= 2) {
             double[] ax = new double[xs.size()], ay = new double[ys.size()];
             for (int i = 0; i < ax.length; i++) { ax[i] = xs.get(i); ay[i] = ys.get(i); }
@@ -262,10 +301,6 @@ public final class DasumBridge {
         }
         xs.clear();
         ys.clear();
-    }
-
-    private static double clampTo(double v, double lo, double hi) {
-        return v < lo ? lo : (v > hi ? hi : v);
     }
 
     /** A run of consecutive {@code Unbounded} pole columns this long or longer is a DENSE region
