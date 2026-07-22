@@ -11,8 +11,9 @@ recursive-union arity — the 12-member scenario type-checks in tens of ms (was 
 the **Correction** below): a missing coinductive back-edge guard on the *anonymous union
 pair* inside `Refinements.imply`, not un-memoized `Assignability`. Regression guard:
 `RecursiveUnionTypeCheckTest`. Still open, and independent of this fix: Wall 1 (§2, the
-`.ast` binding) and the actual closing of `AlgExpr` — `AlgExpr` stays an open trait until
-those land.
+`.ast` binding) and — newly found once the perf fix let the close reach the construction
+gate — **Wall 3, reflexive union subsumption at the construction gate** (`§8`). `AlgExpr`
+stays an open trait until both land; both are construction-gate / `Assignability` work.
 
 ## 1. The goal that surfaced it
 
@@ -192,3 +193,40 @@ recurses into every node by construction. That is a separate change and is **not
 - **No error primitive / `[!!]` sort** — it contradicts the no-lie design intent, and the
   closed union supersedes it once `AlgExpr` closes.
 - `gradient` and the other `pontif.poly` work are independent of this and unaffected.
+
+## 8. Attempting the close after the perf fix — two construction-gate walls remain (2026-07-22)
+
+With the perf blocker fixed, the close was re-attempted end-to-end (union alias + wall-1
+`.ast` fix + drop the catch-alls). **The hang is gone** — the `pontif.poly` suite now
+type-checks in *milliseconds* (0.175 s / 0.720 s), confirming §6. But reaching the
+construction gate (which the hang previously prevented) surfaced **two semantic gaps**,
+both fast compile errors, both in the construction-gate / `Assignability` layer (C3):
+
+**Wall 3 (new — the current blocker): reflexive union subsumption at the construction gate.**
+Inside `substitute`, constructing `Add(substitute(l,…), substitute(rr,…))` fails:
+
+> *Constructor argument 'left' of 'pontif.algebra/Add' cannot be proved to satisfy its
+> declared sort `Const|Param|Add|…|Log` — the argument's sort is `Const|Param|Add|…|Log`;
+> narrow the value so its sort entails the field.*
+
+The argument's sort **is** the whole union and the field's sort is the **same** union, yet
+`[K0|…|Kₙ] ⊑ [K0|…|Kₙ]` is not proven. This breaks **every** node construction from a
+union-typed value — pervasive (12 of 13 `PolynomialModuleTest` cases). Root cause: the gate
+proves an argument satisfies a union field by showing it is a provable *single member*; a
+value already typed as the whole union isn't narrowed to one member, so no single-member
+proof exists. Fix: the field-satisfaction check must accept **union-on-the-left subsumption**
+— every branch of the argument union is a member of the field union (the reflexive
+same-union case is trivial). Lives in the construction gate's field check / `Assignability`
+`isA` for a union sub-sort.
+
+**Wall 1 (still open): the `.ast` binding.** `let e:AlgExpr = $f[Decimal].ast` still fails
+(*"the value's sort is (not statically known)"*). The prototyped `inferFieldOnBase` producer
+search — scan `functionReturns` for a key `<owner>.<attr>` whose owner matches the base
+nominal — **did not match the actual `.ast` producer key**, so no sort was projected. Needs
+the correct hook: either the real producer-key format in `functionReturns`, or projecting
+directly from the `Algebraic` trait's declared `ast:AlgExpr` member for a metareference base.
+
+**Status:** the attempt was reverted (`AlgExpr` stays an open trait) to keep the tree
+building. Closing `AlgExpr` now depends on **Wall 3 + Wall 1**, both construction-gate /
+`Assignability` fixes — no longer a `pontif.poly` matter. The perf axis is done; the
+remaining work is teaching the construction gate that a union value satisfies a union field.
