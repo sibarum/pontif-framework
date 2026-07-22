@@ -13,8 +13,12 @@ import sibarum.dasum.gui.vis.scene.LineLayer;
 import sibarum.dasum.gui.vis.scene.PointLayer;
 import sibarum.dasum.gui.vis.scene.TextLayer;
 import sibarum.dasum.gui.vis.scene.VolumeLayer;
+import sibarum.pontif.core.types.RecordValue;
 
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -683,5 +687,39 @@ class PlotExtensionTest {
                 plotExpr(Const(5.0))""");
         assertEquals(-10.0, win[0], 1e-9, "fallback lo");
         assertEquals(10.0, win[1], 1e-9, "fallback hi");
+    }
+
+    private static RecordValue span(long kind, double lo, double hi) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("kind", kind);
+        m.put("lo", BigDecimal.valueOf(lo));
+        m.put("hi", BigDecimal.valueOf(hi));
+        return new RecordValue("pontif.plot/Span", m);
+    }
+
+    private static RecordValue spansTuple(RecordValue... columns) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (int i = 0; i < columns.length; i++) m.put("_" + i, columns[i]);
+        return new RecordValue("_tuple", m);
+    }
+
+    @Test
+    void reliableSpans_isolatedPole_breaksInsteadOfDrawingAcrossIt() {
+        // curve, curve, POLE, curve, curve — the lone pole must NOT render (a break), so only the
+        // four curve columns become series. No solid line spanning the discontinuity.
+        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+                span(0, 1.0, 1.0), span(0, 1.0, 1.0), span(1, 0.0, 0.0),
+                span(0, 1.0, 1.0), span(0, 1.0, 1.0)));
+        assertEquals(4, series.size(), "isolated pole breaks — only the 4 curve columns draw");
+    }
+
+    @Test
+    void reliableSpans_densePoleRun_fillsAsABlock() {
+        // A run of consecutive poles (>= DENSE_POLE_RUN) is unresolvable dense detail — every column
+        // fills (the block), so all five become full-height series.
+        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+                span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0),
+                span(1, 0.0, 0.0), span(1, 0.0, 0.0)));
+        assertEquals(5, series.size(), "a dense pole run fills every column");
     }
 }

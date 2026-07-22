@@ -240,6 +240,14 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   **robust** (2nd–98th percentile) y-range so a near-pole spike can't flatten the plot. Verified
   headlessly by `PlotExtensionTest.plotExpr_reliableColumns_detectPoleAndBuildSpans` (whole pipeline,
   no window). Window render is manual, like the other plot snippets.
+  - **Sparse-vs-dense pole rendering (LANDED 2026-07-22, Q2 partial).** The first window prototype
+    (`(2x+3)/(x²+3x−4)`, poles at −4 and 1) exposed that painting *every* pole column full-height
+    draws a solid line across an isolated asymptote — the exact lie the design forbids. Fix: a run
+    of `< DENSE_POLE_RUN` (4) consecutive `Unbounded` columns is an isolated pole → **break**; a
+    longer run is unresolvable dense detail → **fill** (the block). So a lone asymptote now reads as
+    a clean break, while `tan(1/x)`-style density still fills. (`DasumBridge.densePoleRuns`; pinned
+    by `PlotExtensionTest` isolated-break / dense-fill cases.) The proven-asymptote dotted overlay
+    remains deferred to 4b.
 - **`plotExpr` takes a bare `AlgExpr`, not `Expression` (adjustment to Q4).** Making `pontif.plot`
   `requires pontif.poly` (for `Expression`) exposed a **compiler bug**: under that *transitive*
   double-import (a program → `pontif.plot` → both `pontif.algebra` and `pontif.poly`, which itself

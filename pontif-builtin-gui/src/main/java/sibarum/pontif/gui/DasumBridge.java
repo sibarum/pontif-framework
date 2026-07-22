@@ -231,14 +231,17 @@ public final class DasumBridge {
         double ymin = yr[0], ymax = yr[1];
         double minH = (ymax - ymin) * 0.004;   // height floor so a flat curve still reads as a line
         double dx = (xhi - xlo) / n;
+        boolean[] fillPole = densePoleRuns(spans);   // which pole columns are a dense (fillable) run
         List<Series> out = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             ReliableSpan s = spans.get(i);
             if (s.kind() == 2) continue;                         // empty → break (draw nothing)
             double x = xlo + (i + 0.5) * dx;
             double ylo, yhi;
-            if (s.kind() == 1) { ylo = ymin; yhi = ymax; }       // pole → full column (the block)
-            else {                                               // curve → clamped vertical segment
+            if (s.kind() == 1) {                                 // pole
+                if (!fillPole[i]) continue;                      // isolated asymptote → BREAK, not a
+                ylo = ymin; yhi = ymax;                          // line across it; only a dense run fills
+            } else {                                             // curve → clamped vertical segment
                 ylo = Math.max(ymin, s.lo());
                 yhi = Math.min(ymax, s.hi());
                 if (yhi < ylo) continue;                         // wholly outside the viewport
@@ -247,6 +250,27 @@ public final class DasumBridge {
             out.add(Series.line(new double[]{x, x}, new double[]{ylo, yhi}, SERIES_COLOR));
         }
         return out;
+    }
+
+    /** A run of consecutive {@code Unbounded} pole columns this long or longer is a DENSE region
+     *  (unresolvable detail — fill it, the block); anything shorter is an isolated asymptote that
+     *  should render as a break, never a solid line across the discontinuity. */
+    private static final int DENSE_POLE_RUN = 4;
+
+    /** Mark each pole column that belongs to a dense run (≥ {@link #DENSE_POLE_RUN} consecutive
+     *  pole columns). Isolated poles stay unmarked so the renderer breaks at them. */
+    private static boolean[] densePoleRuns(List<ReliableSpan> spans) {
+        int n = spans.size();
+        boolean[] dense = new boolean[n];
+        int i = 0;
+        while (i < n) {
+            if (spans.get(i).kind() != 1) { i++; continue; }
+            int j = i;
+            while (j < n && spans.get(j).kind() == 1) j++;       // [i, j) is a maximal pole run
+            if (j - i >= DENSE_POLE_RUN) for (int k = i; k < j; k++) dense[k] = true;
+            i = j;
+        }
+        return dense;
     }
 
     /** {@code [ymin, ymax]} from the 2nd/98th percentile of {@code vals}, padded 5% — robust to
