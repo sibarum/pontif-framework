@@ -262,6 +262,14 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
     crossing the top/bottom edge is cut at the interpolated crossing point (correct slope) and the
     polyline breaks there, so a spike reaches the edge cleanly and off-screen stretches draw
     nothing. (`DasumBridge.clipRunToBand`.)
+  - **Extend to the edge at a proven pole (LANDED 2026-07-22).** The 3rd prototype
+    (`1/((x²+3x−4)(2x+3)(x+5))`, four poles) showed branches ending in mid-air short of the frame
+    when the blow-up fell between the last sample and the pole column. Fix: a run terminated by a
+    POLE (an `Unbounded` column — interval-proven blow-up, so the curve *does* keep going) is
+    aimed off the frame edge (direction = the sign of the adjacent column's enclosure) and the clip
+    draws it to the boundary; a run terminated by an EMPTY column (`Undefined` = a domain edge,
+    where the curve genuinely stops) is left as a plain break, not extended. Pinned by
+    `PlotExtensionTest` (pole-ended run reaches the edge; empty-ended run stops at the data).
 - **`plotExpr` takes a bare `AlgExpr`, not `Expression` (adjustment to Q4).** Making `pontif.plot`
   `requires pontif.poly` (for `Expression`) exposed a **compiler bug**: under that *transitive*
   double-import (a program → `pontif.plot` → both `pontif.algebra` and `pontif.poly`, which itself

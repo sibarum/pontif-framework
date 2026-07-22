@@ -722,4 +722,32 @@ class PlotExtensionTest {
                 span(1, 0.0, 0.0), span(1, 0.0, 0.0)));
         assertEquals(5, series.size(), "a dense pole run fills every column");
     }
+
+    private static double maxY(double[] ys) {
+        double m = Double.NEGATIVE_INFINITY;
+        for (double y : ys) m = Math.max(m, y);
+        return m;
+    }
+
+    @Test
+    void reliableSpans_poleEndedRun_extendsToTheFrameEdge() {
+        // curve rising 0.1 → 0.2 → 0.3, then a POLE (proven blow-up): the line keeps going, so it
+        // must extend past the last sampled midpoint (0.3) up to the top edge (ymax ≈ 0.31 here).
+        var series = DasumBridge.buildReliableSeries(-1.0, 1.0, spansTuple(
+                span(0, 0.1, 0.1), span(0, 0.2, 0.2), span(0, 0.3, 0.3), span(1, 0.0, 0.0)));
+        assertEquals(1, series.size());
+        assertTrue(maxY(series.get(0).ys()) > 0.305,
+                "a pole-ended run extends to the frame edge, past the last midpoint");
+    }
+
+    @Test
+    void reliableSpans_emptyEndedRun_stopsWithoutExtending() {
+        // Same run, but ending at an EMPTY column (Undefined = a domain edge): the curve genuinely
+        // stops, so it must NOT be extended — the top stays at the last data point (0.3).
+        var series = DasumBridge.buildReliableSeries(-1.0, 1.0, spansTuple(
+                span(0, 0.1, 0.1), span(0, 0.2, 0.2), span(0, 0.3, 0.3), span(2, 0.0, 0.0)));
+        assertEquals(1, series.size());
+        assertTrue(maxY(series.get(0).ys()) <= 0.30001,
+                "an empty-ended (domain edge) run stops at the data, not the frame edge");
+    }
 }

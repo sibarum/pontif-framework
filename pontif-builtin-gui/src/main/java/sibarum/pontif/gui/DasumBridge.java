@@ -233,26 +233,52 @@ public final class DasumBridge {
         double[] yr = robustRange(bounds);
         double ymin = yr[0], ymax = yr[1];
         double dx = (xhi - xlo) / n;
+        double beyond = ymax - ymin;                 // how far past an edge to aim an ∞-bound point
         boolean[] fillPole = densePoleRuns(spans);   // which pole columns are a dense (fillable) run
         List<Series> out = new ArrayList<>();
         List<Double> runX = new ArrayList<>(), runY = new ArrayList<>();   // UN-clamped polyline points
+        ReliableSpan lastCurve = null;               // last curve column added to the current run
+        double poleBeforeX = Double.NaN;             // x of a pole immediately preceding this run, if any
         for (int i = 0; i < n; i++) {
             ReliableSpan s = spans.get(i);
             double x = xlo + (i + 0.5) * dx;
             if (s.kind() == 0) {                                 // curve → a point on the polyline
+                if (!Double.isNaN(poleBeforeX) && runX.isEmpty()) {
+                    // this run starts right after a pole → the curve comes FROM ±∞: begin off the
+                    // edge so the clip draws it entering at the frame boundary.
+                    runX.add(poleBeforeX);
+                    runY.add(blowSign(s) >= 0 ? ymax + beyond : ymin - beyond);
+                }
                 runX.add(x);
                 runY.add((s.lo() + s.hi()) / 2.0);               // true midpoint; clipped, not clamped
+                lastCurve = s;
+                poleBeforeX = Double.NaN;
                 continue;
             }
-            clipRunToBand(runX, runY, ymin, ymax, out);          // pole/empty breaks the polyline
+            // A pole (Unbounded) is a proven blow-up: the line keeps going, so aim it off the edge
+            // and let the clip draw it TO the boundary. An empty (Undefined) column is a domain edge
+            // — the curve genuinely stops, so it is left as a plain break.
+            if (s.kind() == 1 && lastCurve != null && !runX.isEmpty()) {
+                runX.add(x);
+                runY.add(blowSign(lastCurve) >= 0 ? ymax + beyond : ymin - beyond);
+            }
+            clipRunToBand(runX, runY, ymin, ymax, out);
             runX.clear();
             runY.clear();
+            lastCurve = null;
+            poleBeforeX = (s.kind() == 1) ? x : Double.NaN;      // only a pole makes the next run enter from ∞
             if (s.kind() == 1 && fillPole[i]) {                  // dense pole → fill (the block)
                 out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, SERIES_COLOR));
             }
         }
         clipRunToBand(runX, runY, ymin, ymax, out);
         return out;
+    }
+
+    /** Which way a curve column adjacent to a pole is blowing up: the sign of its larger-magnitude
+     *  enclosure endpoint (positive → toward the top edge, negative → toward the bottom). */
+    private static double blowSign(ReliableSpan s) {
+        return (Math.abs(s.hi()) >= Math.abs(s.lo()) ? s.hi() : s.lo()) >= 0 ? 1.0 : -1.0;
     }
 
     /**
