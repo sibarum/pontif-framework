@@ -446,11 +446,25 @@ public final class Refinements {
         // which is complete whatever looser's shape — including a union looser (so
         // `(E|L) ⊑ (E|L)` proves via each branch, rather than the weaker
         // implies-some-branch test below returning Residual on an identical union).
-        if (tighter.isUnion()) {
-            return implyUnionTighter(tighter, looser, simplifier, assumed);
-        }
-        if (looser.isUnion()) {
-            return implyUnionLooser(tighter, looser, simplifier, assumed);
+        //
+        // Coinductive guard for the ANONYMOUS union pair, mirroring implyStructural's
+        // named-struct guard: a union carries no name, so a recursive union
+        // (`T = K0|… ` with each `Ki` fielded by `T`) re-derives the identical
+        // `(union ⊑ union)` obligation on every field descent. Without a back-edge
+        // marker the branch × branch × field recursion is super-exponential in arity
+        // (the recursive-union type-checking blowup, docs/recursive-union-typecheck-blowup.md);
+        // marking the pair on entry and assuming it on revisit collapses it to the
+        // finite set of distinct pairs. Sound for the same reason the struct guard is:
+        // subsumption over equi-recursive sorts is a greatest fixed point, so the
+        // back-edge holds, and every non-back-edge branch obligation is still checked.
+        if (tighter.isUnion() || looser.isUnion()) {
+            if (assumed.holds(tighter, looser)) {
+                return ProofResult.passed();
+            }
+            Coinduction.Assumed next = assumed.assuming(tighter, looser);
+            return tighter.isUnion()
+                    ? implyUnionTighter(tighter, looser, simplifier, next)
+                    : implyUnionLooser(tighter, looser, simplifier, next);
         }
         // A refined struct ⊆ its base struct: `[Countdown:@.n==k] ⊑ Countdown`
         // reduces to `Countdown ⊑ Countdown` (the predicate only narrows further).

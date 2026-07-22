@@ -3,6 +3,8 @@ package sibarum.pontif.core.symbolic;
 import java.util.HashSet;
 import java.util.Set;
 
+import sibarum.pontif.core.types.Sort;
+
 /**
  * The termination discipline for sort-level relations over recursive types.
  *
@@ -43,27 +45,55 @@ public final class Coinduction {
         }
     }
 
+    /**
+     * An ordered pair of whole {@link Sort} values — the back-edge key for
+     * <em>anonymous</em> compound sorts (unions, intersections) that {@link NamePair}
+     * cannot key because they carry no name. {@code Sort} is a value record, so equality
+     * is structural: two occurrences of the same {@code K0 | … | Kₙ} union compare equal
+     * whether they arrive as the argument narrowing or as a recursive struct field.
+     */
+    public record SortPair(Sort a, Sort b) {}
+
     /** Two-sided assumption set for directional relations (subsumption, equality). */
-    public record Assumed(Set<NamePair> pairs) {
+    public record Assumed(Set<NamePair> pairs, Set<SortPair> sortPairs) {
 
         public Assumed {
             pairs = Set.copyOf(pairs);
+            sortPairs = Set.copyOf(sortPairs);
         }
 
         public static Assumed empty() {
-            return new Assumed(Set.of());
+            return new Assumed(Set.of(), Set.of());
         }
 
-        /** Is the (ordered) pair already assumed on this path? */
+        /** Is the (ordered) name pair already assumed on this path? */
         public boolean holds(String a, String b) {
             return pairs.contains(new NamePair(a, b));
         }
 
-        /** A copy with {@code (a, b)} added — the original is untouched. */
+        /** A copy with the name pair {@code (a, b)} added — the original is untouched. */
         public Assumed assuming(String a, String b) {
             Set<NamePair> next = new HashSet<>(pairs);
             next.add(new NamePair(a, b));
-            return new Assumed(next);
+            return new Assumed(next, sortPairs);
+        }
+
+        /**
+         * Is the (ordered) whole-sort pair already assumed on this path? Used for the
+         * anonymous compound sorts (unions/intersections) whose recursion would otherwise
+         * be unguarded — revisiting {@code (u, u)} while resolving it is the back-edge of
+         * a recursive union, and the greatest-fixed-point assumption discharges it (the
+         * same discipline {@link #holds(String, String)} applies to named structs).
+         */
+        public boolean holds(Sort a, Sort b) {
+            return sortPairs.contains(new SortPair(a, b));
+        }
+
+        /** A copy with the whole-sort pair {@code (a, b)} added — the original is untouched. */
+        public Assumed assuming(Sort a, Sort b) {
+            Set<SortPair> next = new HashSet<>(sortPairs);
+            next.add(new SortPair(a, b));
+            return new Assumed(pairs, next);
         }
     }
 

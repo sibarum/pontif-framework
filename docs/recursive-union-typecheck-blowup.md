@@ -5,8 +5,14 @@ and what it takes to fix it. Written 2026-07-21 after the attempt was made and
 reverted. Companion to `docs/dispatch-method-elimination.md` and the `pontif.poly`
 CAS core.*
 
-Status: **PROBLEM DIAGNOSED, FIX PROPOSED, NOT YET BUILT.** The closed-union change is
-reverted; `AlgExpr` stays an open trait for now.
+Status: **PERF BLOCKER FIXED (2026-07-21).** Type-checking is now polynomial in
+recursive-union arity — the 12-member scenario type-checks in tens of ms (was a
+~19-minute hang). The root cause turned out to be narrower than §4's original guess (see
+the **Correction** below): a missing coinductive back-edge guard on the *anonymous union
+pair* inside `Refinements.imply`, not un-memoized `Assignability`. Regression guard:
+`RecursiveUnionTypeCheckTest`. Still open, and independent of this fix: Wall 1 (§2, the
+`.ast` binding) and the actual closing of `AlgExpr` — `AlgExpr` stays an open trait until
+those land.
 
 ## 1. The goal that surfaced it
 
@@ -107,47 +113,82 @@ So the work is super-exponential in arity, even though the *set of distinct subp
 is small (bounded by program size × union arity). Classic un-memoized recursive-type
 checking.
 
-## 5. The solution
+### 4a. Correction — where the time actually went (measured 2026-07-21)
 
-**Memoize the recursive-type work** so each distinct subproblem is computed once. Turning
-the super-exponential product into a polynomial number of cached lookups:
+The §4 shape ("un-memoized recursive-type subsumption, exploding factorially") was right;
+the **layer** was wrong. Phase-timing the pipeline put ~all of the wall time in
+`EffectiveSortLens` (the pre-gate `span → effective sort` pass), **not** in `Assignability`
+or the construction gate. The chain is:
 
-1. **`Assignability`: add a memo table** keyed by `(subSort, supSort)` (and one for
-   `sameType`). This is the highest-leverage change — the engine currently recomputes
-   every membership/structural comparison, and a recursive union makes those repeat
-   combinatorially. A per-`AssignabilityContext` `Map<Pair, Boolean/Assignment>` cache,
-   with an in-progress marker to break cycles on recursive types, is sufficient.
-2. **Resolve recursive unions by reference, not expansion.** Where the alias/sort machinery
-   expands `AlgExpr` structurally, cache the resolution by name so a recursive field
-   (`Add.left : AlgExpr`) is resolved once and shared, never re-expanded per occurrence.
-3. **(Optional) Memoize `NarrowingInference` match-branch narrowings** keyed by
-   `(expr, incoming sort)`, so a nested match doesn't re-infer the same branch bodies.
+```
+EffectiveSortLens → NarrowingInference.infer → inferCall → StaticDispatch.matchStatus
+                  → Refinements.imply(argSort, paramSort)      # arg/param sort = the union T
+```
 
-The set of `(subexpression, sort)` pairs in a program is finite and small, so memoization
-makes type-checking a recursive union **linear-ish in program size × arity** instead of
-exponential. This is standard fixpoint/memoization for recursive-type systems.
+`Assignability.isA` is essentially *not on this path* — a memo there (the original §5.1
+"highest-leverage change") would have done nothing. The real engine is the refinement
+kernel's `imply`, and its blowup is precise: `imply(T, T)` for the recursive union `T`
+recurses branch × branch into each struct's `T`-typed fields, which re-ask `imply(T, T)`.
+`implyStructural` already carries a coinductive back-edge guard — but it is keyed by struct
+**name** pairs, and a **union carries no name**, so the `(T ⊑ T)` obligation is re-derived
+on *every* field descent. With `f(k)` the cost at `k` structs already assumed,
+`f(k) = N²·cheap + 2·(N−k)·f(k+1)` ⟹ `f(0) ≈ N²·2ᴺ·N!` — matching the observed
+`≈ ×90 per +2`.
 
-**Placement:** core type-system work in `pontif-ir` (`types/Assignability` primarily,
-plus the alias/narrowing paths). This overlaps the **C3 `Assignability` campaign**'s active
-area — coordinate so the memo table lands with, not against, that work.
+## 5. The fix (as built)
 
-## 6. Verification
+**Give the anonymous union pair the same coinductive back-edge guard the named-struct pair
+already has.** `Coinduction.Assumed` gains a second carrier — a set of whole-`Sort` pairs
+(`Sort` is a value record, so two occurrences of `K0|…|Kₙ` compare structurally equal
+whether they arrive as the argument narrowing or as a recursive struct field). At the top
+of `Refinements.imply`'s union arm: if `(tighter, looser)` is already assumed, return
+`passed` (the greatest-fixed-point back-edge); otherwise mark it and recurse. That collapses
+the field recursion — the first descent into a struct's `T` field revisits `(T ⊑ T)` and
+returns immediately — turning `f(0)` from `N²·2ᴺ·N!` into `O(N²)`.
 
-Reconstruct the §3 repro as a benchmark: compile the `same`-over-`T` scenario for
-`N = 4, 6, 8, 12` and assert compile time stays roughly **linear** in `N` (e.g. N=12 under
-a second). Before the fix: 0.16 s / 14.6 s / >20 s / hang. After: all sub-second. That
-benchmark is the regression guard — a future change that reintroduces un-memoized
-recursive-type work will show up as the curve bending upward again.
+Soundness is the *same* argument that licenses the existing struct guard (class doc on
+`Coinduction`): subsumption over equi-recursive sorts is a greatest fixed point, so the
+back-edge holds and every non-back-edge branch obligation is still checked. The guard fires
+**only** on a genuine back-edge — the identical union pair already on the current derivation
+path — which cannot happen for a finite, non-recursive sort, so no non-recursive result
+changes (borne out by the full suite: pontif-core 305, pontif-ir + parser, pontif-runtime
+1020, all green).
 
-Then closing `AlgExpr` becomes viable end-to-end: apply the §2 wall-1 `.ast` fix, change
-`AlgExpr` to the union, drop the catch-alls, and confirm the `pontif.poly` suite passes —
-`differentiate`'s `[_] -> Const(0.0)` lie is gone (a new node is a compile error), and
-`substitute` recurses into every node by construction.
+Two files: `pontif-core/.../Coinduction.java` (the `Sort`-pair carrier) and
+`Refinements.java` (the union-arm guard). The original §5 proposals (`Assignability` memo,
+resolve-by-reference, narrowing memo) were **not** needed and were not done; the C3
+`Assignability` campaign is unaffected.
 
-## 7. Interim state (until the fix lands)
+## 6. Verification — done
 
-- `AlgExpr` stays an **open trait**. `differentiate` keeps `[_] -> Const(0.0)` — a
+`RecursiveUnionTypeCheckTest` (pontif-runtime) is the regression guard, two tests:
+
+- **`arity12TypeChecksPromptly`** — compiles the §3 `same`-over-`T` scenario at arity 12
+  and asserts it type-checks within a generous 15 s budget (a curve-bend detector). Measured
+  after the fix, the whole curve is polynomial:
+
+  | N | 2 | 4 | 6 | 8 | 12 | 16 | 24 | 32 |
+  |---|---|---|---|---|----|----|----|----|
+  | compile | ~70 ms | ~14 ms | ~28 ms | ~25 ms | ~51 ms | ~100 ms | ~258 ms | ~556 ms |
+
+  (Pre-fix, for comparison: N=6 ≈ 14.6 s, N≥8 aborted, N=12 the ~19-min hang.)
+- **`recursiveUnionMatchEvaluatesCorrectly`** — a recursive `Tree = Leaf | Node` *with* a
+  leaf, so real trees are built and `same` is run; pins that the coinductive type-check
+  shortcut left runtime `match`/dispatch semantics intact (equal trees → `true`, a differing
+  leaf or a shape mismatch → `false`).
+
+Closing `AlgExpr` end-to-end is now unblocked on the perf axis: apply the §2 wall-1 `.ast`
+fix, change `AlgExpr` to the union, drop the catch-alls, and confirm the `pontif.poly` suite
+passes — `differentiate`'s `[_] -> Const(0.0)` lie becomes a compile error and `substitute`
+recurses into every node by construction. That is a separate change and is **not** done here.
+
+## 7. Interim state (until `AlgExpr` is actually closed)
+
+- The **performance blocker is gone** — a large recursive closed union type-checks quickly.
+  Remaining before `AlgExpr` can close: Wall 1 (§2, the `.ast` binding) and the closing
+  change itself.
+- `AlgExpr` stays an **open trait** for now. `differentiate` keeps `[_] -> Const(0.0)` — a
   **documented known limitation**, not an accepted design (the closed union is the fix).
 - **No error primitive / `[!!]` sort** — it contradicts the no-lie design intent, and the
-  closed union supersedes it once the checker scales.
+  closed union supersedes it once `AlgExpr` closes.
 - `gradient` and the other `pontif.poly` work are independent of this and unaffected.
