@@ -1,0 +1,14 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{plotExpr}
+
+# Auto-plotting a function. Write an ordinary Decimal function, prove it algebraic (so the
+# compiler will reflect its body into an expression tree), and hand that tree to plotExpr.
+# The curve is drawn by SOUND interval enclosure, not point sampling: each pixel column is
+# evaluated over its whole x-interval, so the vertical asymptotes at x = -1 and x = 1 are
+# rendered honestly — the line breaks at each pole instead of a near-vertical spike blowing
+# up the y-range and flattening everything else. No domain, no sampling rate, no fuss.
+
+function f(x:Decimal):Decimal -> 1.0 / (x * x - 1.0)
+assign proof f:Algebraic
+
+main ( plotExpr($f[Decimal].ast) )

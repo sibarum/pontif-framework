@@ -36,6 +36,9 @@ final class Samples {
             "A quick y = x² line plot built from two data streams."),
         new Sample("curves-2d", "2D Curves",
             "Two curves overlaid in one chart with auto axes, gridlines, and tick labels."),
+        new Sample("auto-plot", "Auto-Plotted Function",
+            "A rational function plotted straight from its formula by reliable interval "
+            + "enclosure — the asymptotes at x = ±1 drawn honestly, with no blow-up."),
         new Sample("surface-3d", "3D Surface",
             "A paraboloid bowl z = x² + y² as an orbitable 3D surface."),
         new Sample("colormap-surface", "Colormapped Surface",

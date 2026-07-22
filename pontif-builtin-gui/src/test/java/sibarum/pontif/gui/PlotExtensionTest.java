@@ -607,4 +607,34 @@ class PlotExtensionTest {
         var series = DasumBridge.buildReliableSeries(-2.0, 2.0, captured[0]);
         assertFalse(series.isEmpty(), "reliable spans should render to vertical series");
     }
+
+    @Test
+    void plotExpr_fromReflectedAlgebraicFunction_runs() {
+        // Verifies the "Auto-Plotted Function" welcome sample (auto-plot.ptf): an ordinary Decimal
+        // function proven Algebraic is reflected to its AST and handed straight to plotExpr. Guards
+        // the reflection → plotExpr path the sample depends on (1/(x^2-1) has poles at ±1).
+        Extensions.install(new PlotExtension());
+        Object[] captured = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = args.get(2);
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderReliable", stub);
+        NativeCalls.register("pontif.plot/renderReliable", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{Algebraic}
+                        requires pontif.plot.{plotExpr}
+                        function f(x:Decimal):Decimal -> 1.0 / (x * x - 1.0)
+                        assign proof f:Algebraic
+                        plotExpr($f[Decimal].ast)""", "autoplot.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "auto-plot sample should run; got " + r.text());
+        List<DasumBridge.ReliableSpan> spans = DasumBridge.parseSpans(captured[0]);
+        assertEquals(256, spans.size(), "256 columns over the default [-10,10] domain");
+        assertTrue(spans.stream().anyMatch(s -> s.kind() == 1),
+                "1/(x^2-1) must produce pole columns (Unbounded) at x = ±1");
+    }
 }
