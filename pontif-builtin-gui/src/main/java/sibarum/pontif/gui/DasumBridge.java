@@ -61,6 +61,7 @@ import sibarum.pontif.ir.NativeCalls;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,6 +180,90 @@ public final class DasumBridge {
 
     private static double arg(List<Object> args, int i) {
         return i < args.size() ? toDouble(args.get(i)) : 0.0;
+    }
+
+    /**
+     * {@code renderReliable(xlo, xhi, spans)} (pontif.plot, docs/reliable-plotting.md): opens a
+     * window painting per-column interval enclosures as vertical bars. Each {@code Span} is a curve
+     * segment, a full-height pole block, or an empty break — line / break / block in one form. The
+     * spans are computed Pontif-side ({@code evalInterval} per column); this native frames the
+     * y-range and rasterises. The reliable, asymptote-safe sibling of {@link #renderCurve}.
+     */
+    public static Object renderReliable(List<Object> args, NativeCalls.Context ctx) {
+        double xlo = arg(args, 0), xhi = arg(args, 1);
+        Object spans = args.size() > 2 ? args.get(2) : emptyTuple();
+        List<Series> series = buildReliableSeries(xlo, xhi, spans);
+        return openWindowWithRoot("Plot", false, () -> chartComponent(series));
+    }
+
+    /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = pole (full column), 2 = empty. */
+    record ReliableSpan(int kind, double lo, double hi) {}
+
+    /** Parse the Pontif {@code {spans}} tuple of {@code Span(kind,lo,hi)} records, in column order.
+     *  Package-visible: the headless test seam. */
+    static List<ReliableSpan> parseSpans(Object spansValue) {
+        List<ReliableSpan> out = new ArrayList<>();
+        if (spansValue instanceof RecordValue tuple) {
+            for (Object m : tuple.members().values()) {
+                if (m instanceof RecordValue s && "Span".equals(bareType(s.typeName()))) {
+                    out.add(new ReliableSpan((int) Math.round(memberD(s, "kind")),
+                            memberD(s, "lo"), memberD(s, "hi")));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Turn per-column interval spans into vertical line series over {@code [xlo, xhi]}. Framing
+     * policy (v1, native-side): a ROBUST y-range (2nd–98th percentile of the bounded columns'
+     * bounds) so a near-pole spike can't flatten the plot. A pole column fills that range (the
+     * block), an empty column is omitted (the break), a curve column is a clamped vertical segment
+     * (with a small height floor so a flat curve still reads as a line). Package-visible test seam.
+     */
+    static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue) {
+        List<ReliableSpan> spans = parseSpans(spansValue);
+        int n = spans.size();
+        if (n == 0) return List.of();
+        List<Double> bounds = new ArrayList<>();
+        for (ReliableSpan s : spans) if (s.kind() == 0) { bounds.add(s.lo()); bounds.add(s.hi()); }
+        double[] yr = robustRange(bounds);
+        double ymin = yr[0], ymax = yr[1];
+        double minH = (ymax - ymin) * 0.004;   // height floor so a flat curve still reads as a line
+        double dx = (xhi - xlo) / n;
+        List<Series> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            ReliableSpan s = spans.get(i);
+            if (s.kind() == 2) continue;                         // empty → break (draw nothing)
+            double x = xlo + (i + 0.5) * dx;
+            double ylo, yhi;
+            if (s.kind() == 1) { ylo = ymin; yhi = ymax; }       // pole → full column (the block)
+            else {                                               // curve → clamped vertical segment
+                ylo = Math.max(ymin, s.lo());
+                yhi = Math.min(ymax, s.hi());
+                if (yhi < ylo) continue;                         // wholly outside the viewport
+                if (yhi - ylo < minH) { double m = (ylo + yhi) / 2; ylo = m - minH / 2; yhi = m + minH / 2; }
+            }
+            out.add(Series.line(new double[]{x, x}, new double[]{ylo, yhi}, SERIES_COLOR));
+        }
+        return out;
+    }
+
+    /** {@code [ymin, ymax]} from the 2nd/98th percentile of {@code vals}, padded 5% — robust to
+     *  near-pole spikes. An empty set (no bounded columns) yields a default unit window. */
+    private static double[] robustRange(List<Double> vals) {
+        if (vals.isEmpty()) return new double[]{-1, 1};
+        List<Double> s = new ArrayList<>(vals);
+        Collections.sort(s);
+        double lo = percentile(s, 0.02), hi = percentile(s, 0.98);
+        if (hi <= lo) { double m = (lo + hi) / 2; lo = m - 1; hi = m + 1; }
+        double pad = (hi - lo) * 0.05;
+        return new double[]{lo - pad, hi + pad};
+    }
+
+    private static double percentile(List<Double> sorted, double p) {
+        int i = (int) Math.round(p * (sorted.size() - 1));
+        return sorted.get(Math.max(0, Math.min(sorted.size() - 1, i)));
     }
 
     /**

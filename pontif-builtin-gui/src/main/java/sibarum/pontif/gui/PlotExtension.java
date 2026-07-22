@@ -38,10 +38,11 @@ public final class PlotExtension implements Extension {
     public String pontifSource() {
         return """
                 requires pontif.core.{Stream}
+                requires pontif.algebra.{AlgExpr, Interval, Unbounded, Undefined, evalInterval}
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
                            fade, cmap, wire, scene, Curve, curve, color, chart,
-                           Volume3D, Volume, volume, normals}
+                           Volume3D, Volume, volume, normals, plotExpr}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -286,6 +287,47 @@ public final class PlotExtension implements Extension {
                 # Overlay several curves in one 2D chart: chart({title="…"}, {curve(a), curve(b)}).
                 function chart(cfg:_, layers:_):Stream[String] -> renderChart(cfg, layers)
 
+                # --- Reliable plotting: interval-arithmetic column rasterization -----------------
+                # (docs/reliable-plotting.md) An algebraic Expression is rendered by SOUND interval
+                # ENCLOSURE, not point sampling: each pixel column's x-interval is evaluated with
+                # evalInterval, and the y-enclosure becomes a vertical span. This is blind-spot-free
+                # at asymptotes — where point sampling aliases (`tan(1/x)` has ∞ poles between two
+                # samples), the enclosure fills the column. Line, break, and block are ONE form:
+                # a bounded span is the curve, an empty column is a break, a full column is a pole.
+
+                # 256 pixel columns, synthesized once — the default horizontal resolution.
+                let columnIndices:Stream[Int:0 <= @ < 256];
+
+                # One classified column: kind 0 = curve (bounded span [lo,hi]), 1 = pole (Unbounded →
+                # a full-height block), 2 = empty (Undefined → a break). The native reads these.
+                struct Span(kind:Int, lo:Decimal, hi:Decimal)
+
+                # Classify one column [xa, xb] by its interval enclosure — the reliable core. The
+                # three enclosure outcomes map one-to-one onto the three column kinds.
+                function classifyColumn(e:AlgExpr, xa:Decimal, xb:Decimal):Span -> match evalInterval(e, xa, xb) {
+                  [Interval(lo, hi)] -> Span(0, lo, hi)
+                  [Unbounded]        -> Span(1, 0.0, 0.0)
+                  [Undefined]        -> Span(2, 0.0, 0.0)
+                }
+
+                # Native: frame the y-range and paint the per-column spans as vertical bars in one
+                # window (framing native-side for v1). Placeholder body; the native runs.
+                function renderReliable(xlo:_, xhi:_, spans:_):Stream[String] -> {}
+
+                # Plot an algebraic expression tree over [xlo, xhi] by reliable interval enclosure —
+                # one span per column, evaluated with evalInterval. Takes a bare AlgExpr: pass a
+                # hand-built tree, `$f[Decimal].ast` from a proven-Algebraic function, or an
+                # Expression's `.ast` field. (A convenience Expression overload is deferred until the
+                # transitive pontif.poly import bug is fixed — see docs/reliable-plotting.md.)
+                function plotExpr(e:AlgExpr, xlo:Decimal, xhi:Decimal):Stream[String] -> (
+                  let dx = (xhi - xlo) / 256.0
+                  let spans = &columnIndices:[ (i:Int) -> classifyColumn(e, xlo + i * dx, xlo + (i + 1) * dx) ]
+                  renderReliable(xlo, xhi, spans)
+                )
+
+                # Same, over the default domain [-10, 10].
+                function plotExpr(e:AlgExpr):Stream[String] -> plotExpr(e, -10.0, 10.0)
+
                 0
                 """;
     }
@@ -298,6 +340,7 @@ public final class PlotExtension implements Extension {
                 "renderCloud", DasumBridge::renderCloud,
                 "renderSurface", DasumBridge::renderSurface,
                 "renderScene", DasumBridge::renderScene,
-                "renderChart", DasumBridge::renderChart);
+                "renderChart", DasumBridge::renderChart,
+                "renderReliable", DasumBridge::renderReliable);
     }
 }

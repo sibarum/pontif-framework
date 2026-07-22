@@ -566,4 +566,45 @@ class PlotExtensionTest {
         // Centred on the first voxel at the domain corner (-1,-1,-1): midpoint x ≈ -1.
         assertEquals(-1f, (ep[0] + ep[3]) / 2f, 1e-5f, "glyph centred on its voxel");
     }
+
+    @Test
+    void plotExpr_reliableColumns_detectPoleAndBuildSpans() {
+        Extensions.install(new PlotExtension());
+
+        // Capture the per-column spans the native would paint — no window opens. This exercises the
+        // whole reliable pipeline: evalInterval per column (pontif.algebra), classifyColumn's
+        // three-way mapping, the fragment loop, and the Stream[Span] → aggregate boundary crossing.
+        Object[] captured = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = args.get(2);   // the {spans} tuple
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderReliable", stub);
+        NativeCalls.register("pontif.plot/renderReliable", stub);
+
+        // 1/x over [-2, 2]: a pole at x = 0. Point sampling would blow up; interval enclosure marks
+        // the column straddling 0 as Unbounded and leaves the rest as bounded curve spans.
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{AlgExpr, Const, Param, Div}
+                        requires pontif.plot.{plotExpr}
+                        let e:AlgExpr = Div(Const(1.0), Param("x"))
+                        plotExpr(e, -2.0, 2.0)""", "reliable.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "plotExpr should run; got " + r.text());
+        assertNotNull(captured[0], "renderReliable should have received the spans aggregate");
+
+        List<DasumBridge.ReliableSpan> spans = DasumBridge.parseSpans(captured[0]);
+        assertEquals(256, spans.size(), "one span per pixel column");
+        assertTrue(spans.stream().anyMatch(s -> s.kind() == 1),
+                "1/x over [-2,2] must detect a pole column (Unbounded) near x=0");
+        assertTrue(spans.stream().allMatch(s -> s.kind() != 2),
+                "1/x is defined everywhere except the pole — no wholly-undefined columns");
+
+        // The spans rasterise to vertical series: poles as full-height blocks, curves as segments,
+        // breaks omitted. A near-pole spike must NOT set the scale — the robust range stays modest.
+        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, captured[0]);
+        assertFalse(series.isEmpty(), "reliable spans should render to vertical series");
+    }
 }

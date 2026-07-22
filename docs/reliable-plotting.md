@@ -227,3 +227,30 @@ feature-agility). Dependencies point one way, evaluator → renderer, never back
 
 The affine-arithmetic upgrade (slice 5) replaces the *representation* inside (1) behind the same
 interface; (2)–(6) are untouched. That is the whole point of the seams.
+
+## Progress
+
+- **Slice 1 — `evalInterval` (LANDED 2026-07-22, `ba22576`).** Interval-algebra unit + AST walk +
+  `Interval` / `Unbounded` structs, native in `pontif.algebra`, outward-rounded endpoints,
+  `Div`-straddling-0 → `Unbounded`. Verified by `AlgebraIntervalTest` (8) — pole, outward rounding,
+  exactness, partial-domain `sqrt`, periodic saturation, domain edges. 66 algebra/poly tests green.
+- **Slice 2 — flat reliable renderer (LANDED 2026-07-22).** Pontif-side `classifyColumn` +
+  `columnIndices` (256) + `plotExpr`; native `renderReliable` in `DasumBridge` builds one vertical
+  `Series` per column (pole → full-height block, empty → break, curve → clamped segment) over a
+  **robust** (2nd–98th percentile) y-range so a near-pole spike can't flatten the plot. Verified
+  headlessly by `PlotExtensionTest.plotExpr_reliableColumns_detectPoleAndBuildSpans` (whole pipeline,
+  no window). Window render is manual, like the other plot snippets.
+- **`plotExpr` takes a bare `AlgExpr`, not `Expression` (adjustment to Q4).** Making `pontif.plot`
+  `requires pontif.poly` (for `Expression`) exposed a **compiler bug**: under that *transitive*
+  double-import (a program → `pontif.plot` → both `pontif.algebra` and `pontif.poly`, which itself
+  re-imports `pontif.algebra`'s closed `AlgExpr` union), `pontif.poly`'s `differentiate` fails to
+  compile — the pattern variable `a` in `[Exp(a)] -> …` is mis-typed as `Decimal[==64.0]` and
+  rejected as disjoint from the union, even though `pontif.poly` compiles cleanly standalone
+  (`PolynomialModuleTest`, 13 green). So `plotExpr` takes the bare `AlgExpr` (the real requirement;
+  `Expression` is only sugar over it) and `pontif.plot` requires only `pontif.algebra`. The
+  `Expression` convenience overload is **deferred** until the transitive-union linking bug is fixed
+  (a recursive-union / module-linking issue, adjacent to the `ba22576` work). On-ramp meanwhile:
+  `plotExpr($f[Decimal].ast)`, a hand-built tree, or `plotExpr(myExpr.ast)`.
+- **Still ahead:** slice 3 (adaptive subdivision — sharpens fat/tall columns, gives partial-domain
+  tightness for free), slice 4 (feature-aware framing once a root-finder exists; the `Expression`
+  overload once the linking bug lands), slice 5 (affine arithmetic).
