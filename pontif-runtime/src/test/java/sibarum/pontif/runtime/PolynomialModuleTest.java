@@ -96,6 +96,21 @@ class PolynomialModuleTest {
     }
 
     @Test
+    void integerScale_findsMultiplierClearingCoefficientsToIntegers() {
+        // Root-finding step 1: the smallest 10^k making every coefficient integral (roots-preserving).
+        String prog = """
+                requires pontif.poly.{integerScale}
+                requires pontif.algebra.{Algebraic}
+                function p(x:Decimal):Decimal -> %s
+                assign proof p:Algebraic
+                integerScale($p[Decimal].ast, "x") == %s
+                """;
+        assertEquals("true", run(String.format(prog, "3.0*x + 6.0", "1.0")));      // already integer
+        assertEquals("true", run(String.format(prog, "0.5*x + 1.0", "10.0")));     // 0.5 → ×10
+        assertEquals("true", run(String.format(prog, "0.25*x*x + 1.0", "100.0"))); // 0.25 → ×100
+    }
+
+    @Test
     void simplify_combinesLikeTerms() {
         // (x+1)^2 -> x^2 + 2x + 1: exactly 3 terms (expand alone would leave 4: x*x + x + x + 1).
         assertEquals("3.0", run("""

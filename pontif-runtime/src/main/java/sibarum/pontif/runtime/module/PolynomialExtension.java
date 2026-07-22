@@ -56,7 +56,9 @@ public final class PolynomialExtension implements Extension {
             requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
                                      Sin, Cos, Tan, Exp, Log, eval}
             requires pontif.core.{Stream}
-            exports @.{substitute, expand, simplify, differentiate, gradient, degree, coeff, Expression}
+            requires pontif.math.{floor}
+            exports @.{substitute, expand, simplify, differentiate, gradient, degree, coeff,
+                       integerScale, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -230,6 +232,32 @@ public final class PolynomialExtension implements Extension {
                 }
             }
             function coeff(e:AlgExpr, x:String, d:Int):Decimal -> coeffSum(simplify(e), x, d)
+
+            # --- Denominator clearing (root-finding step 1) ----------------------------------
+            # The rational root theorem needs INTEGER coefficients. Every Pontif Decimal is a finite
+            # decimal (its denominator is a power of 10), so multiplying the whole polynomial by a
+            # high-enough 10^k clears every coefficient to an integer — and scaling by a nonzero
+            # constant leaves the ROOTS unchanged. integerScale finds the smallest such 10^k.
+
+            # isInt: v has no fractional part. Declared :Bool so a caller reads a plain Bool.
+            function isInt(v:Decimal):Bool -> floor(v) == v
+
+            # allScaledInt: are coeff@0..coeff@d all integral once scaled by `mult`? (`both` matches
+            # its Bool arguments, sidestepping match-totality over a computed comparison.)
+            function allScaledInt(e:AlgExpr, x:String, d:Int, mult:Decimal):Bool -> match (d < 0) {
+              [Bool:true]  -> true
+              [Bool:false] -> both(isInt(coeff(e, x, d) * mult), allScaledInt(e, x, d - 1, mult))
+            }
+
+            # scaleFrom: smallest power-of-ten ≥ `mult` clearing all coefficients (×10 until integral).
+            function scaleFrom(e:AlgExpr, x:String, mult:Decimal):Decimal ->
+              match allScaledInt(e, x, degree(e, x), mult) {
+                [Bool:true]  -> mult
+                [Bool:false] -> scaleFrom(e, x, mult * 10.0)
+              }
+
+            # integerScale: the multiplier that turns the polynomial's coefficients into integers.
+            function integerScale(e:AlgExpr, x:String):Decimal -> scaleFrom(e, x, 1.0)
 
             # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
             # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,
