@@ -610,7 +610,22 @@ final class ConstructionGate {
     private static Fit classify(
             IrSort arg, IrSort field, Map<String, IrSort.Structural> structs,
             AssignabilityContext actx) {
-        // Field-side composition first: a union fits if any branch fits.
+        // Argument-side union FIRST: a union argument fits iff EVERY branch fits the field. This
+        // must precede the field-side rule below — otherwise a union arg against a union field asks
+        // "does the whole arg union fit some single field branch?", which no multi-member union
+        // does, so reflexive union subsumption (U ⊑ U — e.g. a `pontif.poly` function returning the
+        // closed AlgExpr union, fed to an AlgExpr-typed constructor field) wrongly reads UNKNOWN.
+        if (arg instanceof IrSort.Union argU) {
+            boolean allFit = true;
+            boolean allDisjoint = true;
+            for (IrSort b : argU.branches()) {
+                Fit f = classify(b, field, structs, actx);
+                allFit &= f == Fit.FITS;
+                allDisjoint &= f == Fit.DISJOINT;
+            }
+            return allFit ? Fit.FITS : allDisjoint ? Fit.DISJOINT : Fit.UNKNOWN;
+        }
+        // Field-side composition: a (non-union) arg against a union field fits if any branch fits.
         if (field instanceof IrSort.Union u) {
             boolean allDisjoint = true;
             for (IrSort b : u.branches()) {
@@ -630,17 +645,6 @@ final class ConstructionGate {
             return allFit ? Fit.FITS : Fit.UNKNOWN;
         }
         if (arg == null) return Fit.UNKNOWN;
-        // Argument-side composition: a union fits if every branch fits.
-        if (arg instanceof IrSort.Union u) {
-            boolean allFit = true;
-            boolean allDisjoint = true;
-            for (IrSort b : u.branches()) {
-                Fit f = classify(b, field, structs, actx);
-                allFit &= f == Fit.FITS;
-                allDisjoint &= f == Fit.DISJOINT;
-            }
-            return allFit ? Fit.FITS : allDisjoint ? Fit.DISJOINT : Fit.UNKNOWN;
-        }
 
         String argBase = baseName(arg);
         String fieldBase = baseName(field);

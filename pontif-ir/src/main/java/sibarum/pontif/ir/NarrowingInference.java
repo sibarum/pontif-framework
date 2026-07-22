@@ -766,11 +766,36 @@ public final class NarrowingInference {
         // through the registered struct table by name (the authoritative field
         // sorts), per the Phase-C contract — an inline Structural without a
         // structDefs entry still yields null.
+        // The base's nominal name. A metareference base narrows to a dispatch-style CallSig
+        // (`$f[…]` → [Dispatch] / [AlgebraicDispatch]) whose nominal is its typeName, not a plain
+        // Named — so read it explicitly here (the shared baseName helper stays Named/Refined-only,
+        // its contract for the struct-field paths). Without this a metareference field access has no
+        // nominal to project through and the attribute-producer lookup below never fires.
         String baseName = baseName(baseNarrowing);
+        if (baseName == null && baseNarrowing instanceof IrSort.CallSig cs) {
+            baseName = cs.typeName();
+        }
         if (baseName == null) return null;
         IrSort.Structural struct = ctx.structDefs().get(baseName);
-        if (struct == null) return null;
-        return struct.members().get(fa.fieldName());
+        if (struct != null) {
+            IrSort field = struct.members().get(fa.fieldName());
+            if (field != null) return field;
+        }
+        // Not a struct field. Try a trait ATTRIBUTE PRODUCER on this nominal — e.g. `.ast` on the
+        // metareference nominal AlgebraicDispatch, whose `ast` producer is declared in the Algebraic
+        // trait. Its return sort is captured in functionReturns keyed `<owner>.<attr>` (owner maybe
+        // module-qualified). Projecting it makes a union-typed member (`ast:[Const|…|Log]`) STATICALLY
+        // known so `let e:AlgExpr = $f[…].ast` proves against the union at the construction gate.
+        String attrSuffix = "." + fa.fieldName();
+        for (Map.Entry<String, IrSort> e : ctx.functionReturns().entrySet()) {
+            String key = e.getKey();
+            if (!key.endsWith(attrSuffix)) continue;
+            String owner = key.substring(0, key.length() - attrSuffix.length());
+            if (owner.equals(baseName) || owner.endsWith("/" + baseName) || owner.endsWith("." + baseName)) {
+                return e.getValue();
+            }
+        }
+        return null;
     }
 
     /**

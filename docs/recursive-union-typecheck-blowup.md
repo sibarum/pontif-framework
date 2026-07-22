@@ -5,15 +5,17 @@ and what it takes to fix it. Written 2026-07-21 after the attempt was made and
 reverted. Companion to `docs/dispatch-method-elimination.md` and the `pontif.poly`
 CAS core.*
 
-Status: **PERF BLOCKER FIXED (2026-07-21).** Type-checking is now polynomial in
-recursive-union arity — the 12-member scenario type-checks in tens of ms (was a
-~19-minute hang). The root cause turned out to be narrower than §4's original guess (see
-the **Correction** below): a missing coinductive back-edge guard on the *anonymous union
-pair* inside `Refinements.imply`, not un-memoized `Assignability`. Regression guard:
-`RecursiveUnionTypeCheckTest`. Still open, and independent of this fix: Wall 1 (§2, the
-`.ast` binding) and — newly found once the perf fix let the close reach the construction
-gate — **Wall 3, reflexive union subsumption at the construction gate** (`§8`). `AlgExpr`
-stays an open trait until both land; both are construction-gate / `Assignability` work.
+Status: **CLOSED — `AlgExpr` is now a closed union (2026-07-22).** All three walls are down
+and the close landed end-to-end (`let AlgExpr:Type[Const | … | Log]`, catch-alls dropped from
+`pontif.poly`). Sequence: the perf blocker (Wall 2) fell first — type-checking is now
+polynomial in recursive-union arity (the 12-member scenario type-checks in tens of ms, was a
+~19-minute hang) via a coinductive back-edge guard on the *anonymous union pair* in
+`Refinements.imply` (narrower than §4's original `Assignability`-memo guess — see the
+**Correction**). Reaching the gates then surfaced two more, both fixed 2026-07-22 (§8): Wall 3
+(reflexive/member union subsumption — the **call** gate was reasoning over an *unresolved*
+imported union alias) and Wall 1 (the `.ast` binding — a metareference's `CallSig` nominal
+wasn't read for the attribute-producer projection). Regression guards:
+`RecursiveUnionTypeCheckTest` (the arity curve) and `UnionAliasCrossModuleTest` (Walls 1 & 3).
 
 ## 1. The goal that surfaced it
 
@@ -183,7 +185,7 @@ fix, change `AlgExpr` to the union, drop the catch-alls, and confirm the `pontif
 passes — `differentiate`'s `[_] -> Const(0.0)` lie becomes a compile error and `substitute`
 recurses into every node by construction. That is a separate change and is **not** done here.
 
-## 7. Interim state (until `AlgExpr` is actually closed)
+## 7. Interim state (superseded 2026-07-22 — see §8; `AlgExpr` is now closed)
 
 - The **performance blocker is gone** — a large recursive closed union type-checks quickly.
   Remaining before `AlgExpr` can close: Wall 1 (§2, the `.ast` binding) and the closing
@@ -194,39 +196,39 @@ recurses into every node by construction. That is a separate change and is **not
   closed union supersedes it once `AlgExpr` closes.
 - `gradient` and the other `pontif.poly` work are independent of this and unaffected.
 
-## 8. Attempting the close after the perf fix — two construction-gate walls remain (2026-07-22)
+## 8. Closing the union after the perf fix — Walls 3 and 1, both now fixed (2026-07-22)
 
-With the perf blocker fixed, the close was re-attempted end-to-end (union alias + wall-1
-`.ast` fix + drop the catch-alls). **The hang is gone** — the `pontif.poly` suite now
-type-checks in *milliseconds* (0.175 s / 0.720 s), confirming §6. But reaching the
-construction gate (which the hang previously prevented) surfaced **two semantic gaps**,
-both fast compile errors, both in the construction-gate / `Assignability` layer (C3):
+With the perf blocker gone the close was carried end-to-end (union alias, catch-alls dropped).
+**The hang is gone** — `pontif.poly` type-checks in *milliseconds*, confirming §6. Reaching the
+gates (which the hang previously prevented) surfaced **two more gaps**, each a latent bug the
+open trait never exercised. Both are now fixed; the close is complete.
 
-**Wall 3 (new — the current blocker): reflexive union subsumption at the construction gate.**
-Inside `substitute`, constructing `Add(substitute(l,…), substitute(rr,…))` fails:
+**Wall 3 — union subsumption at the gates.** Two layers, because two gates run over union sorts:
 
-> *Constructor argument 'left' of 'pontif.algebra/Add' cannot be proved to satisfy its
-> declared sort `Const|Param|Add|…|Log` — the argument's sort is `Const|Param|Add|…|Log`;
-> narrow the value so its sort entails the field.*
+- *Construction gate* (`let e:AlgExpr = Add(…)`, and `Add(substitute(l,…), …)`): a union-typed
+  argument against a union field read as UNKNOWN because the gate proved a union field only via a
+  provable *single* member. **Fix:** `ConstructionGate.classify` checks the argument-side union
+  first — a union argument fits iff *every* branch fits the field (reflexive `U ⊑ U` is then
+  trivial). This is the wall as originally diagnosed.
+- *Call gate* (`substitute(anAdd, …)`, `simplify(src)`, `evalInterval(e, …)`): the real blocker
+  turned out to be elsewhere. `PontifCompiler.firstUnprovableCall` runs on the **pre-`AliasResolver`**
+  module (every *other* gate runs inside `IrCompiler.compile`, post-resolution), so an *imported*
+  union alias reached it as a bare `Named` the refinement kernel could not relate to its member
+  structs — `imply(Add, AlgExpr)` read as **provably disjoint** and the call was rejected as a
+  misroute. **Fix:** resolve aliases before the call gate walks, so it reasons over the union like
+  every other gate. (A union *looser* is RESIDUAL, never FAILED, so a genuinely-wrong arg still
+  abstains to runtime by design — the fix widens what routes, it does not blind the gate.)
 
-The argument's sort **is** the whole union and the field's sort is the **same** union, yet
-`[K0|…|Kₙ] ⊑ [K0|…|Kₙ]` is not proven. This breaks **every** node construction from a
-union-typed value — pervasive (12 of 13 `PolynomialModuleTest` cases). Root cause: the gate
-proves an argument satisfies a union field by showing it is a provable *single member*; a
-value already typed as the whole union isn't narrowed to one member, so no single-member
-proof exists. Fix: the field-satisfaction check must accept **union-on-the-left subsumption**
-— every branch of the argument union is a member of the field union (the reflexive
-same-union case is trivial). Lives in the construction gate's field check / `Assignability`
-`isA` for a union sub-sort.
+**Wall 1 — the `.ast` binding.** `let e:AlgExpr = $f[Decimal].ast`. A metareference narrows to a
+dispatch-style **`CallSig`** (`[AlgebraicDispatch]`), but `NarrowingInference.baseName` handles
+only `Named`/`Refined` — so `inferFieldOnBase` had no nominal to key on and returned before the
+attribute-producer lookup (which is otherwise correct: the `ast` producer's `AlgExpr` return sort
+*is* in `functionReturns` as `<owner>/AlgebraicDispatch.ast`). **Fix:** read the nominal from the
+`CallSig`'s `typeName` for the producer projection (the shared `baseName` helper stays
+`Named`/`Refined`-only, its contract for the struct-field paths). The value's sort is then the
+union and the construction gate discharges the claim.
 
-**Wall 1 (still open): the `.ast` binding.** `let e:AlgExpr = $f[Decimal].ast` still fails
-(*"the value's sort is (not statically known)"*). The prototyped `inferFieldOnBase` producer
-search — scan `functionReturns` for a key `<owner>.<attr>` whose owner matches the base
-nominal — **did not match the actual `.ast` producer key**, so no sort was projected. Needs
-the correct hook: either the real producer-key format in `functionReturns`, or projecting
-directly from the `Algebraic` trait's declared `ast:AlgExpr` member for a metareference base.
-
-**Status:** the attempt was reverted (`AlgExpr` stays an open trait) to keep the tree
-building. Closing `AlgExpr` now depends on **Wall 3 + Wall 1**, both construction-gate /
-`Assignability` fixes — no longer a `pontif.poly` matter. The perf axis is done; the
-remaining work is teaching the construction gate that a union value satisfies a union field.
+**Status: done.** `AlgExpr` is a closed union; `differentiate`'s `[_] -> Const(0.0)` lie is gone
+(a new node is a compile error); `substitute` recurses into every node by construction. Guards:
+`UnionAliasCrossModuleTest` (Walls 1 & 3, cross-module), `PolynomialModuleTest` /
+`AlgebraAstSurfaceTest` (the `pontif.poly` and `.ast` surfaces end-to-end).

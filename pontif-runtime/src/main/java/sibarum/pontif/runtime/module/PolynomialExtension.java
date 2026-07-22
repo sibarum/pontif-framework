@@ -55,7 +55,8 @@ public final class PolynomialExtension implements Extension {
     private static final String SOURCE = """
             requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
                                      Sin, Cos, Tan, Exp, Log, eval}
-            exports @.{substitute, expand, simplify, differentiate, Expression}
+            requires pontif.core.{Stream}
+            exports @.{substitute, expand, simplify, differentiate, gradient, Expression}
 
             # substitute: replace variable `name` with expression `r` (total, structural).
             function substitute(e:AlgExpr, name:String, r:AlgExpr):AlgExpr -> match e {
@@ -66,7 +67,11 @@ public final class PolynomialExtension implements Extension {
               [Mul(l, rr)] -> Mul(substitute(l, name, r), substitute(rr, name, r))
               [Div(l, rr)] -> Div(substitute(l, name, r), substitute(rr, name, r))
               [Pow(b, x)]  -> Pow(substitute(b, name, r), substitute(x, name, r))
-              [_]          -> e
+              [Sin(a)]     -> Sin(substitute(a, name, r))
+              [Cos(a)]     -> Cos(substitute(a, name, r))
+              [Tan(a)]     -> Tan(substitute(a, name, r))
+              [Exp(a)]     -> Exp(substitute(a, name, r))
+              [Log(a)]     -> Log(substitute(a, name, r))
             }
 
             # expand: distribute Mul over Add, unroll integer Pow, normalize Sub.
@@ -183,8 +188,13 @@ public final class PolynomialExtension implements Extension {
               [Tan(a)]    -> Div(differentiate(a, x), Mul(Cos(a), Cos(a)))
               [Exp(a)]    -> Mul(Exp(a), differentiate(a, x))
               [Log(a)]    -> Div(differentiate(a, x), a)
-              [_]         -> Const(0.0)
             }
+
+            # gradient: the vector of partial derivatives, one per variable. Maps differentiate over
+            # a Stream of variable names (the fragment captures `f` from scope) — `[∂f/∂v for v in
+            # vars]`, in order. Multivariate by construction.
+            function gradient(f:AlgExpr, vars:Stream[String]):[Stream[AlgExpr]] ->
+              &vars:[ (v:String) -> differentiate(f, v) ]
 
             # Expression: a chainable wrapper around the internal AlgExpr AST — a nicer public API
             # for transformation pipelines. Use a bare AlgExpr when you only want the tree (match,

@@ -504,7 +504,13 @@ public final class PontifCompiler {
     private static Optional<String> firstUnprovableCall(IrModule module) {
         sibarum.pontif.ir.CallGate.Report report;
         try {
-            report = sibarum.pontif.ir.CallGate.walk(module);
+            // Resolve type aliases first, exactly as IrCompiler.compile does internally, so the gate
+            // reasons over the same sorts the rest of the type-checker does. Without this the gate
+            // sees a union alias (`AlgExpr`) as a bare Named the refinement kernel can't relate to its
+            // member structs — so `simplify(anAdd)` reads as a provable misroute (`imply(Add, AlgExpr)`
+            // Failed) and the call is wrongly rejected. Idempotent and already known to succeed here
+            // (compile() ran the same resolution just above).
+            report = sibarum.pontif.ir.CallGate.walk(sibarum.pontif.ir.AliasResolver.resolve(module));
         } catch (Exception | StackOverflowError e) {
             return Optional.empty();  // outside the walk's scope → abstain
         }

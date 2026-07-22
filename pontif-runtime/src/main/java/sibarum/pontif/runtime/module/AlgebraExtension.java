@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
 
 /**
@@ -48,6 +49,20 @@ public final class AlgebraExtension implements Extension {
     public static final AlgebraExtension INSTANCE = new AlgebraExtension();
 
     private AlgebraExtension() {}
+
+    /**
+     * Thrown at a point where the expression is genuinely <b>undefined</b> — a pole (division by
+     * zero), an even root of a negative, {@code 0} to a negative power, or a non-finite
+     * transcendental. This is deliberately <em>distinct</em> from a structural/type error
+     * (not an {@code AlgExpr} node, an unbound name): those are real bugs and must still abort.
+     * {@code eval} lets a domain exception propagate (fail-closed, the strict evaluator);
+     * {@code evalSafe} catches <em>only</em> this type and turns it into the {@code Undefined}
+     * value, so a plot can sample across an asymptote without crashing — fail-closed surfaced as
+     * a value, never as a fabricated number.
+     */
+    static final class AlgebraicDomainException extends RuntimeCheckException {
+        AlgebraicDomainException(String message) { super(message, Origin.NONE); }
+    }
 
     @Override
     public String moduleName() {
@@ -99,6 +114,26 @@ public final class AlgebraExtension implements Extension {
                 return decimal(v);
             });
         });
+        // evalSafe: a TOTAL single-variable eval. Where `eval` fails closed at a domain gap (a
+        // pole, an even root of a negative, a non-finite transcendental), `evalSafe` returns the
+        // `Undefined` sentinel instead — so a plot can walk across an asymptote without aborting.
+        // Only genuine domain gaps are caught; a structural error (not an AlgExpr, unbound name)
+        // is a real bug and still propagates. `x` is read outside the try for the same reason.
+        m.put("evalSafe", (args, ctx) -> {
+            BigDecimal x = decimal(args.get(1));
+            try {
+                return evalNode(args.get(0), name -> x);
+            } catch (AlgebraicDomainException undefinedHere) {
+                return new RecordValue(qn("Undefined"), new LinkedHashMap<>());
+            }
+        });
+        // evalInterval: the INTERVAL evaluator — a sound enclosure of { f(x) : x in [lo, hi] }, the
+        // reliable-plotting substrate (docs/reliable-plotting.md slice 1). It is the generalisation
+        // of evalSafe from a point to a whole pixel column: returns Interval(lo,hi) | Unbounded |
+        // Undefined. Inexact endpoints round OUTWARD, so the result is ALWAYS a true superset of the
+        // real range — the no-lie law at the pixel (never miss the curve, never place it falsely).
+        m.put("evalInterval", (args, ctx) ->
+                encToRecord(encOf(args.get(0), decimal(args.get(1)), decimal(args.get(2)))));
         return m;
     }
 
@@ -255,8 +290,8 @@ public final class AlgebraExtension implements Extension {
                     .subtract(evalNode(r.members().get("right"), env));
             case "Mul" -> evalNode(r.members().get("left"), env)
                     .multiply(evalNode(r.members().get("right"), env));
-            case "Div" -> evalNode(r.members().get("left"), env)
-                    .divide(evalNode(r.members().get("right"), env), MathContext.DECIMAL128);
+            case "Div" -> divChecked(evalNode(r.members().get("left"), env),
+                    evalNode(r.members().get("right"), env));
             // The exponent is read as an EXACT rational straight from the node tree (so
             // `Pow(x, Div(1,3))` keeps 1/3 exactly, not a truncated decimal) — the base^(p/q)
             // evaluation is then exact when the result is a terminating decimal (perfect roots)
@@ -273,6 +308,18 @@ public final class AlgebraExtension implements Extension {
             default -> throw new RuntimeCheckException(
                     "eval: unknown AlgExpr node '" + r.typeName() + "'", Origin.NONE);
         };
+    }
+
+    /**
+     * {@code a / b}, but a zero divisor is a genuine domain gap (a pole), not a Java
+     * {@code ArithmeticException} — surfaced as an {@link AlgebraicDomainException} so
+     * {@code evalSafe} can render it as {@code Undefined}. Never a fabricated quotient.
+     */
+    private static BigDecimal divChecked(BigDecimal a, BigDecimal b) {
+        if (b.signum() == 0) {
+            throw new AlgebraicDomainException("eval: division by zero (" + a + " / 0)");
+        }
+        return a.divide(b, MathContext.DECIMAL128);
     }
 
     /** The source parameter name a {@code Param} node carries. */
@@ -353,7 +400,7 @@ public final class AlgebraExtension implements Extension {
         int baseSign = base.signum();
         if (baseSign == 0) {
             if (num.signum() < 0) {
-                throw new RuntimeCheckException("eval: zero raised to a negative power", Origin.NONE);
+                throw new AlgebraicDomainException("eval: zero raised to a negative power");
             }
             return BigDecimal.ZERO;
         }
@@ -366,9 +413,9 @@ public final class AlgebraExtension implements Extension {
         BigDecimal magnitude = rootOf(powered, n);
         if (baseSign < 0) {
             if (n % 2 == 0) {
-                throw new RuntimeCheckException(
+                throw new AlgebraicDomainException(
                         "eval: even root of a negative number is not real (base " + base
-                                + ", exponent " + num + "/" + den + ")", Origin.NONE);
+                                + ", exponent " + num + "/" + den + ")");
             }
             if (num.testBit(0)) magnitude = magnitude.negate();   // odd numerator keeps the sign
         }
@@ -438,6 +485,226 @@ public final class AlgebraExtension implements Extension {
         return v.intValueExact();
     }
 
+    // --- interval arithmetic (docs/reliable-plotting.md, slice 1) --------------
+    //
+    // UNIT 1 — interval algebra. A three-way enclosure: a bounded [lo, hi], an Unbounded column
+    // (a ±inf spill — a pole or dense feature), or Undefined (no real value ANYWHERE on the
+    // column). Every operation is a SOUND over-approximation — the returned enclosure provably
+    // contains the true range — and inexact endpoints round OUTWARD, so a plot built on this can
+    // never miss the curve nor place it where it isn't. This unit knows nothing of the AlgExpr AST.
+
+    private enum EncKind { BOUNDED, UNBOUNDED, UNDEFINED }
+
+    private record Enc(EncKind kind, BigDecimal lo, BigDecimal hi) {
+        static final Enc UNBOUNDED = new Enc(EncKind.UNBOUNDED, null, null);
+        static final Enc UNDEFINED = new Enc(EncKind.UNDEFINED, null, null);
+        static Enc of(BigDecimal lo, BigDecimal hi) { return new Enc(EncKind.BOUNDED, lo, hi); }
+        boolean straddlesZero() {
+            return kind == EncKind.BOUNDED && lo.signum() <= 0 && hi.signum() >= 0;
+        }
+    }
+
+    /** Division rounding for outward-rounded quotient endpoints (toward −∞ / +∞ respectively). */
+    private static final MathContext DIV_DOWN = new MathContext(34, RoundingMode.FLOOR);
+    private static final MathContext DIV_UP = new MathContext(34, RoundingMode.CEILING);
+    /**
+     * Soundness margin for the double-backed transcendentals (their error is ~1e-16 relative). A
+     * generous 1e-12 relative+absolute over-widening — invisible at pixel scale, and it guarantees
+     * the enclosure stays a true superset despite double rounding.
+     */
+    private static final BigDecimal MARGIN_REL = new BigDecimal("1e-12");
+    private static final BigDecimal MARGIN_ABS = new BigDecimal("1e-12");
+    private static final BigDecimal NEG_ONE = BigDecimal.ONE.negate();
+
+    private static BigDecimal outward(BigDecimal v, boolean up) {
+        BigDecimal margin = v.abs().multiply(MARGIN_REL).add(MARGIN_ABS);
+        return up ? v.add(margin) : v.subtract(margin);
+    }
+
+    private static BigDecimal minBD(BigDecimal a, BigDecimal b) { return a.compareTo(b) <= 0 ? a : b; }
+    private static BigDecimal maxBD(BigDecimal a, BigDecimal b) { return a.compareTo(b) >= 0 ? a : b; }
+
+    /** A binary interval op with the shared propagation: Undefined wins, then Unbounded, then the op. */
+    private static Enc binOp(Enc a, Enc b, BinaryOperator<Enc> op) {
+        if (a.kind() == EncKind.UNDEFINED || b.kind() == EncKind.UNDEFINED) return Enc.UNDEFINED;
+        if (a.kind() == EncKind.UNBOUNDED || b.kind() == EncKind.UNBOUNDED) return Enc.UNBOUNDED;
+        return op.apply(a, b);
+    }
+
+    private static Enc iAdd(Enc a, Enc b) {
+        return binOp(a, b, (x, y) -> Enc.of(x.lo().add(y.lo()), x.hi().add(y.hi())));
+    }
+
+    private static Enc iSub(Enc a, Enc b) {
+        return binOp(a, b, (x, y) -> Enc.of(x.lo().subtract(y.hi()), x.hi().subtract(y.lo())));
+    }
+
+    private static Enc iMul(Enc a, Enc b) {
+        return binOp(a, b, (x, y) -> {                 // min/max of the four endpoint products (exact)
+            BigDecimal p1 = x.lo().multiply(y.lo()), p2 = x.lo().multiply(y.hi());
+            BigDecimal p3 = x.hi().multiply(y.lo()), p4 = x.hi().multiply(y.hi());
+            return Enc.of(minBD(minBD(p1, p2), minBD(p3, p4)), maxBD(maxBD(p1, p2), maxBD(p3, p4)));
+        });
+    }
+
+    private static Enc iDiv(Enc a, Enc b) {
+        return binOp(a, b, (x, y) -> {
+            if (y.straddlesZero()) return Enc.UNBOUNDED;   // THE pole — a divisor range containing 0
+            BigDecimal lo = null, hi = null;
+            BigDecimal[] num = {x.lo(), x.hi()}, den = {y.lo(), y.hi()};
+            for (BigDecimal p : num) {
+                for (BigDecimal q : den) {
+                    BigDecimal down = p.divide(q, DIV_DOWN), up = p.divide(q, DIV_UP);
+                    lo = lo == null ? down : minBD(lo, down);
+                    hi = hi == null ? up : maxBD(hi, up);
+                }
+            }
+            return Enc.of(lo, hi);
+        });
+    }
+
+    private static Enc iIntPow(Enc b, int n) {
+        if (n == 0) return Enc.of(BigDecimal.ONE, BigDecimal.ONE);
+        if (n < 0) return iDiv(Enc.of(BigDecimal.ONE, BigDecimal.ONE), iIntPow(b, -n)); // 1/xⁿ; pole→Unb
+        BigDecimal lo = b.lo(), hi = b.hi();
+        if (n % 2 == 0) {                              // even: U-shaped
+            if (lo.signum() >= 0) return Enc.of(lo.pow(n), hi.pow(n));
+            if (hi.signum() <= 0) return Enc.of(hi.pow(n), lo.pow(n));
+            return Enc.of(BigDecimal.ZERO, maxBD(lo.abs().pow(n), hi.abs().pow(n)));
+        }
+        return Enc.of(lo.pow(n), hi.pow(n));           // odd: monotone increasing
+    }
+
+    private static Enc iFracPow(Enc b, BigDecimal exp) {
+        Rational r = Rational.of(exp);
+        boolean evenRoot = !r.den().testBit(0);        // even denominator ⇒ needs a non-negative base
+        BigDecimal lo = b.lo(), hi = b.hi();
+        if (evenRoot) {
+            if (hi.signum() < 0) return Enc.UNDEFINED;             // wholly out of domain
+            if (lo.signum() < 0) lo = BigDecimal.ZERO;             // clamp to the defined part
+        }
+        try {
+            if (exp.signum() >= 0) {                    // increasing where defined
+                BigDecimal p = outward(powRat(lo, r), false), q = outward(powRat(hi, r), true);
+                return Enc.of(minBD(p, q), maxBD(p, q));
+            }
+            if (lo.signum() == 0 || b.straddlesZero()) return Enc.UNBOUNDED;  // pole at 0 for a neg power
+            BigDecimal p = outward(powRat(hi, r), false), q = outward(powRat(lo, r), true);
+            return Enc.of(minBD(p, q), maxBD(p, q));
+        } catch (AlgebraicDomainException edge) {
+            return Enc.UNBOUNDED;   // unexpected domain edge → paint the column (sound), never a false gap
+        }
+    }
+
+    private static Enc iExp(Enc a) {
+        if (a.kind() != EncKind.BOUNDED) return a.kind() == EncKind.UNDEFINED ? Enc.UNDEFINED : Enc.UNBOUNDED;
+        double ehi = Math.exp(a.hi().doubleValue());
+        if (!Double.isFinite(ehi)) return Enc.UNBOUNDED;           // overflow → unbounded above
+        double elo = Math.exp(a.lo().doubleValue());
+        return Enc.of(outward(BigDecimal.valueOf(elo), false), outward(BigDecimal.valueOf(ehi), true));
+    }
+
+    private static Enc iLog(Enc a) {
+        if (a.kind() != EncKind.BOUNDED) return a.kind() == EncKind.UNDEFINED ? Enc.UNDEFINED : Enc.UNBOUNDED;
+        if (a.hi().signum() <= 0) return Enc.UNDEFINED;            // wholly non-positive → out of domain
+        if (a.lo().signum() <= 0) return Enc.UNBOUNDED;            // touches 0 → log → −∞
+        return Enc.of(outward(BigDecimal.valueOf(Math.log(a.lo().doubleValue())), false),
+                      outward(BigDecimal.valueOf(Math.log(a.hi().doubleValue())), true));
+    }
+
+    private static Enc iSinCos(Enc a, boolean sin) {
+        if (a.kind() == EncKind.UNDEFINED) return Enc.UNDEFINED;
+        if (a.kind() == EncKind.UNBOUNDED) return Enc.of(NEG_ONE, BigDecimal.ONE);  // bounded regardless
+        double lo = a.lo().doubleValue(), hi = a.hi().doubleValue();
+        if (hi - lo >= 2 * Math.PI) return Enc.of(NEG_ONE, BigDecimal.ONE);         // ≥ full period
+        double flo = sin ? Math.sin(lo) : Math.cos(lo);
+        double fhi = sin ? Math.sin(hi) : Math.cos(hi);
+        double mn = Math.min(flo, fhi), mx = Math.max(flo, fhi);
+        double maxAt = sin ? Math.PI / 2 : 0.0;        // where the function attains +1
+        double minAt = sin ? -Math.PI / 2 : Math.PI;   // where it attains −1
+        if (containsCongruent(lo, hi, maxAt, 2 * Math.PI)) mx = 1.0;
+        if (containsCongruent(lo, hi, minAt, 2 * Math.PI)) mn = -1.0;
+        return Enc.of(maxBD(NEG_ONE, outward(BigDecimal.valueOf(mn), false)),
+                      minBD(BigDecimal.ONE, outward(BigDecimal.valueOf(mx), true)));
+    }
+
+    private static Enc iTan(Enc a) {
+        if (a.kind() != EncKind.BOUNDED) return a.kind() == EncKind.UNDEFINED ? Enc.UNDEFINED : Enc.UNBOUNDED;
+        double lo = a.lo().doubleValue(), hi = a.hi().doubleValue();
+        if (hi - lo >= Math.PI) return Enc.UNBOUNDED;                          // spans a full period
+        if (containsCongruent(lo, hi, Math.PI / 2, Math.PI)) return Enc.UNBOUNDED;  // a pole in the column
+        double tlo = Math.tan(lo), thi = Math.tan(hi);                         // one branch → increasing
+        return Enc.of(outward(BigDecimal.valueOf(Math.min(tlo, thi)), false),
+                      outward(BigDecimal.valueOf(Math.max(tlo, thi)), true));
+    }
+
+    /** Does {@code [lo, hi]} contain a point {@code base + k·period} for some integer {@code k}? */
+    private static boolean containsCongruent(double lo, double hi, double base, double period) {
+        return Math.ceil((lo - base) / period) <= Math.floor((hi - base) / period);
+    }
+
+    // UNIT 2 — the AlgExpr walk. Maps a node tree onto UNIT 1, over the column [xlo, xhi]. Mirrors
+    // evalNode's structure; the interval algebra above carries all the soundness. `Param` is the
+    // column itself; anything else recurses and combines. A constant exponent routes to the exact
+    // integer power or the outward-rounded rational power; a symbolic exponent is conservatively
+    // Unbounded (rare, and sound — it paints the column rather than bounding it falsely).
+
+    private static Enc encOf(Object node, BigDecimal xlo, BigDecimal xhi) {
+        if (!(node instanceof RecordValue r) || r.typeName() == null) {
+            throw new RuntimeCheckException("evalInterval: not an AlgExpr node: " + node, Origin.NONE);
+        }
+        Map<String, Object> m = r.members();
+        return switch (QualifiedName.memberOf(r.typeName())) {
+            case "Const" -> { BigDecimal v = decimal(m.get("value")); yield Enc.of(v, v); }
+            case "Param" -> Enc.of(xlo, xhi);
+            case "Add" -> iAdd(encOf(m.get("left"), xlo, xhi), encOf(m.get("right"), xlo, xhi));
+            case "Sub" -> iSub(encOf(m.get("left"), xlo, xhi), encOf(m.get("right"), xlo, xhi));
+            case "Mul" -> iMul(encOf(m.get("left"), xlo, xhi), encOf(m.get("right"), xlo, xhi));
+            case "Div" -> iDiv(encOf(m.get("left"), xlo, xhi), encOf(m.get("right"), xlo, xhi));
+            case "Pow" -> iPow(encOf(m.get("base"), xlo, xhi), m.get("exponent"), xlo, xhi);
+            case "Sin" -> iSinCos(encOf(m.get("arg"), xlo, xhi), true);
+            case "Cos" -> iSinCos(encOf(m.get("arg"), xlo, xhi), false);
+            case "Tan" -> iTan(encOf(m.get("arg"), xlo, xhi));
+            case "Exp" -> iExp(encOf(m.get("arg"), xlo, xhi));
+            case "Log" -> iLog(encOf(m.get("arg"), xlo, xhi));
+            default -> throw new RuntimeCheckException(
+                    "evalInterval: unknown AlgExpr node '" + r.typeName() + "'", Origin.NONE);
+        };
+    }
+
+    private static Enc iPow(Enc base, Object expNode, BigDecimal xlo, BigDecimal xhi) {
+        if (base.kind() == EncKind.UNDEFINED) return Enc.UNDEFINED;
+        BigDecimal exp = constValue(expNode);
+        if (exp == null) return Enc.UNBOUNDED;                     // symbolic exponent → conservative
+        if (base.kind() == EncKind.UNBOUNDED) return Enc.UNBOUNDED;
+        BigDecimal stripped = exp.stripTrailingZeros();
+        if (stripped.scale() <= 0) return iIntPow(base, stripped.intValueExact());  // integer — exact
+        return iFracPow(base, exp);                                 // rational — roots, outward-rounded
+    }
+
+    /** The value of a {@code Const} node, or {@code null} if the node is anything else. */
+    private static BigDecimal constValue(Object node) {
+        if (node instanceof RecordValue r && r.typeName() != null
+                && QualifiedName.memberOf(r.typeName()).equals("Const")) {
+            return decimal(r.members().get("value"));
+        }
+        return null;
+    }
+
+    /** An enclosure as its Pontif value: {@code Interval(lo,hi)} | {@code Unbounded} | {@code Undefined}. */
+    private static RecordValue encToRecord(Enc e) {
+        return switch (e.kind()) {
+            case BOUNDED -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("lo", e.lo());
+                m.put("hi", e.hi());
+                yield new RecordValue(qn("Interval"), m);
+            }
+            case UNBOUNDED -> new RecordValue(qn("Unbounded"), new LinkedHashMap<>());
+            case UNDEFINED -> new RecordValue(qn("Undefined"), new LinkedHashMap<>());
+        };
+    }
+
     private static BigDecimal decimal(Object v) {
         if (v instanceof BigDecimal d) return d;
         if (v instanceof Long l) return BigDecimal.valueOf(l);
@@ -457,9 +724,9 @@ public final class AlgebraExtension implements Extension {
     /** A double result as a Decimal with honest significant digits; a non-finite value fails closed. */
     private static BigDecimal dbl(double d) {
         if (!Double.isFinite(d)) {
-            throw new RuntimeCheckException(
+            throw new AlgebraicDomainException(
                     "eval: transcendental produced a non-finite result (" + d
-                            + ") — outside its real domain", Origin.NONE);
+                            + ") — outside its real domain");
         }
         BigDecimal r = new BigDecimal(d, DOUBLE_SIG).stripTrailingZeros();
         return r.scale() < 0 ? r.setScale(0) : r;   // keep integers as "2", not "2E+0"
@@ -467,9 +734,23 @@ public final class AlgebraExtension implements Extension {
 
     private static final String SOURCE = """
             exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
-                       Sin, Cos, Tan, Exp, Log, Algebraic, eval, evalAt}
+                       Sin, Cos, Tan, Exp, Log, Algebraic, Undefined, Interval, Unbounded,
+                       eval, evalAt, evalSafe, evalInterval}
 
-            trait AlgExpr{}
+            # Undefined: the honest result of evaluating an expression at a point outside its
+            # domain — a pole (1/0), an even root of a negative, a non-finite transcendental. It
+            # is NOT an AlgExpr node (you can't build with it); it is what `evalSafe` returns in
+            # place of a value. So a consumer that must not crash on an asymptote (the plotter)
+            # matches `[Decimal | Undefined]` and treats Undefined as "no point here".
+            struct Undefined()
+
+            # Interval / Unbounded: the other two outcomes of `evalInterval` (docs/reliable-plotting
+            # .md). An `Interval(lo, hi)` is a bounded, sound enclosure of a curve over a pixel column;
+            # `Unbounded` is a column that spills to ±∞ (a pole or dense feature); `Undefined` (above)
+            # is a column wholly outside the domain. Like Undefined, neither is an AlgExpr node — they
+            # are enclosure results, matched as `[Interval | Unbounded | Undefined]`.
+            struct Interval(lo:Decimal, hi:Decimal)
+            struct Unbounded()
 
             struct Const(value:Decimal)
             struct Param(name:String)
@@ -486,18 +767,12 @@ public final class AlgebraExtension implements Extension {
             struct Exp(arg:AlgExpr)
             struct Log(arg:AlgExpr)
 
-            assign trait Const:AlgExpr{}
-            assign trait Param:AlgExpr{}
-            assign trait Add:AlgExpr{}
-            assign trait Sub:AlgExpr{}
-            assign trait Mul:AlgExpr{}
-            assign trait Div:AlgExpr{}
-            assign trait Pow:AlgExpr{}
-            assign trait Sin:AlgExpr{}
-            assign trait Cos:AlgExpr{}
-            assign trait Tan:AlgExpr{}
-            assign trait Exp:AlgExpr{}
-            assign trait Log:AlgExpr{}
+            # AlgExpr is the CLOSED union of its node types (not an open trait). Every `match` over
+            # it is exhaustive with no catch-all, and adding a node becomes a compile error in every
+            # operation that matches AlgExpr until the new case is handled — no silent fallthrough.
+            # (Undefined / Interval / Unbounded are deliberately NOT members: they are evaluation
+            # results, not buildable nodes.)
+            let AlgExpr:Type[Const | Param | Add | Sub | Mul | Div | Pow | Sin | Cos | Tan | Exp | Log]
 
             # Algebraic: the trait a metareference proven algebraic is-a. Its `ast` attribute
             # IS the AST surface — `$f[Decimal].ast` reads it (docs/dispatch-method-elimination
@@ -523,6 +798,16 @@ public final class AlgebraExtension implements Extension {
             # reference is rejected at the type level.
             function astOf(f:Algebraic):AlgExpr -> Const(0.0)
             function eval(e:AlgExpr, x:Decimal):Decimal -> 0.0
+            # evalSafe: the TOTAL sibling of `eval`. At a domain gap (a pole, an even root of a
+            # negative, a non-finite transcendental) it yields `Undefined` instead of failing
+            # closed — so a caller can sample across an asymptote. Body is a placeholder (the
+            # native runs); the union return is the honest signature.
+            function evalSafe(e:AlgExpr, x:Decimal):[Decimal | Undefined] -> Undefined()
+            # evalInterval: a SOUND enclosure of the curve over a whole column [lo, hi] — the
+            # reliable-plotting substrate (docs/reliable-plotting.md). `Interval(ylo, yhi)` bounds
+            # the curve, `Unbounded` marks a pole/dense column, `Undefined` a wholly-out-of-domain
+            # one. Placeholder body (the native runs); the three-way union is the honest signature.
+            function evalInterval(e:AlgExpr, lo:Decimal, hi:Decimal):[Interval | Unbounded | Undefined] -> Unbounded()
             # evalAt binds each variable by NAME from a point dict `{x = …, y = …}` — the
             # N-argument surface (`eval` is the one-variable convenience). The binding is
             # dynamically typed (`_`); a statically-typed point is the next slice.
