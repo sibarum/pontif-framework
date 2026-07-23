@@ -30,11 +30,6 @@ public final class MathExtExtension implements Extension {
     }
 
     @Override
-    public String pontifSource() {
-        return SOURCE;
-    }
-
-    @Override
     public Map<String, NativeCalls.NativeCall> calls() {
         Map<String, NativeCalls.NativeCall> m = new LinkedHashMap<>();
         m.put("gcd", (args, ctx) -> big(args, 0).gcd(big(args, 1)).longValueExact());
@@ -76,20 +71,4 @@ public final class MathExtExtension implements Extension {
     private static BigInteger big(List<Object> args, int i) {
         return BigInteger.valueOf(l(args, i));
     }
-
-    private static final String SOURCE = """
-            exports @.{gcd, lcm, factorial, isqrt, modpow, choose, perm, floorDiv, floorMod}
-
-            function gcd(a:Int, b:Int):Int -> 0
-            function lcm(a:Int, b:Int):Int -> 0
-            function factorial(n:Int):Int -> 0
-            function isqrt(n:Int):Int -> 0
-            function modpow(base:Int, exp:Int, mod:Int):Int -> 0
-            function choose(n:Int, k:Int):Int -> 0
-            function perm(n:Int, k:Int):Int -> 0
-            function floorDiv(a:Int, b:Int):Int -> 0
-            function floorMod(a:Int, b:Int):Int -> 0
-
-            0
-            """;
 }

@@ -61,17 +61,9 @@ public final class BuiltinModules {
      */
     private static final Map<String, String> SOURCES = new LinkedHashMap<>();
 
-    private static final String PONTIF_CORE_SOURCE = """
-            exports @.{Stream, Nothing, Break}
-
-            trait Stream[type E]{}
-
-            struct Nothing()
-
-            struct Break()
-
-            0
-            """;
+    /** {@code pontif.core}'s shipped source (classpath resource, see {@link ModuleResources}). */
+    private static final String PONTIF_CORE_SOURCE =
+            ModuleResources.load(BuiltinModules.class, PONTIF_CORE);
 
     static {
         SOURCES.put(PONTIF_CORE, PONTIF_CORE_SOURCE);

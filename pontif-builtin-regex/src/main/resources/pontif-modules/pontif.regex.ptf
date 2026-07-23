@@ -1,0 +1,17 @@
+exports @.{Regex, Pattern, NoMatch}
+
+# A compiled-on-use regular expression. Holds its RAW source (a backtick literal
+# `\d+` carries the two chars backslash-d verbatim); the native tryMatch compiles it
+# and anchored-matches a subject String. Written as a named type only under `requires
+# pontif.regex.{Regex}`; the backtick literal itself needs no import.
+struct Regex(source:String)
+
+# The no-match result of a Pattern — a nullary marker (like Nothing).
+struct NoMatch()
+
+# The extensible matcher contract (regex is the first tenant; the developer-facing
+# extension surface — user pattern kinds — is a later slice). A Pattern consumes a
+# subject String and yields captures (an ordered aggregate) or NoMatch.
+trait Pattern { tryMatch(subject:String):_ }
+
+0

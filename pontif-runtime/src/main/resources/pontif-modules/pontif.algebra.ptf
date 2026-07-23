@@ -1,0 +1,81 @@
+exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
+           Sin, Cos, Tan, Exp, Log, Algebraic, Undefined, Interval, Unbounded,
+           eval, evalAt, evalSafe, evalInterval}
+
+# Undefined: the honest result of evaluating an expression at a point outside its
+# domain — a pole (1/0), an even root of a negative, a non-finite transcendental. It
+# is NOT an AlgExpr node (you can't build with it); it is what `evalSafe` returns in
+# place of a value. So a consumer that must not crash on an asymptote (the plotter)
+# matches `[Decimal | Undefined]` and treats Undefined as "no point here".
+struct Undefined()
+
+# Interval / Unbounded: the other two outcomes of `evalInterval` (docs/reliable-plotting
+# .md). An `Interval(lo, hi)` is a bounded, sound enclosure of a curve over a pixel column;
+# `Unbounded` is a column that spills to ±∞ (a pole or dense feature); `Undefined` (above)
+# is a column wholly outside the domain. Like Undefined, neither is an AlgExpr node — they
+# are enclosure results, matched as `[Interval | Unbounded | Undefined]`.
+struct Interval(lo:Decimal, hi:Decimal)
+struct Unbounded()
+
+struct Const(value:Decimal)
+struct Param(name:String)
+struct Add(left:AlgExpr, right:AlgExpr)
+struct Sub(left:AlgExpr, right:AlgExpr)
+struct Mul(left:AlgExpr, right:AlgExpr)
+struct Div(left:AlgExpr, right:AlgExpr)
+struct Pow(base:AlgExpr, exponent:AlgExpr)
+# Transcendental primitives — reflected from the pontif.math functions of the same
+# name (sqrt/pow/exp2/inverseSqrt reflect to Pow instead). Evaluated in double precision.
+struct Sin(arg:AlgExpr)
+struct Cos(arg:AlgExpr)
+struct Tan(arg:AlgExpr)
+struct Exp(arg:AlgExpr)
+struct Log(arg:AlgExpr)
+
+# AlgExpr is the CLOSED union of its node types (not an open trait). Every `match` over
+# it is exhaustive with no catch-all, and adding a node becomes a compile error in every
+# operation that matches AlgExpr until the new case is handled — no silent fallthrough.
+# (Undefined / Interval / Unbounded are deliberately NOT members: they are evaluation
+# results, not buildable nodes.)
+let AlgExpr:Type[Const | Param | Add | Sub | Mul | Div | Pow | Sin | Cos | Tan | Exp | Log]
+
+# Algebraic: the trait a metareference proven algebraic is-a. Its `ast` attribute
+# IS the AST surface — `$f[Decimal].ast` reads it (docs/dispatch-method-elimination
+# .md E2). The `eval` METHOD evaluates the reference at a point — `$f[Decimal].eval(x)`
+# — so the metareference behaves as a first-class differentiable object. A
+# metareference $f[…] narrows to the builtin nominal AlgebraicDispatch when f carries
+# `assign proof f:Algebraic`, else the plain Dispatch (no `.ast`, no `.eval`).
+trait Algebraic{ast:AlgExpr, eval(x:Decimal):Decimal}
+
+# AlgebraicDispatch provides both members by reflecting the referent function:
+# `.ast` via astOf; `.eval(x)` by evaluating that AST at x (the free `eval` over the
+# AST, reached by its distinct 2-arg signature). `this` is the metareference itself.
+assign trait AlgebraicDispatch:Algebraic {
+  ast:AlgExpr -> astOf(this)
+  eval(x:Decimal):Decimal -> eval(this.ast, x)
+}
+
+# astOf reflects an algebraic function VALUE into its AST — NON-EXPORTED, so
+# `$f[Decimal].ast`/`.eval` are the only surface. The free `eval` evaluates the AST
+# over one variable (the `.eval` method delegates to it). Both bodies are
+# placeholders — a resolved call runs this extension's Java object
+# (AlgebraExtension.calls) instead. astOf's param is Algebraic, so a non-algebraic
+# reference is rejected at the type level.
+function astOf(f:Algebraic):AlgExpr -> Const(0.0)
+function eval(e:AlgExpr, x:Decimal):Decimal -> 0.0
+# evalSafe: the TOTAL sibling of `eval`. At a domain gap (a pole, an even root of a
+# negative, a non-finite transcendental) it yields `Undefined` instead of failing
+# closed — so a caller can sample across an asymptote. Body is a placeholder (the
+# native runs); the union return is the honest signature.
+function evalSafe(e:AlgExpr, x:Decimal):[Decimal | Undefined] -> Undefined()
+# evalInterval: a SOUND enclosure of the curve over a whole column [lo, hi] — the
+# reliable-plotting substrate (docs/reliable-plotting.md). `Interval(ylo, yhi)` bounds
+# the curve, `Unbounded` marks a pole/dense column, `Undefined` a wholly-out-of-domain
+# one. Placeholder body (the native runs); the three-way union is the honest signature.
+function evalInterval(e:AlgExpr, lo:Decimal, hi:Decimal):[Interval | Unbounded | Undefined] -> Unbounded()
+# evalAt binds each variable by NAME from a point dict `{x = …, y = …}` — the
+# N-argument surface (`eval` is the one-variable convenience). The binding is
+# dynamically typed (`_`); a statically-typed point is the next slice.
+function evalAt(e:AlgExpr, at:_):Decimal -> 0.0
+
+0

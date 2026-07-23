@@ -1,0 +1,9 @@
+exports @.{Stream, Nothing, Break}
+
+trait Stream[type E]{}
+
+struct Nothing()
+
+struct Break()
+
+0

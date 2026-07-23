@@ -1,0 +1,66 @@
+exports @.{
+  sin, cos, tan, asin, acos, atan, atan2,
+  sinh, cosh, tanh, asinh, acosh, atanh,
+  pow, exp, log, exp2, log2, sqrt, inverseSqrt,
+  abs, sign, floor, ceil, trunc, round, fract, min, max, clamp, mix, fma,
+  step, smoothstep, radians, degrees,
+  pi, e, tau, halfPi, sqrt2, ln2
+}
+
+# Trig (GLSL Sin/Cos/Tan/Asin/Acos/Atan/Atan2)
+function sin(x:Decimal):Decimal -> 0.0
+function cos(x:Decimal):Decimal -> 0.0
+function tan(x:Decimal):Decimal -> 0.0
+function asin(x:Decimal):Decimal -> 0.0
+function acos(x:Decimal):Decimal -> 0.0
+function atan(x:Decimal):Decimal -> 0.0
+function atan2(y:Decimal, x:Decimal):Decimal -> 0.0
+
+# Hyperbolic (GLSL Sinh/Cosh/Tanh/Asinh/Acosh/Atanh)
+function sinh(x:Decimal):Decimal -> 0.0
+function cosh(x:Decimal):Decimal -> 0.0
+function tanh(x:Decimal):Decimal -> 0.0
+function asinh(x:Decimal):Decimal -> 0.0
+function acosh(x:Decimal):Decimal -> 0.0
+function atanh(x:Decimal):Decimal -> 0.0
+
+# Exponential (GLSL Pow/Exp/Log/Exp2/Log2/Sqrt/InverseSqrt)
+function pow(x:Decimal, y:Decimal):Decimal -> 0.0
+function exp(x:Decimal):Decimal -> 0.0
+function log(x:Decimal):Decimal -> 0.0
+function exp2(x:Decimal):Decimal -> 0.0
+function log2(x:Decimal):Decimal -> 0.0
+function sqrt(x:Decimal):Decimal -> 0.0
+function inverseSqrt(x:Decimal):Decimal -> 0.0
+
+# Common — exact over Decimal (GLSL FAbs/FSign/Floor/Ceil/Trunc/Round/FMin/FMax/FClamp/FMix/Fma)
+function abs(x:Decimal):Decimal -> 0.0
+function sign(x:Decimal):Decimal -> 0.0
+function floor(x:Decimal):Decimal -> 0.0
+function ceil(x:Decimal):Decimal -> 0.0
+function trunc(x:Decimal):Decimal -> 0.0
+function round(x:Decimal):Decimal -> 0.0
+function fract(x:Decimal):Decimal -> 0.0
+function min(a:Decimal, b:Decimal):Decimal -> 0.0
+function max(a:Decimal, b:Decimal):Decimal -> 0.0
+function clamp(x:Decimal, lo:Decimal, hi:Decimal):Decimal -> 0.0
+function mix(a:Decimal, b:Decimal, t:Decimal):Decimal -> 0.0
+function fma(a:Decimal, b:Decimal, c:Decimal):Decimal -> 0.0
+
+# Common — double (GLSL Step/SmoothStep/Radians/Degrees)
+function step(edge:Decimal, x:Decimal):Decimal -> 0.0
+function smoothstep(e0:Decimal, e1:Decimal, x:Decimal):Decimal -> 0.0
+function radians(degrees:Decimal):Decimal -> 0.0
+function degrees(radians:Decimal):Decimal -> 0.0
+
+# Constants — honest double precision. Nullary functions (not `let`s): a module-level
+# `let` binding doesn't cross a module boundary as an importable name, but a function
+# does — so these are called as `pi()`, `e()`, `tau()`.
+function pi():Decimal -> 3.141592653589793
+function e():Decimal -> 2.718281828459045
+function tau():Decimal -> 6.283185307179586
+function halfPi():Decimal -> 1.5707963267948966
+function sqrt2():Decimal -> 1.4142135623730951
+function ln2():Decimal -> 0.6931471805599453
+
+0

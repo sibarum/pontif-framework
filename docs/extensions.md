@@ -21,7 +21,11 @@ extension" that predated the API.
 - `pontifSource()` — the Pontif **interface** module: the types, events, and native function
   signatures. Native declarations carry a **placeholder body** (`-> {}`); they read as
   ordinary pure declarations. *No new Pontif syntax* — the effect boundary lives in the
-  manifest, not the source.
+  manifest, not the source. **You do not override this method.** By default it loads a
+  `.ptf` file shipped as a classpath resource under `/pontif-modules/<moduleName>.ptf` (see
+  `ModuleResources`), so the source lives in a real `.ptf` file — editable with Pontif tooling,
+  not trapped in a Java text block. The module name is the only key; there is no second filename
+  to keep in sync. (Override only for a source genuinely synthesized at runtime.)
 - `effects()` — emit **sinks**, by bare event-type name. Installed into `NativeFunctions`
   qualified as `moduleName/EventName`; an `emit` routes by the event's (qualified) type.
 - `calls()` — application-invoked **native functions**, by bare name (`stdin`, `window`).
@@ -35,10 +39,11 @@ before compile/run.
 
 ## Pure builtins vs extensions
 
-The **pure** builtin modules (`pontif.core`, `std.*`) have no Java backing and stay hardcoded
-in `BuiltinModules`. An **extension** is precisely a module that *does* have associated Java
-objects — the side-effect channel. `all()` merges the pure builtins with every installed
-extension's module.
+The **pure** builtin modules (`pontif.core`, `std.*`) have no Java backing. `pontif.core` ships
+its source as `pontif-modules/pontif.core.ptf` (loaded via `ModuleResources`, same convention as
+extensions); the `std.*` modules are built directly from IR in `BuiltinModules` (no Pontif source
+at all). An **extension** is precisely a module that *does* have associated Java objects — the
+side-effect channel. `all()` merges the pure builtins with every installed extension's module.
 
 ## The registries (pontif-ir) — the runtime seam
 
@@ -60,14 +65,18 @@ extension's module.
 
 ## How to write an extension
 
-1. Implement `Extension` (a **public no-arg constructor** — ServiceLoader needs it): a
-   `moduleName`, a `pontifSource` declaring your types/events/native signatures (placeholder
-   bodies), and `effects()`/`calls()` maps of Java objects keyed by the bare declaration names.
-2. Ship a provider file `META-INF/services/sibarum.pontif.runtime.module.Extension` in your module
+1. Write your module's Pontif source as `src/main/resources/pontif-modules/<moduleName>.ptf`
+   (the filename **is** the module name, e.g. `pontif-modules/pontif.gui.ptf`). Native
+   declarations get placeholder bodies (`-> {}`); everything else is real Pontif.
+2. Implement `Extension` (a **public no-arg constructor** — ServiceLoader needs it): just a
+   `moduleName()` matching the `.ptf` filename, plus `effects()`/`calls()` maps of Java objects
+   keyed by the bare declaration names. **Do not override `pontifSource()`** — the default loads
+   your `.ptf` from the classpath.
+3. Ship a provider file `META-INF/services/sibarum.pontif.runtime.module.Extension` in your module
    (one implementation class per line). That's the *only* wiring — no launcher/editor edits.
-3. Make sure your module is on the runtime's classpath where it should be usable (e.g. add it as a
+4. Make sure your module is on the runtime's classpath where it should be usable (e.g. add it as a
    dependency of `pontif-playground` for the editor). It then self-registers.
-4. A program drives your effects with the event substrate: `emit YourEvent(…)` hits your sink,
+5. A program drives your effects with the event substrate: `emit YourEvent(…)` hits your sink,
    `action onYourEvent(e:YourEvent) -> …` reacts, your native functions are called directly.
 
 ## Auto-discovery (ServiceLoader)

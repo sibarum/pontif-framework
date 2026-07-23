@@ -30,8 +30,18 @@ public interface Extension {
     /** The module name this extension contributes (e.g. {@code "pontif.events"}, {@code "pontif.gui"}). */
     String moduleName();
 
-    /** The Pontif interface module source — declarations whose native parts this extension backs. */
-    String pontifSource();
+    /**
+     * The Pontif interface module source — declarations whose native parts this extension backs.
+     *
+     * <p>By default this is the {@code .ptf} file shipped as a classpath resource under
+     * {@code /pontif-modules/<moduleName>.ptf} (see {@link ModuleResources}): an extension author
+     * writes that file and need not override this method. The name is derived from
+     * {@link #moduleName()}, so there is nothing to keep in sync. Override only for a source that
+     * is genuinely synthesized at runtime rather than shipped as a file.
+     */
+    default String pontifSource() {
+        return ModuleResources.load(getClass(), moduleName());
+    }
 
     /** Emit sinks by bare event-type name (qualified with {@link #moduleName()} at install). */
     default Map<String, NativeFunctions.Effect> effects() {

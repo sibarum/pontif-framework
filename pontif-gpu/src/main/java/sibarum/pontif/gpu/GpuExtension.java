@@ -36,20 +36,6 @@ public final class GpuExtension implements Extension {
     }
 
     @Override
-    public String pontifSource() {
-        return """
-                requires pontif.core.{Stream}
-                exports @.{gpuVectorAdd}
-
-                # Runs element-wise a + b as a SuperVast compute kernel on the GPU (docs/gpu-kernels.md).
-                # A concrete wiring spike; the general `… on Gpu` surface over arbitrary fragments is next.
-                function gpuVectorAdd(a:Stream[Int], b:Stream[Int]):Stream[Int] -> {}
-
-                0
-                """;
-    }
-
-    @Override
     public Map<String, NativeCalls.NativeCall> calls() {
         return Map.of("gpuVectorAdd", GpuKernels::vectorAdd);
     }

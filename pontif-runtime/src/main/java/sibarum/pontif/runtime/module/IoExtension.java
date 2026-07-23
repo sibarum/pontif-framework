@@ -43,11 +43,6 @@ public final class IoExtension implements Extension {
     }
 
     @Override
-    public String pontifSource() {
-        return SOURCE;
-    }
-
-    @Override
     public Map<String, NativeFunctions.Effect> effects() {
         return Map.of(
                 "StdOut", (event, origin) -> writeText(System.out, event, origin),
@@ -60,30 +55,6 @@ public final class IoExtension implements Extension {
         // source per call.
         return Map.of("stdin", (args, ctx) -> stdinSource());
     }
-
-    private static final String SOURCE = """
-            requires pontif.core.{Stream}
-            exports @.{Event, EventConduit, EventStream, StdOut, StdErr, stdin}
-
-            trait Event{}
-
-            trait EventConduit[type E, type S, type R]{}
-
-            trait EventStream[type R]{}
-
-            struct StdOut(text:String)
-            struct StdErr(text:String)
-            assign trait StdOut:Event{}
-            assign trait StdErr:Event{}
-
-            # The first inbound source (docs/events.md, "Input is an inbound emit"):
-            # the Pontif internals produce stdin's lines. The body is a placeholder —
-            # a resolved `stdin()` call runs this extension's Java object (IoExtension.calls)
-            # instead, yielding a live demand-driven source pulled lazily by the iterator.
-            function stdin():Stream[String] -> {}
-
-            0
-            """;
 
     /** stdin as a demand-driven line source; {@code readLine() == null} (EOF) seals it. */
     private static LiveSource stdinSource() {

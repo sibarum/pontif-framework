@@ -43,36 +43,11 @@ public final class RegexExtension implements Extension {
     }
 
     @Override
-    public String pontifSource() {
-        return SOURCE;
-    }
-
-    @Override
     public Map<String, NativeCalls.NativeCall> calls() {
         // tryMatch is invoked directly (by FQN) from the interpreter's regex match arm, not through
         // user-level dispatch — that is what lets a backtick matcher work with no `requires`.
         return Map.of("tryMatch", (args, ctx) -> tryMatch(args));
     }
-
-    private static final String SOURCE = """
-            exports @.{Regex, Pattern, NoMatch}
-
-            # A compiled-on-use regular expression. Holds its RAW source (a backtick literal
-            # `\\d+` carries the two chars backslash-d verbatim); the native tryMatch compiles it
-            # and anchored-matches a subject String. Written as a named type only under `requires
-            # pontif.regex.{Regex}`; the backtick literal itself needs no import.
-            struct Regex(source:String)
-
-            # The no-match result of a Pattern — a nullary marker (like Nothing).
-            struct NoMatch()
-
-            # The extensible matcher contract (regex is the first tenant; the developer-facing
-            # extension surface — user pattern kinds — is a later slice). A Pattern consumes a
-            # subject String and yields captures (an ordered aggregate) or NoMatch.
-            trait Pattern { tryMatch(subject:String):_ }
-
-            0
-            """;
 
     /**
      * The matcher: {@code args = [Regex, subject]}. Compiles the regex's {@code source}, does an

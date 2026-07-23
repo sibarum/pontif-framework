@@ -1,0 +1,13 @@
+exports @.{gcd, lcm, factorial, isqrt, modpow, choose, perm, floorDiv, floorMod}
+
+function gcd(a:Int, b:Int):Int -> 0
+function lcm(a:Int, b:Int):Int -> 0
+function factorial(n:Int):Int -> 0
+function isqrt(n:Int):Int -> 0
+function modpow(base:Int, exp:Int, mod:Int):Int -> 0
+function choose(n:Int, k:Int):Int -> 0
+function perm(n:Int, k:Int):Int -> 0
+function floorDiv(a:Int, b:Int):Int -> 0
+function floorMod(a:Int, b:Int):Int -> 0
+
+0
