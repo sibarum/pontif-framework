@@ -6,7 +6,8 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            fade, cmap, wire, scene, Curve, curve, color, chart,
            Volume3D, Volume, volume, normals, plotExpr, autoFrame,
            ExprLayer, MarkLayer, VLineLayer, expr,
-           zeros, optima, asymptotes, intersections}
+           zeros, optima, asymptotes, intersections,
+           ChartView, chartView, exportSvg}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -250,6 +251,17 @@ function renderChart(cfg:_, layers:_):Stream[String] -> {}
 
 # Overlay several curves in one 2D chart: chart({title="…"}, {curve(a), curve(b)}).
 function chart(cfg:_, layers:_):Stream[String] -> renderChart(cfg, layers)
+
+# An EMBEDDABLE chart element (docs/plotting.md): unlike `chart`, which opens its own window,
+# `chartView` returns an element you place inside a GUI `window(cfg, {children})` — so a Button can
+# sit beside the plot. Pass the SAME `{layers}` to a button's `exportSvg` to save that chart as SVG.
+struct ChartView(cfg:_, layers:_)
+function chartView(cfg:_, layers:_):ChartView -> ChartView(cfg, layers)
+
+# Native: serialise the given `{layers}` (the same tuple a `chart`/`chartView` takes) to a
+# semantically-classed SVG and pop a native Save dialog to write it. For-effect; wire it to a
+# button's onClick beside the plot. Placeholder body; the native runs.
+function exportSvg(layers:_):Stream[String] -> {}
 
 # --- Reliable plotting: interval-arithmetic column rasterization -----------------
 # (docs/reliable-plotting.md) An algebraic Expression is rendered by SOUND interval

@@ -165,6 +165,27 @@ headlessly in `PlotExtensionTest` via `DasumBridge.buildSceneLayers` / `buildCha
 `pontif-builtin-gui/examples/` (`compose.ptf`, `chart2.ptf`, `axes.ptf`, `colormap.ptf`,
 `wireframe.ptf`).
 
+### Exporting a chart to SVG
+
+A 2D chart can be exported as a **semantically-classed SVG** for embedding in a web page — every
+element carries a role class (`curve`, `asymptote`, `feature zero`/`optimum`/`intersection`,
+`tick-label`) and its data values as `data-*` attributes, so a host page restyles it in CSS and
+drives it with JS. The reliable interval **enclosure band** is emitted too, hidden by default
+(`display:none`) — a host reveals it to show the provably-contains-the-curve region.
+
+The plot and the exporter share ONE intermediate representation. The dasum `PlotScene2D` (frame +
+curves + asymptotes + features + enclosure) is the single semantic scene that feeds *both*
+`PlotScene2DRenderer` (the on-screen OpenGL layers) and `SvgPlotWriter` (the SVG string); the drawing
+meaning — marker glyphs, half-opacity asymptote lines, overlap-thinned labels — is defined once,
+never duplicated per backend. The Pontif bridge lifts its `AnnotatedChart` into that IR.
+
+To wire it up, embed the chart with `chartView(cfg, {layers})` (like `chart`, but a *component* you
+place in a GUI `window(cfg, {children})` instead of its own window) and put a button beside it whose
+`onClick` calls `exportSvg(layers)` on the SAME layer tuple. Clicking pops a native Save dialog
+(dasum NFD) and writes the file — no Pontif filesystem API needed. See
+`pontif-builtin-gui/examples/svg-export.ptf`. The Pontif→IR→SVG path is verified headlessly in
+`PlotExtensionTest` (`DasumBridge.buildScene` + `SvgPlotWriter.write`); the dialog itself is manual.
+
 **Known limit (configurable resolution).** Sampling maps over a *statically-synthesized* index
 stream (`let surfaceIndices:Stream[Int:0<=@<1089];`), and finite-range synthesis needs static
 bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif yet. `surfaceFine`

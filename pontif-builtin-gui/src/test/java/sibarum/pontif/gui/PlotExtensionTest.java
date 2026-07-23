@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -916,6 +917,61 @@ class PlotExtensionTest {
     }
 
     @Test
+    void svgExportExample_compilesAndTypechecks() {
+        // Guards examples/svg-export.ptf: the embeddable chartView + a Clickable export button whose
+        // onClick calls exportSvg on the same layers. Compiles + links only (a window needs GLFW).
+        Extensions.install(new PlotExtension());
+        Extensions.install(new GuiExtension());
+        var result = new PontifCompiler().compileAlt("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chartView, exportSvg}
+                requires pontif.gui.{Button, Column, window, Clickable}
+                function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
+                assign proof f:Algebraic
+                struct ExportButton:[Button](text:String, data:_)
+                assign trait ExportButton:Clickable {
+                  onClick():_ -> ( let done = exportSvg(this.data)  this )
+                }
+                main (
+                  let e = $f[Decimal].ast
+                  let layers = { expr(e), asymptotes(e), zeros(e) }
+                  window({title = "Reliable plot -> SVG", width = 1100, height = 720}, {
+                    Column("center", "middle", { chartView({}, layers), ExportButton("Export SVG...", layers) })
+                  })
+                )""", "svg-export.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
+                () -> "svg-export example should link; got "
+                        + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
+    void exportSvg_buildsSemanticClassedMarkupThroughTheSharedScene() {
+        // The full Pontif -> AnnotatedChart -> PlotScene2D (shared IR) -> SVG path (the Save dialog
+        // itself needs a window, so it's exercised manually). The rational function contributes a
+        // reliable curve (+ enclosure band), asymptotes, and zero markers — each must appear classed.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chart}
+                function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
+                assign proof f:Algebraic
+                chart({title = "r"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast), zeros($f[Decimal].ast) })""");
+        var frame = DasumBridge.annotatedFrame(chart);
+        assertNotNull(frame, "the rational chart frames");
+        var scene = DasumBridge.buildScene(chart, frame);
+        String svg = sibarum.dasum.gui.vis.plot.SvgPlotWriter.write(scene, 900, 550);
+
+        assertDoesNotThrow(() -> javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            .parse(new java.io.ByteArrayInputStream(svg.getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+            () -> "exported SVG must be well-formed:\n" + svg);
+        assertTrue(svg.contains("class=\"pontif-plot\""), "root classed");
+        assertTrue(svg.contains("class=\"curve\""), "reliable curve is a classed path");
+        assertTrue(svg.contains("class=\"asymptote\""), "asymptotes classed");
+        assertTrue(svg.contains("class=\"enclosure-band\"") && svg.contains("display:none"),
+            "the reliable enclosure band ships, hidden by default");
+        assertTrue(svg.contains("feature zero"), "zero markers classed by kind");
+    }
+
+    @Test
     void annotatedLayers_thinOverlappingAsymptoteLabels_butKeepEveryLine() {
         // Regression (tan(1/x)): poles cluster infinitely toward x=0, so a label on every one stacks
         // into an unreadable smear. Every asymptote must still draw its LINE, but overlapping labels
@@ -924,7 +980,7 @@ class PlotExtensionTest {
         List<Double> vlines = List.of(-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9);
         var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
                 new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
-        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines);
+        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null);
         var frame = DasumBridge.annotatedFrame(chart);
         var layers = DasumBridge.buildAnnotatedLayers(chart, frame);
 

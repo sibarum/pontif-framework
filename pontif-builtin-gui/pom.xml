@@ -53,6 +53,14 @@
             <version>${dasum.version}</version>
             <scope>runtime</scope>
         </dependency>
+        <!-- Native File Dialog (NFDe): the Save-SVG dialog. FileDialog is compile-visible via
+             dasum-core, but the nfd native lives here — runtime scope brings the .dll/.dylib. -->
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-nfd</artifactId>
+            <version>${dasum.version}</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

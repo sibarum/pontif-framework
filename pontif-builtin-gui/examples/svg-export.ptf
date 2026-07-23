@@ -1,0 +1,33 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{expr, asymptotes, zeros, chartView, exportSvg}
+requires pontif.gui.{Button, Column, window, Clickable}
+
+# Export a reliable annotated plot to a semantically-classed SVG (docs/plotting.md). The plot is
+# EMBEDDED (chartView) in a GUI window beside a button; clicking the button pops a native Save
+# dialog and writes the SVG — the elements come out classed (curve / asymptote / feature) with the
+# data values as data-* attributes, so a web page can restyle it in CSS and drive it with JS.
+#
+# The SAME `{layers}` tuple feeds both the on-screen chart (chartView) and the exporter (exportSvg),
+# and both render from ONE shared scene IR — the drawing meaning isn't duplicated per backend.
+
+# A rational function: poles at x = 0 (double) and x = 5/13 (simple), plus real zeros.
+function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
+assign proof f:Algebraic
+
+# A button that owns an onClick (subtype the library Button, per the orphan rule) — clicking it
+# exports the layers it carries. `this` is the clicked widget, returned as ui.ptf does.
+struct ExportButton:[Button](text:String, data:_)
+assign trait ExportButton:Clickable {
+  onClick():_ -> ( let done = exportSvg(this.data)  this )
+}
+
+main (
+  let e = $f[Decimal].ast
+  let layers = { expr(e), asymptotes(e), zeros(e) }
+  window({title = "Reliable plot → SVG", width = 1100, height = 720}, {
+    Column("center", "middle", {
+      chartView({}, layers),
+      ExportButton("Export SVG…", layers)
+    })
+  })
+)

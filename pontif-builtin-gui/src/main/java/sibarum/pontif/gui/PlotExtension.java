@@ -43,6 +43,7 @@ public final class PlotExtension implements Extension {
                 "renderSurface", DasumBridge::renderSurface,
                 "renderScene", DasumBridge::renderScene,
                 "renderChart", DasumBridge::renderChart,
-                "renderReliable", DasumBridge::renderReliable);
+                "renderReliable", DasumBridge::renderReliable,
+                "exportSvg", DasumBridge::exportSvg);
     }
 }

@@ -35,9 +35,12 @@ import sibarum.dasum.gui.vis.render.BloomPass;
 import sibarum.dasum.gui.vis.plot.Axis;
 import sibarum.dasum.gui.vis.plot.LinePlot;
 import sibarum.dasum.gui.vis.plot.PlotFrame;
+import sibarum.dasum.gui.vis.plot.PlotScene2D;
+import sibarum.dasum.gui.vis.plot.PlotScene2DRenderer;
 import sibarum.dasum.gui.vis.plot.PlotStyle;
 import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
+import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
 import sibarum.dasum.gui.vis.plot.Ticks;
 import sibarum.dasum.gui.vis.math.CameraRig;
 import sibarum.dasum.gui.vis.math.CameraSpec;
@@ -59,12 +62,18 @@ import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;
 
+import sibarum.dasum.gui.core.dialog.FileDialog;
+
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The Java side of the GUI extension (docs/extensions.md), G5: a <b>declarative UI</b>. The
@@ -197,6 +206,38 @@ public final class DasumBridge {
         Object spans = args.size() > 2 ? args.get(2) : emptyTuple();
         List<Series> series = buildReliableSeries(xlo, xhi, spans);
         return openWindowWithRoot("Plot", false, () -> chartComponent(series));
+    }
+
+    /**
+     * {@code exportSvg({layers})} (pontif.plot): serialise the SAME {@code chart} layer tuple to a
+     * semantically-classed SVG (dasum {@link SvgPlotWriter}, via the shared {@link PlotScene2D} IR)
+     * and pop a native Save dialog ({@link FileDialog}) to write it. Wire it to a button's
+     * {@code onClick} next to the plot — the click runs on the GLFW thread (where NFD must be
+     * invoked), so no Pontif filesystem API is needed. A cancelled dialog is a no-op.
+     */
+    public static Object exportSvg(List<Object> args, NativeCalls.Context ctx) {
+        Object layers = args.isEmpty() ? emptyTuple() : args.get(0);
+        AnnotatedChart chart = buildAnnotatedChart(layers);
+        PlotFrame frame = annotatedFrame(chart);
+        if (frame == null) {
+            System.err.println("exportSvg: no drawable layers — nothing to export.");
+            return new IrInterpreter.DriveResult();
+        }
+        String svg = SvgPlotWriter.write(buildScene(chart, frame), WIDTH, HEIGHT);
+        Optional<Path> dest = FileDialog.save(null,
+                List.of(FileDialog.Filter.of("SVG image", "svg")), null, "plot.svg");
+        if (dest.isPresent()) {
+            Path p = dest.get();
+            if (!p.getFileName().toString().toLowerCase().endsWith(".svg")) {
+                p = p.resolveSibling(p.getFileName() + ".svg");   // ensure the .svg extension
+            }
+            try {
+                Files.writeString(p, svg);
+            } catch (IOException e) {
+                System.err.println("exportSvg: could not write " + p + ": " + e.getMessage());
+            }
+        }
+        return new IrInterpreter.DriveResult();
     }
 
     /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = isolated pole (a single
@@ -442,6 +483,10 @@ public final class DasumBridge {
                     Direction.COLUMN, justify(str(rv, "justify")), align(str(rv, "align")), Em.of(0.8f),
                     childrenOf(rv, ctx), false, 1);
             case "LinePlot" -> buildLinePlot(rv);
+            // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
+            // chart `chart(...)` opens standalone, but as a component so it can sit in a layout
+            // beside a user Button whose onClick calls exportSvg on the same layers.
+            case "ChartView" -> annotatedChartComponent(buildAnnotatedChart(rv.members().get("layers")));
             // A bare children aggregate (window's root arg) → an implicit centered column.
             case "_tuple" -> new Component.Flex(
                     null, null, Em.of(0.5f), TRANSPARENT,
@@ -607,24 +652,25 @@ public final class DasumBridge {
     record MarkSet(int kind, List<Feature> pts) {}
 
     /** The parsed, failsafe-applied decomposition of a {@code chart} layer list: drawn series (from
-     *  sampled {@code Curve} + {@code ExprLayer}), marker sets, and vertical-asymptote x's.
-     *  Package-visible: the headless test seam for the annotated chart. */
-    record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines) {}
-
-    private static final Color MARK_COLOR = new Color(0.98f, 0.85f, 0.30f, 1f);   // amber markers
-    private static final Color LABEL_COLOR = new Color(0.95f, 0.95f, 0.98f, 1f);
-    private static final Color ASYM_COLOR = new Color(0.95f, 0.45f, 0.45f, 1f);   // reddish, half-opacity
+     *  sampled {@code Curve} + {@code ExprLayer}), marker sets, vertical-asymptote x's, and the
+     *  reliable interval-enclosure band (from an {@code ExprLayer}, else {@code null}). This is the
+     *  Pontif-side gather; {@link #buildScene} lifts it into the dasum {@link PlotScene2D} IR that
+     *  drives BOTH the on-screen renderer and the SVG exporter. Package-visible test seam. */
+    record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines,
+                          PlotScene2D.EnclosureBand enclosure) {}
 
     /**
      * Decompose a {@code chart} layer tuple into series + annotations, applying the per-layer
      * primitive {@link #FEATURE_CAP} failsafe (an overflowing annotation layer is dropped and logged
-     * to {@code System.err}). Handles {@code Curve} (sampled), {@code ExprLayer} (interval spans),
-     * {@code MarkLayer} (zeros/optima/intersections), and {@code VLineLayer} (asymptotes).
+     * to {@code System.err}). Handles {@code Curve} (sampled), {@code ExprLayer} (interval spans →
+     * reliable series + enclosure band), {@code MarkLayer} (zeros/optima/intersections), and
+     * {@code VLineLayer} (asymptotes).
      */
     static AnnotatedChart buildAnnotatedChart(Object layersValue) {
         List<Series> series = new ArrayList<>();
         List<MarkSet> marks = new ArrayList<>();
         List<Double> vlines = new ArrayList<>();
+        PlotScene2D.EnclosureBand enclosure = null;
         int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
@@ -639,8 +685,12 @@ public final class DasumBridge {
                                 : SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
                         series.add(Series.line(xs, ys, color));
                     }
-                    case "ExprLayer" -> series.addAll(buildReliableSeries(
-                            memberD(rv, "xlo"), memberD(rv, "xhi"), rv.members().get("spans")));
+                    case "ExprLayer" -> {
+                        double xlo = memberD(rv, "xlo"), xhi = memberD(rv, "xhi");
+                        Object spans = rv.members().get("spans");
+                        series.addAll(buildReliableSeries(xlo, xhi, spans));
+                        if (enclosure == null) enclosure = enclosureBand(xlo, xhi, spans);
+                    }
                     case "MarkLayer" -> {
                         int kind = (int) Math.round(memberD(rv, "kind"));
                         List<Feature> pts = parseMarks(rv.members().get("pts"));
@@ -654,7 +704,27 @@ public final class DasumBridge {
                 }
             }
         }
-        return new AnnotatedChart(series, marks, vlines);
+        return new AnnotatedChart(series, marks, vlines, enclosure);
+    }
+
+    /** Build the reliable enclosure band from an {@code ExprLayer}'s spans: each bounded (curve)
+     *  column contributes its guaranteed {@code [lo, hi]} at the column midpoint. Pole/empty columns
+     *  are gaps (skipped). Returns {@code null} when there are &lt; 2 bounded columns. */
+    static PlotScene2D.EnclosureBand enclosureBand(double xlo, double xhi, Object spansValue) {
+        List<ReliableSpan> spans = parseSpans(spansValue);
+        int n = spans.size();
+        if (n == 0) return null;
+        double dx = (xhi - xlo) / n;
+        List<Double> xs = new ArrayList<>(), lo = new ArrayList<>(), hi = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            ReliableSpan s = spans.get(i);
+            if (s.kind() != 0) continue;                       // only bounded columns bound the curve
+            xs.add(xlo + (i + 0.5) * dx);
+            lo.add(s.lo());
+            hi.add(s.hi());
+        }
+        if (xs.size() < 2) return null;
+        return new PlotScene2D.EnclosureBand(toArray(xs), toArray(lo), toArray(hi));
     }
 
     /** The failsafe gate: true if the count is within {@link #FEATURE_CAP}; otherwise log and drop. */
@@ -730,89 +800,41 @@ public final class DasumBridge {
     }
 
     /**
-     * Axes + drawn series ({@code LinePlot.build}) + overlay layers: a {@code +} glyph and a text
-     * label per marker, and a half-opacity vertical line with an x-value label per asymptote, all
-     * placed through {@code frame}. Package-visible test seam (pure — no window). */
-    static List<Layer> buildAnnotatedLayers(AnnotatedChart chart, PlotFrame frame) {
-        List<Layer> layers = new ArrayList<>(LinePlot.build(frame, chart.series(), PlotStyle.defaults()));
-        float glyph = 0.06f;                                        // marker half-size, world units
-        float labelH = LABEL_HEIGHT;                                // label text height, world units
-        // Markers and asymptote lines ALWAYS draw; their text labels are thinned so they never
-        // overlap. A dense feature cluster (tan(1/x) near 0 has infinitely many poles AND zeros
-        // marching toward the origin) would otherwise stack labels into an unreadable smear — the
-        // lines/glyphs still convey "many features here", but only labels that clear already-placed
-        // ones (an approximate world-space box test) are drawn.
-        LabelPlacer placed = new LabelPlacer();
+     * Lift the Pontif-side {@link AnnotatedChart} into the dasum {@link PlotScene2D} IR — the single
+     * semantic description that feeds BOTH the on-screen renderer ({@link PlotScene2DRenderer}) and
+     * the SVG exporter ({@link SvgPlotWriter}). Curves pass through as {@link Series}; each asymptote
+     * gets its {@code x=…} label; each marker becomes a {@link PlotScene2D.Feature} (a zero sits on
+     * the axis, y = 0); the enclosure band rides along. Defining the drawing meaning once here is
+     * what keeps the two backends from duplicating it.
+     */
+    static PlotScene2D buildScene(AnnotatedChart chart, PlotFrame frame) {
+        List<PlotScene2D.Asymptote> asy = new ArrayList<>();
+        for (double x : chart.vlines()) asy.add(new PlotScene2D.Asymptote(x, "x=" + fmt(x)));
+        List<PlotScene2D.Feature> feats = new ArrayList<>();
         for (MarkSet ms : chart.marks()) {
+            PlotScene2D.FeatureKind kind = featureKind(ms.kind());
             for (Feature f : ms.pts()) {
-                Vec3 a = frame.toWorld(f.x(), ms.kind() == 0 ? 0.0 : f.y());
-                float[] seg = {a.x() - glyph, a.y(), 0f, a.x() + glyph, a.y(), 0f,
-                               a.x(), a.y() - glyph, 0f, a.x(), a.y() + glyph, 0f};
-                layers.add(new LineLayer(seg, filledColor(seg.length, MARK_COLOR)));
-                String text = markLabel(ms.kind(), f);
-                float lx = a.x() + glyph * 1.5f, ly = a.y() + glyph * 1.5f;
-                if (placed.tryPlace(text, lx, ly)) layers.add(label(text, lx, ly, LABEL_COLOR));
+                double y = ms.kind() == 0 ? 0.0 : f.y();       // a zero is marked on the x-axis
+                feats.add(new PlotScene2D.Feature(kind, f.x(), y, markLabel(ms.kind(), f)));
             }
         }
-        // Asymptote labels left-to-right, so the survivors of a cluster are a spread-out subset
-        // (greedy by x) rather than whichever happened to come first in scan order.
-        List<Double> vx = new ArrayList<>(chart.vlines());
-        Collections.sort(vx);
-        for (double x : vx) {
-            float wx = frame.worldX(x);
-            float[] seg = {wx, frame.wy0(), 0f, wx, frame.wy1(), 0f};
-            layers.add(new LineLayer(seg, filledColor(seg.length, ASYM_COLOR))
-                    .withBlend(BlendMode.ALPHA).withOpacity(0.5f));
-            String text = "x=" + fmt(x);
-            float lx = wx + glyph, ly = frame.wy1() - labelH;
-            if (placed.tryPlace(text, lx, ly)) layers.add(label(text, lx, ly, ASYM_COLOR));
-        }
-        return layers;
+        return new PlotScene2D(frame, chart.series(), asy, feats, chart.enclosure());
     }
 
-    /** The fraction of the label height a single character occupies horizontally — an MSDF glyph is
-     *  taller than wide, so a label's world-space width is ≈ {@code chars · height · aspect}. Used only
-     *  to keep labels from overlapping (an estimate, not exact metrics). */
-    private static final float LABEL_CHAR_ASPECT = 0.55f;
-    /** A small world-space breathing gap kept between two labels that would otherwise just touch. */
-    private static final float LABEL_MIN_GAP = 0.08f;
-
-    /** The estimated world-space width of a label's text (see {@link #LABEL_CHAR_ASPECT}). */
-    private static float labelWidth(String text) {
-        return text.length() * LABEL_HEIGHT * LABEL_CHAR_ASPECT;
+    private static PlotScene2D.FeatureKind featureKind(int kind) {
+        return switch (kind) {
+            case 0 -> PlotScene2D.FeatureKind.ZERO;
+            case 2 -> PlotScene2D.FeatureKind.INTERSECTION;
+            default -> PlotScene2D.FeatureKind.OPTIMUM;
+        };
     }
 
     /**
-     * Greedy overlap-avoiding label placement. Each accepted label reserves an approximate
-     * world-space box; a later candidate whose box intersects any reserved one is rejected (its
-     * feature still shows a line/glyph, just no text). This keeps a dense cluster's labels readable
-     * instead of stacking them into a smear. Not pixel-exact — a legibility heuristic, not layout.
-     */
-    private static final class LabelPlacer {
-        private final List<float[]> boxes = new ArrayList<>();   // {x0, y0, x1, y1} in world units
-
-        boolean tryPlace(String text, float x, float y) {
-            float x1 = x + labelWidth(text) + LABEL_MIN_GAP, y1 = y + LABEL_HEIGHT;
-            for (float[] b : boxes) {
-                if (x < b[2] && x1 > b[0] && y < b[3] && y1 > b[1]) return false;
-            }
-            boxes.add(new float[]{x, y, x1, y1});
-            return true;
-        }
-    }
-
-    /** Label text height (world units) — matches {@code labelH} in {@link #buildAnnotatedLayers}. */
-    private static final float LABEL_HEIGHT = 0.24f;
-    /** The dark corona around annotation labels, in screen pixels — keeps them legible over the
-     *  curve, gridlines, and asymptote fills without a solid background plate. */
-    private static final float LABEL_OUTLINE_PX = 2.2f;
-    private static final Color LABEL_OUTLINE = new Color(0.03f, 0.04f, 0.06f, 0.9f);
-
-    /** An annotation label: a left-aligned MSDF line with a dark outline/corona for legibility. */
-    private static TextLayer label(String text, float wx, float wy, Color color) {
-        return new TextLayer(text, new Vec3(wx, wy, 0f), LABEL_HEIGHT, color)
-                .withAlign(TextLayer.HAlign.LEFT)
-                .withOutline(LABEL_OUTLINE, LABEL_OUTLINE_PX);
+     * Axes + drawn series + annotation overlays as OGL layers, via the shared IR — {@link
+     * PlotScene2DRenderer#toLayers} owns the marker-glyph / asymptote-line / label-thinning logic
+     * (the SVG exporter shares the same {@link #buildScene} IR). Package-visible test seam. */
+    static List<Layer> buildAnnotatedLayers(AnnotatedChart chart, PlotFrame frame) {
+        return PlotScene2DRenderer.toLayers(buildScene(chart, frame), PlotStyle.defaults());
     }
 
     /** A marker's label: the x-value for a zero (it lies on the axis), else the point {@code (x, y)}. */
