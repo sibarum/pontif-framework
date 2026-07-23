@@ -743,15 +743,15 @@ public final class DasumBridge {
     static List<Layer> buildAnnotatedLayers(AnnotatedChart chart, PlotFrame frame) {
         List<Layer> layers = new ArrayList<>(LinePlot.build(frame, chart.series(), PlotStyle.defaults()));
         float glyph = 0.06f;                                        // marker half-size, world units
-        float labelH = 0.18f;                                       // label text height, world units
+        float labelH = LABEL_HEIGHT;                                // label text height, world units
         for (MarkSet ms : chart.marks()) {
             for (Feature f : ms.pts()) {
                 Vec3 a = frame.toWorld(f.x(), ms.kind() == 0 ? 0.0 : f.y());
                 float[] seg = {a.x() - glyph, a.y(), 0f, a.x() + glyph, a.y(), 0f,
                                a.x(), a.y() - glyph, 0f, a.x(), a.y() + glyph, 0f};
                 layers.add(new LineLayer(seg, filledColor(seg.length, MARK_COLOR)));
-                layers.add(new TextLayer(markLabel(ms.kind(), f),
-                        new Vec3(a.x() + glyph * 1.5f, a.y() + glyph * 1.5f, 0f), labelH, LABEL_COLOR));
+                layers.add(label(markLabel(ms.kind(), f),
+                        a.x() + glyph * 1.5f, a.y() + glyph * 1.5f, LABEL_COLOR));
             }
         }
         for (double x : chart.vlines()) {
@@ -759,10 +759,23 @@ public final class DasumBridge {
             float[] seg = {wx, frame.wy0(), 0f, wx, frame.wy1(), 0f};
             layers.add(new LineLayer(seg, filledColor(seg.length, ASYM_COLOR))
                     .withBlend(BlendMode.ALPHA).withOpacity(0.5f));
-            layers.add(new TextLayer("x=" + fmt(x),
-                    new Vec3(wx + glyph, frame.wy1() - labelH, 0f), labelH, ASYM_COLOR));
+            layers.add(label("x=" + fmt(x), wx + glyph, frame.wy1() - labelH, ASYM_COLOR));
         }
         return layers;
+    }
+
+    /** Label text height (world units) — matches {@code labelH} in {@link #buildAnnotatedLayers}. */
+    private static final float LABEL_HEIGHT = 0.24f;
+    /** The dark corona around annotation labels, in screen pixels — keeps them legible over the
+     *  curve, gridlines, and asymptote fills without a solid background plate. */
+    private static final float LABEL_OUTLINE_PX = 2.2f;
+    private static final Color LABEL_OUTLINE = new Color(0.03f, 0.04f, 0.06f, 0.9f);
+
+    /** An annotation label: a left-aligned MSDF line with a dark outline/corona for legibility. */
+    private static TextLayer label(String text, float wx, float wy, Color color) {
+        return new TextLayer(text, new Vec3(wx, wy, 0f), LABEL_HEIGHT, color)
+                .withAlign(TextLayer.HAlign.LEFT)
+                .withOutline(LABEL_OUTLINE, LABEL_OUTLINE_PX);
     }
 
     /** A marker's label: the x-value for a zero (it lies on the axis), else the point {@code (x, y)}. */
