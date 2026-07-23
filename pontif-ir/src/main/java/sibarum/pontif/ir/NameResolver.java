@@ -308,7 +308,29 @@ public final class NameResolver {
             case IrExpr.Chr c -> c;
             case IrExpr.Str s -> s;
             case IrExpr.Bool b -> b;
-            case IrExpr.Var v -> v;
+            case IrExpr.Var v -> {
+                // A bare reference to an IMPORTED 0-arg value — a `requires $a.b`
+                // data binding, or an imported top-level `let`. The parser
+                // rewrites LOCAL top-level lets to 0-arg Calls (via
+                // declaredTopLevelLets), but an imported one can't be seen at
+                // parse time and arrives here as a bare Var. Resolve it the same
+                // way the parser resolves a local one and tryStaticMemberRef
+                // resolves an imported static: a 0-arg Call to the declarer's
+                // FQN. Gated to imported names, so local Var handling is
+                // unchanged; gated to function owners, so an imported TYPE name
+                // is left for the sort machinery.
+                ModuleSymbolTable.ImportedName imported = table.importedName(m, v.name());
+                if (imported != null) {
+                    ModuleSymbolTable.ImportedName origin = table.originOf(m, v.name());
+                    if (origin != null
+                            && table.moduleDeclaresFunction(origin.sourceModule(), origin.remoteName())) {
+                        yield new IrExpr.Call(
+                                ModuleSymbolTable.fqn(origin.sourceModule(), origin.remoteName()),
+                                List.of(), v.origin());
+                    }
+                }
+                yield v;
+            }
             case IrExpr.SelfRef s -> s;
             // A metareference names a dispatch — FQN-resolve the name like a
             // call site's, and rewrite type names inside the key sorts.

@@ -2,8 +2,12 @@ package sibarum.pontif.runtime.module;
 
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.CompileException;
+import sibarum.pontif.ir.InferenceContext;
+import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
+import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.ir.NarrowingInference;
 import sibarum.pontif.parser.AltParser;
 
 import java.io.IOException;
@@ -15,6 +19,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
@@ -82,6 +87,18 @@ public final class ModuleResolver {
                 // already-loaded modules (incl. cycles) are skipped.
                 if (builtins.contains(name) || collected.containsKey(name)) continue;
 
+                // Data require: `requires $a.b.c` resolves the data file
+                // `$a.b.c.ptf` by LITERAL filename (a data file is a bare object
+                // literal with no `module` header, so it is not in the header
+                // index). Its terminal value is wrapped as a synthetic module
+                // exporting one 0-arg constant — see loadDataModule. Data files
+                // are pure literals: they `require` nothing, so no closure walk.
+                if (name.startsWith("$")) {
+                    IrModule dataMod = loadDataModule(name, resolveDir, r.origin());
+                    collected.put(name, dataMod);
+                    continue;
+                }
+
                 if (index.isAmbiguous(name)) {
                     throw new CompileException(
                             "required module '" + name + "' is declared by more than one file under "
@@ -129,6 +146,66 @@ public final class ModuleResolver {
                     "required module '" + name + "' (" + label + ") failed to parse: "
                             + e.getMessage(), requireOrigin);
         }
+    }
+
+    /**
+     * Loads a data file required as {@code requires $a.b.c} and wraps its
+     * terminal value as a synthetic single-export module.
+     *
+     * <p>A data file is <em>just an object literal</em> — no {@code module}
+     * header, no declarations — so it parses to an {@link IrModule} with empty
+     * {@code statements} and a {@link IrExpr.Record} {@code main}. We turn that
+     * value into a 0-arg {@code let}-style {@link IrStmt.FunctionDecl} named for
+     * the FQN's last segment, whose return sort is the value's structural
+     * <em>effective sort</em> ({@link NarrowingInference#inferFloor}) — the
+     * compile-time-synthesized type that makes all downstream field access
+     * typesafe. The synthetic module exports that one name, so the ordinary
+     * import/link/name-resolution pipeline binds it with no special casing.
+     *
+     * @param target the required name including the leading {@code $}
+     */
+    private static IrModule loadDataModule(String target, Path resolveDir, Origin requireOrigin)
+            throws CompileException {
+        String fileName = target + ".ptf";                  // literal: keeps `$` and dots
+        Path file = resolveDir.resolve(fileName);
+        if (!Files.isRegularFile(file)) {
+            throw new CompileException(
+                    "required data file '" + fileName + "' was not found under " + resolveDir,
+                    requireOrigin);
+        }
+        String source;
+        try {
+            source = Files.readString(file);
+        } catch (IOException io) {
+            throw new CompileException(
+                    "required data file '" + fileName + "' could not be read: " + io.getMessage(),
+                    requireOrigin);
+        }
+        IrModule loaded;
+        try {
+            loaded = AltParser.parseModule(source, fileName);
+        } catch (Exception e) {
+            throw new CompileException(
+                    "required data file '" + fileName + "' failed to parse: " + e.getMessage(),
+                    requireOrigin);
+        }
+        // A data file must be a single object literal: no top-level declarations
+        // (requires / exports / function / struct / …) and a record terminal
+        // value. This is the "leaf / substitutable-by-value" invariant at its
+        // simplest — the file contributes one value and nothing else.
+        if (!loaded.statements().isEmpty() || !(loaded.main() instanceof IrExpr.Record)) {
+            throw new CompileException(
+                    "data file '" + fileName + "' must be a single object literal "
+                            + "(no declarations, and its content must be a `{…}` record)",
+                    requireOrigin);
+        }
+        IrExpr value = loaded.main();
+        String localName = target.substring(target.lastIndexOf('.') + 1);  // last FQN segment
+        IrSort sort = NarrowingInference.inferFloor(value, InferenceContext.empty());
+        IrStmt.FunctionDecl constant = new IrStmt.FunctionDecl(
+                localName, List.of(), sort, value, requireOrigin, /*topLevelLet*/ true);
+        IrStmt exports = IrStmt.exports(List.of(localName), /*self*/ true);
+        return new IrModule(target, List.of(exports, constant), new IrExpr.Lit(0, requireOrigin));
     }
 
     /**

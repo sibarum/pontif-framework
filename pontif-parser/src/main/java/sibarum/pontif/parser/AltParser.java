@@ -662,6 +662,29 @@ public final class AltParser {
 
     private IrStmt parseRequires() throws ParseException {
         AltToken start = expectKeyword("requires");
+        if (peek().kind() == AltToken.Kind.DOLLAR) {
+            // Data require: `requires $a.b.c` imports the terminal VALUE of the
+            // data file `$a.b.c.ptf` (a bare object literal) under the local
+            // name of its last FQN segment. There is no `.{…}` entry list — the
+            // whole file IS one value, bound once. The `$` is kept on the target
+            // so ModuleResolver resolves it by literal filename rather than the
+            // module-header sibling scan (a data file has no `module` header).
+            consume();                                       // DOLLAR
+            AltToken firstName = expect(AltToken.Kind.IDENT);
+            StringBuilder fqn = new StringBuilder(firstName.text());
+            String lastSeg = firstName.text();
+            while (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
+                consume();                                   // DOT
+                AltToken seg = consume();                    // IDENT
+                fqn.append('.').append(seg.text());
+                lastSeg = seg.text();
+            }
+            AltToken end = tokens.get(pos - 1);
+            return new IrStmt.Requires(
+                    "$" + fqn,
+                    List.of(new IrStmt.RequireEntry(lastSeg, lastSeg)),
+                    start.spanTo(end));
+        }
         String target = parseDottedName();
         List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
         AltToken last = tokens.get(pos - 1);
