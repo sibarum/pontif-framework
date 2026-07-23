@@ -185,10 +185,12 @@ place in a GUI `window(cfg, {children})` instead of its own window) and put a bu
 (dasum NFD) and writes the file — no Pontif filesystem API needed. See
 `pontif-builtin-gui/examples/svg-export.ptf`.
 
-> **Layout gotcha.** Put `chartView` as a *direct* child of `window`'s children. A `SceneView` fills
-> its parent column's width only as a direct fill-child; wrapping it in an explicit `Column`/`Row`
-> (a `Flex`, which does not fill its own parent's cross axis) collapses the chart to **zero width** —
-> it reserves vertical space but draws nothing. Stack the plot and the button directly. The Pontif→IR→SVG path is verified headlessly in
+> **Layout.** The bridge builds its component tree through dasum's `Ui` builders, whose columns
+> default to `STRETCH` and whose `Ui.sceneView()` defaults to fill+grow — so a plot resolves whether
+> it's the whole window, stacked with a button, or nested in a `Column`. As a backstop, window build
+> runs `Ui.lint` (a real layout pass): if a plot/scene ever still collapses to zero size it throws
+> immediately with a fix hint, rather than rendering a silent blank. (This replaced an earlier trap
+> where a `SceneView` wrapped in a non-stretching `Flex` collapsed to zero width.) The Pontif→IR→SVG path is verified headlessly in
 `PlotExtensionTest` (`DasumBridge.buildScene` + `SvgPlotWriter.write`); the dialog itself is manual.
 
 **Known limit (configurable resolution).** Sampling maps over a *statically-synthesized* index

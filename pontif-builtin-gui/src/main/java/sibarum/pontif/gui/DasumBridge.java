@@ -26,6 +26,7 @@ import sibarum.dasum.gui.core.text.FontGroup;
 import sibarum.dasum.gui.core.text.FontGroups;
 import sibarum.dasum.gui.core.theme.Themed;
 import sibarum.dasum.gui.core.theme.Variant;
+import sibarum.dasum.gui.core.ui.Ui;
 import sibarum.dasum.gui.core.window.Window;
 import sibarum.dasum.gui.natives.gl.Gl;
 import sibarum.dasum.gui.natives.glfw.Glfw;
@@ -426,6 +427,10 @@ public final class DasumBridge {
 
             // Build components after font + Em setup, so styled widgets resolve correctly.
             Component root = rootFactory.get();
+            // Layout guardrail (docs/plotting.md): lint the built tree BEFORE rendering. Fonts are
+            // registered and Em is set, so the geometry pass can lay it out — a collapsed plot/scene
+            // (the plot-in-a-column trap) throws here with a fix hint instead of rendering blank.
+            Ui.lint(root);
             wireInput();
 
             // 3D plot windows opt into HDR + bloom: the frame renders into an offscreen HDR target,
@@ -478,20 +483,22 @@ public final class DasumBridge {
                 yield Themed.button(t, Em.of(10f), Variant.PRIMARY, 0,
                         () -> ctx.fireEvent(element("pontif.gui/ButtonEvent", "label", t)));
             }
-            case "Column" -> new Component.Flex(
-                    null, null, Em.of(0.5f), TRANSPARENT,
-                    Direction.COLUMN, justify(str(rv, "justify")), align(str(rv, "align")), Em.of(0.8f),
-                    childrenOf(rv, ctx), false, 1);
+            // Ui.column() defaults (align=STRETCH) make children fill the cross axis, so a nested
+            // plot/scene resolves instead of collapsing; the user's justify/align still apply. grow(1)
+            // lets a column-in-a-column take vertical space.
+            case "Column" -> Ui.column()
+                    .padding(Em.of(0.5f)).gap(Em.of(0.8f)).grow(1)
+                    .justify(justify(str(rv, "justify"))).align(align(str(rv, "align")))
+                    .addAll(childrenOf(rv, ctx)).build();
             case "LinePlot" -> buildLinePlot(rv);
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
             // chart `chart(...)` opens standalone, but as a component so it can sit in a layout
             // beside a user Button whose onClick calls exportSvg on the same layers.
             case "ChartView" -> annotatedChartComponent(buildAnnotatedChart(rv.members().get("layers")));
-            // A bare children aggregate (window's root arg) → an implicit centered column.
-            case "_tuple" -> new Component.Flex(
-                    null, null, Em.of(0.5f), TRANSPARENT,
-                    Direction.COLUMN, JustifyContent.CENTER, AlignItems.CENTER, Em.of(0.8f),
-                    tupleToComponents(rv, ctx), false, 1);
+            // A bare children aggregate (window's root arg) → the implicit root column: FILL the
+            // window (both axes) so fill children (a plot) resolve, STRETCH so they span the width.
+            case "_tuple" -> Ui.column().fill().padding(Em.of(0.5f)).gap(Em.of(0.8f))
+                    .addAll(tupleToComponents(rv, ctx)).build();
             default -> errorLabel("unknown component: " + bareType(rv.typeName()));
         };
     }
@@ -620,9 +627,15 @@ public final class DasumBridge {
      * {@code LinePlot} element, the {@code plotLine} sampler, and the composed {@code chart}.
      * {@code DasumVis.init()} must have run first ({@link #openWindowWithRoot} ensures it).
      */
+    /** A plot/scene viewport built through the {@code Ui} builder — fill + grow + interactive by
+     *  default (a scene has no intrinsic size, so filling its slot is the correct default and keeps a
+     *  plot from collapsing when it isn't the whole window). The plot background is applied here. */
+    static Component.SceneView plotSceneView() {
+        return (Component.SceneView) Ui.sceneView().background(PLOT_BG).build();
+    }
+
     static Component chartComponent(List<Series> series) {
-        Component.SceneView view =                       // null size → fills the window
-                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+        Component.SceneView view = plotSceneView();
         PlotFrame frame = LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series);
         new PlotView(view).showLinePlot(frame, series, PlotStyle.defaults());
         // Pan/zoom fenced to the plot's world rect so it can't be dragged off screen.
@@ -774,7 +787,7 @@ public final class DasumBridge {
     static Component annotatedChartComponent(AnnotatedChart chart) {
         PlotFrame frame = annotatedFrame(chart);
         if (frame == null) return errorLabel("chart: no drawable layers");
-        Component.SceneView view = new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+        Component.SceneView view = plotSceneView();
         new PlotView(view).show(frame, buildAnnotatedLayers(chart, frame));
         SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
                 .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
@@ -863,7 +876,7 @@ public final class DasumBridge {
      */
     static Component buildCloudView(float[] xyz) {
         Component.SceneView view =                       // null size → fills the window
-                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+                plotSceneView();
         SceneStates.publish(view, SceneSnapshot.of(new PointLayer(xyz, null)));
         SceneStates.setCamera(view, CameraSpec.defaultPerspective());
         SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
@@ -883,7 +896,7 @@ public final class DasumBridge {
             return errorLabel("surface needs an N*N grid (N>=2); got " + zs.length + " heights");
         }
         Component.SceneView view =                       // null size → fills the window
-                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+                plotSceneView();
         // OPAQUE (not the TriangleLayer 2-arg default of ALPHA): the surface is solid, so it must
         // WRITE the depth buffer. An ALPHA layer has depth writes disabled in SceneRenderer, which
         // leaves the surface rendering in submission order — far triangles bleed through near ones.
@@ -1296,7 +1309,7 @@ public final class DasumBridge {
         for (Layer l : raw) shown.add(scaleLayer(l, t, textScale));
 
         Component.SceneView view =                       // null width/height → fills the window
-                new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+                plotSceneView();
         SceneStates.publish(view, new SceneSnapshot(shown));
         SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
                 t.apply(build.min()), t.apply(build.max())));
