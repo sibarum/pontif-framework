@@ -1555,24 +1555,29 @@ public final class SortChecker {
                     }
                 } else {
                     IrSort.Structural sp = resolveNominal(baseSort, structDefs);
-                    // Anonymous aggregates ('_record'/'_tuple') defer field-existence to
-                    // the runtime check (RuntimeCheckException carries the access origin);
-                    // only NOMINAL structs are compile-checked here. (The floor now gives
-                    // an anonymous record a structural shape for the parser's base-name
-                    // needs, but that must not change this check's nominal-only contract.)
-                    if (sp != null && sp.name().startsWith("_")) {
-                        sp = null;
-                    }
+                    // Field-existence is decided by the value's EFFECTIVE sort, not by
+                    // whether that sort is nominal. An anonymous aggregate ('_record' /
+                    // '_tuple') is minted only by fully enumerating its members — a
+                    // literal or a declared shape — so its member set is closed and the
+                    // check is sound (abstain-never-bluff still holds: where inference
+                    // can't pin a structural shape it yields '_'/null, which resolveNominal
+                    // maps to null and we defer, exactly as before). A stream stays
+                    // 'Stream[T]' until a runtime seal, so it never surfaces here as an
+                    // under-counted '_tuple'.
                     if (sp != null) {
                         // A trait attribute reads as a field but is stored as a
                         // computed projection: `x.weight` resolves to the satisfier's
                         // `Type.weight(this)` producer. Allow it when no real field
-                        // exists but such an accessor is registered.
+                        // exists but such an accessor is registered. (Anonymous
+                        // aggregates carry no producers, so this stays false for them.)
                         boolean isAttributeProjection =
                                 functionReturns.containsKey(sp.name() + "." + fa.fieldName());
                         if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection) {
+                            String subject = sp.name().startsWith("_")
+                                    ? "Anonymous " + (sp.name().equals("_tuple") ? "tuple" : "record")
+                                    : "Record of sort '" + sp.name() + "'";
                             throw new CompileException(
-                                    "Record of sort '" + sp.name() + "' has no field '"
+                                    subject + " has no field '"
                                             + fa.fieldName() + "'; available fields: "
                                             + sp.members().keySet(),
                                     fa.origin());

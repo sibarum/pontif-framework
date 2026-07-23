@@ -132,19 +132,21 @@ class IrRecordTest {
     }
 
     @Test
-    void interpreter_missingField_throwsWithAccessOrigin() throws Exception {
+    void missingFieldOnAnonymousRecord_isCompileError() throws Exception {
+        // Field-existence is decided by the value's effective sort — an anonymous
+        // record has a closed member set, so a field it does not carry is a
+        // COMPILE error (SortChecker, via IrCompiler.compile), not a deferred
+        // runtime RuntimeCheckException. The access origin still travels on it.
         Origin accessSite = Origin.at("test.ptf", 3, 7);
         IrExpr program = new IrExpr.FieldAccess(
                 IrExpr.record(members("x", IrExpr.lit(1))),
                 "missing",
                 accessSite);
-        RuntimeCheckException ex = assertThrows(
-                RuntimeCheckException.class,
+        CompileException ex = assertThrows(
+                CompileException.class,
                 () -> runInterpreter(new IrModule("m", List.of(), program)));
         assertEquals(accessSite, ex.origin());
-        assertTrue(ex.getMessage().contains("test.ptf:3:7"),
-                "error should include access origin; got: " + ex.getMessage());
-        assertTrue(ex.getMessage().contains("missing"),
+        assertTrue(ex.getMessage().contains("has no field 'missing'"),
                 "error should name the missing field; got: " + ex.getMessage());
     }
 
@@ -188,18 +190,21 @@ class IrRecordTest {
     }
 
     @Test
-    void truffle_missingField_throwsWithAccessOrigin() throws Exception {
+    void truffle_missingFieldOnAnonymousRecord_isCompileError() throws Exception {
+        // Same moved contract as the interpreter path: the field-safety gate runs
+        // at compile time (IrCompiler.compile), so neither backend reaches a
+        // runtime miss on a statically-shaped record.
         Origin accessSite = Origin.at("test.ptf", 8, 2);
         IrExpr program = new IrExpr.FieldAccess(
                 IrExpr.record(members("x", IrExpr.lit(1))),
                 "missing",
                 accessSite);
-        RuntimeCheckException ex = assertThrows(
-                RuntimeCheckException.class,
+        CompileException ex = assertThrows(
+                CompileException.class,
                 () -> runTruffle(new IrModule("m", List.of(), program)));
         assertEquals(accessSite, ex.origin());
-        assertTrue(ex.getMessage().contains("test.ptf:8:2"),
-                "error should include origin; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("has no field 'missing'"),
+                "error should name the missing field; got: " + ex.getMessage());
     }
 
     @Test
