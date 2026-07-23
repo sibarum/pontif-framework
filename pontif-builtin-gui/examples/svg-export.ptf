@@ -1,6 +1,6 @@
 requires pontif.algebra.{Algebraic}
 requires pontif.plot.{expr, asymptotes, zeros, chartView, exportSvg}
-requires pontif.gui.{Button, Column, window, Clickable}
+requires pontif.gui.{Button, window, Clickable}
 
 # Export a reliable annotated plot to a semantically-classed SVG (docs/plotting.md). The plot is
 # EMBEDDED (chartView) in a GUI window beside a button; clicking the button pops a native Save
@@ -21,13 +21,15 @@ assign trait ExportButton:Clickable {
   onClick():_ -> ( let done = exportSvg(this.data)  this )
 }
 
+# NOTE: chartView is placed as a DIRECT child of window's children — a SceneView fills its column's
+# width only as a direct fill-child. Wrapping it in an explicit Column/Row (a Flex) collapses it to
+# zero width (a Flex doesn't fill its parent's cross axis), so the chart would reserve space but not
+# draw. Stack the plot and the button directly; the plot fills, the button centres below it.
 main (
   let e = $f[Decimal].ast
   let layers = { expr(e), asymptotes(e), zeros(e) }
-  window({title = "Reliable plot → SVG", width = 1100, height = 720}, {
-    Column("center", "middle", {
-      chartView({}, layers),
-      ExportButton("Export SVG…", layers)
-    })
+  window({title = "Reliable plot -> SVG", width = 1100, height = 720}, {
+    chartView({}, layers),
+    ExportButton("Export SVG...", layers)
   })
 )

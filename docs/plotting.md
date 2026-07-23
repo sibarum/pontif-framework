@@ -183,7 +183,12 @@ To wire it up, embed the chart with `chartView(cfg, {layers})` (like `chart`, bu
 place in a GUI `window(cfg, {children})` instead of its own window) and put a button beside it whose
 `onClick` calls `exportSvg(layers)` on the SAME layer tuple. Clicking pops a native Save dialog
 (dasum NFD) and writes the file — no Pontif filesystem API needed. See
-`pontif-builtin-gui/examples/svg-export.ptf`. The Pontif→IR→SVG path is verified headlessly in
+`pontif-builtin-gui/examples/svg-export.ptf`.
+
+> **Layout gotcha.** Put `chartView` as a *direct* child of `window`'s children. A `SceneView` fills
+> its parent column's width only as a direct fill-child; wrapping it in an explicit `Column`/`Row`
+> (a `Flex`, which does not fill its own parent's cross axis) collapses the chart to **zero width** —
+> it reserves vertical space but draws nothing. Stack the plot and the button directly. The Pontif→IR→SVG path is verified headlessly in
 `PlotExtensionTest` (`DasumBridge.buildScene` + `SvgPlotWriter.write`); the dialog itself is manual.
 
 **Known limit (configurable resolution).** Sampling maps over a *statically-synthesized* index
