@@ -134,8 +134,8 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
-        List<Series> series = buildChartSeries(layers);
-        return openWindowWithRoot(title, false, () -> chartComponent(series));
+        AnnotatedChart chart = buildAnnotatedChart(layers);
+        return openWindowWithRoot(title, false, () -> annotatedChartComponent(chart));
     }
 
     /**
@@ -591,6 +591,196 @@ public final class DasumBridge {
         SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
                 .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
         return view;
+    }
+
+    // --- Supplemental expression layers: reliable curve + annotations -----------------------------
+    // (docs/reliable-plotting.md) `chart(cfg, {expr(e), zeros(e), optima(e), asymptotes(e),
+    // intersections(e,g)})` composites an interval-reliable curve with feature MARKERS, LABELS, and
+    // half-opacity vertical ASYMPTOTE lines — all expression-driven, all in one window. The feature
+    // detection ran Pontif-side (bounded numeric scans over evalInterval); this native only turns the
+    // resulting primitives into dasum layers over the shared plot frame.
+
+    /** Max markers / vertical lines one annotation layer may paint. A layer that overflows this is
+     *  SUPPRESSED with a log — the "unreasonable quantity of primitives" failsafe: a wildly
+     *  oscillating curve (e.g. sin(1/x) near 0) has unboundedly many zeros/extrema, and hundreds of
+     *  markers would bury the plot rather than inform it. */
+    static final int FEATURE_CAP = 24;
+
+    /** A detected feature anchor (data coordinates). */
+    record Feature(double x, double y) {}
+
+    /** A set of markers sharing a label style: kind 0 = zero (x-axis, x label), 1 = optimum
+     *  ("(x, y)" label), 2 = intersection ("(x, y)" label). */
+    record MarkSet(int kind, List<Feature> pts) {}
+
+    /** The parsed, failsafe-applied decomposition of a {@code chart} layer list: drawn series (from
+     *  sampled {@code Curve} + {@code ExprLayer}), marker sets, and vertical-asymptote x's.
+     *  Package-visible: the headless test seam for the annotated chart. */
+    record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines) {}
+
+    private static final Color MARK_COLOR = new Color(0.98f, 0.85f, 0.30f, 1f);   // amber markers
+    private static final Color LABEL_COLOR = new Color(0.95f, 0.95f, 0.98f, 1f);
+    private static final Color ASYM_COLOR = new Color(0.95f, 0.45f, 0.45f, 1f);   // reddish, half-opacity
+
+    /**
+     * Decompose a {@code chart} layer tuple into series + annotations, applying the per-layer
+     * primitive {@link #FEATURE_CAP} failsafe (an overflowing annotation layer is dropped and logged
+     * to {@code System.err}). Handles {@code Curve} (sampled), {@code ExprLayer} (interval spans),
+     * {@code MarkLayer} (zeros/optima/intersections), and {@code VLineLayer} (asymptotes).
+     */
+    static AnnotatedChart buildAnnotatedChart(Object layersValue) {
+        List<Series> series = new ArrayList<>();
+        List<MarkSet> marks = new ArrayList<>();
+        List<Double> vlines = new ArrayList<>();
+        int autoIdx = 0;
+        if (layersValue instanceof RecordValue tuple) {
+            for (Object member : tuple.members().values()) {
+                if (!(member instanceof RecordValue rv)) continue;
+                switch (bareType(rv.typeName())) {
+                    case "Curve" -> {
+                        double[] xs = doubles(rv.members().get("xs"));
+                        double[] ys = doubles(rv.members().get("ys"));
+                        Color color = rv.members().get("colored") instanceof Boolean c && c
+                                ? new Color(clamp01(memberD(rv, "r")), clamp01(memberD(rv, "g")),
+                                            clamp01(memberD(rv, "b")), 1f)
+                                : SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
+                        series.add(Series.line(xs, ys, color));
+                    }
+                    case "ExprLayer" -> series.addAll(buildReliableSeries(
+                            memberD(rv, "xlo"), memberD(rv, "xhi"), rv.members().get("spans")));
+                    case "MarkLayer" -> {
+                        int kind = (int) Math.round(memberD(rv, "kind"));
+                        List<Feature> pts = parseMarks(rv.members().get("pts"));
+                        if (capOk(pts.size(), markKindName(kind))) marks.add(new MarkSet(kind, pts));
+                    }
+                    case "VLineLayer" -> {
+                        List<Double> xs = parseVLines(rv.members().get("xs"));
+                        if (capOk(xs.size(), "asymptotes")) vlines.addAll(xs);
+                    }
+                    default -> { /* unknown layer kind — ignored */ }
+                }
+            }
+        }
+        return new AnnotatedChart(series, marks, vlines);
+    }
+
+    /** The failsafe gate: true if the count is within {@link #FEATURE_CAP}; otherwise log and drop. */
+    private static boolean capOk(int count, String layer) {
+        if (count <= FEATURE_CAP) return true;
+        System.err.println("pontif.plot: '" + layer + "' layer produced " + count
+                + " features (cap " + FEATURE_CAP + ") — layer suppressed to avoid cluttering the plot.");
+        return false;
+    }
+
+    private static String markKindName(int kind) {
+        return switch (kind) { case 0 -> "zeros"; case 2 -> "intersections"; default -> "optima"; };
+    }
+
+    /** Parse a {@code {pts}} tuple of {@code Mark(x, y)} records into features (in scan order). */
+    static List<Feature> parseMarks(Object ptsValue) {
+        List<Feature> out = new ArrayList<>();
+        if (ptsValue instanceof RecordValue tuple) {
+            for (Object m : tuple.members().values()) {
+                if (m instanceof RecordValue r && "Mark".equals(bareType(r.typeName()))) {
+                    out.add(new Feature(memberD(r, "x"), memberD(r, "y")));
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Parse a {@code {xs}} tuple of {@code VLine(x)} records into asymptote x-positions. */
+    static List<Double> parseVLines(Object xsValue) {
+        List<Double> out = new ArrayList<>();
+        if (xsValue instanceof RecordValue tuple) {
+            for (Object m : tuple.members().values()) {
+                if (m instanceof RecordValue r && "VLine".equals(bareType(r.typeName()))) {
+                    out.add(memberD(r, "x"));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The 2D chart with annotations: axes + drawn series (via {@code LinePlot.build}) plus overlay
+     * layers — a {@code +} glyph and a text label per marker, and a half-opacity vertical line with an
+     * x-value label per asymptote — all placed through the shared {@link PlotFrame}. The frame ranges
+     * over the drawn series AND the marker points, so an off-curve marker is never framed out.
+     */
+    static Component annotatedChartComponent(AnnotatedChart chart) {
+        PlotFrame frame = annotatedFrame(chart);
+        if (frame == null) return errorLabel("chart: no drawable layers");
+        Component.SceneView view = new Component.SceneView(null, null, Em.ZERO, PLOT_BG, true, 1);
+        new PlotView(view).show(frame, buildAnnotatedLayers(chart, frame));
+        SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
+                .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
+        return view;
+    }
+
+    /**
+     * The shared {@link PlotFrame} for an annotated chart: framed over the drawn series AND every
+     * marker point, so an off-curve marker (or an asymptote) is never framed out. Returns
+     * {@code null} when there is nothing to draw. A {@link Series} needs &ge; 2 points, so a lone
+     * marker (e.g. a single local optimum) is duplicated into a degenerate framing series — enough
+     * to stretch the frame, invisible ({@code TRANSPARENT}) and never actually drawn. Package-visible
+     * test seam (pure — no window).
+     */
+    static PlotFrame annotatedFrame(AnnotatedChart chart) {
+        List<Series> framing = new ArrayList<>(chart.series());
+        List<Double> mx = new ArrayList<>(), my = new ArrayList<>();
+        for (MarkSet ms : chart.marks()) for (Feature f : ms.pts()) { mx.add(f.x()); my.add(f.y()); }
+        if (mx.size() == 1) { mx.add(mx.get(0)); my.add(my.get(0)); }
+        if (!mx.isEmpty()) framing.add(Series.line(toArray(mx), toArray(my), TRANSPARENT));
+        if (framing.isEmpty()) return null;
+        return LinePlot.autoFrame(0f, 0f, 10f, 5.5f, framing);
+    }
+
+    /**
+     * Axes + drawn series ({@code LinePlot.build}) + overlay layers: a {@code +} glyph and a text
+     * label per marker, and a half-opacity vertical line with an x-value label per asymptote, all
+     * placed through {@code frame}. Package-visible test seam (pure — no window). */
+    static List<Layer> buildAnnotatedLayers(AnnotatedChart chart, PlotFrame frame) {
+        List<Layer> layers = new ArrayList<>(LinePlot.build(frame, chart.series(), PlotStyle.defaults()));
+        float glyph = 0.06f;                                        // marker half-size, world units
+        float labelH = 0.18f;                                       // label text height, world units
+        for (MarkSet ms : chart.marks()) {
+            for (Feature f : ms.pts()) {
+                Vec3 a = frame.toWorld(f.x(), ms.kind() == 0 ? 0.0 : f.y());
+                float[] seg = {a.x() - glyph, a.y(), 0f, a.x() + glyph, a.y(), 0f,
+                               a.x(), a.y() - glyph, 0f, a.x(), a.y() + glyph, 0f};
+                layers.add(new LineLayer(seg, filledColor(seg.length, MARK_COLOR)));
+                layers.add(new TextLayer(markLabel(ms.kind(), f),
+                        new Vec3(a.x() + glyph * 1.5f, a.y() + glyph * 1.5f, 0f), labelH, LABEL_COLOR));
+            }
+        }
+        for (double x : chart.vlines()) {
+            float wx = frame.worldX(x);
+            float[] seg = {wx, frame.wy0(), 0f, wx, frame.wy1(), 0f};
+            layers.add(new LineLayer(seg, filledColor(seg.length, ASYM_COLOR))
+                    .withBlend(BlendMode.ALPHA).withOpacity(0.5f));
+            layers.add(new TextLayer("x=" + fmt(x),
+                    new Vec3(wx + glyph, frame.wy1() - labelH, 0f), labelH, ASYM_COLOR));
+        }
+        return layers;
+    }
+
+    /** A marker's label: the x-value for a zero (it lies on the axis), else the point {@code (x, y)}. */
+    private static String markLabel(int kind, Feature f) {
+        return kind == 0 ? fmt(f.x()) : "(" + fmt(f.x()) + ", " + fmt(f.y()) + ")";
+    }
+
+    /** A compact numeric label: up to 3 decimals, trailing zeros trimmed ({@code 2.0 → "2"}). */
+    static String fmt(double v) {
+        double r = Math.round(v * 1000.0) / 1000.0;
+        if (r == Math.rint(r) && !Double.isInfinite(r)) return Long.toString((long) r);
+        return java.math.BigDecimal.valueOf(r).stripTrailingZeros().toPlainString();
+    }
+
+    private static double[] toArray(List<Double> xs) {
+        double[] a = new double[xs.size()];
+        for (int i = 0; i < a.length; i++) a[i] = xs.get(i);
+        return a;
     }
 
     /**

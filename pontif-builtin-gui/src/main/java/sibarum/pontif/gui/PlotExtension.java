@@ -37,13 +37,15 @@ public final class PlotExtension implements Extension {
     @Override
     public String pontifSource() {
         return """
-                requires pontif.core.{Stream}
-                requires pontif.algebra.{AlgExpr, Interval, Unbounded, Undefined, evalInterval}
+                requires pontif.core.{Stream, Nothing}
+                requires pontif.algebra.{AlgExpr, Sub, Interval, Unbounded, Undefined, evalInterval}
                 requires pontif.math.{sign, min, max}
                 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
                            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
                            fade, cmap, wire, scene, Curve, curve, color, chart,
-                           Volume3D, Volume, volume, normals, plotExpr, autoFrame}
+                           Volume3D, Volume, volume, normals, plotExpr, autoFrame,
+                           ExprLayer, MarkLayer, VLineLayer, expr,
+                           zeros, optima, asymptotes, intersections}
 
                 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
                 # implement the projection in the method bodies; plotLine does the rest.
@@ -350,7 +352,6 @@ public final class PlotExtension implements Extension {
                 function isPole(s:Decimal):Bool -> s == 2.0
                 function isReal(s:Decimal):Bool -> s < 1.5
                 function differ(a:Decimal, b:Decimal):Bool -> a != b
-                function atEnd(i:Int):Bool -> i >= 256
 
                 # A feature boundary: a pole column, or a genuine sign flip between two real columns.
                 function isFeature(prev:Decimal, cur:Decimal):Bool -> match isPole(cur) {
@@ -367,23 +368,17 @@ public final class PlotExtension implements Extension {
                 # The left edge of probe column i: 256 columns of width 0.25 over [-32, 32].
                 function colX(i:Int):Decimal -> 0.0 - 32.0 + i * 0.25
 
-                # Merge this column's feature into the recursive tail {loX, hiX, found}.
-                function combine(x:Decimal, feat:Bool, rest:[{Decimal, Decimal, Bool}]):[{Decimal, Decimal, Bool}] ->
+                # Fold one probe column into the running frame accumulator {prevRealSign, loX, hiX, any}:
+                # widen [loX, hiX] to include a feature column, always carry the last real sign forward.
+                # Driven by a FOLD (below) rather than deep recursion — the scan is iterative, so a
+                # function with features at every probe depth (tan's poles march across the whole range)
+                # can't blow the interpreter stack the way a 256-deep hand recursion did.
+                function stepFrame(xa:Decimal, s:Decimal, feat:Bool,
+                                   prev:Decimal, lo:Decimal, hi:Decimal, any:Bool):[{Decimal, Decimal, Decimal, Bool}] ->
                   match feat {
-                    [Bool:true]  -> ( let [{rlo, rhi, rany}] = rest  {min(x, rlo), max(x, rhi), true} )
-                    [Bool:false] -> rest
+                    [Bool:true]  -> {nextPrev(prev, s), min(xa, lo), max(xa, hi), true}
+                    [Bool:false] -> {nextPrev(prev, s), lo, hi, any}
                   }
-
-                # Scan probe columns i..255, carrying the last real sign; return the feature x-span.
-                function scanFrom(e:AlgExpr, i:Int, prev:Decimal):[{Decimal, Decimal, Bool}] -> match atEnd(i) {
-                  [Bool:true]  -> {1000000.0, 0.0 - 1000000.0, false}   # empty: lo=+big, hi=-big, none
-                  [Bool:false] -> (
-                    let xa = colX(i)
-                    let s = colSign(e, xa, xa + 0.25)
-                    let rest = scanFrom(e, i + 1, nextPrev(prev, s))
-                    combine(xa, isFeature(prev, s), rest)
-                  )
-                }
 
                 # Turn the feature span into a padded window; no features → the [-10, 10] default.
                 function frameOf(lo:Decimal, hi:Decimal, any:Bool):[{Decimal, Decimal}] -> match any {
@@ -391,16 +386,229 @@ public final class PlotExtension implements Extension {
                   [Bool:false] -> {0.0 - 10.0, 10.0}
                 }
 
-                # autoFrame: the numeric x-window for an expression (prev starts at 7 = "no sign yet").
-                function autoFrame(e:AlgExpr):[{Decimal, Decimal}] -> (
-                  let [{lo, hi, any}] = scanFrom(e, 0, 7.0)
+                # scanFrame: a single FOLD over the 256 probe columns threading the accumulator
+                # {prevRealSign (seed 7 = "no sign yet"), loX (+big), hiX (−big), any (false)} —
+                # O(1) interpreter stack, unlike the old 256-deep scanFrom recursion (which overflowed
+                # for a function like tan whose poles put a feature at every recursion depth). The
+                # fold's `._1` accumulator is RETURNED directly: destructuring it inline
+                # (`let [{…}] = fold(…)._1`) trips the totality checker, so frameOfAcc destructures it
+                # as a plain parameter instead. Probe over an UNREFINED Stream[Int] (indexRange), since
+                # folding a refined-element stream would demand an undecidable per-element domain match.
+                function scanFrame(e:AlgExpr):[{Decimal, Decimal, Decimal, Bool}] -> (
+                  let null:Nothing = Nothing()   # bound out here — a constructor won't resolve in a fragment
+                  let seed = {7.0, 1000000.0, 0.0 - 1000000.0, false}
+                  let probe = indexRange(0, 255)._0
+                  let framer:[ (i:Int, acc:[{Decimal, Decimal, Decimal, Bool}]) ->
+                    ( let [{prev, lo, hi, any}] = acc
+                      let xa = colX(i)
+                      let s = colSign(e, xa, xa + 0.25)
+                      {null, stepFrame(xa, s, isFeature(prev, s), prev, lo, hi, any)} ) ]
+                  framer(&probe, seed)._1
+                )
+
+                # Turn the scan accumulator into the padded window (destructures a plain parameter).
+                function frameOfAcc(acc:[{Decimal, Decimal, Decimal, Bool}]):[{Decimal, Decimal}] -> (
+                  let [{prev, lo, hi, any}] = acc
                   frameOf(lo, hi, any)
                 )
+
+                # autoFrame: the numeric x-window for an expression.
+                function autoFrame(e:AlgExpr):[{Decimal, Decimal}] -> frameOfAcc(scanFrame(e))
 
                 # Plot with NO domain now AUTO-FRAMES to the interesting region (was fixed [-10, 10]).
                 function plotExpr(e:AlgExpr):Stream[String] -> (
                   let [{xlo, xhi}] = autoFrame(e)
                   plotExpr(e, xlo, xhi)
+                )
+
+                # --- Composable expression layers + supplemental annotations ---------------------
+                # (docs/reliable-plotting.md, slice 4b-lite) The reliable expression plot and its
+                # annotations are LAYER VALUES, composited by the same `chart(cfg, {…})` the sampled
+                # `curve` layers use — no bespoke window per feature. Every annotation is DERIVED from
+                # the expression by a bounded NUMERIC scan over `evalInterval` (the reliable substrate),
+                # so it stays in pontif.algebra and sidesteps the pontif.poly transitive-import bug, and
+                # each feature test is LOCAL to a probe column (fragment-friendly — no fragile recursion).
+                #
+                # FAILSAFE: the scan is bounded (≤ FEATURE_PROBE features), and the native caps how many
+                # primitives a layer may paint. A layer that overflows the cap (a wildly oscillating
+                # curve — sin(1/x) near 0 has unboundedly many zeros/extrema) is SUPPRESSED with a log
+                # to StdErr, rather than cluttering the plot with hundreds of markers.
+
+                # A feature point (a marker anchor) and a vertical-asymptote x-position.
+                struct Mark(x:Decimal, y:Decimal)
+                struct VLine(x:Decimal)
+
+                # An algebraic expression as a chart layer (its reliable interval-enclosure curve over
+                # [xlo,xhi]) — the expression sibling of `curve`, produced by `expr(e)`. kind on
+                # MarkLayer selects the native's glyph+label: 0 = zero (marker on the x-axis, labelled
+                # with x), 1 = optimum (marker at (x,y), labelled "(x, y)"), 2 = intersection (as optimum).
+                struct ExprLayer(spans:_, xlo:Decimal, xhi:Decimal)
+                struct MarkLayer(pts:_, kind:Int)
+                struct VLineLayer(xs:_)
+
+                # 384 probe columns — the annotation scan resolution (finer than the 256 render columns
+                # so features that sit close together still resolve into distinct markers).
+                let featureIndices:Stream[Int:0 <= @ < 384];
+
+                # A point sample via a DEGENERATE interval column [x, x]: reuses evalInterval so a pole
+                # (Unbounded) and an off-domain point (Undefined) are surfaced honestly, never faked.
+                # kind 0 = real (v is the value), 1 = pole, 2 = undefined.
+                struct Samp(kind:Int, v:Decimal)
+                function sampleAtX(e:AlgExpr, x:Decimal):Samp -> match evalInterval(e, x, x) {
+                  [Interval(lo, hi)] -> Samp(0, (lo + hi) / 2.0)
+                  [Unbounded]        -> Samp(1, 0.0)
+                  [Undefined]        -> Samp(2, 0.0)
+                }
+
+                # --- shared predicate helpers (returned Bools — never match subjects) --------------
+                function isRealSamp(s:Samp):Bool -> s.kind == 0
+                function oppositeSign(a:Decimal, b:Decimal):Bool -> a * b < 0.0
+                function notB(a:Bool):Bool -> match a { [Bool:true] -> false  [Bool:false] -> true }
+
+                # Does the interval [xa, xb] STRADDLE a pole? (evalInterval over the whole span is
+                # Unbounded.) A feature candidate whose bracket contains an asymptote is an ARTIFACT of
+                # the blow-up — the finite samples either side of a pole fake a sign flip (a false zero)
+                # or a slope reversal (a false extremum) across a discontinuity. Rejecting these is the
+                # no-lie law: a zero/optimum is only real where the curve is actually continuous there.
+                function spanHasPole(e:AlgExpr, xa:Decimal, xb:Decimal):Bool -> isPole(colSign(e, xa, xb))
+
+                # A zero crossing between fa and fb, biased to the column where the RIGHT endpoint
+                # reaches or passes zero — so a root landing exactly on a probe point (sample == 0) is
+                # caught exactly ONCE (in the column whose fb hits 0), never missed and never doubled.
+                function crosses(fa:Decimal, fb:Decimal):Bool -> match (fa < 0.0) {
+                  [Bool:true]  -> fb >= 0.0
+                  [Bool:false] -> andB(fa > 0.0, fb <= 0.0)
+                }
+
+                # The x where the segment through (xa,fa)–(xb,fb) crosses zero (linear interpolation) —
+                # a sub-column-accurate root position, so a marker lands on the true crossing.
+                function interpX(xa:Decimal, xb:Decimal, fa:Decimal, fb:Decimal):Decimal ->
+                  xa - fa * (xb - xa) / (fb - fa)
+
+                # === Zeros =========================================================================
+                # A root sits between two real samples of opposite sign. Poles/undefined columns carry
+                # no sign, so a sign flip ACROSS an asymptote is not mistaken for a zero.
+                function hasRoot(a:Samp, b:Samp):Bool ->
+                  andB(andB(isRealSamp(a), isRealSamp(b)), crosses(a.v, b.v))
+
+                function zeroAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[Mark | Nothing] -> (
+                  let xa = xlo + i * w
+                  let xb = xlo + (i + 1) * w
+                  let fa = sampleAtX(e, xa)
+                  let fb = sampleAtX(e, xb)
+                  match andB(hasRoot(fa, fb), notB(spanHasPole(e, xa, xb))) {
+                    [Bool:true]  -> Mark(interpX(xa, xb, fa.v, fb.v), 0.0)
+                    [Bool:false] -> Nothing()
+                  }
+                )
+
+                # zeros: markers + labels at the roots of `e` along the x-axis. A layer for `chart`.
+                function zeros(e:AlgExpr):MarkLayer -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  let w = (xhi - xlo) / 384.0
+                  let pts = &featureIndices:[ (i:Int) -> zeroAt(e, xlo, w, i) ]
+                  MarkLayer(pts, 0)
+                )
+
+                # === Local optima ==================================================================
+                # A local min/max is a sign flip of the discrete slope: the slope over [x_{i-1},x_i]
+                # and over [x_i,x_{i+1}] point opposite ways. All three samples must be real (an
+                # extremum straddling a pole is not an extremum).
+                function isExtremum(a:Samp, b:Samp, c:Samp):Bool ->
+                  andB(andB(isRealSamp(a), andB(isRealSamp(b), isRealSamp(c))),
+                       oppositeSign(b.v - a.v, c.v - b.v))
+
+                function optAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[Mark | Nothing] -> (
+                  let x0 = xlo + (i - 1) * w
+                  let x2 = xlo + (i + 1) * w
+                  let f0 = sampleAtX(e, x0)
+                  let f1 = sampleAtX(e, xlo + i * w)
+                  let f2 = sampleAtX(e, x2)
+                  match andB(isExtremum(f0, f1, f2), notB(spanHasPole(e, x0, x2))) {
+                    [Bool:true]  -> Mark(xlo + i * w, f1.v)
+                    [Bool:false] -> Nothing()
+                  }
+                )
+
+                # optima: markers + labels at the local minima and maxima of `e`. A layer for `chart`.
+                function optima(e:AlgExpr):MarkLayer -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  let w = (xhi - xlo) / 384.0
+                  let pts = &featureIndices:[ (i:Int) -> optAt(e, xlo, w, i) ]
+                  MarkLayer(pts, 1)
+                )
+
+                # === Vertical asymptotes ===========================================================
+                # A vertical asymptote is an ISOLATED pole column (interval-proven Unbounded): the run
+                # of consecutive pole columns is shorter than the native's DENSE threshold (4). A dense
+                # run is unresolvable detail the reliable layer already fills as a block, so it is NOT
+                # marked here. Emit once, at the FIRST pole column of the run (its predecessor is not a
+                # pole), so a 2–3 wide pole draws a single line.
+                # A pole column is detected over the column's WIDTH (not a point): the interval must
+                # STRADDLE the pole to enclose ±∞ — a degenerate point [x,x] would only catch a pole
+                # sitting exactly on a probe point. Reuses the reliable core's colSign (2.0 = pole).
+                function poleColAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
+                  isPole(colSign(e, xlo + i * w, xlo + (i + 1) * w))
+
+                function denseAhead(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
+                  andB(poleColAt(e, xlo, w, i + 1),
+                       andB(poleColAt(e, xlo, w, i + 2), poleColAt(e, xlo, w, i + 3)))
+
+                function isIsolatedPole(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
+                  andB(andB(poleColAt(e, xlo, w, i), notB(poleColAt(e, xlo, w, i - 1))),
+                       notB(denseAhead(e, xlo, w, i)))
+
+                function asymAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[VLine | Nothing] ->
+                  match isIsolatedPole(e, xlo, w, i) {
+                    [Bool:true]  -> VLine(xlo + i * w + w / 2.0)
+                    [Bool:false] -> Nothing()
+                  }
+
+                # asymptotes: half-opacity vertical lines + x-value labels at `e`'s vertical asymptotes.
+                function asymptotes(e:AlgExpr):VLineLayer -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  let w = (xhi - xlo) / 384.0
+                  let xs = &featureIndices:[ (i:Int) -> asymAt(e, xlo, w, i) ]
+                  VLineLayer(xs)
+                )
+
+                # === Intersections =================================================================
+                # An intersection of `e` and `g` is a zero of their difference `e - g`; the marker's y
+                # is the crossing height eval(e, xr). The scan is the zero scan over the difference tree.
+                function valAtX(e:AlgExpr, x:Decimal):Decimal -> ( let s = sampleAtX(e, x)  s.v )
+
+                function intersectAt(e:AlgExpr, d:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[Mark | Nothing] -> (
+                  let xa = xlo + i * w
+                  let xb = xlo + (i + 1) * w
+                  let fa = sampleAtX(d, xa)
+                  let fb = sampleAtX(d, xb)
+                  match andB(hasRoot(fa, fb), notB(spanHasPole(d, xa, xb))) {
+                    [Bool:true]  -> ( let xr = interpX(xa, xb, fa.v, fb.v)  Mark(xr, valAtX(e, xr)) )
+                    [Bool:false] -> Nothing()
+                  }
+                )
+
+                # intersections: markers + labels where `e` and `g` cross. A layer for `chart`.
+                function intersections(e:AlgExpr, g:AlgExpr):MarkLayer -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  let w = (xhi - xlo) / 384.0
+                  let d = Sub(e, g)
+                  let pts = &featureIndices:[ (i:Int) -> intersectAt(e, d, xlo, w, i) ]
+                  MarkLayer(pts, 2)
+                )
+
+                # === An algebraic expression as a chart layer ======================================
+                # expr(e): the expression's reliable interval-enclosure curve as a `chart` layer
+                # (auto-framed), so it composites with the annotation layers above — the expression
+                # sibling of `curve`. expr(e, xlo, xhi) pins the window instead of auto-framing.
+                function expr(e:AlgExpr, xlo:Decimal, xhi:Decimal):ExprLayer -> (
+                  let dx = (xhi - xlo) / 256.0
+                  let spans = &columnIndices:[ (i:Int) -> classifyColumn(e, xlo + i * dx, xlo + (i + 1) * dx) ]
+                  ExprLayer(spans, xlo, xhi)
+                )
+                function expr(e:AlgExpr):ExprLayer -> (
+                  let [{xlo, xhi}] = autoFrame(e)
+                  expr(e, xlo, xhi)
                 )
 
                 0

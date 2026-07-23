@@ -1,0 +1,35 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{expr, zeros, optima, asymptotes, intersections, chart}
+
+# Supplemental annotation layers on a reliable plot. Every layer is a VALUE composited by the
+# same chart(cfg, {…}) the sampled curves use — the reliable interval-enclosure curve plus four
+# expression-driven overlays, each derived by a bounded numeric scan over the same substrate:
+#
+#   expr(e)            — the asymptote-safe curve (interval enclosure, breaks at poles)
+#   zeros(e)           — markers + labels on the roots along the x-axis
+#   optima(e)          — markers + labels on the local minima and maxima
+#   asymptotes(e)      — half-opacity vertical lines + x-labels at the vertical asymptotes
+#   intersections(e,g) — markers + labels where two curves cross
+#
+# Each overlay has a built-in failsafe: if it would paint an unreasonable number of primitives
+# (a wildly oscillating curve), the layer is suppressed and a notice is logged to StdErr instead
+# of burying the plot in markers.
+
+# A cubic: two local optima and three real roots — nicely framed by the reliable auto-window.
+function f(x:Decimal):Decimal -> x * x * x - 3.0 * x
+assign proof f:Algebraic
+
+# A line to intersect it with.
+function g(x:Decimal):Decimal -> x + 1.0
+assign proof g:Algebraic
+
+# A rational function with two isolated vertical asymptotes, at x = ±1.
+function h(x:Decimal):Decimal -> 1.0 / (x * x - 1.0)
+assign proof h:Algebraic
+
+main ( chart({title = "annotated"}, {
+  expr($f[Decimal].ast),
+  zeros($f[Decimal].ast),
+  optima($f[Decimal].ast),
+  intersections($f[Decimal].ast, $g[Decimal].ast)
+}) )

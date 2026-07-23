@@ -290,10 +290,45 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   the rational root-finder can't reach. Verified end-to-end by `PlotExtensionTest`
   (`plotExpr(x²+x−6)` brackets roots −3 and 2; a constant falls back). **This closes the
   "specify a function → nicely-framed reliable plot" loop.**
+- **Supplemental annotation layers (LANDED 2026-07-22).** Expression-driven overlays composited by
+  the existing `chart(cfg, {…})` layer idiom — the reliable curve and its annotations are layer
+  VALUES, exactly like the sampled `curve` layers. `expr(e)` is the interval-enclosure curve as a
+  chart layer; `zeros(e)` / `optima(e)` / `asymptotes(e)` / `intersections(e, g)` add markers+labels
+  (roots, local min/max, crossings) and half-opacity vertical asymptote lines. Every feature is found
+  by a BOUNDED numeric scan over `evalInterval`/degenerate-column point samples — each test LOCAL to a
+  probe column (fragment-friendly, no recursion), so detection stays in `pontif.algebra` and sidesteps
+  the transitive `pontif.poly` import bug that still blocks symbolic `differentiate`. Extrema use a
+  discrete-slope sign flip (no derivative), zeros/intersections a sign-crossing bracket biased so a
+  root landing exactly on a probe point is caught once, asymptotes an ISOLATED interval-proven pole
+  (a dense run is left to the reliable layer's block fill). **Failsafe:** each layer's primitive count
+  is capped native-side (`DasumBridge.FEATURE_CAP`); an overflowing layer (a wildly oscillating curve
+  — `sin(1/x)` near 0) is SUPPRESSED with a `System.err` notice rather than cluttering the plot.
+  Verified headlessly by `PlotExtensionTest` (zeros of x²−4, optima of x³−3x, asymptotes of
+  1/(x²−1), intersections of x² and x+2, and the cap-suppression + log). Window render manual:
+  `pontif-builtin-gui/examples/annotate.ptf`. The **Auto-Plotted Function** welcome sample
+  (`pontif-playground/.../welcome/samples/auto-plot.ptf`) now demonstrates the composition:
+  `chart({…}, {expr(f), asymptotes(f), optima(f)})` over `1/(x²−1)`.
+  - **No spurious features at asymptotes (fixed 2026-07-22).** The first pass reported false
+    zeros / extrema *straddling* a pole — the finite samples either side of an asymptote fake a
+    sign flip (a false root) or a slope reversal (a false extremum) across the discontinuity (e.g.
+    `1/(x²−1)` produced four bogus extrema hugging x = ±1). Fix: a candidate is rejected when its
+    bracketing interval is `Unbounded` (`spanHasPole` — `evalInterval` over the span straddles a
+    pole), so a feature is kept only where the curve is actually continuous there. Pinned by
+    `PlotExtensionTest.featureLayers_rejectSpuriousFeaturesStraddlingAnAsymptote`.
 - **Still ahead:** slice 3 (adaptive subdivision — sharpens fat/tall columns, gives partial-domain
   tightness for free), slice 4b (EXACT feature marking — dotted asymptotes, labeled intercepts —
   using `pontif.poly`'s `roots()`, once the transitive-import bug is fixed; the numeric framing
   above needs neither), slice 5 (affine arithmetic).
+- **Auto-frame scan is a FOLD, not deep recursion (fixed 2026-07-22).** The `autoFrame` probe scan
+  was a 256-deep hand recursion (`scanFrom`) that overflowed the interpreter stack for a function
+  whose features sit at *every* depth — `tan(x)`, with an asymptote in nearly every probe column, hit
+  heavy min/max work unwinding on an already-deep stack. Rewritten as a single `fold` over the probe
+  range (O(1) stack). Two Pontif-shape gotchas the rewrite navigated: fold over a *refined*-element
+  stream (`Stream[Int:0<=@<256]`) demands an undecidable per-element domain match, so the fold runs
+  over an unrefined `indexRange(0,255)` stream; and destructuring the fold's accumulator inline
+  (`let [{…}] = fold(…)._1`) trips the totality checker, so the accumulator is returned from one
+  function and destructured as a plain parameter in another. Pinned by `PlotExtensionTest`
+  (`plotExpr_autoFrame_tanWithPolesAtEveryDepth_doesNotOverflowTheStack`).
 
 **Root-finding (`pontif.poly`, the exact-intercept CAS — independent of framing):** `integerScale`
 (denominator clearing) and `integerRoots` (RRT band + eval-test) LANDED 2026-07-22; rational `p/q`

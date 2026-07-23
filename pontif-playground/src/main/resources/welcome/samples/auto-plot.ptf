@@ -1,14 +1,25 @@
 requires pontif.algebra.{Algebraic}
-requires pontif.plot.{plotExpr}
+requires pontif.plot.{expr, optima, asymptotes, chart}
 
-# Auto-plotting a function. Write an ordinary Decimal function, prove it algebraic (so the
-# compiler will reflect its body into an expression tree), and hand that tree to plotExpr.
-# The curve is drawn by SOUND interval enclosure, not point sampling: each pixel column is
-# evaluated over its whole x-interval, so the vertical asymptotes at x = -1 and x = 1 are
-# rendered honestly — the line breaks at each pole instead of a near-vertical spike blowing
-# up the y-range and flattening everything else. No domain, no sampling rate, no fuss.
+# Auto-plotting a function, WITH supplemental annotation layers. Write an ordinary Decimal
+# function, prove it algebraic (so the compiler reflects its body into an expression tree), and
+# composite layers with chart(...) — exactly the way the sampled `curve` layers compose.
+#
+#   expr(e)       — the curve drawn by SOUND interval enclosure, not point sampling: each pixel
+#                   column is evaluated over its whole x-interval, so the vertical asymptotes at
+#                   x = ±1 break honestly instead of a spike blowing up the y-range.
+#   asymptotes(e) — half-opacity vertical lines + x-labels at those vertical asymptotes.
+#   optima(e)     — markers + labels on the local minima/maxima (here the max at (0, -1)).
+#
+# Each annotation is derived by a bounded numeric scan and has a built-in failsafe: a layer that
+# would paint an unreasonable number of markers is suppressed with a log, not drawn. No domain,
+# no sampling rate, no fuss — the window auto-frames to the interesting region.
 
 function f(x:Decimal):Decimal -> 1.0 / (x * x - 1.0)
 assign proof f:Algebraic
 
-main ( plotExpr($f[Decimal].ast) )
+main ( chart({title = "Reliable + annotations"}, {
+  expr($f[Decimal].ast),
+  asymptotes($f[Decimal].ast),
+  optima($f[Decimal].ast)
+}) )

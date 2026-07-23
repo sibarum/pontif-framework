@@ -679,6 +679,22 @@ class PlotExtensionTest {
     }
 
     @Test
+    void plotExpr_autoFrame_tanWithPolesAtEveryDepth_doesNotOverflowTheStack() {
+        // Regression: tan(x) has vertical asymptotes marching across the WHOLE probe range, so the
+        // frame-scan meets a feature at every recursion depth. The old hand-written 256-deep scanFrom
+        // recursion overflowed the interpreter stack here (heavy min/max work unwinding on a deep
+        // stack); the fold-based scan is iterative and must simply produce a finite window.
+        double[] win = capturedWindow("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{plotExpr}
+                requires pontif.math.{tan}
+                function f(x:Decimal):Decimal -> tan(x)
+                assign proof f:Algebraic
+                plotExpr($f[Decimal].ast)""");
+        assertTrue(win[1] > win[0], "tan must auto-frame to a finite, ordered window, not overflow");
+    }
+
+    @Test
     void plotExpr_autoFrameFallsBackWhenThereAreNoFeatures() {
         // A nonzero constant has no roots and no poles → the default [-10, 10] window.
         double[] win = capturedWindow("""
@@ -749,5 +765,161 @@ class PlotExtensionTest {
         assertEquals(1, series.size());
         assertTrue(maxY(series.get(0).ys()) <= 0.30001,
                 "an empty-ended (domain edge) run stops at the data, not the frame edge");
+    }
+
+    // --- Supplemental expression layers (reliable + zeros/optima/asymptotes/intersections) --------
+
+    /** Capture the {@code chart} layer tuple and decompose it with the native, without a window. */
+    private static DasumBridge.AnnotatedChart runChart(String program) {
+        Extensions.install(new PlotExtension());
+        Object[] captured = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderChart", stub);
+        NativeCalls.register("pontif.plot/renderChart", stub);
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt(program, "layers.ptf"), PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
+        assertNotNull(captured[0], "renderChart should have received the {layers} tuple");
+        return DasumBridge.buildAnnotatedChart(captured[0]);
+    }
+
+    private static MarkSetOf firstMarkSet(DasumBridge.AnnotatedChart chart, int kind) {
+        var set = chart.marks().stream().filter(m -> m.kind() == kind).findFirst();
+        assertTrue(set.isPresent(), "expected a mark set of kind " + kind);
+        return new MarkSetOf(set.get());
+    }
+
+    /** A tiny view over a MarkSet's features, for order-independent proximity assertions. */
+    private record MarkSetOf(DasumBridge.MarkSet set) {
+        boolean hasNear(double x, double tol) {
+            return set.pts().stream().anyMatch(f -> Math.abs(f.x() - x) < tol);
+        }
+        boolean hasNear(double x, double y, double tol) {
+            return set.pts().stream().anyMatch(f -> Math.abs(f.x() - x) < tol && Math.abs(f.y() - y) < tol);
+        }
+        int size() { return set.pts().size(); }
+    }
+
+    @Test
+    void zeros_layer_marksTheRootsOfAPolynomial() {
+        // x^2 - 4 has roots at x = ±2. The reliable curve frames the window; the zeros layer scans it
+        // for sign changes and drops a marker on each root — composited in ONE chart.
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Mul}
+                requires pontif.plot.{expr, zeros, chart}
+                let e:AlgExpr = Sub(Mul(Param("x"), Param("x")), Const(4.0))
+                chart({title = "zeros"}, { expr(e), zeros(e) })""");
+        assertFalse(chart.series().isEmpty(), "the reliable layer contributes drawable series");
+        var z = firstMarkSet(chart, 0);
+        assertTrue(z.hasNear(-2.0, 0.05), "a zero marker near x = -2");
+        assertTrue(z.hasNear(2.0, 0.05), "a zero marker near x = 2");
+        assertEquals(2, z.size(), "exactly the two real roots of x^2 - 4");
+    }
+
+    @Test
+    void optima_layer_marksLocalMinimaAndMaxima() {
+        // x^3 - 3x has a local MAX at (-1, 2) and a local MIN at (1, -2).
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Mul}
+                requires pontif.plot.{expr, optima, chart}
+                let e:AlgExpr = Sub(Mul(Mul(Param("x"), Param("x")), Param("x")), Mul(Const(3.0), Param("x")))
+                chart({title = "optima"}, { expr(e), optima(e) })""");
+        var o = firstMarkSet(chart, 1);
+        assertTrue(o.hasNear(-1.0, 2.0, 0.1), "a maximum marker near (-1, 2)");
+        assertTrue(o.hasNear(1.0, -2.0, 0.1), "a minimum marker near (1, -2)");
+    }
+
+    @Test
+    void asymptotes_layer_marksIsolatedVerticalAsymptotes() {
+        // 1/(x^2 - 1) has vertical asymptotes at x = ±1 (isolated poles, interval-proven Unbounded).
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Mul, Div}
+                requires pontif.plot.{expr, asymptotes, chart}
+                let e:AlgExpr = Div(Const(1.0), Sub(Mul(Param("x"), Param("x")), Const(1.0)))
+                chart({title = "asymptotes"}, { expr(e), asymptotes(e) })""");
+        assertEquals(2, chart.vlines().size(), "two vertical asymptotes, at x = ±1");
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x + 1.0) < 0.05), "asymptote near x = -1");
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 1.0) < 0.05), "asymptote near x = 1");
+    }
+
+    @Test
+    void featureLayers_rejectSpuriousFeaturesStraddlingAnAsymptote() {
+        // 1/(x^2 - 1): the only real local optimum is the max at (0, -1), and there are NO real zeros.
+        // The finite samples either side of the poles at ±1 fake a slope reversal AND a sign change
+        // across the discontinuity; the pole-in-span guard must reject both, so optima = {(0,-1)} and
+        // zeros = {} — no markers pinned to an asymptote.
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Mul, Div}
+                requires pontif.plot.{expr, optima, zeros, chart}
+                let e:AlgExpr = Div(Const(1.0), Sub(Mul(Param("x"), Param("x")), Const(1.0)))
+                chart({title = "rat"}, { expr(e), optima(e), zeros(e) })""");
+        var o = firstMarkSet(chart, 1);
+        assertEquals(1, o.size(), "exactly one true optimum (no spurious ones beside the poles)");
+        assertTrue(o.hasNear(0.0, -1.0, 0.05), "the local maximum at (0, -1)");
+        var z = firstMarkSet(chart, 0);
+        assertEquals(0, z.size(), "a sign flip ACROSS an asymptote is not a zero");
+    }
+
+    @Test
+    void intersections_layer_marksWhereTwoCurvesCross() {
+        // x^2 and x + 2 cross where x^2 - x - 2 = 0 → x = -1 and x = 2; the crossing heights are the
+        // value of the first curve there (1 and 4).
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Add, Mul}
+                requires pontif.plot.{expr, intersections, chart}
+                let e:AlgExpr = Mul(Param("x"), Param("x"))
+                let g:AlgExpr = Add(Param("x"), Const(2.0))
+                chart({title = "cross"}, { expr(e), intersections(e, g) })""");
+        var pts = firstMarkSet(chart, 2);
+        assertTrue(pts.hasNear(-1.0, 1.0, 0.1), "an intersection near (-1, 1)");
+        assertTrue(pts.hasNear(2.0, 4.0, 0.1), "an intersection near (2, 4)");
+    }
+
+    @Test
+    void annotatedChart_singleMarker_framesAndBuildsLayers_withoutSeriesUnderflow() {
+        // Regression (welcome sample): the auto-plot sample's optima layer yields ONE marker (the max
+        // at (0,-1)). The framing-only series through the markers must not be a 1-point Series (dasum
+        // rejects "a series needs >= 2 points") — a lone marker is duplicated into a degenerate frame
+        // series. Exercises the frame + layer build that the render path runs (no window).
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Mul, Div}
+                requires pontif.plot.{expr, optima, asymptotes, chart}
+                let e:AlgExpr = Div(Const(1.0), Sub(Mul(Param("x"), Param("x")), Const(1.0)))
+                chart({title = "sample"}, { expr(e), asymptotes(e), optima(e) })""");
+        assertEquals(1, firstMarkSet(chart, 1).size(), "one local optimum for 1/(x^2-1)");
+        var frame = DasumBridge.annotatedFrame(chart);
+        assertNotNull(frame, "a single marker must still yield a frame, not throw on a 1-point series");
+        assertFalse(DasumBridge.buildAnnotatedLayers(chart, frame).isEmpty(),
+                "the annotated layer list (axes + curve + marker + asymptotes) builds");
+    }
+
+    @Test
+    void failsafe_suppressesAnOverflowingLayer_andLogs() {
+        // The "unreasonable quantity of primitives" guard: a MarkLayer with more than FEATURE_CAP
+        // markers is dropped rather than cluttering the plot, and a notice is written to StdErr.
+        Map<String, Object> pts = new LinkedHashMap<>();
+        for (int i = 0; i < DasumBridge.FEATURE_CAP + 6; i++) pts.put("_" + i, mark(i * 0.1, 0.0));
+        RecordValue overflow = new RecordValue("pontif.plot/MarkLayer",
+                new LinkedHashMap<>(Map.of("pts", new RecordValue("_tuple", pts), "kind", 1L)));
+
+        java.io.PrintStream realErr = System.err;
+        java.io.ByteArrayOutputStream log = new java.io.ByteArrayOutputStream();
+        System.setErr(new java.io.PrintStream(log));
+        DasumBridge.AnnotatedChart chart;
+        try { chart = DasumBridge.buildAnnotatedChart(spansTuple(overflow)); }
+        finally { System.setErr(realErr); }
+
+        assertTrue(chart.marks().isEmpty(), "an over-cap annotation layer must be suppressed");
+        assertTrue(log.toString().contains("suppressed"), "the failsafe must log the suppression");
+    }
+
+    private static RecordValue mark(double x, double y) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("x", BigDecimal.valueOf(x));
+        m.put("y", BigDecimal.valueOf(y));
+        return new RecordValue("pontif.plot/Mark", m);
     }
 }
