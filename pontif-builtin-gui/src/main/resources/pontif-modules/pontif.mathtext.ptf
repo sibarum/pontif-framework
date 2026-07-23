@@ -1,0 +1,52 @@
+exports @.{MathStyle, stixTwoMath}
+
+# --- Math typesetting: per-font layout config (docs later) ------------------------------------------
+# The offsets and "magic numbers" the math box layout needs, externalized so tuning a font — or
+# cycling through faces to pick the best for the platform — is a data edit here, never an engine
+# change. Every value is in EM (relative to the current font size), except the two unitless script
+# SCALES and the `fontGroup` name. A real OpenType MATH font ships an analogous constants table; this
+# is the hand-tuned stand-in. Field names/order mirror dasum's MathConstants record, which the bridge
+# loads this into; MathConstants.stixTwoMath() is the baked fallback and must match `stixTwoMath` here.
+
+struct MathStyle(
+  # sizing (unitless scale factors)
+  scriptScale:Decimal,           # sub/superscript size relative to its base (TeX ~ 0.7)
+  scriptScriptScale:Decimal,     # a script nested inside a script (TeX ~ 0.55)
+  # the math axis + fractions
+  axisHeight:Decimal,            # math axis above baseline: where a fraction bar / binary minus sit
+  fractionRuleThickness:Decimal, # thickness of the fraction bar
+  fractionGapNum:Decimal,        # gap between the numerator and the bar
+  fractionGapDen:Decimal,        # gap between the bar and the denominator
+  # scripts
+  superscriptShiftUp:Decimal,    # superscript baseline above the base baseline
+  subscriptShiftDown:Decimal,    # subscript baseline below the base baseline
+  scriptGapAfter:Decimal,        # trailing space after a scripted cluster
+  # radical (sqrt)
+  radicalRuleThickness:Decimal,  # thickness of the vinculum (bar over the radicand)
+  radicalGapAbove:Decimal,       # gap between the vinculum and the top of the radicand
+  radicalKernBefore:Decimal,     # space before the surd glyph
+  radicalKernAfter:Decimal,      # space between the surd and the radicand (the tuck under the hook)
+  # inter-atom spacing
+  spaceBinaryOp:Decimal,         # each side of a binary operator (+ - middot)
+  spaceRelation:Decimal,         # each side of a relation (= ~= -> != ...)
+  spacePunct:Decimal,            # after punctuation (comma in an argument list)
+  functionGap:Decimal,           # between a function name (sin, log) and its argument
+  delimiterPad:Decimal,          # padding just inside a delimiter pair ( ... )
+  # glyph source
+  fontGroup:String               # the registered dasum FontGroup to draw from
+)
+
+# STIX Two Math profile — the first face wired up. Numbers seeded from cott's geometry + TeX
+# conventions; tune here as we eyeball real output. Add sibling profiles (latinModernMath,
+# libertinusMath, texGyreTermesMath, ...) returning their own MathStyle when we cycle fonts.
+function stixTwoMath():MathStyle -> MathStyle(
+  0.70, 0.55,                    # scriptScale, scriptScriptScale
+  0.25,                          # axisHeight
+  0.04, 0.10, 0.10,              # fraction: ruleThickness, gapNum, gapDen
+  0.45, 0.20, 0.05,              # scripts: superShiftUp, subShiftDown, gapAfter
+  0.045, 0.06, 0.05, 0.02,       # radical: ruleThickness, gapAbove, kernBefore, kernAfter
+  0.22, 0.28, 0.17,              # spacing: binaryOp, relation, punct
+  0.12,                          # functionGap
+  0.05,                          # delimiterPad
+  "math"                         # fontGroup (the STIX Two Math atlas)
+)
