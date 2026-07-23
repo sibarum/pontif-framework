@@ -425,6 +425,13 @@ public final class DasumBridge {
             AtlasData atlas = AtlasData.loadFromResource("/dasum/atlas/primary.json");
             FontGroups.register(FontGroup.of(FontGroups.DEFAULT, atlas, fontTexture));
 
+            // The "math" font group: STIX Two Math (OFL) — italic math alphanumerics, Greek,
+            // blackboard, operators, radical, delimiters. The math typesetter selects it via
+            // TextLayer.withFontGroup("math") and picks glyphs by their Unicode math codepoints.
+            Texture mathTexture = Texture.fromPngResource("/dasum/atlas/math.png");
+            AtlasData mathAtlas = AtlasData.loadFromResource("/dasum/atlas/math.json");
+            FontGroups.register(FontGroup.of("math", mathAtlas, mathTexture));
+
             // Build components after font + Em setup, so styled widgets resolve correctly.
             Component root = rootFactory.get();
             // Layout guardrail (docs/plotting.md): lint the built tree BEFORE rendering. Fonts are
