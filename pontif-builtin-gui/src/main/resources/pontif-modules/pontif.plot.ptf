@@ -262,15 +262,61 @@ function chart(cfg:_, layers:_):Stream[String] -> renderChart(cfg, layers)
 # 256 pixel columns, synthesized once — the default horizontal resolution.
 let columnIndices:Stream[Int:0 <= @ < 256];
 
-# One classified column: kind 0 = curve (bounded span [lo,hi]), 1 = pole (Unbounded →
-# a full-height block), 2 = empty (Undefined → a break). The native reads these.
+# One classified column: kind 0 = curve (bounded span [lo,hi]), 1 = isolated pole (a single
+# asymptote — Unbounded, rendered as a break the curve blows through), 2 = empty (Undefined → a
+# break), 3 = DENSE pole (unresolvable detail — a full-height block). The native reads these.
 struct Span(kind:Int, lo:Decimal, hi:Decimal)
 
-# Classify one column [xa, xb] by its interval enclosure — the reliable core. The
-# three enclosure outcomes map one-to-one onto the three column kinds.
+# --- subdivision probe: a single (resolvable) pole vs a genuinely dense region -----------------
+# A column that encloses ±∞ (Unbounded) is not always a genuine pole ACROSS its whole width. The
+# interval dependency problem smears `Unbounded` over several columns around ONE simple pole: where a
+# sign-changing denominator root makes its terms cancel, the enclosure still carries their combined
+# width, so it straddles zero (→ Unbounded) for a band of columns even though the true pole is a
+# single point. A run-length threshold can't tell that band from genuinely dense detail (tan(1/x)
+# near 0 has unboundedly many poles) — the band widens with resolution too. Subdividing the column
+# settles it: the overestimation shrinks with the sub-column, so only the sub-column that actually
+# contains the pole stays Unbounded. A single pole ⇒ a small (bounded) count of Unbounded
+# sub-columns; a dense region ⇒ MOST sub-columns stay Unbounded. This is the reliable substrate
+# answering "resolvable single asymptote vs unresolvable detail," resolution-independently.
+
+# A sub-column is a pole iff its interval enclosure is Unbounded (self-contained — used before the
+# reliable core's colSign/isPole are defined further down).
+function subIsPole(e:AlgExpr, xa:Decimal, xb:Decimal):Bool -> match evalInterval(e, xa, xb) {
+  [Interval(lo, hi)] -> false
+  [Unbounded]        -> true
+  [Undefined]        -> false
+}
+
+function boolToInt(b:Bool):Int -> match b { [Bool:true] -> 1  [Bool:false] -> 0 }
+
+# Count, among 16 equal sub-columns of width `sw` starting at `xa`, how many are Unbounded.
+# Iterative-by-tail-recursion over a fixed 16 (no stack concern), mirroring refinePole's recursion.
+function subPoleCount(e:AlgExpr, xa:Decimal, sw:Decimal, i:Int, acc:Int):Int -> match (i >= 16) {
+  [Bool:true]  -> acc
+  [Bool:false] -> subPoleCount(e, xa, sw, i + 1,
+                    acc + boolToInt(subIsPole(e, xa + i * sw, xa + (i + 1) * sw)))
+}
+
+# How many of 16 sub-columns of [xa, xb] are interval-proven poles.
+function polesInColumn(e:AlgExpr, xa:Decimal, xb:Decimal):Int ->
+  subPoleCount(e, xa, (xb - xa) / 16.0, 0, 0)
+
+# A genuinely DENSE (unresolvable) pole column: MOST sub-columns stay Unbounded under subdivision.
+function densePole(e:AlgExpr, xa:Decimal, xb:Decimal):Bool -> polesInColumn(e, xa, xb) > 8
+
+# The column really CONTAINS a pole (a sub-column stays Unbounded at finer resolution) — as opposed
+# to an overestimation smear column, where subdivision resolves the phantom pole away entirely.
+function holdsPole(e:AlgExpr, xa:Decimal, xb:Decimal):Bool -> polesInColumn(e, xa, xb) >= 1
+
+# Classify one column [xa, xb] by its interval enclosure — the reliable core. A bounded enclosure is
+# the curve; Undefined is a break; Unbounded is a pole, split by the subdivision probe into a dense
+# block (kind 3) or a single/smear asymptote (kind 1) the native renders as a break.
 function classifyColumn(e:AlgExpr, xa:Decimal, xb:Decimal):Span -> match evalInterval(e, xa, xb) {
   [Interval(lo, hi)] -> Span(0, lo, hi)
-  [Unbounded]        -> Span(1, 0.0, 0.0)
+  [Unbounded]        -> match densePole(e, xa, xb) {
+                          [Bool:true]  -> Span(3, 0.0, 0.0)
+                          [Bool:false] -> Span(1, 0.0, 0.0)
+                        }
   [Undefined]        -> Span(2, 0.0, 0.0)
 }
 
@@ -500,40 +546,44 @@ function optima(e:AlgExpr):MarkLayer -> (
 )
 
 # === Vertical asymptotes ===========================================================
-# A vertical asymptote is an ISOLATED pole column (interval-proven Unbounded): the run
-# of consecutive pole columns is shorter than the native's DENSE threshold (4). A dense
-# run is unresolvable detail the reliable layer already fills as a block, so it is NOT
-# marked here. Emit once, at the FIRST pole column of the run (its predecessor is not a
-# pole), so a 2–3 wide pole draws a single line.
-# A pole column is detected over the column's WIDTH (not a point): the interval must
-# STRADDLE the pole to enclose ±∞ — a degenerate point [x,x] would only catch a pole
-# sitting exactly on a probe point. Reuses the reliable core's colSign (2.0 = pole).
+# A vertical asymptote is a single, resolvable pole. A column that ENCLOSES ±∞ over its full width
+# (poleColAt) is a candidate, but only the column that genuinely HOLDS the pole under subdivision
+# (holdsPole) is marked — the overestimation-smear columns flanking a simple pole are Unbounded over
+# their full width yet resolve to no pole at finer resolution, so they are skipped. This lands ONE
+# line at the true pole (no per-run bookkeeping) and refines it to display precision. A DENSE column
+# (densePole — unresolvable detail the reliable layer already fills as a block) is NOT marked.
+# A pole column is detected over the column's WIDTH (not a point): the interval must STRADDLE the
+# pole to enclose ±∞ — a degenerate point [x,x] would only catch a pole on a probe point.
 function poleColAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
   isPole(colSign(e, xlo + i * w, xlo + (i + 1) * w))
 
-function denseAhead(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
-  andB(poleColAt(e, xlo, w, i + 1),
-       andB(poleColAt(e, xlo, w, i + 2), poleColAt(e, xlo, w, i + 3)))
+# The column at index i is a markable asymptote: it encloses ±∞, genuinely holds a pole under
+# subdivision (not a mere smear column), and is not a dense/unresolvable region.
+function markablePole(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
+  match poleColAt(e, xlo, w, i) {
+    [Bool:true]  -> andB(holdsPole(e, xlo + i * w, xlo + (i + 1) * w),
+                         notB(densePole(e, xlo + i * w, xlo + (i + 1) * w)))
+    [Bool:false] -> false
+  }
 
-function isIsolatedPole(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
-  andB(andB(poleColAt(e, xlo, w, i), notB(poleColAt(e, xlo, w, i - 1))),
-       notB(denseAhead(e, xlo, w, i)))
-
-# The column [a, b] is Unbounded → the pole is somewhere inside it. Bisect to pin its x: keep the
-# half that still straddles the pole (its enclosure is still Unbounded), recurse. Reporting the raw
-# column MIDPOINT is off by up to w/2, so an asymptote at exactly x = 1 would label "0.997"; ~28
-# halvings shrink that error below display precision, so an integer pole labels as the integer.
+# The column [a, b] holds a pole → bisect to pin its x: keep the half that genuinely holds it and
+# recurse. The test is holdsPole (the subdivision probe), NOT the raw enclosure: at a simple pole the
+# dependency overestimation leaves the direct enclosure Unbounded across a whole band, so bisecting
+# on it would converge to the band's EDGE (off by the overestimation ~w), mislabelling a pole at
+# 0.3846 as "0.383". Subdivision collapses the phantom, so holdsPole is true only for the half that
+# truly contains the pole — the bisection then converges to the pole itself. ~28 halvings shrink the
+# error below display precision, so an integer pole labels as the integer.
 function refinePole(e:AlgExpr, a:Decimal, b:Decimal, depth:Int):Decimal -> match (depth <= 0) {
   [Bool:true]  -> (a + b) / 2.0
   [Bool:false] -> ( let m = (a + b) / 2.0
-                    match spanHasPole(e, a, m) {
+                    match holdsPole(e, a, m) {
                       [Bool:true]  -> refinePole(e, a, m, depth - 1)
                       [Bool:false] -> refinePole(e, m, b, depth - 1)
                     } )
 }
 
 function asymAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[VLine | Nothing] ->
-  match isIsolatedPole(e, xlo, w, i) {
+  match markablePole(e, xlo, w, i) {
     [Bool:true]  -> VLine(refinePole(e, xlo + i * w, xlo + (i + 1) * w, 28))
     [Bool:false] -> Nothing()
   }

@@ -156,7 +156,10 @@ layers depth-write) and 3D text (`TextLayer`), and already carries the 2D axis s
 - **Colorbar** — a surface scene shows a colorbar key (colormap + height range) as a sidebar beside
   the viewport, reusing component composition rather than a second camera.
 
-`cfg` mirrors the GUI's `{title = …}`, plus `{axes, grid}` for scenes. All of this is verified
+`cfg` mirrors the GUI's `{title = …}`, plus `{axes, grid}` for scenes. It also takes optional
+`{width, height}` (pixels) to size the window — e.g. `chart({title = "f", width = 1200, height = 800},
+{…})`; omitted (or ≤ 0), each falls back to the 900×600 default. `cfg` is an open record, so these
+keys need no signature change. All of this is verified
 headlessly in `PlotExtensionTest` via `DasumBridge.buildSceneLayers` / `buildChartSeries` /
 `axisBoxLayers` / `colorFor` (no window opens); the window-opening examples live in
 `pontif-builtin-gui/examples/` (`compose.ptf`, `chart2.ptf`, `axes.ptf`, `colormap.ptf`,

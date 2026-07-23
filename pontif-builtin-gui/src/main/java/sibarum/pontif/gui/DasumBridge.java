@@ -109,7 +109,8 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Pontif";
         Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
-        return openWindowWithRoot(title, false, () -> toComponent(rootTree, ctx));
+        return openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
+                false, () -> toComponent(rootTree, ctx));
     }
 
     /**
@@ -135,7 +136,8 @@ public final class DasumBridge {
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
         AnnotatedChart chart = buildAnnotatedChart(layers);
-        return openWindowWithRoot(title, false, () -> annotatedChartComponent(chart));
+        return openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
+                false, () -> annotatedChartComponent(chart));
     }
 
     /**
@@ -175,7 +177,8 @@ public final class DasumBridge {
         boolean grid = cfgBool(args, 0, "grid", true);
         boolean equalAspect = "equal".equals(cfgStr(args, 0, "aspect"));  // default: box (cube) aspect
         SceneBuild build = buildSceneLayers(layers);
-        return openWindowWithRoot(title, true, () -> sceneComponent(build, axes, grid, equalAspect));
+        return openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
+                true, () -> sceneComponent(build, axes, grid, equalAspect));
     }
 
     private static double arg(List<Object> args, int i) {
@@ -196,7 +199,10 @@ public final class DasumBridge {
         return openWindowWithRoot("Plot", false, () -> chartComponent(series));
     }
 
-    /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = pole (full column), 2 = empty. */
+    /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = isolated pole (a single
+     *  asymptote — a break the curve blows through), 2 = empty (a domain-edge break), 3 = dense pole
+     *  (unresolvable detail — a full-height fill block). The isolated-vs-dense split is decided
+     *  Pontif-side by a subdivision probe (pontif.plot's {@code classifyColumn}), not a run length. */
     record ReliableSpan(int kind, double lo, double hi) {}
 
     /** Parse the Pontif {@code {spans}} tuple of {@code Span(kind,lo,hi)} records, in column order.
@@ -218,11 +224,11 @@ public final class DasumBridge {
      * Turn per-column interval spans into readable line series over {@code [xlo, xhi]}. Each maximal
      * run of consecutive CURVE columns becomes ONE connected polyline through the column midpoints
      * (clamped to the viewport) — so the plot reads as a curve, not a field of vertical dashes.
-     * A break (an empty column, or an isolated pole) ends the current polyline; the curve resumes as
-     * a fresh one on the far side — so an asymptote is a clean gap, never a line drawn across it. A
-     * DENSE pole run (unresolvable detail) still fills as full-height bars. The y-range is a ROBUST
-     * 2nd–98th percentile of the bounded columns so a near-pole spike can't flatten the plot.
-     * Package-visible test seam.
+     * A break (an empty column, or an isolated pole — kind 1) ends the current polyline; the curve
+     * resumes as a fresh one on the far side — so an asymptote is a clean gap, never a line drawn
+     * across it. A DENSE pole (kind 3 — unresolvable detail) still fills as a full-height bar. The
+     * y-range is a ROBUST 2nd–98th percentile of the bounded columns so a near-pole spike can't
+     * flatten the plot. Package-visible test seam.
      */
     static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue) {
         List<ReliableSpan> spans = parseSpans(spansValue);
@@ -234,7 +240,6 @@ public final class DasumBridge {
         double ymin = yr[0], ymax = yr[1];
         double dx = (xhi - xlo) / n;
         double beyond = ymax - ymin;                 // how far past an edge to aim an ∞-bound point
-        boolean[] fillPole = densePoleRuns(spans);   // which pole columns are a dense (fillable) run
         List<Series> out = new ArrayList<>();
         List<Double> runX = new ArrayList<>(), runY = new ArrayList<>();   // UN-clamped polyline points
         ReliableSpan lastCurve = null;               // last curve column added to the current run
@@ -255,10 +260,11 @@ public final class DasumBridge {
                 poleBeforeX = Double.NaN;
                 continue;
             }
-            // A pole (Unbounded) is a proven blow-up: the line keeps going, so aim it off the edge
-            // and let the clip draw it TO the boundary. An empty (Undefined) column is a domain edge
-            // — the curve genuinely stops, so it is left as a plain break.
-            if (s.kind() == 1 && lastCurve != null && !runX.isEmpty()) {
+            // A pole (kind 1 isolated OR kind 3 dense) is a proven blow-up: the line keeps going, so
+            // aim it off the edge and let the clip draw it TO the boundary. An empty (Undefined, kind
+            // 2) column is a domain edge — the curve genuinely stops, so it is left as a plain break.
+            boolean pole = s.kind() == 1 || s.kind() == 3;
+            if (pole && lastCurve != null && !runX.isEmpty()) {
                 runX.add(x);
                 runY.add(blowSign(lastCurve) >= 0 ? ymax + beyond : ymin - beyond);
             }
@@ -266,8 +272,8 @@ public final class DasumBridge {
             runX.clear();
             runY.clear();
             lastCurve = null;
-            poleBeforeX = (s.kind() == 1) ? x : Double.NaN;      // only a pole makes the next run enter from ∞
-            if (s.kind() == 1 && fillPole[i]) {                  // dense pole → fill (the block)
+            poleBeforeX = pole ? x : Double.NaN;                 // only a pole makes the next run enter from ∞
+            if (s.kind() == 3) {                                 // dense pole → fill (the block)
                 out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, SERIES_COLOR));
             }
         }
@@ -329,27 +335,6 @@ public final class DasumBridge {
         ys.clear();
     }
 
-    /** A run of consecutive {@code Unbounded} pole columns this long or longer is a DENSE region
-     *  (unresolvable detail — fill it, the block); anything shorter is an isolated asymptote that
-     *  should render as a break, never a solid line across the discontinuity. */
-    private static final int DENSE_POLE_RUN = 4;
-
-    /** Mark each pole column that belongs to a dense run (≥ {@link #DENSE_POLE_RUN} consecutive
-     *  pole columns). Isolated poles stay unmarked so the renderer breaks at them. */
-    private static boolean[] densePoleRuns(List<ReliableSpan> spans) {
-        int n = spans.size();
-        boolean[] dense = new boolean[n];
-        int i = 0;
-        while (i < n) {
-            if (spans.get(i).kind() != 1) { i++; continue; }
-            int j = i;
-            while (j < n && spans.get(j).kind() == 1) j++;       // [i, j) is a maximal pole run
-            if (j - i >= DENSE_POLE_RUN) for (int k = i; k < j; k++) dense[k] = true;
-            i = j;
-        }
-        return dense;
-    }
-
     /** {@code [ymin, ymax]} from the 2nd/98th percentile of {@code vals}, padded 5% — robust to
      *  near-pole spikes. An empty set (no bounded columns) yields a default unit window. */
     private static double[] robustRange(List<Double> vals) {
@@ -375,8 +360,16 @@ public final class DasumBridge {
      */
     private static Object openWindowWithRoot(String title, boolean enableBloom,
             java.util.function.Supplier<Component> rootFactory) {
+        return openWindowWithRoot(title, WIDTH, HEIGHT, enableBloom, rootFactory);
+    }
+
+    /** As {@link #openWindowWithRoot(String, boolean, java.util.function.Supplier)}, at an explicit
+     *  window size — the {@code width}/{@code height} cfg keys ({@code chart({width=…, height=…}, …)})
+     *  flow here; the cfg-less render natives use the {@link #WIDTH}×{@link #HEIGHT} default overload. */
+    private static Object openWindowWithRoot(String title, int width, int height, boolean enableBloom,
+            java.util.function.Supplier<Component> rootFactory) {
         try (GlfwContext glfw = GlfwContext.init();
-             Window win = Window.create(WIDTH, HEIGHT, title);
+             Window win = Window.create(width, height, title);
              Batcher batcher = new Batcher()) {
             // Gl.load() before any GL call (texture upload); see the texture-ordering bugfix.
             Gl.load();
@@ -744,24 +737,68 @@ public final class DasumBridge {
         List<Layer> layers = new ArrayList<>(LinePlot.build(frame, chart.series(), PlotStyle.defaults()));
         float glyph = 0.06f;                                        // marker half-size, world units
         float labelH = LABEL_HEIGHT;                                // label text height, world units
+        // Markers and asymptote lines ALWAYS draw; their text labels are thinned so they never
+        // overlap. A dense feature cluster (tan(1/x) near 0 has infinitely many poles AND zeros
+        // marching toward the origin) would otherwise stack labels into an unreadable smear — the
+        // lines/glyphs still convey "many features here", but only labels that clear already-placed
+        // ones (an approximate world-space box test) are drawn.
+        LabelPlacer placed = new LabelPlacer();
         for (MarkSet ms : chart.marks()) {
             for (Feature f : ms.pts()) {
                 Vec3 a = frame.toWorld(f.x(), ms.kind() == 0 ? 0.0 : f.y());
                 float[] seg = {a.x() - glyph, a.y(), 0f, a.x() + glyph, a.y(), 0f,
                                a.x(), a.y() - glyph, 0f, a.x(), a.y() + glyph, 0f};
                 layers.add(new LineLayer(seg, filledColor(seg.length, MARK_COLOR)));
-                layers.add(label(markLabel(ms.kind(), f),
-                        a.x() + glyph * 1.5f, a.y() + glyph * 1.5f, LABEL_COLOR));
+                String text = markLabel(ms.kind(), f);
+                float lx = a.x() + glyph * 1.5f, ly = a.y() + glyph * 1.5f;
+                if (placed.tryPlace(text, lx, ly)) layers.add(label(text, lx, ly, LABEL_COLOR));
             }
         }
-        for (double x : chart.vlines()) {
+        // Asymptote labels left-to-right, so the survivors of a cluster are a spread-out subset
+        // (greedy by x) rather than whichever happened to come first in scan order.
+        List<Double> vx = new ArrayList<>(chart.vlines());
+        Collections.sort(vx);
+        for (double x : vx) {
             float wx = frame.worldX(x);
             float[] seg = {wx, frame.wy0(), 0f, wx, frame.wy1(), 0f};
             layers.add(new LineLayer(seg, filledColor(seg.length, ASYM_COLOR))
                     .withBlend(BlendMode.ALPHA).withOpacity(0.5f));
-            layers.add(label("x=" + fmt(x), wx + glyph, frame.wy1() - labelH, ASYM_COLOR));
+            String text = "x=" + fmt(x);
+            float lx = wx + glyph, ly = frame.wy1() - labelH;
+            if (placed.tryPlace(text, lx, ly)) layers.add(label(text, lx, ly, ASYM_COLOR));
         }
         return layers;
+    }
+
+    /** The fraction of the label height a single character occupies horizontally — an MSDF glyph is
+     *  taller than wide, so a label's world-space width is ≈ {@code chars · height · aspect}. Used only
+     *  to keep labels from overlapping (an estimate, not exact metrics). */
+    private static final float LABEL_CHAR_ASPECT = 0.55f;
+    /** A small world-space breathing gap kept between two labels that would otherwise just touch. */
+    private static final float LABEL_MIN_GAP = 0.08f;
+
+    /** The estimated world-space width of a label's text (see {@link #LABEL_CHAR_ASPECT}). */
+    private static float labelWidth(String text) {
+        return text.length() * LABEL_HEIGHT * LABEL_CHAR_ASPECT;
+    }
+
+    /**
+     * Greedy overlap-avoiding label placement. Each accepted label reserves an approximate
+     * world-space box; a later candidate whose box intersects any reserved one is rejected (its
+     * feature still shows a line/glyph, just no text). This keeps a dense cluster's labels readable
+     * instead of stacking them into a smear. Not pixel-exact — a legibility heuristic, not layout.
+     */
+    private static final class LabelPlacer {
+        private final List<float[]> boxes = new ArrayList<>();   // {x0, y0, x1, y1} in world units
+
+        boolean tryPlace(String text, float x, float y) {
+            float x1 = x + labelWidth(text) + LABEL_MIN_GAP, y1 = y + LABEL_HEIGHT;
+            for (float[] b : boxes) {
+                if (x < b[2] && x1 > b[0] && y < b[3] && y1 > b[1]) return false;
+            }
+            boxes.add(new float[]{x, y, x1, y1});
+            return true;
+        }
     }
 
     /** Label text height (world units) — matches {@code labelH} in {@link #buildAnnotatedLayers}. */
@@ -1499,6 +1536,19 @@ public final class DasumBridge {
         if (i < args.size() && args.get(i) instanceof RecordValue rv
                 && rv.members().get(field) instanceof Boolean b) {
             return b;
+        }
+        return def;
+    }
+
+    /** A numeric cfg field (Int/Decimal) as a positive int, or {@code def} when absent / non-positive.
+     *  Powers the optional {@code width}/{@code height} keys on a plot cfg record ({@code chart({title
+     *  = "…", width = 1200, height = 800}, {…})}); an omitted or ≤ 0 value falls back to the default. */
+    private static int cfgInt(List<Object> args, int i, String field, int def) {
+        if (i < args.size() && args.get(i) instanceof RecordValue rv) {
+            Object v = rv.members().get(field);
+            if (v instanceof Long l && l > 0) return Math.toIntExact(l);
+            if (v instanceof Integer n && n > 0) return n;
+            if (v instanceof BigDecimal d && d.signum() > 0) return d.intValue();
         }
         return def;
     }

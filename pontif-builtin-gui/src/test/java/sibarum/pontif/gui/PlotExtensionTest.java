@@ -730,13 +730,31 @@ class PlotExtensionTest {
     }
 
     @Test
-    void reliableSpans_densePoleRun_fillsAsABlock() {
-        // A run of consecutive poles (>= DENSE_POLE_RUN) is unresolvable dense detail — every column
-        // fills (the block), so all five become full-height series.
+    void reliableSpans_densePole_fillsAsABlock() {
+        // Dense pole columns (kind 3 — unresolvable detail, decided Pontif-side by the subdivision
+        // probe) each fill, so all five become full-height series.
         var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
-                span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0),
-                span(1, 0.0, 0.0), span(1, 0.0, 0.0)));
+                span(3, 0.0, 0.0), span(3, 0.0, 0.0), span(3, 0.0, 0.0),
+                span(3, 0.0, 0.0), span(3, 0.0, 0.0)));
         assertEquals(5, series.size(), "a dense pole run fills every column");
+    }
+
+    @Test
+    void reliableSpans_smearedSimplePole_breaksInsteadOfFilling() {
+        // Regression (the garbled cluster): interval overestimation at a sign-changing simple pole
+        // smears `Unbounded` across several columns, but the subdivision probe marks them isolated
+        // (kind 1), NOT dense. A run of kind-1 poles must render as a clean break the curve blows
+        // through — NOT a stack of full-height fill bars. Curve on each side → two connected
+        // polylines, with the whole smear a single gap between them.
+        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+                span(0, 1.0, 1.0), span(0, 1.0, 1.0),
+                span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0),
+                span(0, 1.0, 1.0), span(0, 1.0, 1.0)));
+        // No full-height fill bars: every emitted series is a curve/spike polyline, not a {ymin,ymax}
+        // block. The two curve stretches each become one polyline (blowing off toward the edge at the
+        // pole), so the smear is a break — never five stacked bars.
+        assertTrue(series.size() <= 2,
+                "a smeared isolated pole breaks the curve; it does NOT fill as bars. got " + series.size());
     }
 
     private static double maxY(double[] ys) {
@@ -867,6 +885,60 @@ class PlotExtensionTest {
         assertTrue(o.hasNear(0.0, -1.0, 0.05), "the local maximum at (0, -1)");
         var z = firstMarkSet(chart, 0);
         assertEquals(0, z.size(), "a sign flip ACROSS an asymptote is not a zero");
+    }
+
+    @Test
+    void asymptotes_layer_findsBothPolesOfARationalFunction_evenTheSmearedSimpleOne() {
+        // Regression (the "garbled cluster"): (7x^4-5x^3+2x^2-11x+3)/(13x^3-5x^2) has denominator
+        // x^2*(13x-5) → poles at x = 0 (double, clean) and x = 5/13 ≈ 0.3846 (simple, sign-changing).
+        // The simple pole's denominator terms nearly cancel, so interval overestimation smeared it
+        // across several Unbounded columns — the old run-length heuristic misread that as a DENSE
+        // block, rendered it as a stack of bars, and skipped its asymptote line. The subdivision
+        // probe now resolves it: exactly one asymptote at each true pole, and NO dense-fill columns.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, chart}
+                function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
+                assign proof f:Algebraic
+                chart({title = "rational"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast) })""");
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x) < 1e-3),
+                "asymptote at the double pole x = 0; got " + chart.vlines());
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 5.0 / 13.0) < 1e-3),
+                "asymptote at the smeared simple pole x = 5/13 ≈ 0.3846; got " + chart.vlines());
+        // The smeared simple pole must NOT be misclassified as a dense fill block: no kind-3 columns.
+        assertTrue(chart.series().stream().noneMatch(PlotExtensionTest::isFullHeightBar),
+                "a simple pole renders as a break, never a stack of full-height fill bars");
+    }
+
+    /** A dense-pole fill bar is a 2-point vertical segment spanning the whole frame at one x. */
+    private static boolean isFullHeightBar(sibarum.dasum.gui.vis.plot.Series s) {
+        return s.pointCount() == 2 && s.xs()[0] == s.xs()[1];
+    }
+
+    @Test
+    void annotatedLayers_thinOverlappingAsymptoteLabels_butKeepEveryLine() {
+        // Regression (tan(1/x)): poles cluster infinitely toward x=0, so a label on every one stacks
+        // into an unreadable smear. Every asymptote must still draw its LINE, but overlapping labels
+        // are dropped — the well-separated ones (-0.9, 0.9) survive, the tight cluster near 0 collapses
+        // to at most a couple of labels.
+        List<Double> vlines = List.of(-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9);
+        var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
+                new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
+        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines);
+        var frame = DasumBridge.annotatedFrame(chart);
+        var layers = DasumBridge.buildAnnotatedLayers(chart, frame);
+
+        long asymptoteLines = layers.stream()
+                .filter(l -> l instanceof LineLayer && l.opacity() == 0.5f).count();
+        assertEquals(vlines.size(), asymptoteLines, "every asymptote still draws its line");
+
+        List<String> labels = layers.stream()
+                .filter(l -> l instanceof TextLayer t && t.text().startsWith("x="))
+                .map(l -> ((TextLayer) l).text()).toList();
+        assertTrue(labels.size() < vlines.size(),
+                "overlapping labels are thinned; got all " + labels);
+        assertTrue(labels.contains("x=-0.9") && labels.contains("x=0.9"),
+                "the well-separated asymptotes keep their labels; got " + labels);
     }
 
     @Test
