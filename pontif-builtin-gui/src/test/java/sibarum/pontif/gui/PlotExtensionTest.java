@@ -841,8 +841,14 @@ class PlotExtensionTest {
                 let e:AlgExpr = Div(Const(1.0), Sub(Mul(Param("x"), Param("x")), Const(1.0)))
                 chart({title = "asymptotes"}, { expr(e), asymptotes(e) })""");
         assertEquals(2, chart.vlines().size(), "two vertical asymptotes, at x = ±1");
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x + 1.0) < 0.05), "asymptote near x = -1");
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 1.0) < 0.05), "asymptote near x = 1");
+        // refinePole bisects the pole column, so the reported x is the true pole to display precision
+        // (not the ±w/2 column midpoint) — an integer asymptote must land on the integer and label "1".
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x + 1.0) < 1e-4), "asymptote at x = -1 (refined)");
+        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 1.0) < 1e-4), "asymptote at x = 1 (refined)");
+        assertTrue(chart.vlines().stream().anyMatch(x -> DasumBridge.fmt(x).equals("1")),
+                "the label reads the clean integer '1', not '0.997' / '1.002'");
+        assertTrue(chart.vlines().stream().anyMatch(x -> DasumBridge.fmt(x).equals("-1")),
+                "and '-1' for the negative asymptote");
     }
 
     @Test

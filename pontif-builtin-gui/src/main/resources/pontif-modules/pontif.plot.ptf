@@ -519,9 +519,22 @@ function isIsolatedPole(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):Bool ->
   andB(andB(poleColAt(e, xlo, w, i), notB(poleColAt(e, xlo, w, i - 1))),
        notB(denseAhead(e, xlo, w, i)))
 
+# The column [a, b] is Unbounded → the pole is somewhere inside it. Bisect to pin its x: keep the
+# half that still straddles the pole (its enclosure is still Unbounded), recurse. Reporting the raw
+# column MIDPOINT is off by up to w/2, so an asymptote at exactly x = 1 would label "0.997"; ~28
+# halvings shrink that error below display precision, so an integer pole labels as the integer.
+function refinePole(e:AlgExpr, a:Decimal, b:Decimal, depth:Int):Decimal -> match (depth <= 0) {
+  [Bool:true]  -> (a + b) / 2.0
+  [Bool:false] -> ( let m = (a + b) / 2.0
+                    match spanHasPole(e, a, m) {
+                      [Bool:true]  -> refinePole(e, a, m, depth - 1)
+                      [Bool:false] -> refinePole(e, m, b, depth - 1)
+                    } )
+}
+
 function asymAt(e:AlgExpr, xlo:Decimal, w:Decimal, i:Int):[VLine | Nothing] ->
   match isIsolatedPole(e, xlo, w, i) {
-    [Bool:true]  -> VLine(xlo + i * w + w / 2.0)
+    [Bool:true]  -> VLine(refinePole(e, xlo + i * w, xlo + (i + 1) * w, 28))
     [Bool:false] -> Nothing()
   }
 

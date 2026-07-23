@@ -315,6 +315,12 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
     bracketing interval is `Unbounded` (`spanHasPole` — `evalInterval` over the span straddles a
     pole), so a feature is kept only where the curve is actually continuous there. Pinned by
     `PlotExtensionTest.featureLayers_rejectSpuriousFeaturesStraddlingAnAsymptote`.
+  - **Asymptote x-labels refined to the true pole (fixed 2026-07-22).** The asymptote layer first
+    labelled the probe-column MIDPOINT, off by up to ½ a column width, so an asymptote at exactly
+    x = 1 read "0.997"/"1.002". Fix: `refinePole` bisects the Unbounded column (keeping the half that
+    still straddles the pole via `spanHasPole`, ~28 halvings) so the reported x is the pole to well
+    below display precision — an integer pole now labels as the integer. Pinned by
+    `asymptotes_layer_marksIsolatedVerticalAsymptotes` (x = ±1 to < 1e-4, label "1"/"-1").
 - **Still ahead:** slice 3 (adaptive subdivision — sharpens fat/tall columns, gives partial-domain
   tightness for free), slice 4b (EXACT feature marking — dotted asymptotes, labeled intercepts —
   using `pontif.poly`'s `roots()`, once the transitive-import bug is fixed; the numeric framing
