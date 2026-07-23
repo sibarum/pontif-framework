@@ -1,28 +1,29 @@
 package sibarum.pontif.receipts;
 
-import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.SymExpr;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 
-import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Discharge for {@code Decimal}-domain obligations — the dense counterpart of
- * {@link IntegerDischarge}, covering Decimal's three narrows (sign, range,
- * equality-up-to-precision).
+ * Discharge for {@code Decimal}-domain obligations — a thin named wrapper over
+ * the unified {@link BoundAnalysis} engine in {@link BoundAnalysis.Domain#DECIMAL}.
  *
- * <p>Uses only <b>dense-valid</b> reasoning: And/Or goal decomposition, ground
- * evaluation of constant comparisons ({@code compareTo}-based, so
- * {@code 2.0 == 2.00}), and {@link Refinements#discharge} — order implication
- * over BigDecimal bounds plus the domain-neutral sign lattice.
+ * <p>The engine is shared with {@link IntegerDischarge}; the domain argument is
+ * the whole difference. In the Decimal domain the engine's quantization step is
+ * the identity, so no integer-strict cut ({@code >c ⟹ >=c+1},
+ * {@code POSITIVE ⟹ >=1}) is ever applied — {@code 0.5} witnesses {@code >0}
+ * without {@code >=1}. The dense-valid reasoning this class used to spell out
+ * (And/Or goal decomposition, ground constant comparison, single-hypothesis
+ * order implication, and the sign lattice) is all subsumed by the shared
+ * {@link RealInterval} arithmetic; what it additionally gains is linear-bound
+ * reasoning — additive thresholds like {@code x>5 ∧ y>=0 ⟹ x+y>5} — which the
+ * old order-implication-plus-sign backend could not derive.
  *
- * <p><b>Soundness gate (the inverse of {@link IntegerDischarge}'s):</b> this
- * must NEVER call {@code BoundAnalysis} — its integer-strict cuts
- * ({@code >c ⟹ >=c+1}, {@code POSITIVE ⟹ >=1}) are exactly what is false in a
- * dense domain ({@code 0.5} witnesses {@code >0} without {@code >=1}). The
- * Int/Decimal routing in {@link Discharge} is what keeps each domain's facts
- * on its own side.
+ * <p><b>Soundness gate:</b> the Int/Decimal routing lives in {@link Discharge};
+ * this class must always pass {@link BoundAnalysis.Domain#DECIMAL}. The single
+ * dense-invalid move (the integer grid) is quarantined inside
+ * {@code BoundAnalysis.quantize} under a {@code Domain.INT} guard.
  */
 final class DecimalDischarge {
 
@@ -30,64 +31,6 @@ final class DecimalDischarge {
 
     /** Can {@code goal} be discharged from {@code hypotheses} over the decimals? */
     static boolean discharge(List<SymExpr> hypotheses, SymExpr goal) {
-        List<SymExpr> flat = new ArrayList<>();
-        for (SymExpr h : hypotheses) {
-            flatten(h, flat);
-        }
-        return dischargeGoal(flat, goal);
-    }
-
-    /** Range hypotheses arrive as conjunctions ({@code @>=lo & @<=hi}) — expose the conjuncts. */
-    private static void flatten(SymExpr h, List<SymExpr> out) {
-        if (h instanceof SymExpr.And(SymExpr l, SymExpr r)) {
-            flatten(l, out);
-            flatten(r, out);
-        } else {
-            out.add(h);
-        }
-    }
-
-    private static boolean dischargeGoal(List<SymExpr> hyps, SymExpr goal) {
-        if (goal instanceof SymExpr.Bool b) {
-            return b.value();
-        }
-        if (goal instanceof SymExpr.And(SymExpr l, SymExpr r)) {
-            return dischargeGoal(hyps, l) && dischargeGoal(hyps, r);
-        }
-        if (goal instanceof SymExpr.Or(SymExpr l, SymExpr r)) {
-            return dischargeGoal(hyps, l) || dischargeGoal(hyps, r);
-        }
-        Boolean ground = evalGround(goal);
-        if (ground != null) {
-            return ground;
-        }
-        return Refinements.discharge(hyps, goal);
-    }
-
-    /** Evaluates a comparison whose sides are both numeric constants; null if not ground. */
-    private static Boolean evalGround(SymExpr goal) {
-        if (!(goal instanceof SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r))) {
-            return null;
-        }
-        BigDecimal a = asNumeric(l);
-        BigDecimal b = asNumeric(r);
-        if (a == null || b == null) {
-            return null;
-        }
-        int c = a.compareTo(b);
-        return switch (op) {
-            case LT -> c < 0;
-            case LE -> c <= 0;
-            case GT -> c > 0;
-            case GE -> c >= 0;
-            case EQ -> c == 0;
-            case NE -> c != 0;
-        };
-    }
-
-    private static BigDecimal asNumeric(SymExpr e) {
-        if (e instanceof SymExpr.Dec d) return d.value();
-        if (e instanceof SymExpr.Lit l) return BigDecimal.valueOf(l.value());
-        return null;
+        return BoundAnalysis.discharge(BoundAnalysis.Domain.DECIMAL, hypotheses, goal);
     }
 }

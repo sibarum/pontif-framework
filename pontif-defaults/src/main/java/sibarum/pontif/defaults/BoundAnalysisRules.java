@@ -2,7 +2,7 @@ package sibarum.pontif.defaults;
 
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 
 import java.util.List;
 import java.util.Optional;

@@ -55,6 +55,15 @@ leaf question to `Refinements.imply` (it does not absorb it — `pontif-core` ca
 `pontif-ir`). The target is: nominal/assign decisions have one home (`Assignability`),
 refinement-proof has one home (`Refinements`), and the two compose in one direction.
 
+Below `Refinements`, the **numeric-linear reasoning** ("does this comparison follow from these
+bounds?") likewise has exactly one home: **`core.symbolic.BoundAnalysis`** — a domain-parameterized
+(`INT`/`DECIMAL`) linear-bound + sign engine over the strictness-aware `core.symbolic.RealInterval`.
+`Refinements` (subtyping, dense `Decimal` domain) and the receipt-graph return gate (`Int`/`Decimal`
+by sort) both route through it; `pontif-predicates`'s legacy long `Interval` is now just its
+`INT` projection for call-site narrowing. The integer-strict grid (`>c ⟹ >=c+1`) lives in a single
+guarded step (`BoundAnalysis.quantize`), so an enhancement to the reasoning happens in one place and
+the Int/Decimal soundness boundary is one line, not two parallel engines.
+
 ### 1c. The facade — `sibarum.pontif.types.TypeSystem`
 
 A strangler-fig facade (`TypeSystem` / `DelegatingTypeSystem`) is the seam callers use so

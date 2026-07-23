@@ -10,7 +10,7 @@ import sibarum.pontif.core.symbolic.Simplifier;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 import sibarum.pontif.predicates.ComplementResult;
 import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.predicates.SatResult;

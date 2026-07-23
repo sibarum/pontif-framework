@@ -4,7 +4,6 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.Origin.Span;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.predicates.BoundAnalysis;
 import sibarum.pontif.predicates.Interval;
 import sibarum.pontif.types.DispatchQuery;
 import sibarum.pontif.types.DispatchResult;
@@ -1318,7 +1317,7 @@ public final class NarrowingInference {
                 && eq.left() instanceof IrExpr.SelfRef) {
             try {
                 SymExpr expr = IrCompiler.compileSymExpr(eq.right());
-                return intervalToIntSort(BoundAnalysis.bound(expr, hypothesesFromEnv(ctx)));
+                return intervalToIntSort(Interval.of(expr, hypothesesFromEnv(ctx)));
             } catch (CompileException | RuntimeException unused) {
                 // Non-kernel term (e.g. an unresolved MethodCall at parse time) →
                 // can't project; drop to the declared sort. Never throw.

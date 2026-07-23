@@ -32,36 +32,25 @@ public final class Refinements {
     }
 
     /**
-     * Best-effort discharge: can {@code goal} be derived from any combination
-     * of {@code hypotheses}? Tries direct single-hypothesis implication first,
-     * then falls back to sign analysis for compound arithmetic subjects.
+     * Best-effort discharge: can {@code goal} be derived from {@code hypotheses}?
+     * Delegates to the one linear-bound + sign kernel ({@link BoundAnalysis}) in
+     * the <b>dense</b> ({@code Decimal}) domain — refinement proof for
+     * subtyping / simplification is domain-neutral, and the integer-strict grid
+     * belongs only to the receipts / return-gate side ({@code Domain.INT}). The
+     * kernel subsumes the former order-implication + sign backend and adds
+     * additive linear reasoning (e.g. {@code x>5 ∧ y>=0 ⟹ x+y>5}).
      */
     public static boolean discharge(java.util.List<SymExpr> hypotheses, SymExpr goal) {
-        for (SymExpr fact : hypotheses) {
-            if (implies(fact, goal)) return true;
-        }
-        return SignAnalysis.canDischarge(hypotheses, goal);
+        return BoundAnalysis.discharge(BoundAnalysis.Domain.DECIMAL, hypotheses, goal);
     }
 
     /**
-     * Does {@code fact} imply {@code goal}? Both should typically be Cmp expressions
-     * about the same subject (Self, Var, or any matching expression).
-     * Returns true for trivial cases (structural equality) and for arithmetic
-     * inferences over Cmp with constant bounds.
+     * Does the single hypothesis {@code fact} imply {@code goal}? Reflexivity,
+     * then the shared linear-bound kernel ({@link #discharge}, dense domain).
+     * The one-fact specialization of {@link #discharge}.
      */
     public static boolean implies(SymExpr fact, SymExpr goal) {
-        if (fact.equals(goal)) return true;
-        if (!(fact instanceof SymExpr.Cmp(SymExpr factSubj, SymExpr.CmpOp factOp, SymExpr factBound))) {
-            return false;
-        }
-        if (!(goal instanceof SymExpr.Cmp(SymExpr goalSubj, SymExpr.CmpOp goalOp, SymExpr goalBound))) {
-            return false;
-        }
-        if (!factSubj.equals(goalSubj)) return false;
-        java.math.BigDecimal a = asNumeric(factBound);
-        java.math.BigDecimal b = asNumeric(goalBound);
-        if (a == null || b == null) return false;
-        return checkImplies(factOp, a, goalOp, b);
+        return fact.equals(goal) || discharge(java.util.List.of(fact), goal);
     }
 
     /**
@@ -659,7 +648,15 @@ public final class Refinements {
         if (ta == null || la == null) {
             return ProofResult.residual(looser);
         }
-        boolean holds = checkImplies(top, ta, lop, la);
+        // The positive verdict comes from the one shared kernel (dense domain):
+        // does the tighter predicate, as a hypothesis, discharge the looser as a
+        // goal? This subsumes and strengthens the former hand-rolled order table
+        // (it also proves e.g. @>3 ⟹ @!=0). A non-discharge on this
+        // constant-bounded Self shape is a genuine non-implication → Failed;
+        // shapes the guards above reject stay Residual (undecided), preserving
+        // the Failed ⟺ provably-not-implied distinction the callers rely on.
+        boolean holds = BoundAnalysis.discharge(
+                BoundAnalysis.Domain.DECIMAL, java.util.List.of(tighter), looser);
         return holds
                 ? ProofResult.passed()
                 : ProofResult.failed(
@@ -667,58 +664,15 @@ public final class Refinements {
     }
 
     /**
-     * Numeric constant extraction for the implication check. Generalized to
-     * BigDecimal so the same dense-valid order logic serves both the integer
-     * and Decimal domains — integers convert exactly, so integer results are
-     * unchanged. (The integer-only discreteness facts — {@code >0 ⟹ >=1} —
-     * never lived here; they are quarantined in {@code BoundAnalysis}, reached
-     * only via the integer discharge route.)
+     * Numeric constant extraction for the arithmetic-implication guard, over
+     * BigDecimal (integers convert exactly). Only gates which predicate shapes
+     * are eligible for a Passed/Failed verdict; the verdict itself is the shared
+     * {@link BoundAnalysis} kernel's.
      */
     private static java.math.BigDecimal asNumeric(SymExpr e) {
         if (e instanceof SymExpr.Lit l) return java.math.BigDecimal.valueOf(l.value());
         if (e instanceof SymExpr.Frac f && f.denom() == 1) return java.math.BigDecimal.valueOf(f.num());
         if (e instanceof SymExpr.Dec d) return d.value();
         return null;
-    }
-
-    /**
-     * Dense-valid implication over constant bounds: every case below holds in
-     * any ordered field (no integer adjacency). Value comparison is
-     * {@code compareTo}-based, so {@code 2.0} and {@code 2.00} agree.
-     */
-    private static boolean checkImplies(SymExpr.CmpOp tOp, java.math.BigDecimal ta,
-                                        SymExpr.CmpOp lOp, java.math.BigDecimal la) {
-        int c = ta.compareTo(la);
-        return switch (tOp) {
-            case GT -> switch (lOp) {
-                case GT -> c >= 0;
-                case GE -> c >= 0;
-                default -> false;
-            };
-            case GE -> switch (lOp) {
-                case GT -> c > 0;
-                case GE -> c >= 0;
-                default -> false;
-            };
-            case LT -> switch (lOp) {
-                case LT -> c <= 0;
-                case LE -> c <= 0;
-                default -> false;
-            };
-            case LE -> switch (lOp) {
-                case LT -> c < 0;
-                case LE -> c <= 0;
-                default -> false;
-            };
-            case EQ -> switch (lOp) {
-                case EQ -> c == 0;
-                case GT -> c > 0;
-                case GE -> c >= 0;
-                case LT -> c < 0;
-                case LE -> c <= 0;
-                case NE -> c != 0;
-            };
-            case NE -> lOp == SymExpr.CmpOp.NE && c == 0;
-        };
     }
 }

@@ -1,7 +1,7 @@
 package sibarum.pontif.receipts;
 
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 
 import java.util.List;
 

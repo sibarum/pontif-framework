@@ -8,7 +8,7 @@ import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 
 import java.util.ArrayList;
 import java.util.HashMap;

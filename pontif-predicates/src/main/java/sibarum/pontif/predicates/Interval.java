@@ -1,14 +1,26 @@
 package sibarum.pontif.predicates;
 
+import java.math.BigDecimal;
+import java.util.List;
+
+import sibarum.pontif.core.symbolic.BoundAnalysis;
+import sibarum.pontif.core.symbolic.RealInterval;
+import sibarum.pontif.core.symbolic.SymExpr;
+
 /**
  * A closed integer interval {@code [lo, hi]} with explicit {@code ±∞}
  * endpoints, plus the <b>saturating arithmetic</b> the bound engine needs
  * ({@link #scale}, {@link #add}) on top of {@link #intersect}.
  *
- * <p>This is the value type returned by {@link BoundAnalysis#bound}: the
- * statically-known range of an integer expression. Over-approximation is
- * always toward the wider interval (saturate to {@code ±∞}, never wrap),
- * so any conclusion drawn from a whole-interval check is sound.
+ * <p>This is the {@link BoundAnalysis.Domain#INT INT}-domain <b>projection</b>
+ * of the core engine's strictness-aware {@link RealInterval}: {@link #of}
+ * runs {@link BoundAnalysis#bound} and {@link #from projects} its grid-aligned
+ * result here, the statically-known range of an integer expression for
+ * call-site narrowing. The reasoning lives in {@code core.symbolic.BoundAnalysis};
+ * this type is only the legacy long-based view narrowing consumers still read.
+ * Over-approximation is always toward the wider interval (saturate to
+ * {@code ±∞}, never wrap), so any conclusion drawn from a whole-interval check
+ * is sound.
  *
  * <h2>Infinities</h2>
  * {@link #NEG_INF} / {@link #POS_INF} are the {@code long} sentinels for
@@ -22,11 +34,12 @@ package sibarum.pontif.predicates;
  * range — e.g. produced by intersecting disjoint bounds, which means the
  * hypotheses are contradictory). Callers should check {@link #isEmpty}.
  *
- * <p><b>Note (follow-up):</b> {@link PredicateArithmetic} carries its own
- * private {@code Interval}/{@code IntervalSet} for satisfiability-over-a-
- * domain. That one models <em>sets</em> of integers (union/complement);
- * this one models a single range with arithmetic. They should eventually
- * merge — see {@code docs/TODO.md}.
+ * <p><b>Note (follow-up):</b> the general strictness-aware range now lives in
+ * {@code core.symbolic.RealInterval}; this long-based type is its integer
+ * projection. {@link PredicateArithmetic} still carries its own private
+ * {@code Interval}/{@code IntervalSet} for satisfiability-over-a-domain (sets of
+ * integers, union/complement) — fold that into {@code RealInterval} next. See
+ * {@code docs/TODO.md}.
  */
 public record Interval(long lo, long hi) {
 
@@ -56,6 +69,41 @@ public record Interval(long lo, long hi) {
     /** {@code (-∞, k]}. */
     public static Interval atMost(long k) {
         return new Interval(NEG_INF, k);
+    }
+
+    /**
+     * The integer call-site narrowing entry point: the statically-known integer
+     * range of {@code expr} under {@code hypotheses}, as this legacy long-based
+     * interval. Delegates the reasoning to the one core engine
+     * ({@link BoundAnalysis#bound} in {@link BoundAnalysis.Domain#INT}) and
+     * {@linkplain #from projects} its grid-aligned result down. This is the
+     * projection seam: narrowing-to-{@code [Int]} is a {@code pontif-predicates}
+     * concern; the reasoning is not.
+     */
+    public static Interval of(SymExpr expr, List<SymExpr> hypotheses) {
+        return from(BoundAnalysis.bound(BoundAnalysis.Domain.INT, expr, hypotheses));
+    }
+
+    /**
+     * Projects a grid-aligned {@link Domain#INT INT}-domain {@link RealInterval}
+     * to this long-based interval. An infinite side maps to the {@code ±∞}
+     * sentinel; finite endpoints of an integer range are integer-valued
+     * (floored / ceiled defensively) and saturate to the sentinels if out of
+     * {@code long} range.
+     */
+    public static Interval from(RealInterval iv) {
+        if (iv.isEmpty()) return empty();
+        long lo = iv.lo() == null ? NEG_INF : saturate(RealInterval.ceil(iv.lo()), NEG_INF);
+        long hi = iv.hi() == null ? POS_INF : saturate(RealInterval.floor(iv.hi()), POS_INF);
+        return new Interval(lo, hi);
+    }
+
+    private static long saturate(BigDecimal v, long infinityIfOutOfRange) {
+        try {
+            return v.longValueExact();
+        } catch (ArithmeticException outOfRange) {
+            return v.signum() < 0 ? NEG_INF : POS_INF;
+        }
     }
 
     /** No integer falls in this interval ({@code lo > hi}). */

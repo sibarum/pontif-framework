@@ -1,6 +1,7 @@
 package sibarum.pontif.predicates;
 
 import org.junit.jupiter.api.Test;
+import sibarum.pontif.core.symbolic.BoundAnalysis;
 import sibarum.pontif.core.symbolic.SymExpr;
 
 import java.util.List;
@@ -32,38 +33,38 @@ class BoundAnalysisTest {
 
     @Test
     void boundOfLiteralIsAPoint() {
-        assertEquals(Interval.point(7), BoundAnalysis.bound(lit(7), List.of()));
+        assertEquals(Interval.point(7), Interval.of(lit(7), List.of()));
     }
 
     @Test
     void boundOfUnconstrainedVarIsAll() {
-        assertEquals(Interval.all(), BoundAnalysis.bound(v("x"), List.of()));
+        assertEquals(Interval.all(), Interval.of(v("x"), List.of()));
     }
 
     @Test
     void boundOfVarUnderLowerBoundHyp() {
         // x with x >= 1  →  [1, ∞)
-        assertEquals(Interval.atLeast(1), BoundAnalysis.bound(v("x"), List.of(ge(v("x"), 1))));
+        assertEquals(Interval.atLeast(1), Interval.of(v("x"), List.of(ge(v("x"), 1))));
     }
 
     @Test
     void boundOfSumShiftsTheLowerBound() {
         // x + 1 with x >= 1  →  [2, ∞)
-        Interval iv = BoundAnalysis.bound(add(v("x"), lit(1)), List.of(ge(v("x"), 1)));
+        Interval iv = Interval.of(add(v("x"), lit(1)), List.of(ge(v("x"), 1)));
         assertEquals(Interval.atLeast(2), iv);
     }
 
     @Test
     void boundOfScaledVar() {
         // 2x with x >= 1  →  [2, ∞)
-        Interval iv = BoundAnalysis.bound(mul(lit(2), v("x")), List.of(ge(v("x"), 1)));
+        Interval iv = Interval.of(mul(lit(2), v("x")), List.of(ge(v("x"), 1)));
         assertEquals(Interval.atLeast(2), iv);
     }
 
     @Test
     void boundOfProductFromSign() {
         // n * r with n > 0, r >= 1  → sign POSITIVE → [1, ∞)
-        Interval iv = BoundAnalysis.bound(
+        Interval iv = Interval.of(
                 mul(v("n"), v("r")), List.of(gt(v("n"), 0), ge(v("r"), 1)));
         assertEquals(Interval.atLeast(1), iv);
     }
@@ -71,7 +72,7 @@ class BoundAnalysisTest {
     @Test
     void boundOfSquareIsNonNegative() {
         // x * x with no hypotheses → NON_NEGATIVE → [0, ∞)
-        Interval iv = BoundAnalysis.bound(mul(v("x"), v("x")), List.of());
+        Interval iv = Interval.of(mul(v("x"), v("x")), List.of());
         assertEquals(Interval.atLeast(0), iv);
     }
 
@@ -79,7 +80,7 @@ class BoundAnalysisTest {
     void boundFromRangeHypothesisFlattensConjunction() {
         // x with (x >= 1 ∧ x <= 4) — one And hypothesis → [1, 4]
         SymExpr range = SymExpr.and(ge(v("x"), 1), cmp(v("x"), SymExpr.CmpOp.LE, lit(4)));
-        assertEquals(new Interval(1, 4), BoundAnalysis.bound(v("x"), List.of(range)));
+        assertEquals(new Interval(1, 4), Interval.of(v("x"), List.of(range)));
     }
 
     @Test

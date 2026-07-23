@@ -96,33 +96,4 @@ public enum Sign {
             default -> BOTTOM;
         };
     }
-
-    /**
-     * Does any value with this sign definitively satisfy {@code value op bound}?
-     * Returns true only when sign alone is sufficient evidence.
-     */
-    public boolean satisfies(SymExpr.CmpOp op, long bound) {
-        return switch (op) {
-            case GT -> switch (this) {
-                case POSITIVE -> bound <= 0;
-                case NON_NEGATIVE, ZERO -> bound < 0;
-                default -> false;
-            };
-            case GE -> switch (this) {
-                case POSITIVE, NON_NEGATIVE, ZERO -> bound <= 0;
-                default -> false;
-            };
-            case LT -> switch (this) {
-                case NEGATIVE -> bound >= 0;
-                case NON_POSITIVE, ZERO -> bound > 0;
-                default -> false;
-            };
-            case LE -> switch (this) {
-                case NEGATIVE, NON_POSITIVE, ZERO -> bound >= 0;
-                default -> false;
-            };
-            case EQ -> this == ZERO && bound == 0;
-            case NE -> bound == 0 && (this == POSITIVE || this == NEGATIVE);
-        };
-    }
 }

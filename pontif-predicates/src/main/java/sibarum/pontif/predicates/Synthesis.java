@@ -27,7 +27,7 @@ import java.util.Optional;
  * {@code P} by:
  *
  * <ol>
- *   <li>deriving the candidate domain {@code [lo,hi]} with {@link BoundAnalysis} —
+ *   <li>deriving the candidate domain {@code [lo,hi]} with {@link Interval#of} —
  *       the <em>only</em> special role the order-bounds play is making the domain
  *       finite and iterable; and
  *   <li>keeping each candidate {@code n} where {@link Refinements#satisfies} proves
@@ -90,7 +90,7 @@ public final class Synthesis {
         // rephrase `@` as a named subject the engine treats as an ordinary variable.
         SymExpr canonical = selfLeft(predicate);
         SymExpr overSubject = Substitute.applySelf(canonical, SymExpr.var(SUBJECT));
-        Interval domain = BoundAnalysis.bound(SymExpr.var(SUBJECT), List.of(overSubject));
+        Interval domain = Interval.of(SymExpr.var(SUBJECT), List.of(overSubject));
         if (domain.lo() == Interval.NEG_INF || domain.hi() == Interval.POS_INF) {
             return Optional.empty();                       // unbounded on a side — not enumerable
         }

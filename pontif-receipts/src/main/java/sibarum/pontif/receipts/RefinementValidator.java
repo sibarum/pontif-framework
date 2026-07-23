@@ -1,7 +1,6 @@
 package sibarum.pontif.receipts;
 
 import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.predicates.BoundAnalysis;
 import sibarum.pontif.predicates.Interval;
 
 import java.util.ArrayList;
@@ -106,7 +105,7 @@ final class RefinementValidator {
         }
         List<SymExpr> hyps = new ArrayList<>(baseFacts);
         hyps.addAll(splitGuards);
-        Interval iv = BoundAnalysis.bound(subject, hyps);
+        Interval iv = Interval.of(subject, hyps);
         if (iv.lo() == Interval.NEG_INF || iv.hi() == Interval.POS_INF) {
             return null;  // not a finite interval — nothing to enumerate
         }

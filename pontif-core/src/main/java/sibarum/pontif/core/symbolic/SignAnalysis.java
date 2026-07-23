@@ -27,16 +27,6 @@ public final class SignAnalysis {
         };
     }
 
-    public static boolean canDischarge(List<SymExpr> hypotheses, SymExpr goal) {
-        if (!(goal instanceof SymExpr.Cmp(SymExpr subject, SymExpr.CmpOp op, SymExpr bound))) {
-            return false;
-        }
-        Long boundLong = asLongConst(bound);
-        if (boundLong == null) return false;
-        Sign s = computeSign(subject, hypotheses);
-        return s.satisfies(op, boundLong);
-    }
-
     private static Sign signOfLong(long v) {
         if (v > 0) return Sign.POSITIVE;
         if (v < 0) return Sign.NEGATIVE;

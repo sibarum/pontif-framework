@@ -1,5 +1,7 @@
 package sibarum.pontif.predicates;
 
+import sibarum.pontif.core.symbolic.BoundAnalysis;
+
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.symbolic.SymExpr;
 

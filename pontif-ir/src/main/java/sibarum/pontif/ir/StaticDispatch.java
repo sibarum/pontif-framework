@@ -6,7 +6,7 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.predicates.BoundAnalysis;
+import sibarum.pontif.predicates.Interval;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -267,7 +267,7 @@ public final class StaticDispatch {
                                             java.util.Map<String, java.util.Set<String>> traitImpls) {
         if (isIntRefined(arg) && isIntRefined(param)) {
             SymExpr self = SymExpr.var("·self");  // synthetic binder, won't collide
-            return BoundAnalysis.bound(self, List.of(
+            return Interval.of(self, List.of(
                     Substitute.applySelf(arg.predicate(), self),
                     Substitute.applySelf(param.predicate(), self))).isEmpty();
         }

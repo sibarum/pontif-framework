@@ -261,12 +261,19 @@ so `v + v` can't route post-link), `generics__22` (`checkOperatorBounds` can't r
   so a recursive/cross call to an overloaded name doesn't pin *which* overload — resolve via
   `StaticDispatch` and record the node index so the issuer carries overload-specific IHs.
   Deferred until an obligation needs it.
-- **Strengthen `Refinements.imply` via bounds** — generalize the ad-hoc single-atom threshold
-  compare (`checkImpliesOnLongs`) to linear shapes (`2x+3 ≥ 5`). Lives in `pontif-core`, *below*
-  predicates — needs the engine reachable from core or a thin core-level port.
-- **Unify `BoundAnalysis`'s `Interval` with `PredicateArithmetic`'s private `Interval`/
-  `IntervalSet`** — two same-named types in one package (single-range-with-arithmetic vs
-  integer-sets-for-satisfiability). Merge carefully.
+- ~~**Strengthen `Refinements.imply` via bounds**~~ **DONE** — the linear-bound + sign engine
+  now lives in `pontif-core` (`core.symbolic.BoundAnalysis`, domain-parameterized over a
+  strictness-aware `core.symbolic.RealInterval`); `Refinements.discharge`/`imply`/`implies`
+  delegate to it. The former hand-rolled order table (`checkImplies`) and the parallel
+  `SignAnalysis.canDischarge` discharge path are deleted — there is now one numeric-linear
+  reasoning engine, referenced by both the receipt/return gate (`Int`/`Decimal` domains) and
+  the subtyping/assignment leaf (dense `Decimal` domain). Enhancing it happens in one place.
+- **Unify the interval value types** — `core.symbolic.RealInterval` is now the general
+  strictness-aware range the engine reasons over; `pontif-predicates`'s legacy long
+  `Interval` is reduced to its `Domain.INT` projection (`Interval.of`/`Interval.from`) for
+  call-site narrowing. Still separate: `PredicateArithmetic`'s private `Interval`/`IntervalSet`
+  (integer-sets-for-satisfiability) — fold that into `RealInterval`/a set-of-`RealInterval`
+  next. Merge carefully.
 - **Issuer plugin interface** — gated on Pontif's not-yet-designed package-management/build
   tool. Largely dissolves into "custom issuers as Pontif functions" below.
 
