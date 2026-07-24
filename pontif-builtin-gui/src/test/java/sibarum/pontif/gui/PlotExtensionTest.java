@@ -839,6 +839,60 @@ class PlotExtensionTest {
     }
 
     @Test
+    void multipleAutoPlots_getDistinctColoursBandsAndColourCodedTitles() {
+        // Two reliable auto-plots overlaid in one chart: expr(e), expr(r). Each must draw in its own
+        // palette colour (not one shared cyan), contribute its own enclosure band, and add a
+        // colour-coded title entry — so the plots are distinguishable and the title maps to the lines.
+        var chart = runChart("""
+                requires pontif.algebra.{AlgExpr, Const, Param, Sub, Add, Mul, Div}
+                requires pontif.plot.{expr, chart}
+                let e:AlgExpr = Sub(Mul(Param("x"), Param("x")), Const(4.0))
+                let r:AlgExpr = Add(Mul(Param("x"), Param("x")), Const(1.0))
+                chart({title = "two"}, { expr(e), expr(r) })""");
+        assertEquals(2, chart.enclosures().size(), "one enclosure band per reliably-plotted expression");
+        assertEquals(2, chart.titles().size(), "one colour-coded title entry per expression");
+        // The two titles carry DISTINCT palette colours (so the on-screen / SVG title colour-codes).
+        var c0 = chart.titles().get(0).color();
+        var c1 = chart.titles().get(1).color();
+        assertFalse(c0.r() == c1.r() && c0.g() == c1.g() && c0.b() == c1.b(),
+                "the two expressions take different palette colours");
+        // And the drawn series are painted in those same two colours — never a single shared colour.
+        long distinctSeriesColours = chart.series().stream()
+                .map(s -> s.color().r() + "," + s.color().g() + "," + s.color().b())
+                .distinct().count();
+        assertTrue(distinctSeriesColours >= 2, "overlaid reliable plots draw in distinct colours");
+    }
+
+    @Test
+    void multipleAutoPlots_fromProvenFunctions_composeTwoReliablePlots() {
+        // The end-to-end shape from the sample: two Decimal functions proven Algebraic, their reflected
+        // ASTs ($f[Decimal].ast) auto-plotted together with annotation layers over the first. Exercises
+        // the exact requested syntax (^ powers, implicit multiplication, integer literals) all the way
+        // to the decomposed chart.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chart, optima}
+
+                function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+                assign proof f:Algebraic
+
+                function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+                assign proof g:Algebraic
+
+                main (
+                  let e = $f[Decimal].ast
+                  let r = $g[Decimal].ast
+                  chart({title = "Rational functions"}, { expr(e), expr(r), asymptotes(e), zeros(e), optima(e) })
+                )""");
+        assertEquals(2, chart.enclosures().size(), "two reliably-plotted expressions → two enclosure bands");
+        assertEquals(2, chart.titles().size(), "two colour-coded title entries");
+        long distinctSeriesColours = chart.series().stream()
+                .map(s -> s.color().r() + "," + s.color().g() + "," + s.color().b())
+                .distinct().count();
+        assertTrue(distinctSeriesColours >= 2, "the two auto-plots draw in distinct colours");
+    }
+
+    @Test
     void optima_layer_marksLocalMinimaAndMaxima() {
         // x^3 - 3x has a local MAX at (-1, 2) and a local MIN at (1, -2).
         var chart = runChart("""

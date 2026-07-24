@@ -321,6 +321,19 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
     still straddles the pole via `spanHasPole`, ~28 halvings) so the reported x is the pole to well
     below display precision — an integer pole now labels as the integer. Pinned by
     `asymptotes_layer_marksIsolatedVerticalAsymptotes` (x = ±1 to < 1e-4, label "1"/"-1").
+- **Multiple auto-plots in one chart (LANDED 2026-07-24).** A `chart(cfg, {…})` now composites
+  several reliable expression layers — `chart({…}, {expr(e), expr(r), asymptotes(e), zeros(e),
+  optima(e)})`. Each `expr(…)` takes the next palette colour (the counter is SHARED with the sampled
+  `curve` layers, so a mixed chart never collides), so overlaid reliable plots are distinguishable
+  instead of a single indistinguishable cyan. Every reliably-plotted expression contributes its own
+  interval-enclosure band (the SVG export emits one `.enclosure-band` per plot, indexed by
+  `data-band`), and the typeset math title above the plot COLOUR-CODES each equation to its line —
+  laid out left-to-right with aligned baselines on screen (`DasumBridge.mathTitleComponent`) and as
+  per-equation colour-wrapped nested SVGs in the export (`titledChartSvg`). The dasum IR carries this
+  as `PlotScene2D.enclosures` (a list, was a single band). Verified headlessly by `PlotExtensionTest`
+  (`multipleAutoPlots_*`, incl. the exact `^`/implicit-mult/proven-`Algebraic` sample syntax) and
+  `SvgPlotWriterTest.export_emitsOneEnclosureBandPerReliablePlot`. Window render manual: the
+  **Multiple Auto-Plots** welcome sample (`pontif-playground/.../welcome/samples/multi-auto-plot.ptf`).
 - **Still ahead:** slice 3 (adaptive subdivision — sharpens fat/tall columns, gives partial-domain
   tightness for free), slice 4b (EXACT feature marking — dotted asymptotes, labeled intercepts —
   using `pontif.poly`'s `roots()`, once the transitive-import bug is fixed; the numeric framing

@@ -148,7 +148,9 @@ layers depth-write) and 3D text (`TextLayer`), and already carries the 2D axis s
   opacity, not a mode). `cmap(surface(h), "viridis"|"turbo"|"grayscale"|"cool")` picks the height
   colormap; `wire(surface(h))` overlays the sample-grid mesh.
 - **2D charts** — `chart(cfg, {curve(a), curve(b), …})`. Overlays multiple curves (each auto-coloured
-  from a palette) with the axes/gridlines/tick-labels the 2D stack already draws. Mixing 2D and 3D
+  from a palette) with the axes/gridlines/tick-labels the 2D stack already draws. The palette also
+  covers reliable `expr(…)` layers, so several auto-plots (`{expr(e), expr(r), …}`) overlay in
+  distinct colours with a colour-coded math title — see docs/reliable-plotting.md. Mixing 2D and 3D
   layers is deliberately unsupported (different camera/interaction).
 - **Graduations** — 3D scenes draw a labeled, tick-marked bounding box + floor grid by default
   (`{axes = false}` / `{grid = false}` to disable). Tick positions/labels reuse dasum's

@@ -40,6 +40,9 @@ final class Samples {
             "A rational function plotted straight from its formula by reliable interval "
             + "enclosure, with supplemental layers: honest asymptotes at x = ±1 and a labeled "
             + "local maximum — composited with chart(...)."),
+        new Sample("multi-auto-plot", "Multiple Auto-Plots",
+            "Two rational functions reliably plotted in one chart — colour-coded curves and a "
+            + "colour-coded math title — with asymptote, zero, and optimum layers over the first."),
         new Sample("surface-3d", "3D Surface",
             "A paraboloid bowl z = x² + y² as an orbitable 3D surface."),
         new Sample("colormap-surface", "Colormapped Surface",

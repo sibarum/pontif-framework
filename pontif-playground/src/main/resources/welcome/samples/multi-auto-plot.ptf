@@ -1,0 +1,25 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{expr, asymptotes, zeros, chart, optima}
+
+# MULTIPLE auto-plots in one chart. Each expr(...) is its own reliably-plotted expression, drawn
+# by SOUND interval enclosure (not point sampling); overlaying several composites them into one
+# window with auto axes/gridlines. The plots are colour-coded — every expr(...) takes the next
+# palette colour, and the typeset math title above the plot colour-codes each equation to its line.
+#
+#   expr(e), expr(r)        — two curves, distinct colours, each auto-framed and asymptote-safe.
+#   asymptotes/zeros/optima — supplemental annotation layers, here derived from e.
+#
+# No domain, no sampling rate: the window auto-frames to the interesting region across the plots.
+
+function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+assign proof f:Algebraic
+
+function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+assign proof g:Algebraic
+
+main (
+  let e = $f[Decimal].ast
+  let r = $g[Decimal].ast
+  chart({title = "Rational functions", width = 1000, height = 720, export = true},
+        { expr(e), expr(r), asymptotes(e), zeros(e), optima(e) })
+)

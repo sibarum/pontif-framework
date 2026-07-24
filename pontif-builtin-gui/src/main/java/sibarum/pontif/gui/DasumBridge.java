@@ -281,20 +281,39 @@ public final class DasumBridge {
         PlotFrame frame = annotatedFrame(chart);
         if (frame == null) return null;
         String plotSvg = SvgPlotWriter.write(buildScene(chart, frame), WIDTH, HEIGHT);
-        RecordValue titleAst = chart.titleAst();
-        if (titleAst == null || !isAlgExprNode(titleAst)) return plotSvg;
+        List<TitledExpr> titles = chart.titles();
+        if (titles.isEmpty()) return plotSvg;
 
-        LaidOut laid = new MathLayout(mathAtlas(), MathConstants.stixTwoMath()).layout(algExprToMathBox(titleAst));
-        String titleSvg = MathSvg.write(laid, 48.0);
-        double pad = 12.0, outerW = WIDTH, outerH = EXPORT_TITLE_BAND + HEIGHT;
-        // Title: fit into the top band (centered via the nested svg's preserveAspectRatio meet).
-        String placedTitle = placeSvg(titleSvg, 0, pad, outerW, EXPORT_TITLE_BAND - 2 * pad);
+        double pad = 12.0, outerW = WIDTH, outerH = EXPORT_TITLE_BAND + HEIGHT, bandH = EXPORT_TITLE_BAND - 2 * pad;
+        // Lay out each equation and give it a horizontal slot proportional to its width (a gap between),
+        // wrapping each nested title svg in a `<g>` whose CSS color drives its `currentColor` fill — so
+        // the exported title colour-codes to the curves, exactly like the on-screen title.
+        MathConstants mc = MathConstants.stixTwoMath();
+        List<LaidOut> laids = new ArrayList<>();
+        double totalW = 0;
+        for (int i = 0; i < titles.size(); i++) {
+            LaidOut laid = new MathLayout(mathAtlas(), mc).layout(algExprToMathBox(titles.get(i).ast()));
+            laids.add(laid);
+            totalW += (i == 0 ? 0 : TITLE_GAP_EM) + laid.width();
+        }
+        double usableW = outerW - 2 * pad;
+        StringBuilder placedTitle = new StringBuilder();
+        double xoff = 0;
+        for (int i = 0; i < laids.size(); i++) {
+            LaidOut laid = laids.get(i);
+            double slotW = usableW * (laid.width() / totalW);
+            double slotX = pad + usableW * (xoff / totalW);
+            String eqSvg = placeSvg(MathSvg.write(laid, 48.0), slotX, pad, slotW, bandH);
+            placedTitle.append("<g style=\"color:").append(hex(titles.get(i).color())).append("\">")
+                       .append(eqSvg).append("</g>\n");
+            xoff += laid.width() + TITLE_GAP_EM;
+        }
         String placedPlot = placeSvg(plotSvg, 0, EXPORT_TITLE_BAND, outerW, HEIGHT);
         // Embed the (subset) STIX Two Math font so the title renders true on any machine — the SVG is
         // fully self-contained. The @font-face defines the family the nested title svg references.
         String fontFace = mathFontFace();
         return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
-                + fmt(outerW) + " " + fmt(outerH) + "\">\n" + fontFace + placedTitle + "\n"
+                + fmt(outerW) + " " + fmt(outerH) + "\">\n" + fontFace + placedTitle
                 + placedPlot + "\n</svg>\n";
     }
 
@@ -360,11 +379,22 @@ public final class DasumBridge {
      * flatten the plot. Package-visible test seam.
      */
     static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue) {
-        return buildReliableSeries(xlo, xhi, parseSpans(spansValue));
+        return buildReliableSeries(xlo, xhi, parseSpans(spansValue), SERIES_COLOR);
     }
 
-    /** As above, from already-parsed spans — the seam the interactive Java sampler feeds directly. */
+    /** As above, in a chosen colour — so several overlaid reliable plots ({@code expr(e), expr(r)})
+     *  each draw in their own palette colour instead of a single indistinguishable cyan. */
+    static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue, Color color) {
+        return buildReliableSeries(xlo, xhi, parseSpans(spansValue), color);
+    }
+
+    /** From already-parsed spans, default colour — the seam the interactive Java sampler feeds directly. */
     static List<Series> buildReliableSeries(double xlo, double xhi, List<ReliableSpan> spans) {
+        return buildReliableSeries(xlo, xhi, spans, SERIES_COLOR);
+    }
+
+    /** As above, from already-parsed spans in a chosen {@code color}. */
+    static List<Series> buildReliableSeries(double xlo, double xhi, List<ReliableSpan> spans, Color color) {
         int n = spans.size();
         if (n == 0) return List.of();
         List<Double> bounds = new ArrayList<>();
@@ -401,16 +431,16 @@ public final class DasumBridge {
                 runX.add(x);
                 runY.add(blowSign(lastCurve) >= 0 ? ymax + beyond : ymin - beyond);
             }
-            clipRunToBand(runX, runY, ymin, ymax, out);
+            clipRunToBand(runX, runY, ymin, ymax, out, color);
             runX.clear();
             runY.clear();
             lastCurve = null;
             poleBeforeX = pole ? x : Double.NaN;                 // only a pole makes the next run enter from ∞
             if (s.kind() == 3) {                                 // dense pole → fill (the block)
-                out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, SERIES_COLOR));
+                out.add(Series.line(new double[]{x, x}, new double[]{ymin, ymax}, color));
             }
         }
-        clipRunToBand(runX, runY, ymin, ymax, out);
+        clipRunToBand(runX, runY, ymin, ymax, out, color);
         return out;
     }
 
@@ -427,7 +457,7 @@ public final class DasumBridge {
      * (the "serif" the clamp-to-viewport version produced). Off-screen stretches draw nothing.
      */
     private static void clipRunToBand(List<Double> xs, List<Double> ys,
-                                      double ymin, double ymax, List<Series> out) {
+                                      double ymin, double ymax, List<Series> out, Color color) {
         List<Double> cx = new ArrayList<>(), cy = new ArrayList<>();
         for (int i = 0; i < xs.size(); i++) {
             double x = xs.get(i), y = ys.get(i);
@@ -439,7 +469,7 @@ public final class DasumBridge {
                     double edge = y > ymax ? ymax : ymin;
                     cx.add(px + (edge - py) * (x - px) / (y - py));
                     cy.add(edge);
-                    flushPts(cx, cy, out);
+                    flushPts(cx, cy, out, color);
                 } else if (!pin && in) {                         // entering → start at the edge
                     double edge = py > ymax ? ymax : ymin;
                     cx.add(px + (edge - py) * (x - px) / (y - py));
@@ -449,20 +479,20 @@ public final class DasumBridge {
                     double e2 = py < ymin ? ymax : ymin;
                     cx.add(px + (e1 - py) * (x - px) / (y - py)); cy.add(e1);
                     cx.add(px + (e2 - py) * (x - px) / (y - py)); cy.add(e2);
-                    flushPts(cx, cy, out);
+                    flushPts(cx, cy, out, color);
                 }
             }
             if (in) { cx.add(x); cy.add(y); }
         }
-        flushPts(cx, cy, out);
+        flushPts(cx, cy, out, color);
     }
 
     /** Emit the accumulated points as one polyline (if it has ≥ 2 of them) and reset the buffer. */
-    private static void flushPts(List<Double> xs, List<Double> ys, List<Series> out) {
+    private static void flushPts(List<Double> xs, List<Double> ys, List<Series> out, Color color) {
         if (xs.size() >= 2) {
             double[] ax = new double[xs.size()], ay = new double[ys.size()];
             for (int i = 0; i < ax.length; i++) { ax[i] = xs.get(i); ay[i] = ys.get(i); }
-            out.add(Series.line(ax, ay, SERIES_COLOR));
+            out.add(Series.line(ax, ay, color));
         }
         xs.clear();
         ys.clear();
@@ -730,6 +760,13 @@ public final class DasumBridge {
         return (float) Math.max(0.0, Math.min(1.0, v));
     }
 
+    /** A {@code #rrggbb} CSS hex string for a {@link Color}'s RGB (alpha dropped) — used to colour-code
+     *  each equation in the exported multi-plot title via a wrapping {@code <g style="color:…">}. */
+    private static String hex(Color c) {
+        return String.format("#%02x%02x%02x",
+                Math.round(clamp01(c.r()) * 255f), Math.round(clamp01(c.g()) * 255f), Math.round(clamp01(c.b()) * 255f));
+    }
+
     /**
      * The shared 2D line-chart component: a {@link Component.SceneView} carrying the given
      * {@link Series} published through a {@link PlotView}, axes auto-ranged over ALL series, with
@@ -754,22 +791,47 @@ public final class DasumBridge {
         return view;
     }
 
-    /**
-     * A fixed-height viewport that typesets an {@code AlgExpr} AST as a math title (STIX Two Math) —
-     * placed above a reliable plot. The math is rendered y-up and framed to its own box by an ortho
-     * camera (via {@link PlotView#show}). Returns {@code null} when there is no AST or it isn't a
-     * recognised algebraic node (so a plot without an expression stays untitled).
-     */
+    /** Em gap laid out between two adjacent equations in a multi-expression title. */
+    private static final double TITLE_GAP_EM = 1.0;
+
+    /** Single-AST convenience (a reliable plot's title in the default {@link #TEXT} colour) — used by
+     *  {@link #renderReliable}. Delegates to the colour-coded list form. */
     static Component mathTitleComponent(RecordValue ast) {
         if (ast == null || !isAlgExprNode(ast)) return null;
+        return mathTitleComponent(List.of(new TitledExpr(ast, TEXT)));
+    }
+
+    /**
+     * A fixed-height viewport typesetting one or more {@code AlgExpr} ASTs as a math title (STIX Two
+     * Math) placed above a reliable plot. With several expressions (a multi-plot {@code chart}) they
+     * are laid out left-to-right with a gap and each is drawn in its curve's palette colour, so the
+     * title colour-codes to the lines. Baselines are aligned across the equations. The math is
+     * rendered y-up and framed to its own box by an ortho camera (via {@link PlotView#show}). Returns
+     * {@code null} when there is nothing typesettable (so a plot without an expression stays untitled).
+     */
+    static Component mathTitleComponent(List<TitledExpr> titles) {
+        if (titles == null || titles.isEmpty()) return null;
         MathConstants mc = MathConstants.stixTwoMath();
-        LaidOut laid = new MathLayout(mathAtlas(), mc).layout(algExprToMathBox(ast));
-        float w = (float) Math.max(1e-3, laid.width());
-        float h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
-        List<Layer> layers = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
-        // The bar height sets the title size: the ortho camera now fits the equation tightly to the
-        // bar height (PlotView's 2D fit), so the title fills ~this many em. 3.5em reads as a prominent
-        // title without dominating the window.
+        List<LaidOut> laids = new ArrayList<>();
+        for (TitledExpr t : titles) laids.add(new MathLayout(mathAtlas(), mc).layout(algExprToMathBox(t.ast())));
+        double maxAsc = 0, maxDesc = 0, totalW = 0;
+        for (int i = 0; i < laids.size(); i++) {
+            maxAsc = Math.max(maxAsc, laids.get(i).ascent());
+            maxDesc = Math.max(maxDesc, laids.get(i).descent());
+            totalW += (i == 0 ? 0 : TITLE_GAP_EM) + laids.get(i).width();
+        }
+        float w = (float) Math.max(1e-3, totalW), h = (float) Math.max(1e-3, maxAsc + maxDesc);
+        // All equations share the baseline y = maxDesc; each is offset in x by the running width.
+        List<Layer> layers = new ArrayList<>();
+        double xoff = 0;
+        for (int i = 0; i < laids.size(); i++) {
+            LaidOut laid = laids.get(i);
+            float originY = (float) (maxDesc - laid.descent());     // baseline = originY + descent = maxDesc
+            layers.addAll(MathOgl.toLayers(laid, mc, titles.get(i).color(), 1f, (float) xoff, originY, /*yUp*/ true));
+            xoff += laid.width() + TITLE_GAP_EM;
+        }
+        // The bar height sets the title size: the ortho camera fits the equations tightly to the bar
+        // height (PlotView's 2D fit). 3.5em reads as a prominent title without dominating the window.
         Component.SceneView view = (Component.SceneView) Ui.sceneView()
                 .background(PLOT_BG).height(Em.of(3.5f)).grow(0).interactive(false).build();
         PlotFrame frame = new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h));
@@ -780,7 +842,15 @@ public final class DasumBridge {
     /** Stack a typeset math title above a plot (title fixed-height, plot grows to fill). With no
      *  title AST the plot is returned unwrapped. */
     static Component titledPlot(Component plot, RecordValue titleAst) {
-        Component title = mathTitleComponent(titleAst);
+        return titledPlot(plot, mathTitleComponent(titleAst));
+    }
+
+    /** As above, from a colour-coded list of expressions (a multi-plot chart's title). */
+    static Component titledPlot(Component plot, List<TitledExpr> titles) {
+        return titledPlot(plot, mathTitleComponent(titles));
+    }
+
+    private static Component titledPlot(Component plot, Component title) {
         if (title == null) return plot;
         // grow(1) so the wrapper takes its slot's main-axis space (correct at the window root, and
         // it won't collapse the plot). The title is fixed-height; the plot grows to fill the rest.
@@ -795,7 +865,7 @@ public final class DasumBridge {
      * and writes the same semantic SVG as the {@code exportSvg} native.
      */
     private static Component chartRoot(AnnotatedChart chart, boolean export) {
-        Component plot = titledPlot(annotatedChartComponent(chart), chart.titleAst());
+        Component plot = titledPlot(annotatedChartComponent(chart), chart.titles());
         if (!export) return plot;
         Component button = Themed.button("Export SVG", Em.of(11f), Variant.PRIMARY, 0,
                 () -> writeChartSvgDialog(chart));
@@ -996,7 +1066,16 @@ public final class DasumBridge {
      *  Pontif-side gather; {@link #buildScene} lifts it into the dasum {@link PlotScene2D} IR that
      *  drives BOTH the on-screen renderer and the SVG exporter. Package-visible test seam. */
     record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines,
-                          PlotScene2D.EnclosureBand enclosure, RecordValue titleAst) {}
+                          List<PlotScene2D.EnclosureBand> enclosures, List<TitledExpr> titles) {
+        AnnotatedChart {
+            enclosures = enclosures == null ? List.of() : enclosures;
+            titles = titles == null ? List.of() : titles;
+        }
+    }
+
+    /** One reliably-plotted expression's AST paired with the palette {@link Color} its curve draws in
+     *  — so the typeset math title above a multi-plot chart colour-codes each expression to its line. */
+    record TitledExpr(RecordValue ast, Color color) {}
 
     /**
      * Decompose a {@code chart} layer tuple into series + annotations, applying the per-layer
@@ -1009,8 +1088,8 @@ public final class DasumBridge {
         List<Series> series = new ArrayList<>();
         List<MarkSet> marks = new ArrayList<>();
         List<Double> vlines = new ArrayList<>();
-        PlotScene2D.EnclosureBand enclosure = null;
-        RecordValue titleAst = null;
+        List<PlotScene2D.EnclosureBand> enclosures = new ArrayList<>();
+        List<TitledExpr> titles = new ArrayList<>();
         int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
@@ -1026,11 +1105,17 @@ public final class DasumBridge {
                         series.add(Series.line(xs, ys, color));
                     }
                     case "ExprLayer" -> {
+                        // Each reliable auto-plot takes the next palette slot (shared with Curve), so
+                        // overlaid expr(e), expr(r) draw in distinct colours instead of one cyan.
+                        Color color = SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
                         double xlo = memberD(rv, "xlo"), xhi = memberD(rv, "xhi");
                         Object spans = rv.members().get("spans");
-                        series.addAll(buildReliableSeries(xlo, xhi, spans));
-                        if (enclosure == null) enclosure = enclosureBand(xlo, xhi, spans);
-                        if (titleAst == null && rv.members().get("ast") instanceof RecordValue a) titleAst = a;
+                        series.addAll(buildReliableSeries(xlo, xhi, spans, color));
+                        PlotScene2D.EnclosureBand band = enclosureBand(xlo, xhi, spans);
+                        if (band != null) enclosures.add(band);
+                        if (rv.members().get("ast") instanceof RecordValue a && isAlgExprNode(a)) {
+                            titles.add(new TitledExpr(a, color));
+                        }
                     }
                     case "MarkLayer" -> {
                         int kind = (int) Math.round(memberD(rv, "kind"));
@@ -1045,7 +1130,7 @@ public final class DasumBridge {
                 }
             }
         }
-        return new AnnotatedChart(series, marks, vlines, enclosure, titleAst);
+        return new AnnotatedChart(series, marks, vlines, enclosures, titles);
     }
 
     /** Build the reliable enclosure band from an {@code ExprLayer}'s spans: each bounded (curve)
@@ -1162,7 +1247,7 @@ public final class DasumBridge {
                 feats.add(new PlotScene2D.Feature(kind, f.x(), y, markLabel(ms.kind(), f)));
             }
         }
-        return new PlotScene2D(frame, chart.series(), asy, feats, chart.enclosure());
+        return new PlotScene2D(frame, chart.series(), asy, feats, chart.enclosures());
     }
 
     private static PlotScene2D.FeatureKind featureKind(int kind) {
