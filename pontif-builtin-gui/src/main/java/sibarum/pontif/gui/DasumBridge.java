@@ -161,7 +161,7 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
-        AnnotatedChart chart = buildAnnotatedChart(layers);
+        AnnotatedChart chart = buildAnnotatedChart(layers, ctx);
         boolean export = cfgBool(args, 0, "export", false);   // add an Export-SVG button below the plot
         // Standalone chart window: typeset the expression as a math title above the plot (root fills
         // the window, so the wrapping column can't collapse). Embedded chartView stays untitled — it
@@ -239,7 +239,7 @@ public final class DasumBridge {
      */
     public static Object exportSvg(List<Object> args, NativeCalls.Context ctx) {
         Object layers = args.isEmpty() ? emptyTuple() : args.get(0);
-        writeChartSvgDialog(buildAnnotatedChart(layers));
+        writeChartSvgDialog(buildAnnotatedChart(layers, ctx));
         return new IrInterpreter.DriveResult();
     }
 
@@ -622,7 +622,7 @@ public final class DasumBridge {
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
             // chart `chart(...)` opens standalone, but as a component so it can sit in a layout
             // beside a user Button whose onClick calls exportSvg on the same layers.
-            case "ChartView" -> annotatedChartComponent(buildAnnotatedChart(rv.members().get("layers")));
+            case "ChartView" -> annotatedChartComponent(buildAnnotatedChart(rv.members().get("layers"), ctx));
             // A bare children aggregate (window's root arg) → the implicit root column: FILL the
             // window (both axes) so fill children (a plot) resolve, STRETCH so they span the width.
             case "_tuple" -> Ui.column().fill().padding(Em.of(0.5f)).gap(Em.of(0.8f))
@@ -1066,7 +1066,8 @@ public final class DasumBridge {
      *  Pontif-side gather; {@link #buildScene} lifts it into the dasum {@link PlotScene2D} IR that
      *  drives BOTH the on-screen renderer and the SVG exporter. Package-visible test seam. */
     record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines,
-                          List<PlotScene2D.EnclosureBand> enclosures, List<TitledExpr> titles) {
+                          List<PlotScene2D.EnclosureBand> enclosures, List<TitledExpr> titles,
+                          double[] exprWindow) {
         AnnotatedChart {
             enclosures = enclosures == null ? List.of() : enclosures;
             titles = titles == null ? List.of() : titles;
@@ -1085,11 +1086,25 @@ public final class DasumBridge {
      * {@code VLineLayer} (asymptotes).
      */
     static AnnotatedChart buildAnnotatedChart(Object layersValue) {
+        return buildAnnotatedChart(layersValue, null);
+    }
+
+    /**
+     * As above, with a runtime {@code ctx} that (when non-null) lets several auto-plots SHARE one
+     * x-window: the per-expression auto-frames are unioned into {@code [X0, X1]} and every
+     * {@code ExprLayer} is RE-SAMPLED across it (via the interval evaluator, {@link #classifyJava}),
+     * so each reliable curve spans the full frame width edge-to-edge instead of only its own slice.
+     * The window is stored on the chart so {@link #annotatedFrame} pins the x-axis to it exactly.
+     * With {@code ctx == null} (the headless test seam) each layer keeps its own pre-sampled spans and
+     * window; the shared window is still recorded (the union) so framing stays tight.
+     */
+    static AnnotatedChart buildAnnotatedChart(Object layersValue, NativeCalls.Context ctx) {
         List<Series> series = new ArrayList<>();
         List<MarkSet> marks = new ArrayList<>();
         List<Double> vlines = new ArrayList<>();
         List<PlotScene2D.EnclosureBand> enclosures = new ArrayList<>();
         List<TitledExpr> titles = new ArrayList<>();
+        double[] window = exprWindow(layersValue);   // union of the ExprLayers' auto-frames, or null
         int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
@@ -1108,14 +1123,23 @@ public final class DasumBridge {
                         // Each reliable auto-plot takes the next palette slot (shared with Curve), so
                         // overlaid expr(e), expr(r) draw in distinct colours instead of one cyan.
                         Color color = SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
-                        double xlo = memberD(rv, "xlo"), xhi = memberD(rv, "xhi");
-                        Object spans = rv.members().get("spans");
-                        series.addAll(buildReliableSeries(xlo, xhi, spans, color));
-                        PlotScene2D.EnclosureBand band = enclosureBand(xlo, xhi, spans);
-                        if (band != null) enclosures.add(band);
-                        if (rv.members().get("ast") instanceof RecordValue a && isAlgExprNode(a)) {
-                            titles.add(new TitledExpr(a, color));
+                        boolean isAlg = rv.members().get("ast") instanceof RecordValue a && isAlgExprNode(a);
+                        RecordValue ast = isAlg ? (RecordValue) rv.members().get("ast") : null;
+                        // Re-sample across the SHARED window when we can (ctx + AST + a window); else
+                        // fall back to this layer's own pre-sampled spans over its own window.
+                        double loU, hiU;
+                        List<ReliableSpan> spanList;
+                        if (ctx != null && ast != null && window != null) {
+                            loU = window[0]; hiU = window[1];
+                            spanList = resampleReliable(ast, loU, hiU, ctx);
+                        } else {
+                            loU = memberD(rv, "xlo"); hiU = memberD(rv, "xhi");
+                            spanList = parseSpans(rv.members().get("spans"));
                         }
+                        series.addAll(buildReliableSeries(loU, hiU, spanList, color));
+                        PlotScene2D.EnclosureBand band = enclosureBand(loU, hiU, spanList);
+                        if (band != null) enclosures.add(band);
+                        if (ast != null) titles.add(new TitledExpr(ast, color));
                     }
                     case "MarkLayer" -> {
                         int kind = (int) Math.round(memberD(rv, "kind"));
@@ -1130,14 +1154,47 @@ public final class DasumBridge {
                 }
             }
         }
-        return new AnnotatedChart(series, marks, vlines, enclosures, titles);
+        return new AnnotatedChart(series, marks, vlines, enclosures, titles, window);
+    }
+
+    /** The shared x-window for a chart's reliable plots: the union {@code [min xlo, max xhi]} of every
+     *  {@code ExprLayer}'s (Pontif-side auto-framed) window. {@code null} when the chart has no
+     *  {@code ExprLayer} (a purely sampled-{@code Curve} chart keeps its own data-driven framing). */
+    private static double[] exprWindow(Object layersValue) {
+        double lo = Double.POSITIVE_INFINITY, hi = Double.NEGATIVE_INFINITY;
+        boolean any = false;
+        if (layersValue instanceof RecordValue tuple) {
+            for (Object member : tuple.members().values()) {
+                if (member instanceof RecordValue rv && "ExprLayer".equals(bareType(rv.typeName()))) {
+                    lo = Math.min(lo, memberD(rv, "xlo"));
+                    hi = Math.max(hi, memberD(rv, "xhi"));
+                    any = true;
+                }
+            }
+        }
+        return any && lo < hi ? new double[]{lo, hi} : null;
+    }
+
+    /** Re-sample an expression's reliable interval enclosure across {@code [xlo, xhi]} (256 columns),
+     *  entirely in Java via the {@code evalInterval} native — the same per-column classification the
+     *  Pontif {@code expr(...)} runs, replayed over a chosen window so overlaid plots share one frame. */
+    private static List<ReliableSpan> resampleReliable(RecordValue ast, double xlo, double xhi,
+                                                       NativeCalls.Context ctx) {
+        double dx = (xhi - xlo) / 256.0;
+        List<ReliableSpan> spans = new ArrayList<>(256);
+        for (int i = 0; i < 256; i++) spans.add(classifyJava(ast, xlo + i * dx, xlo + (i + 1) * dx, ctx));
+        return spans;
     }
 
     /** Build the reliable enclosure band from an {@code ExprLayer}'s spans: each bounded (curve)
      *  column contributes its guaranteed {@code [lo, hi]} at the column midpoint. Pole/empty columns
      *  are gaps (skipped). Returns {@code null} when there are &lt; 2 bounded columns. */
     static PlotScene2D.EnclosureBand enclosureBand(double xlo, double xhi, Object spansValue) {
-        List<ReliableSpan> spans = parseSpans(spansValue);
+        return enclosureBand(xlo, xhi, parseSpans(spansValue));
+    }
+
+    /** As above, from already-parsed spans (the re-sampled path). */
+    static PlotScene2D.EnclosureBand enclosureBand(double xlo, double xhi, List<ReliableSpan> spans) {
         int n = spans.size();
         if (n == 0) return null;
         double dx = (xhi - xlo) / n;
@@ -1225,7 +1282,12 @@ public final class DasumBridge {
         if (mx.size() == 1) { mx.add(mx.get(0)); my.add(my.get(0)); }
         if (!mx.isEmpty()) framing.add(Series.line(toArray(mx), toArray(my), TRANSPARENT));
         if (framing.isEmpty()) return null;
-        return LinePlot.autoFrame(0f, 0f, 10f, 5.5f, framing);
+        PlotFrame auto = LinePlot.autoFrame(0f, 0f, 10f, 5.5f, framing);
+        double[] w = chart.exprWindow();
+        if (w == null) return auto;
+        // Reliable plots: pin the x-axis EXACTLY to the (shared) sampling window so the curves reach
+        // the frame edges — no 5% x-pad margin. Keep the data-driven, padded y-range from the sweep.
+        return new PlotFrame(0f, 0f, 10f, 5.5f, Axis.autoRange(w[0], w[1], 0.0), auto.y());
     }
 
     /**

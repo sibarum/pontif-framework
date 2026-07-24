@@ -330,7 +330,11 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   `data-band`), and the typeset math title above the plot COLOUR-CODES each equation to its line —
   laid out left-to-right with aligned baselines on screen (`DasumBridge.mathTitleComponent`) and as
   per-equation colour-wrapped nested SVGs in the export (`titledChartSvg`). The dasum IR carries this
-  as `PlotScene2D.enclosures` (a list, was a single band). Verified headlessly by `PlotExtensionTest`
+  as `PlotScene2D.enclosures` (a list, was a single band). The plots also SHARE one x-window: the
+  per-expression auto-frames are unioned and every `expr(…)` is RE-SAMPLED across it native-side (via
+  the interval evaluator, `classifyJava` — the same replay `plotInput` uses), so each reliable curve
+  spans the full frame width edge-to-edge instead of only its own slice, and the frame x-axis is
+  pinned exactly to that window (no 5% pad). Verified headlessly by `PlotExtensionTest`
   (`multipleAutoPlots_*`, incl. the exact `^`/implicit-mult/proven-`Algebraic` sample syntax) and
   `SvgPlotWriterTest.export_emitsOneEnclosureBandPerReliablePlot`. Window render manual: the
   **Multiple Auto-Plots** welcome sample (`pontif-playground/.../welcome/samples/multi-auto-plot.ptf`).

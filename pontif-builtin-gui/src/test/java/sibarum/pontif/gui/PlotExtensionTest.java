@@ -792,8 +792,10 @@ class PlotExtensionTest {
     private static DasumBridge.AnnotatedChart runChart(String program) {
         Extensions.install(new PlotExtension());
         Object[] captured = new Object[1];
+        NativeCalls.Context[] capturedCtx = new NativeCalls.Context[1];
         NativeCalls.NativeCall stub = (args, ctx) -> {
             captured[0] = args.size() > 1 ? args.get(1) : null;
+            capturedCtx[0] = ctx;   // so the decomposition can re-sample across the shared window
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderChart", stub);
@@ -802,7 +804,7 @@ class PlotExtensionTest {
                 new PontifCompiler().compileAlt(program, "layers.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
         assertNotNull(captured[0], "renderChart should have received the {layers} tuple");
-        return DasumBridge.buildAnnotatedChart(captured[0]);
+        return DasumBridge.buildAnnotatedChart(captured[0], capturedCtx[0]);
     }
 
     private static MarkSetOf firstMarkSet(DasumBridge.AnnotatedChart chart, int kind) {
@@ -890,6 +892,36 @@ class PlotExtensionTest {
                 .map(s -> s.color().r() + "," + s.color().g() + "," + s.color().b())
                 .distinct().count();
         assertTrue(distinctSeriesColours >= 2, "the two auto-plots draw in distinct colours");
+    }
+
+    @Test
+    void multipleAutoPlots_shareOneWindow_soBothCurvesSpanTheFullFrameWidth() {
+        // f and g auto-frame to DIFFERENT windows on their own. Overlaid, they must share ONE x-window
+        // (the union) and each be re-sampled across it, so both curves reach the frame edges instead of
+        // stopping inside their own slice. The frame x-axis is pinned exactly to that shared window.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, chart}
+                function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+                assign proof f:Algebraic
+                function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+                assign proof g:Algebraic
+                main (
+                  let e = $f[Decimal].ast
+                  let r = $g[Decimal].ast
+                  chart({title = "two"}, { expr(e), expr(r) })
+                )""");
+        var win = chart.exprWindow();
+        assertNotNull(win, "a chart with reliable plots records a shared window");
+        var frame = DasumBridge.annotatedFrame(chart);
+        assertEquals(win[0], frame.x().min(), 1e-9, "frame x pinned to the shared window low edge");
+        assertEquals(win[1], frame.x().max(), 1e-9, "frame x pinned to the shared window high edge");
+        // Every reliable series now lives within one half-column of the shared window (re-sampled over
+        // it), and collectively the drawn data reaches both edges — no dead margin on either side.
+        double dx = (win[1] - win[0]) / 256.0, minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
+        for (var s : chart.series()) for (double x : s.xs()) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+        assertTrue(minX <= win[0] + dx, "drawn curves reach the left edge (within a column)");
+        assertTrue(maxX >= win[1] - dx, "drawn curves reach the right edge (within a column)");
     }
 
     @Test
@@ -1076,7 +1108,7 @@ class PlotExtensionTest {
         List<Double> vlines = List.of(-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9);
         var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
                 new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
-        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null, null);
+        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null, null, null);
         var frame = DasumBridge.annotatedFrame(chart);
         var layers = DasumBridge.buildAnnotatedLayers(chart, frame);
 
