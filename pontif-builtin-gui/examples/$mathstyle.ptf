@@ -1,0 +1,38 @@
+# Math typesetting layout config — a DATA MODULE (docs/plotting.md). This file is a single object
+# literal: `requires $mathstyle` binds it under `mathstyle`, and field access (`mathstyle.axisHeight`)
+# is statically type-checked. Every value is in EM (relative to font size), except the two unitless
+# script SCALES and the fontGroup name. Field names mirror dasum's MathConstants; the bridge reads
+# this record into it (a missing field falls back to the STIX Two Math default). Tune here, or copy
+# to a sibling `$…` file per font as we cycle faces — no engine edit.
+{
+  # sizing (unitless scale factors)
+  scriptScale = 0.70,            # sub/superscript size relative to its base (TeX ~ 0.7)
+  scriptScriptScale = 0.55,      # a script nested inside a script (TeX ~ 0.55)
+
+  # the math axis + fractions
+  axisHeight = 0.25,             # math axis above baseline: where a fraction bar / binary minus sit
+  fractionRuleThickness = 0.04,  # thickness of the fraction bar
+  fractionGapNum = 0.10,         # gap between the numerator and the bar
+  fractionGapDen = 0.10,         # gap between the bar and the denominator
+
+  # scripts
+  superscriptShiftUp = 0.45,     # superscript baseline above the base baseline
+  subscriptShiftDown = 0.20,     # subscript baseline below the base baseline
+  scriptGapAfter = 0.05,         # trailing space after a scripted cluster
+
+  # radical (sqrt)
+  radicalRuleThickness = 0.045,  # thickness of the vinculum (bar over the radicand)
+  radicalGapAbove = 0.06,        # gap between the vinculum and the top of the radicand
+  radicalKernBefore = 0.05,      # space before the surd glyph
+  radicalKernAfter = 0.02,       # space between the surd and the radicand (the tuck under the hook)
+
+  # inter-atom spacing
+  spaceBinaryOp = 0.22,          # each side of a binary operator (+ - middot)
+  spaceRelation = 0.28,          # each side of a relation (= ~= -> != ...)
+  spacePunct = 0.17,             # after punctuation (comma in an argument list)
+  functionGap = 0.12,            # between a function name (sin, log) and its argument
+  delimiterPad = 0.05,           # padding just inside a delimiter pair ( ... )
+
+  # glyph source
+  fontGroup = "math"             # the registered dasum FontGroup (the STIX Two Math atlas)
+}

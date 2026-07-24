@@ -42,6 +42,7 @@ import sibarum.dasum.gui.vis.plot.PlotStyle;
 import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
 import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
+import sibarum.dasum.gui.vis.mathtext.MathConstants;
 import sibarum.dasum.gui.vis.plot.Ticks;
 import sibarum.dasum.gui.vis.math.CameraRig;
 import sibarum.dasum.gui.vis.math.CameraSpec;
@@ -1598,6 +1599,44 @@ public final class DasumBridge {
     /** A struct field as a double (Int/Decimal scalar), or 0.0. */
     private static double memberD(RecordValue rv, String field) {
         return toDouble(rv.members().get(field));
+    }
+
+    /** A numeric member as a double, or {@code def} when the field is absent — so a partial config
+     *  record falls back to the profile default per missing field. */
+    private static double memberOr(RecordValue rv, String field, double def) {
+        return rv.members().containsKey(field) ? toDouble(rv.members().get(field)) : def;
+    }
+
+    /**
+     * Read a math-style config record (a {@code requires $…} data module, docs/plotting.md) into the
+     * dasum {@link MathConstants} the typesetter consumes — the seam between "config as data" and the
+     * engine. Fields are read by name; any omitted field falls back to the STIX Two Math default, so a
+     * user config may override only the values they care about. Package-visible test seam.
+     */
+    static MathConstants mathConstantsFrom(RecordValue cfg) {
+        MathConstants d = MathConstants.stixTwoMath();
+        if (cfg == null) return d;
+        String fontGroup = cfg.members().get("fontGroup") instanceof StringValue s ? s.content() : d.fontGroup();
+        return new MathConstants(
+                memberOr(cfg, "scriptScale", d.scriptScale()),
+                memberOr(cfg, "scriptScriptScale", d.scriptScriptScale()),
+                memberOr(cfg, "axisHeight", d.axisHeight()),
+                memberOr(cfg, "fractionRuleThickness", d.fractionRuleThickness()),
+                memberOr(cfg, "fractionGapNum", d.fractionGapNum()),
+                memberOr(cfg, "fractionGapDen", d.fractionGapDen()),
+                memberOr(cfg, "superscriptShiftUp", d.superscriptShiftUp()),
+                memberOr(cfg, "subscriptShiftDown", d.subscriptShiftDown()),
+                memberOr(cfg, "scriptGapAfter", d.scriptGapAfter()),
+                memberOr(cfg, "radicalRuleThickness", d.radicalRuleThickness()),
+                memberOr(cfg, "radicalGapAbove", d.radicalGapAbove()),
+                memberOr(cfg, "radicalKernBefore", d.radicalKernBefore()),
+                memberOr(cfg, "radicalKernAfter", d.radicalKernAfter()),
+                memberOr(cfg, "spaceBinaryOp", d.spaceBinaryOp()),
+                memberOr(cfg, "spaceRelation", d.spaceRelation()),
+                memberOr(cfg, "spacePunct", d.spacePunct()),
+                memberOr(cfg, "functionGap", d.functionGap()),
+                memberOr(cfg, "delimiterPad", d.delimiterPad()),
+                fontGroup);
     }
 
     /**
