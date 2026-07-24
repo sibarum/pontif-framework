@@ -153,8 +153,11 @@ public final class DasumBridge {
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
         AnnotatedChart chart = buildAnnotatedChart(layers);
+        // Standalone chart window: typeset the expression as a math title above the plot (root fills
+        // the window, so the wrapping column can't collapse). Embedded chartView stays untitled — it
+        // composes as a bare fill SceneView, which a wrapping column would otherwise collapse.
         return openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
-                false, () -> annotatedChartComponent(chart));
+                false, () -> titledPlot(annotatedChartComponent(chart), chart.titleAst()));
     }
 
     /**
@@ -684,7 +687,10 @@ public final class DasumBridge {
     static Component titledPlot(Component plot, RecordValue titleAst) {
         Component title = mathTitleComponent(titleAst);
         if (title == null) return plot;
-        return Ui.column().fill().gap(Em.of(0.3f)).padding(Em.of(0.3f)).add(title).add(plot).build();
+        // grow(1) so the wrapper takes its slot's main-axis space (correct at the window root, and
+        // it won't collapse the plot). The title is fixed-height; the plot grows to fill the rest.
+        return Ui.column().fill().grow(1).gap(Em.of(0.3f)).padding(Em.of(0.3f))
+                .add(title).add(plot).build();
     }
 
     /** Whether a record is a recognised {@code AlgExpr} node (so we don't try to typeset e.g. a
@@ -845,8 +851,10 @@ public final class DasumBridge {
         new PlotView(view).show(frame, buildAnnotatedLayers(chart, frame));
         SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
                 .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
-        // Typeset the expression as a math title above the plot (when a `expr(e)` layer carried its AST).
-        return titledPlot(view, chart.titleAst());
+        // Return the bare SceneView — it fills its slot as a direct child (fillsCrossAxis), so an
+        // EMBEDDED chartView composes without collapsing. The math title is added only at the window
+        // ROOT (renderChart), where a wrapping column fills the window; see titledPlot.
+        return view;
     }
 
     /**
