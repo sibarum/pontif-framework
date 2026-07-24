@@ -2,7 +2,7 @@ package sibarum.pontif.gui;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import sibarum.dasum.gui.vis.mathtext.MathConstants;
+import sibarum.dasum.gui.mathtext.MathConstants;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.runtime.PontifCompiler;

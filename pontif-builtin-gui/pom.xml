@@ -47,6 +47,13 @@
             <artifactId>dasum-vis</artifactId>
             <version>${dasum.version}</version>
         </dependency>
+        <!-- Math notation typesetter (MathConstants, and the MathBox IR + backends the render/export
+             natives will drive). -->
+        <dependency>
+            <groupId>sibarum.dasum.gui</groupId>
+            <artifactId>dasum-mathtext</artifactId>
+            <version>${dasum.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-glfw</artifactId>

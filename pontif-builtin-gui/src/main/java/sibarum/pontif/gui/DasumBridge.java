@@ -42,7 +42,7 @@ import sibarum.dasum.gui.vis.plot.PlotStyle;
 import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
 import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
-import sibarum.dasum.gui.vis.mathtext.MathConstants;
+import sibarum.dasum.gui.mathtext.MathConstants;
 import sibarum.dasum.gui.vis.plot.Ticks;
 import sibarum.dasum.gui.vis.math.CameraRig;
 import sibarum.dasum.gui.vis.math.CameraSpec;
