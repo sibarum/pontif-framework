@@ -1171,6 +1171,35 @@ class PlotExtensionTest {
     }
 
     @Test
+    void multiPlotExportSvg_colourCodesEachCurve() throws Exception {
+        // End-to-end SVG export of two colour-coded plots: each curve must carry its OWN stroke, not a
+        // single shared --pontif-curve for every path (which rendered orange as cyan → "orange missing").
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chart, optima}
+                function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+                assign proof f:Algebraic
+                function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+                assign proof g:Algebraic
+                main (
+                  let e = $f[Decimal].ast
+                  let r = $g[Decimal].ast
+                  chart({title = "two"}, { expr(e), expr(r), asymptotes(e), zeros(e), optima(e) })
+                )""");
+        String svg = DasumBridge.titledChartSvg(chart);
+        assertNotNull(svg);
+        // A snapshot on disk for eyeballing the actual drawn geometry (the SVG-verification habit).
+        String out = System.getenv("PLOT_SVG_OUT");
+        if (out != null) java.nio.file.Files.writeString(java.nio.file.Path.of(out), svg);
+        // Curves are cyan (f) and orange (g); count distinct inline strokes ON curve paths.
+        java.util.Set<String> curveStrokes = new java.util.HashSet<>();
+        var m = java.util.regex.Pattern.compile("<path class=\"curve\" style=\"stroke:(#[0-9a-f]+)\"").matcher(svg);
+        while (m.find()) curveStrokes.add(m.group(1));
+        assertTrue(curveStrokes.contains("#66ccff"), "f's curves are cyan; got " + curveStrokes);
+        assertTrue(curveStrokes.contains("#ff8c59"), "g's curves are orange; got " + curveStrokes);
+    }
+
+    @Test
     void annotatedLayers_thinOverlappingAsymptoteLabels_butKeepEveryLine() {
         // Regression (tan(1/x)): poles cluster infinitely toward x=0, so a label on every one stacks
         // into an unreadable smear. Every asymptote must still draw its LINE, but overlapping labels
