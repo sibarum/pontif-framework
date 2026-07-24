@@ -675,8 +675,11 @@ public final class DasumBridge {
         float w = (float) Math.max(1e-3, laid.width());
         float h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
         List<Layer> layers = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
+        // The bar height sets how big the title renders: the ortho camera fits the equation into it,
+        // and since the bar is much wider than any equation it's height-limited — so a taller bar =
+        // a larger title. A pad-free world rect (no extra margin) keeps it filling the bar.
         Component.SceneView view = (Component.SceneView) Ui.sceneView()
-                .background(PLOT_BG).height(Em.of(3f)).grow(0).interactive(false).build();
+                .background(PLOT_BG).height(Em.of(6f)).grow(0).interactive(false).build();
         PlotFrame frame = new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h));
         new PlotView(view).show(frame, layers);
         return view;
