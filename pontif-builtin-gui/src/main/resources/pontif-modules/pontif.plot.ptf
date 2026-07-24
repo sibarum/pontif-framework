@@ -476,9 +476,12 @@ struct VLine(x:Decimal)
 # MarkLayer selects the native's glyph+label: 0 = zero (marker on the x-axis, labelled
 # with x), 1 = optimum (marker at (x,y), labelled "(x, y)"), 2 = intersection (as optimum).
 # `ast` carries the source expression tree so the chart can typeset it as a math title above the plot.
+# `ast` carries the SOURCE expression so a chart can colour-code each annotation to its plot: the
+# native matches a MarkLayer/VLineLayer's ast to the ExprLayer of the same expression and reuses its
+# palette colour (falling back to a neutral default when the annotation has no matching plot).
 struct ExprLayer(spans:_, xlo:Decimal, xhi:Decimal, ast:AlgExpr)
-struct MarkLayer(pts:_, kind:Int)
-struct VLineLayer(xs:_)
+struct MarkLayer(pts:_, kind:Int, ast:AlgExpr)
+struct VLineLayer(xs:_, ast:AlgExpr)
 
 # 384 probe columns — the annotation scan resolution (finer than the 256 render columns
 # so features that sit close together still resolve into distinct markers).
@@ -541,7 +544,7 @@ function zeros(e:AlgExpr):MarkLayer -> (
   let [{xlo, xhi}] = autoFrame(e)
   let w = (xhi - xlo) / 384.0
   let pts = &featureIndices:[ (i:Int) -> zeroAt(e, xlo, w, i) ]
-  MarkLayer(pts, 0)
+  MarkLayer(pts, 0, e)
 )
 
 # === Local optima ==================================================================
@@ -569,7 +572,7 @@ function optima(e:AlgExpr):MarkLayer -> (
   let [{xlo, xhi}] = autoFrame(e)
   let w = (xhi - xlo) / 384.0
   let pts = &featureIndices:[ (i:Int) -> optAt(e, xlo, w, i) ]
-  MarkLayer(pts, 1)
+  MarkLayer(pts, 1, e)
 )
 
 # === Vertical asymptotes ===========================================================
@@ -620,7 +623,7 @@ function asymptotes(e:AlgExpr):VLineLayer -> (
   let [{xlo, xhi}] = autoFrame(e)
   let w = (xhi - xlo) / 384.0
   let xs = &featureIndices:[ (i:Int) -> asymAt(e, xlo, w, i) ]
-  VLineLayer(xs)
+  VLineLayer(xs, e)
 )
 
 # === Intersections =================================================================
@@ -645,7 +648,7 @@ function intersections(e:AlgExpr, g:AlgExpr):MarkLayer -> (
   let w = (xhi - xlo) / 384.0
   let d = Sub(e, g)
   let pts = &featureIndices:[ (i:Int) -> intersectAt(e, d, xlo, w, i) ]
-  MarkLayer(pts, 2)
+  MarkLayer(pts, 2, e)
 )
 
 # === An algebraic expression as a chart layer ======================================

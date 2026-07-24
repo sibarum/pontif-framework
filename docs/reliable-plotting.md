@@ -334,7 +334,10 @@ interface; (2)–(6) are untouched. That is the whole point of the seams.
   per-expression auto-frames are unioned and every `expr(…)` is RE-SAMPLED across it native-side (via
   the interval evaluator, `classifyJava` — the same replay `plotInput` uses), so each reliable curve
   spans the full frame width edge-to-edge instead of only its own slice, and the frame x-axis is
-  pinned exactly to that window (no 5% pad). Verified headlessly by `PlotExtensionTest`
+  pinned exactly to that window (no 5% pad). The plots also share ONE robust y-range (computed across
+  all of them), so every curve clips and blows up to the SAME top/bottom at its poles — a tall
+  function and a flatter one both reach the vertical frame edges, instead of each stopping at its own
+  band (blue reaching ±20 while orange halted at ±10). Verified headlessly by `PlotExtensionTest`
   (`multipleAutoPlots_*`, incl. the exact `^`/implicit-mult/proven-`Algebraic` sample syntax) and
   `SvgPlotWriterTest.export_emitsOneEnclosureBandPerReliablePlot`. Window render manual: the
   **Multiple Auto-Plots** welcome sample (`pontif-playground/.../welcome/samples/multi-auto-plot.ptf`).

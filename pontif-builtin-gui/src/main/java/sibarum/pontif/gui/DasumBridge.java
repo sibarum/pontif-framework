@@ -393,13 +393,31 @@ public final class DasumBridge {
         return buildReliableSeries(xlo, xhi, spans, SERIES_COLOR);
     }
 
-    /** As above, from already-parsed spans in a chosen {@code color}. */
+    /** As above, from already-parsed spans in a chosen {@code color}, with a per-expression robust
+     *  y-range. */
     static List<Series> buildReliableSeries(double xlo, double xhi, List<ReliableSpan> spans, Color color) {
-        int n = spans.size();
-        if (n == 0) return List.of();
+        return buildReliableSeries(xlo, xhi, spans, color,
+                spans.isEmpty() ? new double[]{-1, 1} : robustRange(reliableBounds(spans)));
+    }
+
+    /** The guaranteed {@code [lo, hi]} values of every bounded (curve) column — the sample set the
+     *  robust y-range is taken over. */
+    private static List<Double> reliableBounds(List<ReliableSpan> spans) {
         List<Double> bounds = new ArrayList<>();
         for (ReliableSpan s : spans) if (s.kind() == 0) { bounds.add(s.lo()); bounds.add(s.hi()); }
-        double[] yr = robustRange(bounds);
+        return bounds;
+    }
+
+    /**
+     * As above, but clipped and pole-aimed to an EXPLICIT y-range {@code yr = [ymin, ymax]}. Several
+     * overlaid reliable plots pass ONE shared range here (computed across all of them), so every curve
+     * blows up to the SAME top/bottom at its poles — otherwise each would stop at its own robust band
+     * (a tall function reaching the frame edge while a flatter one halts halfway up).
+     */
+    static List<Series> buildReliableSeries(double xlo, double xhi, List<ReliableSpan> spans,
+                                            Color color, double[] yr) {
+        int n = spans.size();
+        if (n == 0) return List.of();
         double ymin = yr[0], ymax = yr[1];
         double dx = (xhi - xlo) / n;
         double beyond = ymax - ymin;                 // how far past an edge to aim an ∞-bound point
@@ -1057,15 +1075,16 @@ public final class DasumBridge {
     record Feature(double x, double y) {}
 
     /** A set of markers sharing a label style: kind 0 = zero (x-axis, x label), 1 = optimum
-     *  ("(x, y)" label), 2 = intersection ("(x, y)" label). */
-    record MarkSet(int kind, List<Feature> pts) {}
+     *  ("(x, y)" label), 2 = intersection ("(x, y)" label). {@code color} colour-codes them to the
+     *  owning plot (null = neutral default). */
+    record MarkSet(int kind, List<Feature> pts, Color color) {}
 
     /** The parsed, failsafe-applied decomposition of a {@code chart} layer list: drawn series (from
      *  sampled {@code Curve} + {@code ExprLayer}), marker sets, vertical-asymptote x's, and the
      *  reliable interval-enclosure band (from an {@code ExprLayer}, else {@code null}). This is the
      *  Pontif-side gather; {@link #buildScene} lifts it into the dasum {@link PlotScene2D} IR that
      *  drives BOTH the on-screen renderer and the SVG exporter. Package-visible test seam. */
-    record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines,
+    record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<VLineMark> vlines,
                           List<PlotScene2D.EnclosureBand> enclosures, List<TitledExpr> titles,
                           double[] exprWindow) {
         AnnotatedChart {
@@ -1101,10 +1120,13 @@ public final class DasumBridge {
     static AnnotatedChart buildAnnotatedChart(Object layersValue, NativeCalls.Context ctx) {
         List<Series> series = new ArrayList<>();
         List<MarkSet> marks = new ArrayList<>();
-        List<Double> vlines = new ArrayList<>();
+        List<VLineMark> vlines = new ArrayList<>();
         List<PlotScene2D.EnclosureBand> enclosures = new ArrayList<>();
         List<TitledExpr> titles = new ArrayList<>();
         double[] window = exprWindow(layersValue);   // union of the ExprLayers' auto-frames, or null
+        List<ExprPlot> exprPlots = new ArrayList<>(); // reliable plots, resolved but not yet drawn
+        List<RawMark> rawMarks = new ArrayList<>();   // annotation layers, coloured after all exprs seen
+        List<RawVLine> rawVLines = new ArrayList<>();
         int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
@@ -1121,7 +1143,8 @@ public final class DasumBridge {
                     }
                     case "ExprLayer" -> {
                         // Each reliable auto-plot takes the next palette slot (shared with Curve), so
-                        // overlaid expr(e), expr(r) draw in distinct colours instead of one cyan.
+                        // overlaid expr(e), expr(r) draw in distinct colours instead of one cyan. Resolve
+                        // its spans now; defer series-building until the SHARED y-range is known (below).
                         Color color = SERIES_PALETTE[autoIdx++ % SERIES_PALETTE.length];
                         boolean isAlg = rv.members().get("ast") instanceof RecordValue a && isAlgExprNode(a);
                         RecordValue ast = isAlg ? (RecordValue) rv.members().get("ast") : null;
@@ -1136,26 +1159,77 @@ public final class DasumBridge {
                             loU = memberD(rv, "xlo"); hiU = memberD(rv, "xhi");
                             spanList = parseSpans(rv.members().get("spans"));
                         }
-                        series.addAll(buildReliableSeries(loU, hiU, spanList, color));
-                        PlotScene2D.EnclosureBand band = enclosureBand(loU, hiU, spanList);
-                        if (band != null) enclosures.add(band);
-                        if (ast != null) titles.add(new TitledExpr(ast, color));
+                        exprPlots.add(new ExprPlot(color, loU, hiU, spanList, ast));
                     }
                     case "MarkLayer" -> {
                         int kind = (int) Math.round(memberD(rv, "kind"));
                         List<Feature> pts = parseMarks(rv.members().get("pts"));
-                        if (capOk(pts.size(), markKindName(kind))) marks.add(new MarkSet(kind, pts));
+                        if (capOk(pts.size(), markKindName(kind))) rawMarks.add(new RawMark(kind, pts, astKey(rv.members().get("ast"))));
                     }
                     case "VLineLayer" -> {
                         List<Double> xs = parseVLines(rv.members().get("xs"));
-                        if (capOk(xs.size(), "asymptotes")) vlines.addAll(xs);
+                        if (capOk(xs.size(), "asymptotes")) rawVLines.add(new RawVLine(xs, astKey(rv.members().get("ast"))));
                     }
                     default -> { /* unknown layer kind — ignored */ }
                 }
             }
         }
+        // ONE shared robust y-range across ALL reliable plots, so every curve clips and blows up to the
+        // SAME top/bottom — a tall function and a flatter one both reach the frame edges at their poles,
+        // instead of each stopping at its own band (blue to ±20, orange only to ±10).
+        double[] yShared = null;
+        Map<String, Color> colorByAst = new LinkedHashMap<>();   // an expression's AST → its plot colour
+        if (!exprPlots.isEmpty()) {
+            List<Double> allBounds = new ArrayList<>();
+            for (ExprPlot ep : exprPlots) allBounds.addAll(reliableBounds(ep.spans()));
+            yShared = allBounds.isEmpty() ? new double[]{-1, 1} : robustRange(allBounds);
+        }
+        for (ExprPlot ep : exprPlots) {
+            series.addAll(buildReliableSeries(ep.xlo(), ep.xhi(), ep.spans(), ep.color(), yShared));
+            PlotScene2D.EnclosureBand band = enclosureBand(ep.xlo(), ep.xhi(), ep.spans());
+            if (band != null) enclosures.add(band);
+            if (ep.ast() != null) {
+                titles.add(new TitledExpr(ep.ast(), ep.color()));
+                colorByAst.putIfAbsent(astKey(ep.ast()), ep.color());
+            }
+        }
+        // Colour-code each annotation to its owning plot: match its source-expression AST to the plot of
+        // the same expression; a null colour (no matching plot) falls back to the neutral default.
+        for (RawMark rm : rawMarks) marks.add(new MarkSet(rm.kind(), rm.pts(), colorByAst.get(rm.astKey())));
+        for (RawVLine rv : rawVLines) {
+            Color c = colorByAst.get(rv.astKey());
+            for (double x : rv.xs()) vlines.add(new VLineMark(x, c));
+        }
         return new AnnotatedChart(series, marks, vlines, enclosures, titles, window);
     }
+
+    /** A vertical asymptote at data-x {@code x}, tinted {@code color} (null = neutral default). */
+    record VLineMark(double x, Color color) {}
+
+    /** A raw marker layer held until all expression plots are seen, so its {@code astKey} can be matched
+     *  to the owning plot's colour. */
+    private record RawMark(int kind, List<Feature> pts, String astKey) {}
+
+    /** A raw asymptote layer, likewise deferred for colour-matching by {@code astKey}. */
+    private record RawVLine(List<Double> xs, String astKey) {}
+
+    /** A structural key for an AST record tree (type + members, recursively) — two references to the
+     *  same expression key equal, so {@code asymptotes(e)} matches {@code expr(e)} regardless of order.
+     *  {@code null} when there is no AST (an annotation with nothing to match keeps the default colour). */
+    private static String astKey(Object v) {
+        if (v instanceof RecordValue r) {
+            StringBuilder sb = new StringBuilder(bareType(r.typeName())).append('(');
+            for (Map.Entry<String, Object> e : r.members().entrySet()) {
+                sb.append(e.getKey()).append('=').append(astKey(e.getValue())).append(',');
+            }
+            return sb.append(')').toString();
+        }
+        return v == null ? null : String.valueOf(v);
+    }
+
+    /** A reliable plot resolved from an {@code ExprLayer} — its colour, x-window, classified spans, and
+     *  (optional) AST for the title — held until the shared y-range is computed across all such plots. */
+    private record ExprPlot(Color color, double xlo, double xhi, List<ReliableSpan> spans, RecordValue ast) {}
 
     /** The shared x-window for a chart's reliable plots: the union {@code [min xlo, max xhi]} of every
      *  {@code ExprLayer}'s (Pontif-side auto-framed) window. {@code null} when the chart has no
@@ -1300,13 +1374,13 @@ public final class DasumBridge {
      */
     static PlotScene2D buildScene(AnnotatedChart chart, PlotFrame frame) {
         List<PlotScene2D.Asymptote> asy = new ArrayList<>();
-        for (double x : chart.vlines()) asy.add(new PlotScene2D.Asymptote(x, "x=" + fmt(x)));
+        for (VLineMark v : chart.vlines()) asy.add(new PlotScene2D.Asymptote(v.x(), "x=" + fmt(v.x()), v.color()));
         List<PlotScene2D.Feature> feats = new ArrayList<>();
         for (MarkSet ms : chart.marks()) {
             PlotScene2D.FeatureKind kind = featureKind(ms.kind());
             for (Feature f : ms.pts()) {
                 double y = ms.kind() == 0 ? 0.0 : f.y();       // a zero is marked on the x-axis
-                feats.add(new PlotScene2D.Feature(kind, f.x(), y, markLabel(ms.kind(), f)));
+                feats.add(new PlotScene2D.Feature(kind, f.x(), y, markLabel(ms.kind(), f), ms.color()));
             }
         }
         return new PlotScene2D(frame, chart.series(), asy, feats, chart.enclosures());

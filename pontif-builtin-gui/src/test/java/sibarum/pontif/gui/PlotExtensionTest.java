@@ -916,12 +916,83 @@ class PlotExtensionTest {
         var frame = DasumBridge.annotatedFrame(chart);
         assertEquals(win[0], frame.x().min(), 1e-9, "frame x pinned to the shared window low edge");
         assertEquals(win[1], frame.x().max(), 1e-9, "frame x pinned to the shared window high edge");
-        // Every reliable series now lives within one half-column of the shared window (re-sampled over
-        // it), and collectively the drawn data reaches both edges — no dead margin on either side.
-        double dx = (win[1] - win[0]) / 256.0, minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
-        for (var s : chart.series()) for (double x : s.xs()) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
-        assertTrue(minX <= win[0] + dx, "drawn curves reach the left edge (within a column)");
-        assertTrue(maxX >= win[1] - dx, "drawn curves reach the right edge (within a column)");
+        // EACH expression (grouped by its palette colour) must reach BOTH edges — not just the union.
+        // A per-color check, because f alone spanning the window would mask g stopping at its own xhi
+        // (the exact "orange doesn't reach the edge" symptom the aggregate check couldn't catch).
+        double dx = (win[1] - win[0]) / 256.0;
+        java.util.Map<String, double[]> byColor = new java.util.LinkedHashMap<>();
+        for (var s : chart.series()) {
+            String c = s.color().r() + "," + s.color().g() + "," + s.color().b();
+            double lo = Double.POSITIVE_INFINITY, hi = Double.NEGATIVE_INFINITY;
+            for (double x : s.xs()) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+            byColor.merge(c, new double[]{lo, hi},
+                    (a, b) -> new double[]{Math.min(a[0], b[0]), Math.max(a[1], b[1])});
+        }
+        assertEquals(2, byColor.size(), "two distinctly-coloured reliable plots");
+        byColor.forEach((c, ext) -> {
+            assertTrue(ext[0] <= win[0] + dx, "curve " + c + " reaches the left edge; got min x " + ext[0]);
+            assertTrue(ext[1] >= win[1] - dx, "curve " + c + " reaches the right edge; got max x " + ext[1]);
+        });
+    }
+
+    @Test
+    void multipleAutoPlots_annotationsColourMatchTheirOwningPlot() {
+        // asymptotes(e) and asymptotes(r) must take e's and r's palette colours respectively — the
+        // native matches each annotation's source AST to the plot of the same expression, regardless of
+        // layer order. f (e) poles at x≈-0.591, 2.257; g (r) poles at x=-4, 1.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, chart}
+                function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+                assign proof f:Algebraic
+                function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+                assign proof g:Algebraic
+                main (
+                  let e = $f[Decimal].ast
+                  let r = $g[Decimal].ast
+                  chart({title = "t"}, { expr(e), expr(r), asymptotes(e), asymptotes(r) })
+                )""");
+        // e = palette slot 0 (cyan), r = palette slot 1 (orange).
+        var cyan = new sibarum.dasum.gui.core.render.Color(0.40f, 0.80f, 1.00f, 1f);
+        var orange = new sibarum.dasum.gui.core.render.Color(1.00f, 0.55f, 0.35f, 1f);
+        for (var v : chart.vlines()) assertNotNull(v.color(), "every asymptote is colour-matched to its plot");
+        var atPole1 = chart.vlines().stream().filter(v -> Math.abs(v.x() - 1.0) < 1e-3).findFirst().orElseThrow();
+        var atPole2 = chart.vlines().stream().filter(v -> Math.abs(v.x() - 2.257) < 5e-3).findFirst().orElseThrow();
+        assertEquals(orange, atPole1.color(), "g's asymptote at x=1 takes g's (orange) colour");
+        assertEquals(cyan, atPole2.color(), "f's asymptote at x≈2.257 takes f's (cyan) colour");
+    }
+
+    @Test
+    void multipleAutoPlots_shareOneYRange_soBothBlowUpToTheSameEdges() {
+        // f blows up to a much larger magnitude than g near their poles. On one shared frame each must
+        // use the SAME robust y-band, so both curves' pole spikes reach the SAME top/bottom — otherwise
+        // f reaches ±20 while g stops at its own ±10, leaving g visibly short of the vertical edges.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, chart}
+                function f(x:Decimal):Decimal -> (2*x^3+7) / (3*x^2-5*x-4)
+                assign proof f:Algebraic
+                function g(x:Decimal):Decimal -> (2*x+3)/(x^2+3*x-4)
+                assign proof g:Algebraic
+                main (
+                  let e = $f[Decimal].ast
+                  let r = $g[Decimal].ast
+                  chart({title = "two"}, { expr(e), expr(r) })
+                )""");
+        java.util.Map<String, double[]> yByColor = new java.util.LinkedHashMap<>();
+        for (var s : chart.series()) {
+            String c = s.color().r() + "," + s.color().g() + "," + s.color().b();
+            double lo = Double.POSITIVE_INFINITY, hi = Double.NEGATIVE_INFINITY;
+            for (double y : s.ys()) { lo = Math.min(lo, y); hi = Math.max(hi, y); }
+            yByColor.merge(c, new double[]{lo, hi},
+                    (a, b) -> new double[]{Math.min(a[0], b[0]), Math.max(a[1], b[1])});
+        }
+        assertEquals(2, yByColor.size(), "two distinctly-coloured reliable plots");
+        var ys = yByColor.values().iterator();
+        double[] y0 = ys.next(), y1 = ys.next();
+        // Both blow up (poles on both) to the SAME shared band edges — top and bottom match tightly.
+        assertEquals(y0[1], y1[1], 1e-9, "both curves blow up to the same TOP edge");
+        assertEquals(y0[0], y1[0], 1e-9, "both curves blow down to the same BOTTOM edge");
     }
 
     @Test
@@ -948,11 +1019,11 @@ class PlotExtensionTest {
         assertEquals(2, chart.vlines().size(), "two vertical asymptotes, at x = ±1");
         // refinePole bisects the pole column, so the reported x is the true pole to display precision
         // (not the ±w/2 column midpoint) — an integer asymptote must land on the integer and label "1".
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x + 1.0) < 1e-4), "asymptote at x = -1 (refined)");
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 1.0) < 1e-4), "asymptote at x = 1 (refined)");
-        assertTrue(chart.vlines().stream().anyMatch(x -> DasumBridge.fmt(x).equals("1")),
+        assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x() + 1.0) < 1e-4), "asymptote at x = -1 (refined)");
+        assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x() - 1.0) < 1e-4), "asymptote at x = 1 (refined)");
+        assertTrue(chart.vlines().stream().anyMatch(v -> DasumBridge.fmt(v.x()).equals("1")),
                 "the label reads the clean integer '1', not '0.997' / '1.002'");
-        assertTrue(chart.vlines().stream().anyMatch(x -> DasumBridge.fmt(x).equals("-1")),
+        assertTrue(chart.vlines().stream().anyMatch(v -> DasumBridge.fmt(v.x()).equals("-1")),
                 "and '-1' for the negative asymptote");
     }
 
@@ -988,9 +1059,9 @@ class PlotExtensionTest {
                 function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
                 assign proof f:Algebraic
                 chart({title = "rational"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast) })""");
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x) < 1e-3),
+        assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x()) < 1e-3),
                 "asymptote at the double pole x = 0; got " + chart.vlines());
-        assertTrue(chart.vlines().stream().anyMatch(x -> Math.abs(x - 5.0 / 13.0) < 1e-3),
+        assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x() - 5.0 / 13.0) < 1e-3),
                 "asymptote at the smeared simple pole x = 5/13 ≈ 0.3846; got " + chart.vlines());
         // The smeared simple pole must NOT be misclassified as a dense fill block: no kind-3 columns.
         assertTrue(chart.series().stream().noneMatch(PlotExtensionTest::isFullHeightBar),
@@ -1105,7 +1176,9 @@ class PlotExtensionTest {
         // into an unreadable smear. Every asymptote must still draw its LINE, but overlapping labels
         // are dropped — the well-separated ones (-0.9, 0.9) survive, the tight cluster near 0 collapses
         // to at most a couple of labels.
-        List<Double> vlines = List.of(-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9);
+        double[] vx = {-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9};
+        List<DasumBridge.VLineMark> vlines = new java.util.ArrayList<>();
+        for (double x : vx) vlines.add(new DasumBridge.VLineMark(x, null));
         var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
                 new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
         var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null, null, null);
