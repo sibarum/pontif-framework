@@ -7,7 +7,7 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            Volume3D, Volume, volume, normals, plotExpr, autoFrame,
            ExprLayer, MarkLayer, VLineLayer, expr,
            zeros, optima, asymptotes, intersections,
-           ChartView, chartView, exportSvg}
+           ChartView, chartView, exportSvg, exportMathSvg}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -262,6 +262,11 @@ function chartView(cfg:_, layers:_):ChartView -> ChartView(cfg, layers)
 # semantically-classed SVG and pop a native Save dialog to write it. For-effect; wire it to a
 # button's onClick beside the plot. Placeholder body; the native runs.
 function exportSvg(layers:_):Stream[String] -> {}
+
+# Native: typeset an algebraic expression's AST (`$f[Decimal].ast`) as expertly-formatted math
+# (STIX Two Math) and pop a Save dialog to write it as an SVG — the `String -> AST -> Formatted`
+# pipeline's render half, over the reliable AST we already plot. Placeholder body; the native runs.
+function exportMathSvg(e:AlgExpr):Stream[String] -> {}
 
 # --- Reliable plotting: interval-arithmetic column rasterization -----------------
 # (docs/reliable-plotting.md) An algebraic Expression is rendered by SOUND interval

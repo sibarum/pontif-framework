@@ -43,6 +43,10 @@ import sibarum.dasum.gui.vis.plot.PlotView;
 import sibarum.dasum.gui.vis.plot.Series;
 import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
 import sibarum.dasum.gui.mathtext.MathConstants;
+import sibarum.dasum.gui.mathtext.MathBox;
+import sibarum.dasum.gui.mathtext.MathLayout;
+import sibarum.dasum.gui.mathtext.MathSvg;
+import sibarum.dasum.gui.mathtext.LaidOut;
 import sibarum.dasum.gui.vis.plot.Ticks;
 import sibarum.dasum.gui.vis.math.CameraRig;
 import sibarum.dasum.gui.vis.math.CameraSpec;
@@ -1637,6 +1641,114 @@ public final class DasumBridge {
                 memberOr(cfg, "functionGap", d.functionGap()),
                 memberOr(cfg, "delimiterPad", d.delimiterPad()),
                 fontGroup);
+    }
+
+    // --- AlgExpr → MathBox: typeset an algebraic AST (docs/plotting.md) ---------------------------
+    // The `AlgExpr` front-end of the math typesetter: a precedence-correct tree-walk from the same
+    // AST we plot into the semantic MathBox IR, which then lays out + renders to SVG/OGL. Div →
+    // fraction, Pow → superscript (or a radical for the ½ power), Mul → juxtaposition (a middot only
+    // before a number, so a coefficient·power reads as `7x`, not `7·x`, but 2·3 doesn't become `23`),
+    // functions → an upright name + parenthesised argument. Parentheses are added by precedence.
+
+    /** Operator precedence for parenthesization: higher binds tighter. Div is a fraction (visually
+     *  grouped), so it and the atoms never need parens around their children. */
+    private static int mathPrec(RecordValue n) {
+        return switch (bareType(n.typeName())) {
+            case "Add", "Sub" -> 1;
+            case "Mul" -> 2;
+            case "Pow" -> 4;
+            default -> 5;                       // Const / Param / Div / Sin… — atomic or self-grouping
+        };
+    }
+
+    /** Translate an {@code AlgExpr} AST value into a {@link MathBox}. Package-visible test seam. */
+    static MathBox algExprToMathBox(RecordValue ast) {
+        return mathConv(ast);
+    }
+
+    /** Convert, wrapping in parentheses when the node binds looser than the surrounding context. */
+    private static MathBox mathConvP(Object node, int minPrec) {
+        MathBox b = mathConv(node);
+        return (node instanceof RecordValue rv && mathPrec(rv) < minPrec) ? MathBox.paren(b) : b;
+    }
+
+    private static MathBox mathConv(Object node) {
+        if (!(node instanceof RecordValue r)) return MathBox.num(String.valueOf(node));
+        Map<String, Object> m = r.members();
+        return switch (bareType(r.typeName())) {
+            case "Const" -> MathBox.num(fmt(memberD(r, "value")));
+            case "Param" -> MathBox.var(str(r, "name"));
+            case "Add" -> MathBox.row(mathConvP(m.get("left"), 1), MathBox.op("+"), mathConvP(m.get("right"), 1));
+            case "Sub" -> MathBox.row(mathConvP(m.get("left"), 1), MathBox.op("−"), mathConvP(m.get("right"), 2));
+            case "Mul" -> mathMul(m.get("left"), m.get("right"));
+            case "Div" -> MathBox.frac(mathConv(m.get("left")), mathConv(m.get("right")));
+            case "Pow" -> mathPow(m.get("base"), m.get("exponent"));
+            case "Sin" -> mathFunc("sin", m.get("arg"));
+            case "Cos" -> mathFunc("cos", m.get("arg"));
+            case "Tan" -> mathFunc("tan", m.get("arg"));
+            case "Log" -> mathFunc("log", m.get("arg"));
+            case "Exp" -> MathBox.pow(MathBox.sym("e"), mathConv(m.get("arg")));
+            default -> MathBox.num("?");
+        };
+    }
+
+    private static MathBox mathMul(Object l, Object r) {
+        MathBox lb = mathConvP(l, 2), rb = mathConvP(r, 2);
+        boolean rightIsNumber = r instanceof RecordValue rv && "Const".equals(bareType(rv.typeName()));
+        return rightIsNumber ? MathBox.row(lb, MathBox.op("·"), rb) : MathBox.row(lb, rb);
+    }
+
+    private static MathBox mathPow(Object base, Object exp) {
+        if (exp instanceof RecordValue ev && "Const".equals(bareType(ev.typeName()))
+                && Math.abs(memberD(ev, "value") - 0.5) < 1e-9) {
+            return MathBox.sqrt(mathConv(base));              // x^(1/2) → √x
+        }
+        return MathBox.pow(mathConvP(base, 5), mathConv(exp));
+    }
+
+    private static MathBox mathFunc(String name, Object arg) {
+        return MathBox.row(MathBox.fn(name), MathBox.paren(mathConv(arg)));
+    }
+
+    /** The math-font atlas metrics for layout (lazy classpath load; same atlas the FontGroup uses). */
+    private static AtlasData mathAtlas;
+    private static synchronized AtlasData mathAtlas() {
+        if (mathAtlas == null) mathAtlas = AtlasData.loadFromResource("/dasum/atlas/math.json");
+        return mathAtlas;
+    }
+
+    /** Typeset an {@code AlgExpr} AST to an SVG string. Package-visible test seam. */
+    static String mathSvg(RecordValue ast) {
+        LaidOut laid = new MathLayout(mathAtlas(), MathConstants.stixTwoMath())
+                .layout(algExprToMathBox(ast));
+        return MathSvg.write(laid, 48.0);
+    }
+
+    /**
+     * {@code exportMathSvg(e)} (pontif.plot): typeset an algebraic expression's AST to a semantic
+     * SVG and pop a native Save dialog to write it — the math sibling of {@link #exportSvg}. Wire it
+     * to a button, or call it for-effect. A cancelled dialog is a no-op.
+     */
+    public static Object exportMathSvg(List<Object> args, NativeCalls.Context ctx) {
+        if (args.isEmpty() || !(args.get(0) instanceof RecordValue ast)) {
+            System.err.println("exportMathSvg: expected an AlgExpr AST.");
+            return new IrInterpreter.DriveResult();
+        }
+        String svg = mathSvg(ast);
+        Optional<Path> dest = FileDialog.save(null,
+                List.of(FileDialog.Filter.of("SVG image", "svg")), null, "math.svg");
+        if (dest.isPresent()) {
+            Path p = dest.get();
+            if (!p.getFileName().toString().toLowerCase().endsWith(".svg")) {
+                p = p.resolveSibling(p.getFileName() + ".svg");
+            }
+            try {
+                Files.writeString(p, svg);
+            } catch (IOException e) {
+                System.err.println("exportMathSvg: could not write " + p + ": " + e.getMessage());
+            }
+        }
+        return new IrInterpreter.DriveResult();
     }
 
     /**
