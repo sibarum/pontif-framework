@@ -7,7 +7,7 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            Volume3D, Volume, volume, normals, plotExpr, autoFrame,
            ExprLayer, MarkLayer, VLineLayer, expr,
            zeros, optima, asymptotes, intersections,
-           ChartView, chartView, exportSvg, exportMathSvg}
+           ChartView, chartView, exportSvg, exportMathSvg, plotInput}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -267,6 +267,14 @@ function exportSvg(layers:_):Stream[String] -> {}
 # (STIX Two Math) and pop a Save dialog to write it as an SVG — the `String -> AST -> Formatted`
 # pipeline's render half, over the reliable AST we already plot. Placeholder body; the native runs.
 function exportMathSvg(e:AlgExpr):Stream[String] -> {}
+
+# Native: open an interactive window with an editable expression field over a live
+# reliable plot + typeset title. Typing re-parses the arithmetic subset (numbers,
+# single-letter variables, + - * / ^, parens, implicit mult) and re-plots, debounced;
+# an invalid input keeps the last good plot and marks the field. Unlike `plotExpr`,
+# which takes a pre-built AST, this takes the raw STRING and parses it in the loop.
+# Placeholder body; the native runs.
+function plotInput(expr:String):Stream[String] -> {}
 
 # --- Reliable plotting: interval-arithmetic column rasterization -----------------
 # (docs/reliable-plotting.md) An algebraic Expression is rendered by SOUND interval

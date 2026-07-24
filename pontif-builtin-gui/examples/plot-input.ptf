@@ -1,0 +1,12 @@
+requires pontif.plot.{plotInput}
+
+# An interactive plot: a window with an editable expression field over a live reliable plot and a
+# typeset math title. Type an expression — numbers, single-letter variables, `+ - * / ^`, parentheses,
+# and implicit multiplication (`2x`, `(x+1)(x-1)`) — and the plot re-fits and re-draws as you type
+# (debounced). While the text isn't yet a valid expression the last good plot is kept and the field
+# shows a small marker, so mid-keystroke states don't blank the view. The initial string seeds it.
+#
+# Unlike `plotExpr`, which takes a pre-built AST from `$f[Decimal].ast`, `plotInput` takes the raw
+# STRING and parses it in the loop — that's what makes live editing possible.
+
+main plotInput("(2x+3) / (x^2+3x-4)")

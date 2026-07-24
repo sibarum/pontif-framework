@@ -8,9 +8,12 @@ import sibarum.dasum.gui.core.component.JustifyContent;
 import sibarum.dasum.gui.core.em.Em;
 import sibarum.dasum.gui.core.em.EmContext;
 import sibarum.dasum.gui.core.event.EventLoop;
+import sibarum.dasum.gui.core.input.FocusState;
 import sibarum.dasum.gui.core.input.Handlers;
 import sibarum.dasum.gui.core.input.HoverState;
 import sibarum.dasum.gui.core.input.InputState;
+import sibarum.dasum.gui.core.input.TextInputController;
+import sibarum.dasum.gui.core.input.TextStates;
 import sibarum.dasum.gui.core.layout.HitTest;
 import sibarum.dasum.gui.core.layout.LatestLayout;
 import sibarum.dasum.gui.core.layout.Layout;
@@ -84,6 +87,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The Java side of the GUI extension (docs/extensions.md), G5: a <b>declarative UI</b>. The
@@ -353,7 +360,11 @@ public final class DasumBridge {
      * flatten the plot. Package-visible test seam.
      */
     static List<Series> buildReliableSeries(double xlo, double xhi, Object spansValue) {
-        List<ReliableSpan> spans = parseSpans(spansValue);
+        return buildReliableSeries(xlo, xhi, parseSpans(spansValue));
+    }
+
+    /** As above, from already-parsed spans — the seam the interactive Java sampler feeds directly. */
+    static List<Series> buildReliableSeries(double xlo, double xhi, List<ReliableSpan> spans) {
         int n = spans.size();
         if (n == 0) return List.of();
         List<Double> bounds = new ArrayList<>();
@@ -609,6 +620,9 @@ public final class DasumBridge {
         GlfwCallbacks.setMouseButtonListener((w, button, action, mods) -> {
             if (button != Glfw.GLFW_MOUSE_BUTTON_LEFT) return;
             if (action == Glfw.GLFW_PRESS) {
+                // Focus an editable Text under the cursor (caret placement / selection start).
+                TextInputController.onMouseDown(HoverState.hovered(), InputState.mouseX(),
+                        InputState.mouseY(), (mods & Glfw.GLFW_MOD_SHIFT) != 0);
                 // Let a viewport claim the press first; if it does, don't also arm a button click.
                 boolean scene = SceneViewController.onMouseDown(
                         HoverState.hovered(), InputState.mouseX(), InputState.mouseY());
@@ -628,6 +642,15 @@ public final class DasumBridge {
         });
         // Scroll zooms the viewport under the cursor; onScroll self-guards to interactive SceneViews.
         GlfwCallbacks.setScrollListener((w, xo, yo) -> SceneViewController.onScroll(HoverState.hovered(), yo));
+        // Keyboard → the focused editable Text: typed characters, and edit keys (backspace, arrows,
+        // Ctrl+A, …) on press/repeat. This is what makes an input field actually accept input.
+        GlfwCallbacks.setCharListener((w, cp) -> TextInputController.onCharInput(cp));
+        GlfwCallbacks.setKeyListener((w, key, sc, action, mods) -> {
+            if (action == Glfw.GLFW_PRESS || action == Glfw.GLFW_REPEAT) {
+                TextInputController.onKey(key, (mods & Glfw.GLFW_MOD_SHIFT) != 0,
+                        (mods & Glfw.GLFW_MOD_CONTROL) != 0);
+            }
+        });
     }
 
     // --- helpers ------------------------------------------------------------------------------
@@ -778,6 +801,164 @@ public final class DasumBridge {
                 () -> writeChartSvgDialog(chart));
         Component buttonRow = Ui.row().justify(JustifyContent.CENTER).padding(Em.of(0.4f)).add(button).build();
         return Ui.column().fill().gap(Em.of(0.2f)).add(plot).add(buttonRow).build();
+    }
+
+    // --- Interactive expression input: type an expression, plot updates live (docs/plotting.md) ----
+
+    private static final Color ERR_COLOR = new Color(0.95f, 0.45f, 0.45f, 1f);
+
+    /**
+     * {@code plotInput(expr)} (pontif.plot): opens a window with an editable expression field over a
+     * live reliable plot + typeset title. Typing re-parses (debounced) and re-publishes the plot and
+     * title in place; while the text isn't a valid expression the last good plot is kept and the field
+     * shows a small marker. The arithmetic subset is parsed by {@link ExprParser}; sampling reuses the
+     * reliable interval core via the {@code evalInterval} native, driven from Java.
+     */
+    public static Object plotInput(List<Object> args, NativeCalls.Context ctx) {
+        String initial = !args.isEmpty() && args.get(0) instanceof StringValue s ? s.content() : "";
+        return openWindowWithRoot("Plot", WIDTH, HEIGHT, false, () -> plotInputRoot(initial, ctx));
+    }
+
+    private static Component plotInputRoot(String initial, NativeCalls.Context ctx) {
+        Component.SceneView plotSV = plotSceneView();
+        PlotView plotView = new PlotView(plotSV);
+        Component.SceneView titleSV = (Component.SceneView) Ui.sceneView()
+                .background(PLOT_BG).height(Em.of(3f)).grow(0).interactive(false).build();
+        PlotView titleView = new PlotView(titleSV);
+
+        // content, fontGroup, fontSize, color, width, height, padding, wrapWidth, clip,
+        // interactive, selectable, editable, acceptsTab, flexGrow
+        Component.Text input = new Component.Text(initial, FontGroups.DEFAULT, Em.of(1.3f), TEXT,
+                null, null, Em.of(0.4f), null, true, true, true, true, false, 1);
+        Component.Text status = new Component.Text("", FontGroups.DEFAULT, Em.of(0.95f), ERR_COLOR,
+                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
+        Component label = new Component.Text("f(x) =", FontGroups.DEFAULT, Em.of(1.2f), TEXT,
+                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
+
+        Debouncer debounce = new Debouncer(280);
+        TextStates.onContentChange(input,
+                txt -> debounce.submit(() -> updatePlotInput(txt, plotView, titleView, status, ctx)));
+        updatePlotInput(initial, plotView, titleView, status, ctx);   // initial render
+        FocusState.set(input);
+
+        Component inputRow = Ui.row().padding(Em.of(0.5f)).gap(Em.of(0.5f)).align(AlignItems.CENTER)
+                .add(label).add(input).add(status).build();
+        return Ui.column().fill().add(inputRow).add(titleSV).add(plotSV).build();
+    }
+
+    /** Re-parse {@code text} and, if valid, re-publish the reliable plot + typeset title; otherwise keep
+     *  the last good plot and mark the field. Runs off the GLFW thread (debounce) — publishes lock-free. */
+    private static void updatePlotInput(String text, PlotView plotView, PlotView titleView,
+                                        Component.Text status, NativeCalls.Context ctx) {
+        Optional<RecordValue> parsed = ExprParser.parse(text);
+        if (parsed.isEmpty()) {
+            TextStates.setContent(status, text == null || text.isBlank() ? "" : "⚠ can't parse");
+            return;
+        }
+        RecordValue e = parsed.get();
+        try {
+            List<Series> series = sampleReliableJava(e, ctx);
+            if (series.isEmpty()) { TextStates.setContent(status, ""); return; }
+            plotView.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series), series, PlotStyle.defaults());
+            MathConstants mc = MathConstants.stixTwoMath();
+            LaidOut laid = new MathLayout(mathAtlas(), mc).layout(algExprToMathBox(e));
+            float w = (float) Math.max(1e-3, laid.width()), h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
+            List<Layer> tl = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
+            titleView.show(new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h)), tl);
+            TextStates.setContent(status, "");
+        } catch (RuntimeException ex) {
+            TextStates.setContent(status, "⚠ can't plot");
+        }
+    }
+
+    /** Sample an {@code AlgExpr} into reliable line series entirely in Java: auto-frame + per-column
+     *  interval enclosure (the {@code evalInterval} native) + {@link #buildReliableSeries}. This is the
+     *  Pontif reliable pipeline replayed from Java so a live edit can re-plot without re-running Pontif. */
+    private static List<Series> sampleReliableJava(RecordValue ast, NativeCalls.Context ctx) {
+        double[] win = autoFrameJava(ast, ctx);
+        double xlo = win[0], xhi = win[1], dx = (xhi - xlo) / 256.0;
+        List<ReliableSpan> spans = new ArrayList<>(256);
+        for (int i = 0; i < 256; i++) spans.add(classifyJava(ast, xlo + i * dx, xlo + (i + 1) * dx, ctx));
+        return buildReliableSeries(xlo, xhi, spans);
+    }
+
+    /** Java mirror of pontif.plot's autoFrame: scan 256 probe columns over [-32,32], widening to the
+     *  span of features (a pole, or a sign flip between real columns); fall back to [-10,10]. */
+    private static double[] autoFrameJava(RecordValue ast, NativeCalls.Context ctx) {
+        double prevReal = 7, lo = 1e6, hi = -1e6;
+        boolean any = false;
+        for (int i = 0; i < 256; i++) {
+            double xa = -32.0 + i * 0.25;
+            double s = colSignJava(ast, xa, xa + 0.25, ctx);
+            boolean pole = s == 2.0;
+            boolean feature = pole || (prevReal < 1.5 && s < 1.5 && prevReal != s);
+            if (feature) { lo = Math.min(lo, xa); hi = Math.max(hi, xa); any = true; }
+            if (s < 1.5) prevReal = s;                       // carry the last real sign forward
+        }
+        if (!any) return new double[]{-10.0, 10.0};
+        double pad = Math.max((hi - lo) * 0.15, 1.0);
+        return new double[]{lo - pad, hi + pad};
+    }
+
+    /** The reliable core's colSign in Java: -1/0/1 from the enclosure midpoint, 2 = pole, 7 = undefined. */
+    private static double colSignJava(RecordValue ast, double xa, double xb, NativeCalls.Context ctx) {
+        return switch (encKind(ast, xa, xb, ctx)) {
+            case 0 -> Math.signum((intervalLo + intervalHi) / 2.0);
+            case 1 -> 2.0;
+            default -> 7.0;
+        };
+    }
+
+    private static ReliableSpan classifyJava(RecordValue ast, double xa, double xb, NativeCalls.Context ctx) {
+        return switch (encKind(ast, xa, xb, ctx)) {
+            case 0 -> new ReliableSpan(0, intervalLo, intervalHi);
+            case 1 -> new ReliableSpan(1, 0.0, 0.0);         // pole
+            default -> new ReliableSpan(2, 0.0, 0.0);        // undefined
+        };
+    }
+
+    // encKind stashes the bounded interval's endpoints here for the caller (single-threaded per call).
+    private static double intervalLo, intervalHi;
+
+    /** Evaluate the interval enclosure of {@code ast} over [xa,xb] via the {@code evalInterval} native;
+     *  returns 0 = bounded (endpoints in {@link #intervalLo}/{@link #intervalHi}), 1 = Unbounded,
+     *  2 = Undefined. */
+    private static int encKind(RecordValue ast, double xa, double xb, NativeCalls.Context ctx) {
+        Object enc = evalIntervalNative().call(
+                List.of(ast, BigDecimal.valueOf(xa), BigDecimal.valueOf(xb)), ctx);
+        if (enc instanceof RecordValue r) {
+            switch (bareType(r.typeName())) {
+                case "Interval" -> { intervalLo = memberD(r, "lo"); intervalHi = memberD(r, "hi"); return 0; }
+                case "Unbounded" -> { return 1; }
+                default -> { return 2; }
+            }
+        }
+        return 2;
+    }
+
+    private static NativeCalls.NativeCall evalIntervalNative;
+    private static synchronized NativeCalls.NativeCall evalIntervalNative() {
+        if (evalIntervalNative == null) evalIntervalNative = NativeCalls.get("pontif.algebra/evalInterval");
+        return evalIntervalNative;
+    }
+
+    /** A single-slot debounce: each {@link #submit} cancels the pending task and schedules a new one, so
+     *  only the last keystroke in a burst fires (on a daemon worker thread). */
+    private static final class Debouncer {
+        private final long delayMs;
+        private final ScheduledExecutorService exec = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "pontif-plot-debounce");
+            t.setDaemon(true);
+            return t;
+        });
+        private ScheduledFuture<?> pending;
+
+        Debouncer(long delayMs) { this.delayMs = delayMs; }
+
+        synchronized void submit(Runnable task) {
+            if (pending != null) pending.cancel(false);
+            pending = exec.schedule(task, delayMs, TimeUnit.MILLISECONDS);
+        }
     }
 
     /** Whether a record is a recognised {@code AlgExpr} node (so we don't try to typeset e.g. a
