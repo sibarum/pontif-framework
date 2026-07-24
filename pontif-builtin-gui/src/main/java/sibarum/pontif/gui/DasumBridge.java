@@ -153,11 +153,12 @@ public final class DasumBridge {
         if (title.isEmpty()) title = "Chart";
         Object layers = args.size() > 1 ? args.get(1) : emptyTuple();
         AnnotatedChart chart = buildAnnotatedChart(layers);
+        boolean export = cfgBool(args, 0, "export", false);   // add an Export-SVG button below the plot
         // Standalone chart window: typeset the expression as a math title above the plot (root fills
         // the window, so the wrapping column can't collapse). Embedded chartView stays untitled — it
         // composes as a bare fill SceneView, which a wrapping column would otherwise collapse.
         return openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
-                false, () -> titledPlot(annotatedChartComponent(chart), chart.titleAst()));
+                false, () -> chartRoot(chart, export));
     }
 
     /**
@@ -229,27 +230,32 @@ public final class DasumBridge {
      */
     public static Object exportSvg(List<Object> args, NativeCalls.Context ctx) {
         Object layers = args.isEmpty() ? emptyTuple() : args.get(0);
-        AnnotatedChart chart = buildAnnotatedChart(layers);
+        writeChartSvgDialog(buildAnnotatedChart(layers));
+        return new IrInterpreter.DriveResult();
+    }
+
+    /** Serialise a chart to a semantic SVG and pop a native Save dialog to write it — shared by the
+     *  {@code exportSvg} native and the standalone chart window's Export button. Must run on the GLFW
+     *  thread (where NFD lives). No-op when nothing is drawable or the dialog is cancelled. */
+    static void writeChartSvgDialog(AnnotatedChart chart) {
         PlotFrame frame = annotatedFrame(chart);
         if (frame == null) {
             System.err.println("exportSvg: no drawable layers — nothing to export.");
-            return new IrInterpreter.DriveResult();
+            return;
         }
         String svg = SvgPlotWriter.write(buildScene(chart, frame), WIDTH, HEIGHT);
         Optional<Path> dest = FileDialog.save(null,
                 List.of(FileDialog.Filter.of("SVG image", "svg")), null, "plot.svg");
-        if (dest.isPresent()) {
-            Path p = dest.get();
-            if (!p.getFileName().toString().toLowerCase().endsWith(".svg")) {
-                p = p.resolveSibling(p.getFileName() + ".svg");   // ensure the .svg extension
-            }
-            try {
-                Files.writeString(p, svg);
-            } catch (IOException e) {
-                System.err.println("exportSvg: could not write " + p + ": " + e.getMessage());
-            }
+        if (dest.isEmpty()) return;
+        Path p = dest.get();
+        if (!p.getFileName().toString().toLowerCase().endsWith(".svg")) {
+            p = p.resolveSibling(p.getFileName() + ".svg");       // ensure the .svg extension
         }
-        return new IrInterpreter.DriveResult();
+        try {
+            Files.writeString(p, svg);
+        } catch (IOException e) {
+            System.err.println("exportSvg: could not write " + p + ": " + e.getMessage());
+        }
     }
 
     /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = isolated pole (a single
@@ -694,6 +700,21 @@ public final class DasumBridge {
         // it won't collapse the plot). The title is fixed-height; the plot grows to fill the rest.
         return Ui.column().fill().grow(1).gap(Em.of(0.3f)).padding(Em.of(0.3f))
                 .add(title).add(plot).build();
+    }
+
+    /**
+     * The standalone chart window root: the titled plot filling the window, plus (when {@code export})
+     * a centered Export-SVG button below it. Everything is root-descended with proper grow/stretch, so
+     * nothing collapses. The button's click runs on the GLFW thread — where NFD's Save dialog lives —
+     * and writes the same semantic SVG as the {@code exportSvg} native.
+     */
+    private static Component chartRoot(AnnotatedChart chart, boolean export) {
+        Component plot = titledPlot(annotatedChartComponent(chart), chart.titleAst());
+        if (!export) return plot;
+        Component button = Themed.button("Export SVG", Em.of(11f), Variant.PRIMARY, 0,
+                () -> writeChartSvgDialog(chart));
+        Component buttonRow = Ui.row().justify(JustifyContent.CENTER).padding(Em.of(0.4f)).add(button).build();
+        return Ui.column().fill().gap(Em.of(0.2f)).add(plot).add(buttonRow).build();
     }
 
     /** Whether a record is a recognised {@code AlgExpr} node (so we don't try to typeset e.g. a

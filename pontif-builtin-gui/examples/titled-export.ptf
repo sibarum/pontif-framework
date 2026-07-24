@@ -1,0 +1,17 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{expr, asymptotes, zeros, chart}
+
+# A reliable plot in its own window: the expression typeset as a math title above the curve, and an
+# Export-SVG button below it (cfg `export = true`). Clicking the button pops a native Save dialog and
+# writes the plot as a semantically-classed SVG. Everything sits at the window root, so it fills
+# cleanly — no custom layout needed. (For a plot embedded in your OWN GUI layout, use chartView with
+# a Clickable button, as in svg-export.ptf.)
+
+function f(x:Decimal):Decimal -> (2*x + 3) / (x^2 + 3*x - 4)
+assign proof f:Algebraic
+
+main (
+  let e = $f[Decimal].ast
+  chart({title = "Rational function", width = 1000, height = 720, export = true},
+        { expr(e), asymptotes(e), zeros(e) })
+)

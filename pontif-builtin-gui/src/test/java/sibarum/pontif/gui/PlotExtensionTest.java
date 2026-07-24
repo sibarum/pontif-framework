@@ -944,6 +944,26 @@ class PlotExtensionTest {
     }
 
     @Test
+    void titledExportExample_compilesAndTypechecks() {
+        // Guards examples/titled-export.ptf: a standalone chart window with a math title and an
+        // Export-SVG button (cfg export=true). Compiles + links only (the window needs GLFW).
+        Extensions.install(new PlotExtension());
+        var result = new PontifCompiler().compileAlt("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chart}
+                function f(x:Decimal):Decimal -> (2*x + 3) / (x^2 + 3*x - 4)
+                assign proof f:Algebraic
+                main (
+                  let e = $f[Decimal].ast
+                  chart({title = "Rational function", width = 1000, height = 720, export = true},
+                        { expr(e), asymptotes(e), zeros(e) })
+                )""", "titled-export.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
+                () -> "titled-export example should link; got "
+                        + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
     void exportSvg_buildsSemanticClassedMarkupThroughTheSharedScene() {
         // The full Pontif -> AnnotatedChart -> PlotScene2D (shared IR) -> SVG path (the Save dialog
         // itself needs a window, so it's exercised manually). The rational function contributes a
