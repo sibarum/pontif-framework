@@ -7,7 +7,8 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            Volume3D, Volume, volume, normals, plotExpr, autoFrame,
            ExprLayer, MarkLayer, VLineLayer, expr,
            zeros, optima, asymptotes, intersections,
-           ChartView, chartView, exportSvg, exportMathSvg, plotInput}
+           ChartView, chartView, exportSvg, exportMathSvg, plotInput,
+           markup, exportMarkupSvg, markupInput}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -275,6 +276,22 @@ function exportMathSvg(e:AlgExpr):Stream[String] -> {}
 # which takes a pre-built AST, this takes the raw STRING and parses it in the loop.
 # Placeholder body; the native runs.
 function plotInput(expr:String):Stream[String] -> {}
+
+# Native: parse an ASCII math-notation string (dasum MathMarkup — subscripts a_b,
+# superscripts a^b, fractions a/b, sqrt, matrices [[a,b],[c,d]], sum/integral/lim,
+# Greek names, arrows, …) and open a window typesetting it (STIX Two Math) with an
+# Export-SVG button. The input half of the math stack: string -> MathBox -> render.
+# Placeholder body; the native runs.
+function markup(s:String):Stream[String] -> {}
+
+# Native: typeset a markup string and pop a Save dialog to write it as a
+# self-contained SVG (subset STIX Two Math embedded). The markup sibling of exportMathSvg.
+function exportMarkupSvg(s:String):Stream[String] -> {}
+
+# Native: an interactive window — an editable field over a live-typeset equation.
+# Type math notation and it re-typesets as you type (debounced); malformed input
+# keeps the last good render and marks the field. The markup twin of plotInput.
+function markupInput(s:String):Stream[String] -> {}
 
 # --- Reliable plotting: interval-arithmetic column rasterization -----------------
 # (docs/reliable-plotting.md) An algebraic Expression is rendered by SOUND interval

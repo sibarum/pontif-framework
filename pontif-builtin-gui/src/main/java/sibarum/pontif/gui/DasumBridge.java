@@ -49,6 +49,7 @@ import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
 import sibarum.dasum.gui.mathtext.MathConstants;
 import sibarum.dasum.gui.mathtext.MathBox;
 import sibarum.dasum.gui.mathtext.MathLayout;
+import sibarum.dasum.gui.mathtext.MathMarkup;
 import sibarum.dasum.gui.mathtext.MathOgl;
 import sibarum.dasum.gui.mathtext.MathSvg;
 import sibarum.dasum.gui.mathtext.LaidOut;
@@ -1046,6 +1047,129 @@ public final class DasumBridge {
         synchronized void submit(Runnable task) {
             if (pending != null) pending.cancel(false);
             pending = exec.schedule(task, delayMs, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    // --- Math markup: type a notation string, typeset it (docs/mathtext.md) ----------------------
+    // The MathMarkup parser (dasum-mathtext) turns an ASCII notation string into the MathBox IR; here
+    // it's the input half of the "LaTeX killer" — a native to typeset a string, one to export it as a
+    // self-contained SVG, and an interactive window that re-typesets live as you type (the plotInput
+    // debounce/publish pattern, over math instead of a plot).
+
+    /** A fixed-size viewport typesetting a {@link MathBox} tree y-up, framed tightly by an ortho
+     *  camera — the markup counterpart of {@link #mathTitleComponent}, sized to fill a window. */
+    private static Component mathBoxComponent(MathBox box) {
+        MathConstants mc = MathConstants.stixTwoMath();
+        LaidOut laid = new MathLayout(mathAtlas(), mc).layout(box);
+        Component.SceneView view = plotSceneView();
+        publishMathBox(new PlotView(view), laid, mc);
+        return view;
+    }
+
+    /** (Re)publish a laid-out equation into {@code view}'s ortho frame — shared by the static render
+     *  and the live-updating input window. */
+    private static void publishMathBox(PlotView view, LaidOut laid, MathConstants mc) {
+        float w = (float) Math.max(1e-3, laid.width()), h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
+        List<Layer> layers = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
+        view.show(new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h)), layers);
+    }
+
+    /** Typeset a markup string to a self-contained SVG (subset STIX Two Math embedded), or {@code null}
+     *  if the markup doesn't parse. */
+    static String markupSvg(String markup) {
+        MathBox box;
+        try { box = MathMarkup.parse(markup); } catch (MathMarkup.MarkupError e) { return null; }
+        LaidOut laid = new MathLayout(mathAtlas(), MathConstants.stixTwoMath()).layout(box);
+        String inner = MathSvg.write(laid, 48.0);
+        String fontFace = mathFontFace();
+        // Splice the @font-face into the equation SVG so the file renders true anywhere.
+        return fontFace.isEmpty() ? inner : inner.replaceFirst("(?s)(<svg[^>]*>\\n?)", "$1" + fontFace);
+    }
+
+    /**
+     * {@code markup(s)} (pontif.plot): parse an ASCII math-notation string and open a window typesetting
+     * it (STIX Two Math), with an Export-SVG button. A malformed string shows an error label instead.
+     */
+    public static Object markup(List<Object> args, NativeCalls.Context ctx) {
+        String s = !args.isEmpty() && args.get(0) instanceof StringValue v ? v.content() : "";
+        return openWindowWithRoot("Math", WIDTH, HEIGHT, false, () -> markupRenderRoot(s));
+    }
+
+    private static Component markupRenderRoot(String s) {
+        MathBox box;
+        try {
+            box = MathMarkup.parse(s);
+        } catch (MathMarkup.MarkupError e) {
+            return errorLabel("can't parse markup: " + e.getMessage());
+        }
+        Component math = mathBoxComponent(box);
+        Component button = Themed.button("Export SVG", Em.of(11f), Variant.PRIMARY, 0,
+                () -> writeMarkupSvgDialog(s));
+        Component buttonRow = Ui.row().justify(JustifyContent.CENTER).padding(Em.of(0.4f)).add(button).build();
+        return Ui.column().fill().grow(1).gap(Em.of(0.2f)).padding(Em.of(0.3f)).add(math).add(buttonRow).build();
+    }
+
+    /** {@code exportMarkupSvg(s)} (pontif.plot): typeset a markup string and pop a Save dialog. */
+    public static Object exportMarkupSvg(List<Object> args, NativeCalls.Context ctx) {
+        String s = !args.isEmpty() && args.get(0) instanceof StringValue v ? v.content() : "";
+        writeMarkupSvgDialog(s);
+        return new IrInterpreter.DriveResult();
+    }
+
+    private static void writeMarkupSvgDialog(String markup) {
+        String svg = markupSvg(markup);
+        if (svg == null) { System.err.println("exportMarkupSvg: markup doesn't parse: " + markup); return; }
+        Optional<Path> dest = FileDialog.save(null,
+                List.of(FileDialog.Filter.of("SVG image", "svg")), null, "math.svg");
+        if (dest.isEmpty()) return;
+        Path p = dest.get();
+        if (!p.getFileName().toString().toLowerCase().endsWith(".svg")) {
+            p = p.resolveSibling(p.getFileName() + ".svg");
+        }
+        try { Files.writeString(p, svg); }
+        catch (IOException e) { System.err.println("exportMarkupSvg: could not write " + p + ": " + e.getMessage()); }
+    }
+
+    /**
+     * {@code markupInput(s)} (pontif.plot): an editable field over a live-typeset equation — type math
+     * notation and it re-typesets as you type (debounced). Malformed input keeps the last good render
+     * and marks the field. The interactivity twin of {@link #plotInput}, over MathMarkup instead of a plot.
+     */
+    public static Object markupInput(List<Object> args, NativeCalls.Context ctx) {
+        String initial = !args.isEmpty() && args.get(0) instanceof StringValue v ? v.content() : "";
+        return openWindowWithRoot("Math", WIDTH, HEIGHT, false, () -> markupInputRoot(initial));
+    }
+
+    private static Component markupInputRoot(String initial) {
+        Component.SceneView mathSV = plotSceneView();
+        PlotView mathView = new PlotView(mathSV);
+
+        Component.Text input = new Component.Text(initial, FontGroups.DEFAULT, Em.of(1.3f), TEXT,
+                null, null, Em.of(0.4f), null, true, true, true, true, false, 1);
+        Component.Text status = new Component.Text("", FontGroups.DEFAULT, Em.of(0.95f), ERR_COLOR,
+                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
+
+        Debouncer debounce = new Debouncer(220);
+        TextStates.onContentChange(input, txt -> debounce.submit(() -> updateMarkup(txt, mathView, status)));
+        updateMarkup(initial, mathView, status);          // initial render
+        FocusState.set(input);
+
+        Component inputRow = Ui.row().padding(Em.of(0.5f)).gap(Em.of(0.5f)).align(AlignItems.CENTER)
+                .add(input).add(status).build();
+        return Ui.column().fill().add(inputRow).add(mathSV).build();
+    }
+
+    /** Re-typeset {@code text}; on a parse error keep the last good render and mark the field. Runs off
+     *  the GLFW thread (debounce) — {@link PlotView#show} publishes lock-free. */
+    private static void updateMarkup(String text, PlotView mathView, Component.Text status) {
+        if (text == null || text.isBlank()) { TextStates.setContent(status, ""); return; }
+        MathConstants mc = MathConstants.stixTwoMath();
+        try {
+            LaidOut laid = new MathLayout(mathAtlas(), mc).layout(MathMarkup.parse(text));
+            publishMathBox(mathView, laid, mc);
+            TextStates.setContent(status, "");
+        } catch (MathMarkup.MarkupError e) {
+            TextStates.setContent(status, "⚠");
         }
     }
 

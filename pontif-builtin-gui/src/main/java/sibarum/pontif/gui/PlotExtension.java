@@ -37,15 +37,19 @@ public final class PlotExtension implements Extension {
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
         // The natives are the thin renderers; the sampling/shaping lives in Pontif above.
-        return Map.of(
-                "renderCurve", DasumBridge::renderCurve,
-                "renderCloud", DasumBridge::renderCloud,
-                "renderSurface", DasumBridge::renderSurface,
-                "renderScene", DasumBridge::renderScene,
-                "renderChart", DasumBridge::renderChart,
-                "renderReliable", DasumBridge::renderReliable,
-                "exportSvg", DasumBridge::exportSvg,
-                "exportMathSvg", DasumBridge::exportMathSvg,
-                "plotInput", DasumBridge::plotInput);
+        // (Map.ofEntries, not Map.of — past 10 pairs Map.of has no overload.)
+        return Map.ofEntries(
+                Map.entry("renderCurve", DasumBridge::renderCurve),
+                Map.entry("renderCloud", DasumBridge::renderCloud),
+                Map.entry("renderSurface", DasumBridge::renderSurface),
+                Map.entry("renderScene", DasumBridge::renderScene),
+                Map.entry("renderChart", DasumBridge::renderChart),
+                Map.entry("renderReliable", DasumBridge::renderReliable),
+                Map.entry("exportSvg", DasumBridge::exportSvg),
+                Map.entry("exportMathSvg", DasumBridge::exportMathSvg),
+                Map.entry("plotInput", DasumBridge::plotInput),
+                Map.entry("markup", DasumBridge::markup),
+                Map.entry("exportMarkupSvg", DasumBridge::exportMarkupSvg),
+                Map.entry("markupInput", DasumBridge::markupInput));
     }
 }

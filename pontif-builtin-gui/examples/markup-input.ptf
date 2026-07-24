@@ -1,0 +1,16 @@
+requires pontif.plot.{markupInput}
+
+# Interactive math typesetting: a window with an editable field over a live-typeset
+# equation. Type ASCII math notation and it re-typesets (STIX Two Math) as you type,
+# debounced; a malformed keystroke keeps the last good render and shows a ⚠ marker.
+#
+# The notation (dasum MathMarkup): a_b subscript, a^b superscript (x^a_b aligns both),
+# a/b fraction, sqrt(x) / root(3,x), |x| or abs(x), matrices [[a,b],[c,d]], vectors
+# [a,b], sum/product/integral/lim with limits (e.g. sum(k=1,n,k), lim(x->0,f)),
+# branches {->a,->b}, Greek names (pi theta Omega ...), arrows (--> ==> ->), degrees,
+# and 'verbatim text'. Everything else is implicit multiplication.
+#
+# For a one-shot render with an Export-SVG button instead, use `markup("...")`;
+# to write straight to a file, `exportMarkupSvg("...")`.
+
+main markupInput("sum(k=1,n,k^2) = (n(n+1)(2n+1))/6")

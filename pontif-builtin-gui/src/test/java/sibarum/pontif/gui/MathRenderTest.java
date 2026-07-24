@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -65,6 +66,25 @@ class MathRenderTest {
         assertTrue(svg.contains("<text"), "glyph runs render as <text>");
         assertTrue(svg.contains("<rect"), "the fraction bar renders as a <rect> rule");
         assertTrue(svg.contains("class=\"math\""), "root is classed");
+    }
+
+    @Test
+    void markupSvg_typesetsNotation_selfContained() {
+        // A markup string exercising a fraction, a superscript, a root and a Greek symbol.
+        String svg = DasumBridge.markupSvg("(x^2 + 1)/sqrt(pi)");
+        assertNotNull(svg, "valid markup should render");
+        assertDoesNotThrow(() -> DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                .parse(new ByteArrayInputStream(svg.getBytes(StandardCharsets.UTF_8))),
+                () -> "markup SVG must be well-formed:\n" + svg);
+        assertTrue(svg.contains("<rect"), "the fraction bar / vinculum render as <rect> rules");
+        assertTrue(svg.contains("√"), "the radical surd is emitted");
+        assertTrue(svg.contains("π"), "the Greek symbol is emitted");
+        assertTrue(svg.contains("@font-face"), "the STIX subset is embedded — the SVG is self-contained");
+    }
+
+    @Test
+    void markupSvg_returnsNull_onMalformedMarkup() {
+        assertNull(DasumBridge.markupSvg("(x^2"), "unbalanced input doesn't render");
     }
 
     /** Minimal reflective peek at a MathBox's kind without exposing dasum types across the test. */
