@@ -200,7 +200,11 @@ public final class ModuleResolver {
                     requireOrigin);
         }
         IrExpr value = loaded.main();
-        String localName = target.substring(target.lastIndexOf('.') + 1);  // last FQN segment
+        // Bind under the last FQN segment WITHOUT the leading `$` — for a single-segment data require
+        // (`requires $mathstyle`) there is no dot, so stripping the `$` first is what yields the bare
+        // local name `mathstyle` (matching the parser's RequireEntry) rather than `$mathstyle`.
+        String bare = target.startsWith("$") ? target.substring(1) : target;
+        String localName = bare.substring(bare.lastIndexOf('.') + 1);  // last FQN segment
         IrSort sort = NarrowingInference.inferFloor(value, InferenceContext.empty());
         IrStmt.FunctionDecl constant = new IrStmt.FunctionDecl(
                 localName, List.of(), sort, value, requireOrigin, /*topLevelLet*/ true);
