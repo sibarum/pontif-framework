@@ -338,8 +338,9 @@ function classifyColumn(e:AlgExpr, xa:Decimal, xb:Decimal):Span -> match evalInt
 }
 
 # Native: frame the y-range and paint the per-column spans as vertical bars in one
-# window (framing native-side for v1). Placeholder body; the native runs.
-function renderReliable(xlo:_, xhi:_, spans:_):Stream[String] -> {}
+# window (framing native-side for v1). `title` is the expression's AST, typeset as a
+# math title above the plot (or Nothing for none). Placeholder body; the native runs.
+function renderReliable(xlo:_, xhi:_, spans:_, title:AlgExpr):Stream[String] -> {}
 
 # Plot an algebraic expression tree over [xlo, xhi] by reliable interval enclosure —
 # one span per column, evaluated with evalInterval. Takes a bare AlgExpr: pass a
@@ -349,7 +350,7 @@ function renderReliable(xlo:_, xhi:_, spans:_):Stream[String] -> {}
 function plotExpr(e:AlgExpr, xlo:Decimal, xhi:Decimal):Stream[String] -> (
   let dx = (xhi - xlo) / 256.0
   let spans = &columnIndices:[ (i:Int) -> classifyColumn(e, xlo + i * dx, xlo + (i + 1) * dx) ]
-  renderReliable(xlo, xhi, spans)
+  renderReliable(xlo, xhi, spans, e)
 )
 
 # --- Auto-framing: find the interesting x-window NUMERICALLY ----------------------
@@ -466,7 +467,8 @@ struct VLine(x:Decimal)
 # [xlo,xhi]) — the expression sibling of `curve`, produced by `expr(e)`. kind on
 # MarkLayer selects the native's glyph+label: 0 = zero (marker on the x-axis, labelled
 # with x), 1 = optimum (marker at (x,y), labelled "(x, y)"), 2 = intersection (as optimum).
-struct ExprLayer(spans:_, xlo:Decimal, xhi:Decimal)
+# `ast` carries the source expression tree so the chart can typeset it as a math title above the plot.
+struct ExprLayer(spans:_, xlo:Decimal, xhi:Decimal, ast:AlgExpr)
 struct MarkLayer(pts:_, kind:Int)
 struct VLineLayer(xs:_)
 
@@ -645,7 +647,7 @@ function intersections(e:AlgExpr, g:AlgExpr):MarkLayer -> (
 function expr(e:AlgExpr, xlo:Decimal, xhi:Decimal):ExprLayer -> (
   let dx = (xhi - xlo) / 256.0
   let spans = &columnIndices:[ (i:Int) -> classifyColumn(e, xlo + i * dx, xlo + (i + 1) * dx) ]
-  ExprLayer(spans, xlo, xhi)
+  ExprLayer(spans, xlo, xhi, e)
 )
 function expr(e:AlgExpr):ExprLayer -> (
   let [{xlo, xhi}] = autoFrame(e)

@@ -979,7 +979,7 @@ class PlotExtensionTest {
         List<Double> vlines = List.of(-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9);
         var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
                 new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
-        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null);
+        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null, null);
         var frame = DasumBridge.annotatedFrame(chart);
         var layers = DasumBridge.buildAnnotatedLayers(chart, frame);
 

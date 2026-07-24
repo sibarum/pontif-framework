@@ -35,6 +35,7 @@ import sibarum.dasum.gui.vis.DasumVis;
 import sibarum.dasum.gui.vis.render.BloomPass;
 import sibarum.dasum.gui.vis.plot.Axis;
 import sibarum.dasum.gui.vis.plot.LinePlot;
+import sibarum.dasum.gui.vis.plot.Axis;
 import sibarum.dasum.gui.vis.plot.PlotFrame;
 import sibarum.dasum.gui.vis.plot.PlotScene2D;
 import sibarum.dasum.gui.vis.plot.PlotScene2DRenderer;
@@ -45,6 +46,7 @@ import sibarum.dasum.gui.vis.plot.SvgPlotWriter;
 import sibarum.dasum.gui.mathtext.MathConstants;
 import sibarum.dasum.gui.mathtext.MathBox;
 import sibarum.dasum.gui.mathtext.MathLayout;
+import sibarum.dasum.gui.mathtext.MathOgl;
 import sibarum.dasum.gui.mathtext.MathSvg;
 import sibarum.dasum.gui.mathtext.LaidOut;
 import sibarum.dasum.gui.vis.plot.Ticks;
@@ -210,8 +212,9 @@ public final class DasumBridge {
     public static Object renderReliable(List<Object> args, NativeCalls.Context ctx) {
         double xlo = arg(args, 0), xhi = arg(args, 1);
         Object spans = args.size() > 2 ? args.get(2) : emptyTuple();
+        RecordValue titleAst = args.size() > 3 && args.get(3) instanceof RecordValue r ? r : null;
         List<Series> series = buildReliableSeries(xlo, xhi, spans);
-        return openWindowWithRoot("Plot", false, () -> chartComponent(series));
+        return openWindowWithRoot("Plot", false, () -> titledPlot(chartComponent(series), titleAst));
     }
 
     /**
@@ -656,6 +659,43 @@ public final class DasumBridge {
         return view;
     }
 
+    /**
+     * A fixed-height viewport that typesets an {@code AlgExpr} AST as a math title (STIX Two Math) —
+     * placed above a reliable plot. The math is rendered y-up and framed to its own box by an ortho
+     * camera (via {@link PlotView#show}). Returns {@code null} when there is no AST or it isn't a
+     * recognised algebraic node (so a plot without an expression stays untitled).
+     */
+    static Component mathTitleComponent(RecordValue ast) {
+        if (ast == null || !isAlgExprNode(ast)) return null;
+        MathConstants mc = MathConstants.stixTwoMath();
+        LaidOut laid = new MathLayout(mathAtlas(), mc).layout(algExprToMathBox(ast));
+        float w = (float) Math.max(1e-3, laid.width());
+        float h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
+        List<Layer> layers = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
+        Component.SceneView view = (Component.SceneView) Ui.sceneView()
+                .background(PLOT_BG).height(Em.of(3f)).grow(0).interactive(false).build();
+        PlotFrame frame = new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h));
+        new PlotView(view).show(frame, layers);
+        return view;
+    }
+
+    /** Stack a typeset math title above a plot (title fixed-height, plot grows to fill). With no
+     *  title AST the plot is returned unwrapped. */
+    static Component titledPlot(Component plot, RecordValue titleAst) {
+        Component title = mathTitleComponent(titleAst);
+        if (title == null) return plot;
+        return Ui.column().fill().gap(Em.of(0.3f)).padding(Em.of(0.3f)).add(title).add(plot).build();
+    }
+
+    /** Whether a record is a recognised {@code AlgExpr} node (so we don't try to typeset e.g. a
+     *  {@code Nothing} sentinel as a title). */
+    private static boolean isAlgExprNode(RecordValue r) {
+        return switch (bareType(r.typeName())) {
+            case "Add", "Sub", "Mul", "Div", "Pow", "Sin", "Cos", "Tan", "Exp", "Log", "Const", "Param" -> true;
+            default -> false;
+        };
+    }
+
     // --- Supplemental expression layers: reliable curve + annotations -----------------------------
     // (docs/reliable-plotting.md) `chart(cfg, {expr(e), zeros(e), optima(e), asymptotes(e),
     // intersections(e,g)})` composites an interval-reliable curve with feature MARKERS, LABELS, and
@@ -682,7 +722,7 @@ public final class DasumBridge {
      *  Pontif-side gather; {@link #buildScene} lifts it into the dasum {@link PlotScene2D} IR that
      *  drives BOTH the on-screen renderer and the SVG exporter. Package-visible test seam. */
     record AnnotatedChart(List<Series> series, List<MarkSet> marks, List<Double> vlines,
-                          PlotScene2D.EnclosureBand enclosure) {}
+                          PlotScene2D.EnclosureBand enclosure, RecordValue titleAst) {}
 
     /**
      * Decompose a {@code chart} layer tuple into series + annotations, applying the per-layer
@@ -696,6 +736,7 @@ public final class DasumBridge {
         List<MarkSet> marks = new ArrayList<>();
         List<Double> vlines = new ArrayList<>();
         PlotScene2D.EnclosureBand enclosure = null;
+        RecordValue titleAst = null;
         int autoIdx = 0;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
@@ -715,6 +756,7 @@ public final class DasumBridge {
                         Object spans = rv.members().get("spans");
                         series.addAll(buildReliableSeries(xlo, xhi, spans));
                         if (enclosure == null) enclosure = enclosureBand(xlo, xhi, spans);
+                        if (titleAst == null && rv.members().get("ast") instanceof RecordValue a) titleAst = a;
                     }
                     case "MarkLayer" -> {
                         int kind = (int) Math.round(memberD(rv, "kind"));
@@ -729,7 +771,7 @@ public final class DasumBridge {
                 }
             }
         }
-        return new AnnotatedChart(series, marks, vlines, enclosure);
+        return new AnnotatedChart(series, marks, vlines, enclosure, titleAst);
     }
 
     /** Build the reliable enclosure band from an {@code ExprLayer}'s spans: each bounded (curve)
@@ -803,7 +845,8 @@ public final class DasumBridge {
         new PlotView(view).show(frame, buildAnnotatedLayers(chart, frame));
         SceneStates.setInteraction(view, InteractionSpec.panZoom2d()
                 .withPanBounds(frame.wx0(), frame.wy0(), frame.wx1(), frame.wy1()));
-        return view;
+        // Typeset the expression as a math title above the plot (when a `expr(e)` layer carried its AST).
+        return titledPlot(view, chart.titleAst());
     }
 
     /**
