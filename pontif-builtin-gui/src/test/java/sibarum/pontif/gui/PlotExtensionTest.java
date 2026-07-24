@@ -1009,6 +1009,8 @@ class PlotExtensionTest {
         assertTrue(svg.contains("class=\"pontif-plot\""), "the plot is included");
         assertTrue(svg.contains("class=\"curve\"") && svg.contains("class=\"asymptote\""),
             "the plot's curve + asymptotes are in the export");
+        assertTrue(svg.contains("@font-face") && svg.contains("base64,"),
+            "the STIX Two Math subset is embedded, so the title renders anywhere (self-contained)");
     }
 
     @Test

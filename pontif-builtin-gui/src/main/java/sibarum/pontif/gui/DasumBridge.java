@@ -73,10 +73,12 @@ import sibarum.pontif.ir.NativeCalls;
 import sibarum.dasum.gui.core.dialog.FileDialog;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -281,8 +283,33 @@ public final class DasumBridge {
         // Title: fit into the top band (centered via the nested svg's preserveAspectRatio meet).
         String placedTitle = placeSvg(titleSvg, 0, pad, outerW, EXPORT_TITLE_BAND - 2 * pad);
         String placedPlot = placeSvg(plotSvg, 0, EXPORT_TITLE_BAND, outerW, HEIGHT);
+        // Embed the (subset) STIX Two Math font so the title renders true on any machine — the SVG is
+        // fully self-contained. The @font-face defines the family the nested title svg references.
+        String fontFace = mathFontFace();
         return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
-                + fmt(outerW) + " " + fmt(outerH) + "\">\n" + placedTitle + "\n" + placedPlot + "\n</svg>\n";
+                + fmt(outerW) + " " + fmt(outerH) + "\">\n" + fontFace + placedTitle + "\n"
+                + placedPlot + "\n</svg>\n";
+    }
+
+    /** An {@code @font-face} {@code <style>} embedding the subset STIX Two Math (base64 woff2), or
+     *  empty when the resource is absent (then the export references the family by name). */
+    private static String mathFontFace() {
+        String b64 = mathFontBase64();
+        return b64.isEmpty() ? "" :
+                "<style>@font-face{font-family:\"STIX Two Math\";src:url(data:font/woff2;base64,"
+                        + b64 + ") format(\"woff2\");}</style>\n";
+    }
+
+    private static String mathFontBase64;   // cached
+    private static synchronized String mathFontBase64() {
+        if (mathFontBase64 == null) {
+            try (InputStream in = DasumBridge.class.getResourceAsStream("/dasum/fonts/STIXTwoMath-subset.woff2")) {
+                mathFontBase64 = in == null ? "" : Base64.getEncoder().encodeToString(in.readAllBytes());
+            } catch (IOException e) {
+                mathFontBase64 = "";
+            }
+        }
+        return mathFontBase64;
     }
 
     /** Wrap an SVG-document fragment as a positioned, aspect-preserving nested {@code <svg>} by
