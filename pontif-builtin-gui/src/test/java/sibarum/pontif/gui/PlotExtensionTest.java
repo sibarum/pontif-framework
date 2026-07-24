@@ -991,6 +991,27 @@ class PlotExtensionTest {
     }
 
     @Test
+    void titledChartSvg_includesTheTypesetTitleAboveThePlot() {
+        // Export-with-title: the combined SVG stacks the typeset math title (from the chart's expr AST)
+        // above the plot, each a nested <svg> with its own classed markup.
+        var chart = runChart("""
+                requires pontif.algebra.{Algebraic}
+                requires pontif.plot.{expr, asymptotes, zeros, chart}
+                function f(x:Decimal):Decimal -> (2*x + 3) / (x^2 + 3*x - 4)
+                assign proof f:Algebraic
+                chart({title = "r"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast), zeros($f[Decimal].ast) })""");
+        String svg = DasumBridge.titledChartSvg(chart);
+        assertNotNull(svg, "a drawable chart yields an SVG");
+        assertDoesNotThrow(() -> javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            .parse(new java.io.ByteArrayInputStream(svg.getBytes(java.nio.charset.StandardCharsets.UTF_8))),
+            () -> "combined title+plot SVG must be well-formed:\n" + svg);
+        assertTrue(svg.contains("class=\"math\""), "the typeset math title is included");
+        assertTrue(svg.contains("class=\"pontif-plot\""), "the plot is included");
+        assertTrue(svg.contains("class=\"curve\"") && svg.contains("class=\"asymptote\""),
+            "the plot's curve + asymptotes are in the export");
+    }
+
+    @Test
     void annotatedLayers_thinOverlappingAsymptoteLabels_butKeepEveryLine() {
         // Regression (tan(1/x)): poles cluster infinitely toward x=0, so a label on every one stacks
         // into an unreadable smear. Every asymptote must still draw its LINE, but overlapping labels

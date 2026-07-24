@@ -238,12 +238,11 @@ public final class DasumBridge {
      *  {@code exportSvg} native and the standalone chart window's Export button. Must run on the GLFW
      *  thread (where NFD lives). No-op when nothing is drawable or the dialog is cancelled. */
     static void writeChartSvgDialog(AnnotatedChart chart) {
-        PlotFrame frame = annotatedFrame(chart);
-        if (frame == null) {
+        String svg = titledChartSvg(chart);
+        if (svg == null) {
             System.err.println("exportSvg: no drawable layers — nothing to export.");
             return;
         }
-        String svg = SvgPlotWriter.write(buildScene(chart, frame), WIDTH, HEIGHT);
         Optional<Path> dest = FileDialog.save(null,
                 List.of(FileDialog.Filter.of("SVG image", "svg")), null, "plot.svg");
         if (dest.isEmpty()) return;
@@ -256,6 +255,43 @@ public final class DasumBridge {
         } catch (IOException e) {
             System.err.println("exportSvg: could not write " + p + ": " + e.getMessage());
         }
+    }
+
+    /** Pixel height of the math-title band in the exported SVG (mirrors the on-screen title bar). */
+    private static final double EXPORT_TITLE_BAND = 96.0;
+
+    /**
+     * Serialise a chart to SVG <b>including the typeset math title</b> when the chart carries an
+     * expression AST — the title band stacked above the plot, exactly like the window. Both the title
+     * ({@link MathSvg}) and the plot ({@link SvgPlotWriter}) are emitted as nested {@code <svg>}s in
+     * one document, so each keeps its own coordinate system and class-styled markup (no class overlap
+     * between {@code .math*} and {@code .pontif-plot*}). Returns just the plot SVG when there's no
+     * title, or {@code null} when nothing is drawable. Package-visible test seam.
+     */
+    static String titledChartSvg(AnnotatedChart chart) {
+        PlotFrame frame = annotatedFrame(chart);
+        if (frame == null) return null;
+        String plotSvg = SvgPlotWriter.write(buildScene(chart, frame), WIDTH, HEIGHT);
+        RecordValue titleAst = chart.titleAst();
+        if (titleAst == null || !isAlgExprNode(titleAst)) return plotSvg;
+
+        LaidOut laid = new MathLayout(mathAtlas(), MathConstants.stixTwoMath()).layout(algExprToMathBox(titleAst));
+        String titleSvg = MathSvg.write(laid, 48.0);
+        double pad = 12.0, outerW = WIDTH, outerH = EXPORT_TITLE_BAND + HEIGHT;
+        // Title: fit into the top band (centered via the nested svg's preserveAspectRatio meet).
+        String placedTitle = placeSvg(titleSvg, 0, pad, outerW, EXPORT_TITLE_BAND - 2 * pad);
+        String placedPlot = placeSvg(plotSvg, 0, EXPORT_TITLE_BAND, outerW, HEIGHT);
+        return "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 "
+                + fmt(outerW) + " " + fmt(outerH) + "\">\n" + placedTitle + "\n" + placedPlot + "\n</svg>\n";
+    }
+
+    /** Wrap an SVG-document fragment as a positioned, aspect-preserving nested {@code <svg>} by
+     *  injecting {@code x/y/width/height} + {@code preserveAspectRatio} into its root tag. */
+    private static String placeSvg(String svg, double x, double y, double w, double h) {
+        int at = svg.indexOf("<svg") + 4;
+        String attrs = " x=\"" + fmt(x) + "\" y=\"" + fmt(y) + "\" width=\"" + fmt(w) + "\" height=\"" + fmt(h)
+                + "\" preserveAspectRatio=\"xMidYMid meet\"";
+        return svg.substring(0, at) + attrs + svg.substring(at);
     }
 
     /** A classified column: kind 0 = curve span {@code [lo,hi]}, 1 = isolated pole (a single
