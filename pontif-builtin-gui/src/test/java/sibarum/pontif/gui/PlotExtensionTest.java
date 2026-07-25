@@ -49,8 +49,8 @@ class PlotExtensionTest {
         // the qualified one, so override BOTH (last registration wins).
         double[][] captured = new double[2][];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = DasumBridge.doubles(args.get(0));
-            captured[1] = DasumBridge.doubles(args.get(1));
+            captured[0] = GuiShared.doubles(args.get(0));
+            captured[1] = GuiShared.doubles(args.get(1));
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderCurve", stub);
@@ -87,8 +87,8 @@ class PlotExtensionTest {
 
         double[][] captured = new double[2][];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = DasumBridge.doubles(args.get(0));
-            captured[1] = DasumBridge.doubles(args.get(1));
+            captured[0] = GuiShared.doubles(args.get(0));
+            captured[1] = GuiShared.doubles(args.get(1));
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderCurve", stub);
@@ -122,8 +122,8 @@ class PlotExtensionTest {
 
         double[][] captured = new double[2][];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = DasumBridge.doubles(args.get(0));
-            captured[1] = DasumBridge.doubles(args.get(1));
+            captured[0] = GuiShared.doubles(args.get(0));
+            captured[1] = GuiShared.doubles(args.get(1));
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderCurve", stub);
@@ -161,7 +161,7 @@ class PlotExtensionTest {
         // Capture the flattened xyz the native renderer would receive — no window opens.
         float[][] captured = new float[1][];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = DasumBridge.xyzTriples(args.get(0));
+            captured[0] = GuiShared.xyzTriples(args.get(0));
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderCloud", stub);
@@ -194,7 +194,7 @@ class PlotExtensionTest {
         // Capture the row-major height grid the renderer would mesh — no window opens.
         double[][] captured = new double[1][];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = DasumBridge.doubles(args.get(0));
+            captured[0] = GuiShared.doubles(args.get(0));
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderSurface", stub);
@@ -258,7 +258,7 @@ class PlotExtensionTest {
         assertFalse(r.isError(), () -> "scene program should run; got " + r.text());
         assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
 
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         // 3 geometry layers (2 surfaces + 1 cloud) then the text label appended last.
         assertEquals(4, build.layers().size(), "surface + faded surface + cloud + text");
         assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(0));
@@ -307,7 +307,7 @@ class PlotExtensionTest {
         assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
         assertNotNull(capturedLayers[0], "renderChart should have received the {layers} tuple");
 
-        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        var series = ChartBuilder.buildChartSeries(capturedLayers[0]);
         assertEquals(2, series.size(), "two overlaid curves → two series");
     }
 
@@ -344,7 +344,7 @@ class PlotExtensionTest {
         assertFalse(r.isError(), () -> "coloured chart program should run; got " + r.text());
         assertNotNull(capturedLayers[0], "renderChart should have received the {layers} tuple");
 
-        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        var series = ChartBuilder.buildChartSeries(capturedLayers[0]);
         assertEquals(2, series.size(), "two overlaid curves → two series");
 
         // Explicit {1,0,0} honoured verbatim.
@@ -382,7 +382,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "chart with curve(f, 10) should run; got " + r.text());
-        var series = DasumBridge.buildChartSeries(capturedLayers[0]);
+        var series = ChartBuilder.buildChartSeries(capturedLayers[0]);
         assertEquals(1, series.size(), "one curve → one series");
         assertEquals(10, series.get(0).pointCount(), "10 samples, not the default 65");
     }
@@ -390,7 +390,7 @@ class PlotExtensionTest {
     @Test
     void axisBox_generatesWireframeTicksAndNiceLabels() {
         // World bounds of a bowl: x,z in [-3,3], height y in [0,18].
-        List<Layer> layers = DasumBridge.axisBoxLayers(new Vec3(-3f, 0f, -3f), new Vec3(3f, 18f, 3f), true);
+        List<Layer> layers = SceneBuilder.axisBoxLayers(new Vec3(-3f, 0f, -3f), new Vec3(3f, 18f, 3f), true);
 
         long lineLayers = layers.stream().filter(l -> l instanceof LineLayer).count();
         long textLayers = layers.stream().filter(l -> l instanceof TextLayer).count();
@@ -403,21 +403,21 @@ class PlotExtensionTest {
         assertTrue(zeroLabel, "expected a billboard '0' tick label");
 
         // Empty/degenerate bounds produce nothing (no crash).
-        assertTrue(DasumBridge.axisBoxLayers(new Vec3(0f, 0f, 0f), new Vec3(0f, 0f, 0f), true).isEmpty());
+        assertTrue(SceneBuilder.axisBoxLayers(new Vec3(0f, 0f, 0f), new Vec3(0f, 0f, 0f), true).isEmpty());
     }
 
     @Test
     void colormaps_areMonotoneAndNamed() {
         // Endpoints and a distinct interior — each named map differs from the legacy "cool" ramp.
-        assertArrayEquals(new float[]{0f, 0f, 0f}, DasumBridge.colorFor("grayscale", 0f), 1e-6f);
-        assertArrayEquals(new float[]{1f, 1f, 1f}, DasumBridge.colorFor("grayscale", 1f), 1e-6f);
-        assertArrayEquals(new float[]{0f, 0.5f, 1f}, DasumBridge.colorFor("cool", 0f), 1e-6f);
-        assertArrayEquals(new float[]{1f, 0.5f, 0f}, DasumBridge.colorFor("cool", 1f), 1e-6f);
+        assertArrayEquals(new float[]{0f, 0f, 0f}, SceneBuilder.colorFor("grayscale", 0f), 1e-6f);
+        assertArrayEquals(new float[]{1f, 1f, 1f}, SceneBuilder.colorFor("grayscale", 1f), 1e-6f);
+        assertArrayEquals(new float[]{0f, 0.5f, 1f}, SceneBuilder.colorFor("cool", 0f), 1e-6f);
+        assertArrayEquals(new float[]{1f, 0.5f, 0f}, SceneBuilder.colorFor("cool", 1f), 1e-6f);
         // t is clamped; an unknown name falls back to "cool".
-        assertArrayEquals(DasumBridge.colorFor("cool", 1f), DasumBridge.colorFor("cool", 2f), 1e-6f);
-        assertArrayEquals(DasumBridge.colorFor("cool", 0.5f), DasumBridge.colorFor("bogus", 0.5f), 1e-6f);
+        assertArrayEquals(SceneBuilder.colorFor("cool", 1f), SceneBuilder.colorFor("cool", 2f), 1e-6f);
+        assertArrayEquals(SceneBuilder.colorFor("cool", 0.5f), SceneBuilder.colorFor("bogus", 0.5f), 1e-6f);
         // viridis/turbo span dark→bright (green-ness rises), distinct from cool.
-        float[] vlo = DasumBridge.colorFor("viridis", 0f), vhi = DasumBridge.colorFor("viridis", 1f);
+        float[] vlo = SceneBuilder.colorFor("viridis", 0f), vhi = SceneBuilder.colorFor("viridis", 1f);
         assertTrue(vhi[1] > vlo[1], "viridis brightens (green rises) low→high");
     }
 
@@ -444,7 +444,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "cmap scene should run; got " + r.text());
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         assertNotNull(build.bar(), "a surface scene has a colorbar key");
         assertEquals("viridis", build.bar().colormap(), "cmap selected viridis");
         assertEquals(0.0, build.bar().lo(), 1e-6, "min height 0");
@@ -474,7 +474,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "wire(surfaceFine(...)) should run; got " + r.text());
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         // A wired surface yields TWO layers: the triangle mesh + its wireframe line overlay.
         assertEquals(2, build.layers().size(), "surface + wireframe");
         assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(0));
@@ -510,7 +510,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "volume program should run; got " + r.text());
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         assertEquals(1, build.layers().size(), "one volumetric layer");
         Layer l = build.layers().get(0);
         assertInstanceOf(VolumeLayer.class, l);
@@ -553,7 +553,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "normals program should run; got " + r.text());
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         // TWO layers: the raymarched volume + its gradient-glyph overlay.
         assertEquals(2, build.layers().size(), "volume + gradient glyphs");
         assertInstanceOf(VolumeLayer.class, build.layers().get(0));
@@ -600,7 +600,7 @@ class PlotExtensionTest {
         assertFalse(r.isError(), () -> "plotExpr should run; got " + r.text());
         assertNotNull(captured[0], "renderReliable should have received the spans aggregate");
 
-        List<DasumBridge.ReliableSpan> spans = DasumBridge.parseSpans(captured[0]);
+        List<ReliableSeries.ReliableSpan> spans = ReliableSeries.parseSpans(captured[0]);
         assertEquals(256, spans.size(), "one span per pixel column");
         assertTrue(spans.stream().anyMatch(s -> s.kind() == 1),
                 "1/x over [-2,2] must detect a pole column (Unbounded) near x=0");
@@ -609,7 +609,7 @@ class PlotExtensionTest {
 
         // The spans rasterise to vertical series: poles as full-height blocks, curves as segments,
         // breaks omitted. A near-pole spike must NOT set the scale — the robust range stays modest.
-        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, captured[0]);
+        var series = ReliableSeries.buildReliableSeries(-2.0, 2.0, captured[0]);
         assertFalse(series.isEmpty(), "reliable spans should render to vertical series");
     }
 
@@ -637,7 +637,7 @@ class PlotExtensionTest {
                 PontifRunner.Engine.INTERPRETER);
 
         assertFalse(r.isError(), () -> "auto-plot sample should run; got " + r.text());
-        List<DasumBridge.ReliableSpan> spans = DasumBridge.parseSpans(captured[0]);
+        List<ReliableSeries.ReliableSpan> spans = ReliableSeries.parseSpans(captured[0]);
         assertEquals(256, spans.size(), "256 columns over the auto-framed domain");
         assertTrue(spans.stream().anyMatch(s -> s.kind() == 1),
                 "1/(x^2-1) must produce pole columns (Unbounded) at x = ±1");
@@ -724,7 +724,7 @@ class PlotExtensionTest {
     void reliableSpans_isolatedPole_breaksTheCurveIntoTwoConnectedPolylines() {
         // curve, curve, POLE, curve, curve — the two curve stretches connect into ONE polyline each,
         // and the lone pole is a break between them (not a line across it). So exactly two series.
-        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+        var series = ReliableSeries.buildReliableSeries(-2.0, 2.0, spansTuple(
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0), span(1, 0.0, 0.0),
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0)));
         assertEquals(2, series.size(), "one connected polyline on each side of the broken pole");
@@ -734,7 +734,7 @@ class PlotExtensionTest {
     void reliableSpans_densePole_fillsAsABlock() {
         // Dense pole columns (kind 3 — unresolvable detail, decided Pontif-side by the subdivision
         // probe) each fill, so all five become full-height series.
-        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+        var series = ReliableSeries.buildReliableSeries(-2.0, 2.0, spansTuple(
                 span(3, 0.0, 0.0), span(3, 0.0, 0.0), span(3, 0.0, 0.0),
                 span(3, 0.0, 0.0), span(3, 0.0, 0.0)));
         assertEquals(5, series.size(), "a dense pole run fills every column");
@@ -747,7 +747,7 @@ class PlotExtensionTest {
         // (kind 1), NOT dense. A run of kind-1 poles must render as a clean break the curve blows
         // through — NOT a stack of full-height fill bars. Curve on each side → two connected
         // polylines, with the whole smear a single gap between them.
-        var series = DasumBridge.buildReliableSeries(-2.0, 2.0, spansTuple(
+        var series = ReliableSeries.buildReliableSeries(-2.0, 2.0, spansTuple(
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0),
                 span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0), span(1, 0.0, 0.0),
                 span(0, 1.0, 1.0), span(0, 1.0, 1.0)));
@@ -768,7 +768,7 @@ class PlotExtensionTest {
     void reliableSpans_poleEndedRun_extendsToTheFrameEdge() {
         // curve rising 0.1 → 0.2 → 0.3, then a POLE (proven blow-up): the line keeps going, so it
         // must extend past the last sampled midpoint (0.3) up to the top edge (ymax ≈ 0.31 here).
-        var series = DasumBridge.buildReliableSeries(-1.0, 1.0, spansTuple(
+        var series = ReliableSeries.buildReliableSeries(-1.0, 1.0, spansTuple(
                 span(0, 0.1, 0.1), span(0, 0.2, 0.2), span(0, 0.3, 0.3), span(1, 0.0, 0.0)));
         assertEquals(1, series.size());
         assertTrue(maxY(series.get(0).ys()) > 0.305,
@@ -779,7 +779,7 @@ class PlotExtensionTest {
     void reliableSpans_emptyEndedRun_stopsWithoutExtending() {
         // Same run, but ending at an EMPTY column (Undefined = a domain edge): the curve genuinely
         // stops, so it must NOT be extended — the top stays at the last data point (0.3).
-        var series = DasumBridge.buildReliableSeries(-1.0, 1.0, spansTuple(
+        var series = ReliableSeries.buildReliableSeries(-1.0, 1.0, spansTuple(
                 span(0, 0.1, 0.1), span(0, 0.2, 0.2), span(0, 0.3, 0.3), span(2, 0.0, 0.0)));
         assertEquals(1, series.size());
         assertTrue(maxY(series.get(0).ys()) <= 0.30001,
@@ -789,7 +789,7 @@ class PlotExtensionTest {
     // --- Supplemental expression layers (reliable + zeros/optima/asymptotes/intersections) --------
 
     /** Capture the {@code chart} layer tuple and decompose it with the native, without a window. */
-    private static DasumBridge.AnnotatedChart runChart(String program) {
+    private static ChartBuilder.AnnotatedChart runChart(String program) {
         Extensions.install(new PlotExtension());
         Object[] captured = new Object[1];
         NativeCalls.Context[] capturedCtx = new NativeCalls.Context[1];
@@ -804,17 +804,17 @@ class PlotExtensionTest {
                 new PontifCompiler().compileAlt(program, "layers.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
         assertNotNull(captured[0], "renderChart should have received the {layers} tuple");
-        return DasumBridge.buildAnnotatedChart(captured[0], capturedCtx[0]);
+        return ChartBuilder.buildAnnotatedChart(captured[0], capturedCtx[0]);
     }
 
-    private static MarkSetOf firstMarkSet(DasumBridge.AnnotatedChart chart, int kind) {
+    private static MarkSetOf firstMarkSet(ChartBuilder.AnnotatedChart chart, int kind) {
         var set = chart.marks().stream().filter(m -> m.kind() == kind).findFirst();
         assertTrue(set.isPresent(), "expected a mark set of kind " + kind);
         return new MarkSetOf(set.get());
     }
 
     /** A tiny view over a MarkSet's features, for order-independent proximity assertions. */
-    private record MarkSetOf(DasumBridge.MarkSet set) {
+    private record MarkSetOf(ChartBuilder.MarkSet set) {
         boolean hasNear(double x, double tol) {
             return set.pts().stream().anyMatch(f -> Math.abs(f.x() - x) < tol);
         }
@@ -913,7 +913,7 @@ class PlotExtensionTest {
                 )""");
         var win = chart.exprWindow();
         assertNotNull(win, "a chart with reliable plots records a shared window");
-        var frame = DasumBridge.annotatedFrame(chart);
+        var frame = ChartBuilder.annotatedFrame(chart);
         assertEquals(win[0], frame.x().min(), 1e-9, "frame x pinned to the shared window low edge");
         assertEquals(win[1], frame.x().max(), 1e-9, "frame x pinned to the shared window high edge");
         // EACH expression (grouped by its palette colour) must reach BOTH edges — not just the union.
@@ -1021,9 +1021,9 @@ class PlotExtensionTest {
         // (not the ±w/2 column midpoint) — an integer asymptote must land on the integer and label "1".
         assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x() + 1.0) < 1e-4), "asymptote at x = -1 (refined)");
         assertTrue(chart.vlines().stream().anyMatch(v -> Math.abs(v.x() - 1.0) < 1e-4), "asymptote at x = 1 (refined)");
-        assertTrue(chart.vlines().stream().anyMatch(v -> DasumBridge.fmt(v.x()).equals("1")),
+        assertTrue(chart.vlines().stream().anyMatch(v -> GuiShared.fmt(v.x()).equals("1")),
                 "the label reads the clean integer '1', not '0.997' / '1.002'");
-        assertTrue(chart.vlines().stream().anyMatch(v -> DasumBridge.fmt(v.x()).equals("-1")),
+        assertTrue(chart.vlines().stream().anyMatch(v -> GuiShared.fmt(v.x()).equals("-1")),
                 "and '-1' for the negative asymptote");
     }
 
@@ -1131,9 +1131,9 @@ class PlotExtensionTest {
                 function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
                 assign proof f:Algebraic
                 chart({title = "r"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast), zeros($f[Decimal].ast) })""");
-        var frame = DasumBridge.annotatedFrame(chart);
+        var frame = ChartBuilder.annotatedFrame(chart);
         assertNotNull(frame, "the rational chart frames");
-        var scene = DasumBridge.buildScene(chart, frame);
+        var scene = ChartBuilder.buildScene(chart, frame);
         String svg = sibarum.dasum.gui.vis.plot.SvgPlotWriter.write(scene, 900, 550);
 
         assertDoesNotThrow(() -> javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
@@ -1157,7 +1157,7 @@ class PlotExtensionTest {
                 function f(x:Decimal):Decimal -> (2*x + 3) / (x^2 + 3*x - 4)
                 assign proof f:Algebraic
                 chart({title = "r"}, { expr($f[Decimal].ast), asymptotes($f[Decimal].ast), zeros($f[Decimal].ast) })""");
-        String svg = DasumBridge.titledChartSvg(chart);
+        String svg = PlotSvg.titledChartSvg(chart);
         assertNotNull(svg, "a drawable chart yields an SVG");
         assertDoesNotThrow(() -> javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
             .parse(new java.io.ByteArrayInputStream(svg.getBytes(java.nio.charset.StandardCharsets.UTF_8))),
@@ -1186,7 +1186,7 @@ class PlotExtensionTest {
                   let r = $g[Decimal].ast
                   chart({title = "two"}, { expr(e), expr(r), asymptotes(e), zeros(e), optima(e) })
                 )""");
-        String svg = DasumBridge.titledChartSvg(chart);
+        String svg = PlotSvg.titledChartSvg(chart);
         assertNotNull(svg);
         // A snapshot on disk for eyeballing the actual drawn geometry (the SVG-verification habit).
         String out = System.getenv("PLOT_SVG_OUT");
@@ -1206,13 +1206,13 @@ class PlotExtensionTest {
         // are dropped — the well-separated ones (-0.9, 0.9) survive, the tight cluster near 0 collapses
         // to at most a couple of labels.
         double[] vx = {-0.9, 0.0, 0.01, 0.02, 0.03, 0.04, 0.9};
-        List<DasumBridge.VLineMark> vlines = new java.util.ArrayList<>();
-        for (double x : vx) vlines.add(new DasumBridge.VLineMark(x, null));
+        List<ChartBuilder.VLineMark> vlines = new java.util.ArrayList<>();
+        for (double x : vx) vlines.add(new ChartBuilder.VLineMark(x, null));
         var series = List.of(sibarum.dasum.gui.vis.plot.Series.line(
                 new double[]{-1.0, 1.0}, new double[]{-1.0, 1.0}, new sibarum.dasum.gui.core.render.Color(1, 1, 1, 1)));
-        var chart = new DasumBridge.AnnotatedChart(series, List.of(), vlines, null, null, null);
-        var frame = DasumBridge.annotatedFrame(chart);
-        var layers = DasumBridge.buildAnnotatedLayers(chart, frame);
+        var chart = new ChartBuilder.AnnotatedChart(series, List.of(), vlines, null, null, null);
+        var frame = ChartBuilder.annotatedFrame(chart);
+        var layers = ChartBuilder.buildAnnotatedLayers(chart, frame);
 
         long asymptoteLines = layers.stream()
                 .filter(l -> l instanceof LineLayer && l.opacity() == 0.5f).count();
@@ -1254,9 +1254,9 @@ class PlotExtensionTest {
                 let e:AlgExpr = Div(Const(1.0), Sub(Mul(Param("x"), Param("x")), Const(1.0)))
                 chart({title = "sample"}, { expr(e), asymptotes(e), optima(e) })""");
         assertEquals(1, firstMarkSet(chart, 1).size(), "one local optimum for 1/(x^2-1)");
-        var frame = DasumBridge.annotatedFrame(chart);
+        var frame = ChartBuilder.annotatedFrame(chart);
         assertNotNull(frame, "a single marker must still yield a frame, not throw on a 1-point series");
-        assertFalse(DasumBridge.buildAnnotatedLayers(chart, frame).isEmpty(),
+        assertFalse(ChartBuilder.buildAnnotatedLayers(chart, frame).isEmpty(),
                 "the annotated layer list (axes + curve + marker + asymptotes) builds");
     }
 
@@ -1265,15 +1265,15 @@ class PlotExtensionTest {
         // The "unreasonable quantity of primitives" guard: a MarkLayer with more than FEATURE_CAP
         // markers is dropped rather than cluttering the plot, and a notice is written to StdErr.
         Map<String, Object> pts = new LinkedHashMap<>();
-        for (int i = 0; i < DasumBridge.FEATURE_CAP + 6; i++) pts.put("_" + i, mark(i * 0.1, 0.0));
+        for (int i = 0; i < ChartBuilder.FEATURE_CAP + 6; i++) pts.put("_" + i, mark(i * 0.1, 0.0));
         RecordValue overflow = new RecordValue("pontif.plot/MarkLayer",
                 new LinkedHashMap<>(Map.of("pts", new RecordValue("_tuple", pts), "kind", 1L)));
 
         java.io.PrintStream realErr = System.err;
         java.io.ByteArrayOutputStream log = new java.io.ByteArrayOutputStream();
         System.setErr(new java.io.PrintStream(log));
-        DasumBridge.AnnotatedChart chart;
-        try { chart = DasumBridge.buildAnnotatedChart(spansTuple(overflow)); }
+        ChartBuilder.AnnotatedChart chart;
+        try { chart = ChartBuilder.buildAnnotatedChart(spansTuple(overflow)); }
         finally { System.setErr(realErr); }
 
         assertTrue(chart.marks().isEmpty(), "an over-cap annotation layer must be suppressed");

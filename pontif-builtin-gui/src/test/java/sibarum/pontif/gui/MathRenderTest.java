@@ -52,13 +52,13 @@ class MathRenderTest {
     @Test
     void algExprToMathBox_topLevelIsAFraction() {
         // The whole rational function is a Div → the typeset root is a Fraction.
-        MathBoxProbe probe = MathBoxProbe.of(DasumBridge.algExprToMathBox(rationalAst()));
+        MathBoxProbe probe = MathBoxProbe.of(MathText.algExprToMathBox(rationalAst()));
         assertTrue(probe.isFraction(), "the rational expression typesets as a fraction at the root");
     }
 
     @Test
     void mathSvg_isWellFormed_andTypesetsFractionAndScripts() {
-        String svg = DasumBridge.mathSvg(rationalAst());
+        String svg = MathText.mathSvg(rationalAst());
         System.out.println("=== math SVG (rational function) ===\n" + svg);   // captured for preview
         assertDoesNotThrow(() -> DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(new ByteArrayInputStream(svg.getBytes(StandardCharsets.UTF_8))),
@@ -71,7 +71,7 @@ class MathRenderTest {
     @Test
     void markupSvg_typesetsNotation_selfContained() {
         // A markup string exercising a fraction, a superscript, a root and a Greek symbol.
-        String svg = DasumBridge.markupSvg("(x^2 + 1)/sqrt(pi)");
+        String svg = MathText.markupSvg("(x^2 + 1)/sqrt(pi)");
         assertNotNull(svg, "valid markup should render");
         assertDoesNotThrow(() -> DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(new ByteArrayInputStream(svg.getBytes(StandardCharsets.UTF_8))),
@@ -84,7 +84,7 @@ class MathRenderTest {
 
     @Test
     void markupSvg_returnsNull_onMalformedMarkup() {
-        assertNull(DasumBridge.markupSvg("(x^2"), "unbalanced input doesn't render");
+        assertNull(MathText.markupSvg("(x^2"), "unbalanced input doesn't render");
     }
 
     /** Minimal reflective peek at a MathBox's kind without exposing dasum types across the test. */

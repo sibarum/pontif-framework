@@ -26,13 +26,13 @@ class DasumBridgeTest {
         members.put("0", 0L);
         members.put("1", new BigDecimal("1.5"));
         members.put("2", 4);
-        double[] result = DasumBridge.doubles(new RecordValue("_tuple", members));
+        double[] result = GuiShared.doubles(new RecordValue("_tuple", members));
         assertArrayEquals(new double[]{0.0, 1.5, 4.0}, result, 1e-12);
     }
 
     @Test
     void doubles_nonRecordYieldsEmpty() {
-        assertEquals(0, DasumBridge.doubles("not a tuple").length);
-        assertEquals(0, DasumBridge.doubles(null).length);
+        assertEquals(0, GuiShared.doubles("not a tuple").length);
+        assertEquals(0, GuiShared.doubles(null).length);
     }
 }

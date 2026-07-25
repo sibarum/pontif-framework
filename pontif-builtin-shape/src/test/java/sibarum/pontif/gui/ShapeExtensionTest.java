@@ -56,7 +56,7 @@ class ShapeExtensionTest {
         // The single Volume layer carries the raw signed-distance grid the SDF was sampled into.
         RecordValue tuple = (RecordValue) capturedLayers[0];
         RecordValue vol = (RecordValue) tuple.members().values().iterator().next();
-        double[] vs = DasumBridge.doubles(vol.members().get("vs"));
+        double[] vs = GuiShared.doubles(vol.members().get("vs"));
 
         // 24^3 samples over the sphere's bounds [-2,2]^3 (radius 1, box padded to 2r). The grid is
         // clamped to a surface band (±2·dx) so the volumetric render lights the surface shell, not
@@ -79,7 +79,7 @@ class ShapeExtensionTest {
         assertEquals(exact, vs[17 + 12 * 24 + 12 * 576], 1e-9, "near-surface voxel carries the exact sdf");
 
         // The same layers build into one raymarched 24^3 VolumeLayer (the reused plot path).
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         assertEquals(1, build.layers().size(), "one volumetric layer");
         assertInstanceOf(VolumeLayer.class, build.layers().get(0));
         assertEquals(24, ((VolumeLayer) build.layers().get(0)).nx(), "24^3 sampling grid");
@@ -120,7 +120,7 @@ class ShapeExtensionTest {
         assertEquals(2.0, ((java.math.BigDecimal) ray.members().get("hx")).doubleValue(), 1e-9, "box half-extent x");
 
         // The same layers build into one dasum RaymarchLayer with the spliced shader + AABB.
-        DasumBridge.SceneBuild build = DasumBridge.buildSceneLayers(capturedLayers[0]);
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
         assertEquals(1, build.layers().size(), "one raymarch layer");
         sibarum.dasum.gui.vis.scene.RaymarchLayer layer =
                 assertInstanceOf(sibarum.dasum.gui.vis.scene.RaymarchLayer.class, build.layers().get(0));

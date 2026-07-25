@@ -33,7 +33,7 @@ class MathTextConfigTest {
         m.put("axisHeight", new BigDecimal("0.30"));         // overridden
         m.put("spaceRelation", new BigDecimal("0.33"));      // overridden
         m.put("fontGroup", new StringValue("mathAlt"));      // overridden
-        MathConstants mc = DasumBridge.mathConstantsFrom(new RecordValue("_record", m));
+        MathConstants mc = MathText.mathConstantsFrom(new RecordValue("_record", m));
 
         assertEquals(0.30, mc.axisHeight(), 1e-9, "overridden field read from the record");
         assertEquals(0.33, mc.spaceRelation(), 1e-9);
@@ -46,7 +46,7 @@ class MathTextConfigTest {
 
     @Test
     void nullConfig_isTheDefaultProfile() {
-        assertEquals(MathConstants.stixTwoMath(), DasumBridge.mathConstantsFrom(null),
+        assertEquals(MathConstants.stixTwoMath(), MathText.mathConstantsFrom(null),
                 "no config → the baked default profile");
     }
 
