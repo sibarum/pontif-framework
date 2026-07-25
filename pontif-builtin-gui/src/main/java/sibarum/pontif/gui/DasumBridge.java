@@ -78,6 +78,7 @@ import sibarum.dasum.gui.core.dialog.FileDialog;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.foreign.MemorySegment;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -695,10 +696,23 @@ public final class DasumBridge {
         // Ctrl+A, …) on press/repeat. This is what makes an input field actually accept input.
         GlfwCallbacks.setCharListener((w, cp) -> TextInputController.onCharInput(cp));
         GlfwCallbacks.setKeyListener((w, key, sc, action, mods) -> {
-            if (action == Glfw.GLFW_PRESS || action == Glfw.GLFW_REPEAT) {
-                TextInputController.onKey(key, (mods & Glfw.GLFW_MOD_SHIFT) != 0,
-                        (mods & Glfw.GLFW_MOD_CONTROL) != 0);
-            }
+            if (action != Glfw.GLFW_PRESS && action != Glfw.GLFW_REPEAT) return;
+            boolean shift = (mods & Glfw.GLFW_MOD_SHIFT) != 0;
+            boolean ctrl = (mods & Glfw.GLFW_MOD_CONTROL) != 0;
+            // Editing keys and clipboard are SEPARATE entry points from onKey (which only does
+            // caret navigation), so dispatch them explicitly — first match wins. Without this an
+            // editable Text accepts typed chars but not backspace/delete/enter.
+            MemorySegment win = MemorySegment.ofAddress(w);       // clipboard calls take the GLFW handle
+            // GLFW letter keycodes match ASCII uppercase ('A'..'Z' = 65..90).
+            if (ctrl && key == 'A' && TextInputController.onSelectAll()) return;
+            if (ctrl && key == 'C' && TextInputController.onCopy(win)) return;
+            if (ctrl && key == 'X' && TextInputController.onCut(win)) return;
+            if (ctrl && key == 'V' && TextInputController.onPaste(win)) return;
+            if (key == Glfw.GLFW_KEY_BACKSPACE && TextInputController.onBackspace(ctrl)) return;
+            if (key == Glfw.GLFW_KEY_DELETE && TextInputController.onDelete(ctrl)) return;
+            if (key == Glfw.GLFW_KEY_ENTER && TextInputController.onEnter()) return;
+            if (key == Glfw.GLFW_KEY_TAB && TextInputController.onTab()) return;
+            TextInputController.onKey(key, shift, ctrl);           // arrows / Home / End
         });
     }
 
@@ -941,7 +955,7 @@ public final class DasumBridge {
                                         Component.Text status, NativeCalls.Context ctx) {
         Optional<RecordValue> parsed = ExprParser.parse(text);
         if (parsed.isEmpty()) {
-            TextStates.setContent(status, text == null || text.isBlank() ? "" : "⚠ can't parse");
+            TextStates.setContent(status, text == null || text.isBlank() ? "" : "cannot parse");
             return;
         }
         RecordValue e = parsed.get();
@@ -956,7 +970,7 @@ public final class DasumBridge {
             titleView.show(new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h)), tl);
             TextStates.setContent(status, "");
         } catch (RuntimeException ex) {
-            TextStates.setContent(status, "⚠ can't plot");
+            TextStates.setContent(status, "cannot plot");
         }
     }
 
@@ -1056,22 +1070,37 @@ public final class DasumBridge {
     // self-contained SVG, and an interactive window that re-typesets live as you type (the plotInput
     // debounce/publish pattern, over math instead of a plot).
 
-    /** A fixed-size viewport typesetting a {@link MathBox} tree y-up, framed tightly by an ortho
-     *  camera — the markup counterpart of {@link #mathTitleComponent}, sized to fill a window. */
+    /** A viewport typesetting a {@link MathBox} tree y-up, the equation contained and centered; it
+     *  re-fits when the window resizes. The markup counterpart of {@link #mathTitleComponent}. */
     private static Component mathBoxComponent(MathBox box) {
         MathConstants mc = MathConstants.stixTwoMath();
         LaidOut laid = new MathLayout(mathAtlas(), mc).layout(box);
-        Component.SceneView view = plotSceneView();
-        publishMathBox(new PlotView(view), laid, mc);
+        Component.SceneView view = (Component.SceneView) Ui.sceneView().background(PLOT_BG).grow(1).build();
+        PlotView pv = new PlotView(view);
+        SceneStates.onViewportResize(view, px -> showMathFitted(pv, view, laid, mc));
+        showMathFitted(pv, view, laid, mc);
         return view;
     }
 
-    /** (Re)publish a laid-out equation into {@code view}'s ortho frame — shared by the static render
-     *  and the live-updating input window. */
-    private static void publishMathBox(PlotView view, LaidOut laid, MathConstants mc) {
-        float w = (float) Math.max(1e-3, laid.width()), h = (float) Math.max(1e-3, laid.ascent() + laid.descent());
+    /**
+     * Publish a laid-out equation CONTAINED in {@code sv}'s viewport (centered, never overflowing).
+     * {@link PlotView} fits a frame by height with width following the viewport aspect — right for a
+     * plot, but a short wide equation would spill past the sides. So the framed region is padded out
+     * to the viewport's aspect ratio (with a margin) around the equation, making the fit contain both
+     * axes. Reads the live viewport size, so it must be re-run on resize.
+     */
+    private static void showMathFitted(PlotView view, Component.SceneView sv, LaidOut laid, MathConstants mc) {
         List<Layer> layers = MathOgl.toLayers(laid, mc, TEXT, 1f, 0f, 0f, /*yUp*/ true);
-        view.show(new PlotFrame(0f, 0f, w, h, Axis.linear(0, w), Axis.linear(0, h)), layers);
+        double w = Math.max(1e-3, laid.width()), h = Math.max(1e-3, laid.ascent() + laid.descent());
+        SceneStates.ViewportPx px = SceneStates.viewportPxOf(sv);
+        double aspect = (px != null && px.width() > 0 && px.height() > 0)
+                ? (double) px.width() / px.height() : (double) WIDTH / HEIGHT;
+        double margin = 1.25;
+        double fw = Math.max(w, h * aspect) * margin;     // frame aspect == viewport aspect, so a
+        double fh = Math.max(h, w / aspect) * margin;     // height-fit also fits the width
+        float x0 = (float) ((w - fw) / 2), y0 = (float) ((h - fh) / 2);
+        float x1 = (float) (x0 + fw), y1 = (float) (y0 + fh);
+        view.show(new PlotFrame(x0, y0, x1, y1, Axis.linear(x0, x1), Axis.linear(y0, y1)), layers);
     }
 
     /** Typeset a markup string to a self-contained SVG (subset STIX Two Math embedded), or {@code null}
@@ -1141,8 +1170,13 @@ public final class DasumBridge {
     }
 
     private static Component markupInputRoot(String initial) {
-        Component.SceneView mathSV = plotSceneView();
+        // grow(1) so the math viewport takes the space below the input row (a fill sceneview with
+        // grow=0 in a column collapses — the zero-area lint rule).
+        Component.SceneView mathSV = (Component.SceneView) Ui.sceneView().background(PLOT_BG).grow(1).build();
         PlotView mathView = new PlotView(mathSV);
+        MathConstants mc = MathConstants.stixTwoMath();
+        LaidOut[] last = {null};                           // the current good render, re-fit on resize
+        SceneStates.onViewportResize(mathSV, px -> { if (last[0] != null) showMathFitted(mathView, mathSV, last[0], mc); });
 
         Component.Text input = new Component.Text(initial, FontGroups.DEFAULT, Em.of(1.3f), TEXT,
                 null, null, Em.of(0.4f), null, true, true, true, true, false, 1);
@@ -1150,8 +1184,9 @@ public final class DasumBridge {
                 null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
 
         Debouncer debounce = new Debouncer(220);
-        TextStates.onContentChange(input, txt -> debounce.submit(() -> updateMarkup(txt, mathView, status)));
-        updateMarkup(initial, mathView, status);          // initial render
+        TextStates.onContentChange(input,
+                txt -> debounce.submit(() -> updateMarkup(txt, mathView, mathSV, status, last, mc)));
+        updateMarkup(initial, mathView, mathSV, status, last, mc);   // initial render
         FocusState.set(input);
 
         Component inputRow = Ui.row().padding(Em.of(0.5f)).gap(Em.of(0.5f)).align(AlignItems.CENTER)
@@ -1161,15 +1196,16 @@ public final class DasumBridge {
 
     /** Re-typeset {@code text}; on a parse error keep the last good render and mark the field. Runs off
      *  the GLFW thread (debounce) — {@link PlotView#show} publishes lock-free. */
-    private static void updateMarkup(String text, PlotView mathView, Component.Text status) {
+    private static void updateMarkup(String text, PlotView mathView, Component.SceneView mathSV,
+                                     Component.Text status, LaidOut[] last, MathConstants mc) {
         if (text == null || text.isBlank()) { TextStates.setContent(status, ""); return; }
-        MathConstants mc = MathConstants.stixTwoMath();
         try {
             LaidOut laid = new MathLayout(mathAtlas(), mc).layout(MathMarkup.parse(text));
-            publishMathBox(mathView, laid, mc);
+            last[0] = laid;
+            showMathFitted(mathView, mathSV, laid, mc);
             TextStates.setContent(status, "");
         } catch (MathMarkup.MarkupError e) {
-            TextStates.setContent(status, "⚠");
+            TextStates.setContent(status, "cannot parse");
         }
     }
 
