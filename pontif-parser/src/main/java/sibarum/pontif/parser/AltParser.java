@@ -20,6 +20,18 @@ import sibarum.pontif.types.TypeCatalog;
 import sibarum.pontif.types.TypeInfo;
 import sibarum.pontif.types.TypeSystem;
 
+import static sibarum.pontif.parser.IrQueries.baseSortName;
+import static sibarum.pontif.parser.IrQueries.extractDottedName;
+import static sibarum.pontif.parser.IrQueries.isCapitalizedName;
+import static sibarum.pontif.parser.IrQueries.isComparison;
+import static sibarum.pontif.parser.IrQueries.isOrderComparison;
+import static sibarum.pontif.parser.IrQueries.isPositionalKey;
+import static sibarum.pontif.parser.IrQueries.isSelfType;
+import static sibarum.pontif.parser.IrQueries.isStar;
+import static sibarum.pontif.parser.IrQueries.isUnknownSort;
+import static sibarum.pontif.parser.IrQueries.sameBaseName;
+import static sibarum.pontif.parser.IrQueries.selfToFieldAccess;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -461,10 +473,6 @@ public final class AltParser {
         return peek().kind() == AltToken.Kind.LBRACE
                 && peek(1).kind() == AltToken.Kind.IDENT
                 && peek(2).kind() == AltToken.Kind.EQUALS;
-    }
-
-    private static boolean isCapitalizedName(String s) {
-        return !s.isEmpty() && Character.isUpperCase(s.charAt(0));
     }
 
     /**
@@ -3065,10 +3073,6 @@ public final class AltParser {
         }
     }
 
-    private static boolean isSelfType(IrSort sort) {
-        return sort instanceof IrSort.Named n && n.name().equals(IrSort.SELF_TYPE);
-    }
-
     private IrSort parseBracketSort() throws ParseException {
         AltToken open = expect(AltToken.Kind.LBRACKET);
         AltToken first = peek();
@@ -3410,10 +3414,6 @@ public final class AltParser {
     }
 
     /** Whether {@code t} is the {@code *} operator (the tuple-repetition marker). */
-    private static boolean isStar(AltToken t) {
-        return t.kind() == AltToken.Kind.OP && "*".equals(t.text());
-    }
-
     /** Parses a tuple-repetition count ({@code N} in {@code {T*N}}) — an integer literal ≥ 1. */
     private int repeatCount(AltToken intTok) throws ParseException {
         int n;
@@ -3464,21 +3464,6 @@ public final class AltParser {
      * same name; null otherwise (signals cross-base — caller emits Union
      * or Intersection instead of normalizing).
      */
-    private static String sameBaseName(List<IrSort> branches) {
-        String base = null;
-        for (IrSort b : branches) {
-            String n = switch (b) {
-                case IrSort.Named bn -> bn.name();
-                case IrSort.Refined r -> r.name();
-                default -> null;
-            };
-            if (n == null) return null;
-            if (base == null) base = n;
-            else if (!base.equals(n)) return null;
-        }
-        return base;
-    }
-
     /**
      * Whether {@code peek()} — an opening {@code (} of a {@code Name(…)} group — is the
      * start of a <b>call signature</b> {@code Name(…):Return} rather than a struct
@@ -3966,21 +3951,6 @@ public final class AltParser {
                 pred.origin());
     }
 
-    private static boolean isComparison(IrExpr.Op op) {
-        return switch (op) {
-            case LT, LE, GT, GE, EQ, NE -> true;
-            default -> false;
-        };
-    }
-
-    /** Order comparisons only ({@code < <= > >=}) — the ones that chain. */
-    private static boolean isOrderComparison(IrExpr.Op op) {
-        return switch (op) {
-            case LT, LE, GT, GE -> true;
-            default -> false;
-        };
-    }
-
     // --- Expressions (Pratt) ---
 
     public IrExpr parseExpr() throws ParseException {
@@ -4066,14 +4036,6 @@ public final class AltParser {
     }
 
     /** True for a tuple positional key — {@code _0}, {@code _1}, … (underscore + digits). */
-    private static boolean isPositionalKey(String name) {
-        if (name.length() < 2 || name.charAt(0) != '_') return false;
-        for (int i = 1; i < name.length(); i++) {
-            if (!Character.isDigit(name.charAt(i))) return false;
-        }
-        return true;
-    }
-
     private IrExpr parsePrimaryWithPostfix() throws ParseException {
         // Spread-ascription `&s:[transform]` — the inline/anonymous face of applying
         // a transform per element over a stream (docs/stream-war.md §3). `&a:[x]` ≡
@@ -5618,27 +5580,6 @@ public final class AltParser {
         return result;
     }
 
-    /** True if {@code s} is the unknown placeholder sort {@code _}. */
-    private static boolean isUnknownSort(IrSort s) {
-        return s instanceof IrSort.Named n && n.name().equals("_");
-    }
-
-    /**
-     * Rewrites a per-field pattern predicate ({@code @==25}, Self meaning the
-     * FIELD) into a whole-value predicate ({@code @.unscaled==25}, Self
-     * meaning the carrier) — the form native-anatomy patterns refine with.
-     */
-    private static IrExpr selfToFieldAccess(IrExpr pred, String field) {
-        return switch (pred) {
-            case IrExpr.SelfRef s -> new IrExpr.FieldAccess(s, field, s.origin());
-            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
-                    selfToFieldAccess(op.left(), field),
-                    selfToFieldAccess(op.right(), field),
-                    op.origin());
-            default -> pred;  // literals and anything Self-free pass through
-        };
-    }
-
     /**
      * Best-effort base-sort name for a scrutinee expression. Returns {@code null}
      * if no base can be inferred (the scrutinee isn't a Var in scope, or is a
@@ -5697,36 +5638,6 @@ public final class AltParser {
             }
             case IrSort.Trait t -> t.name();
         };
-    }
-
-    private static String baseSortName(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.CallSig c -> CallKinds.builtin(c.typeName()) == CallKinds.Kind.FUNCTION
-                    ? null : c.typeName();
-            case IrSort.Trait t -> t.name();
-            // Cross-base unions/intersections have no single base name.
-            case IrSort.Union u -> null;
-            case IrSort.Intersection i -> null;
-        };
-    }
-
-    /**
-     * If {@code expr} is a chain of {@link IrExpr.FieldAccess} rooted at an
-     * {@link IrExpr.Var}, returns the dotted name (e.g., {@code "Point.manhattan"}).
-     * Otherwise returns {@code null}. Used by {@code parsePrimaryWithPostfix}
-     * to decide whether {@code Name.fn(args)} is a qualified Call or an Apply.
-     */
-    private static String extractDottedName(IrExpr expr) {
-        if (expr instanceof IrExpr.Var v) return v.name();
-        if (expr instanceof IrExpr.FieldAccess fa) {
-            String base = extractDottedName(fa.base());
-            if (base == null) return null;
-            return base + "." + fa.fieldName();
-        }
-        return null;
     }
 
     private List<IrExpr> parseArgList() throws ParseException {
