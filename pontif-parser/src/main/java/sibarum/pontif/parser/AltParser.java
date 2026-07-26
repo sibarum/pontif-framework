@@ -2,20 +2,18 @@ package sibarum.pontif.parser;
 
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.CallKinds;
-import sibarum.pontif.ir.InferenceContext;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.types.Assignability;
-import sibarum.pontif.types.AssignabilityContext;
 import sibarum.pontif.types.TypeCatalog;
 import sibarum.pontif.types.TypeInfo;
-import sibarum.pontif.types.TypeSystem;
 
+import static sibarum.pontif.parser.IrQueries.TUPLE_SENTINEL;
 import static sibarum.pontif.parser.IrQueries.baseSortName;
+import static sibarum.pontif.parser.IrQueries.describeSort;
 import static sibarum.pontif.parser.IrQueries.extractDottedName;
 import static sibarum.pontif.parser.IrQueries.isCapitalizedName;
 import static sibarum.pontif.parser.IrQueries.isComparison;
@@ -70,7 +68,6 @@ public final class AltParser {
      * ({@code _0 .. _n}); the name marks the aggregate as a tuple for display
      * and keeps tuples from being mistaken for a declared struct.
      */
-    static final String TUPLE_SENTINEL = "_tuple";
 
     /**
      * Keywords are recognized by text at parse time, not by token kind.
@@ -269,6 +266,10 @@ public final class AltParser {
      */
     private final Set<String> declaredZeroArgFunctions = new java.util.HashSet<>();
 
+
+    /** Parse-time type reasoning, reading this parser's live scope maps and shared catalog. */
+    private final ParseTimeInference inference =
+            new ParseTimeInference(types, currentScope, declaredTopLevelLets, declaredFunctionReturns);
 
     public AltParser(List<AltToken> tokens) {
         this.tokens = List.copyOf(tokens);
@@ -500,7 +501,7 @@ public final class AltParser {
         if (!needsMono) return null;
         Map<String, IrSort> binds = new LinkedHashMap<>();
         for (int i = 0; i < args.size(); i++) {
-            unifyTypeParam(sig.params().get(i).sort(), inferMaximalSort(args.get(i)),
+            unifyTypeParam(sig.params().get(i).sort(), inference.maximalSort(args.get(i)),
                     sig.typeParams(), binds);
         }
         List<IrSort> typeArgs = new ArrayList<>(sig.typeParams().size());
@@ -1848,7 +1849,7 @@ public final class AltParser {
         // below sees a match.
         if (synthDirective && value != null && declaredSort instanceof IrSort.Refined ref
                 && types.isStruct(ref.name())) {
-            String valueBase = baseSortName(inferMaximalSort(value));
+            String valueBase = baseSortName(inference.maximalSort(value));
             if (!ref.name().equals(valueBase)) {
                 IrSort.Structural target = declaredStructShape(ref.name());
                 IrSort.Structural valueStruct = valueBase == null
@@ -1892,7 +1893,7 @@ public final class AltParser {
                         start.origin());
             }
         }
-        IrSort inferredSort = inferMaximalSort(value);
+        IrSort inferredSort = inference.maximalSort(value);
         // Coercion is a QUERY now, not decided here: the type system says which coercion a declared
         // claim licenses (docs/language-inventory.md §4) and this let-lowering acts on the verdict —
         // computing the recorded binding sort and whether the claim travels on a construction-gate
@@ -1907,7 +1908,7 @@ public final class AltParser {
         // cases (roadmap §4.5 item 1 — replacing the retired CoercionResolver); it throws on a provable
         // mismatch. A null result defers to the aggregate sentinels / declared-claim below (trait cases,
         // whose satisfaction is a post-link fact, are judged by the construction/claim gate).
-        IrSort binding = nominalBinding(inferredSort, declaredSort, name, start.origin());
+        IrSort binding = inference.nominalBinding(inferredSort, declaredSort, name, start.origin());
         if (binding == null) {
             String inferredBase = baseSortName(inferredSort);
             String declaredBase = baseSortName(declaredSort);
@@ -2006,142 +2007,6 @@ public final class AltParser {
         return values.size() == 1 ? new IrExpr.Lit(values.get(0), origin) : null;
     }
 
-    /**
-     * Computes the maximally-specific sort for an expression. Used by
-     * top-level let to give bindings the tightest narrowing the parser can
-     * derive at parse time. Best-effort: falls back to coarser shapes when
-     * tighter inference would require machinery that doesn't exist yet
-     * (notably per-call dispatch return narrowing).
-     *
-     * <p>Coverage:
-     * <ul>
-     *   <li>{@code Lit v}        → {@code [Int:@==v]} singleton.
-     *   <li>{@code Bool v}       → {@code [Bool:@==v]} singleton.
-     *   <li>{@code Var name}     → scope lookup; falls back to declared
-     *       top-level lets, else the loose {@code "_"} sort.
-     *   <li>{@code Record}       → structural sort with recursively-inferred
-     *       field sorts. Struct name is recovered via field-set lookup in
-     *       {@link #types}; if no unique match, the sort is
-     *       anonymous (still useful for field access).
-     *   <li>{@code FieldAccess}  → base's sort's field sort, if base inferable.
-     *   <li>{@code BinOp}        → {@code [Int:@==expr]} or {@code [Bool:@==expr]}
-     *       per the op kind, via the implicit-@==EXPR sugar shape Pontif uses
-     *       elsewhere.
-     *   <li>{@code Call name a*} → declared return sort of {@code name}
-     *       (lossy — per-call narrowing waits on the dispatch-inference
-     *       priority work).
-     *   <li>{@code Apply / Lambda / Match / SelfRef / LetIn} → coarse
-     *       fallback (the {@code "_"} sort). Tighter shapes can be added when
-     *       a use case justifies them.
-     * </ul>
-     */
-    // Parse-time best-effort typing — now ONE engine with the core. The parser
-    // is no longer a separate reasoner: it runs inferFloor through the TypeSystem
-    // facade over an InferenceContext built from its live scope maps, so every narrowing shape
-    // the core can express (the exact value-pin, field projection, method/operator
-    // return typing) is available here too. Parse-time weakness falls out only from
-    // an emptier context (no imports yet → "_"), never a divergent strategy. See
-    // docs/inference-unification.md.
-    private IrSort inferMaximalSort(IrExpr expr) {
-        // A record keeps its STRUCTURAL representation — the parser's canonical
-        // aggregate shape (member name → sort), interchangeable with the
-        // field-conjunct refinement the core's `infer` produces for the same value
-        // (James 2026-06-18). Members and every other form type through the one
-        // core engine, so there's no divergent reasoner — only a shape choice.
-        if (expr instanceof IrExpr.Record r) {
-            // A named PARAMETRIC-struct record routes through the core engine so its narrowing carries
-            // the derived type-args (Box(5) → [Box[Int]:@.value==5]) — the type-arg-aware Assignability
-            // (roadmap §4.5 item 2) needs them to decide `let b:Box[Int] = Box(5)`. The refinement form
-            // is interchangeable with the structural aggregate shape (James 2026-06-18); other records
-            // keep the structural shape.
-            boolean parametricNamed = r.typeName() != null
-                    && types.shapeOf(r.typeName()).map(s -> !s.typeParams().isEmpty()).orElse(false);
-            if (!parametricNamed) {
-                Map<String, IrSort> members = new LinkedHashMap<>();
-                for (Map.Entry<String, IrExpr> e : r.members().entrySet()) {
-                    members.put(e.getKey(), inferMaximalSort(e.getValue()));
-                }
-                return new IrSort.Structural(
-                        r.typeName() != null ? r.typeName() : "_record", members, r.origin());
-            }
-        }
-        IrSort inferred = sibarum.pontif.types.TypeSystem.standard().inferFloor(expr, parseInferenceContext());
-        // The parser's floor for "no narrowing" is the unknown sort "_", not null.
-        return inferred != null ? inferred : IrSort.named("_");
-    }
-
-    /**
-     * Builds the inference context from the parser's live scope maps. Mirrors the
-     * old per-case lookup order: a Var resolves in {@code currentScope} over
-     * {@code declaredTopLevelLets}; a 0-arg Call resolves in
-     * {@code declaredFunctionReturns} over {@code declaredTopLevelLets} (a top-level
-     * let lowers to a 0-arg call). Method/operator returns live in
-     * {@code declaredFunctionReturns} keyed {@code Type.method} / the operator symbol.
-     * Null-valued entries are stripped ({@link InferenceContext}'s canonical
-     * constructor rejects nulls).
-     */
-    private InferenceContext parseInferenceContext() {
-        Map<String, IrSort> typeEnv = new LinkedHashMap<>();
-        typeEnv.putAll(declaredTopLevelLets);
-        typeEnv.putAll(currentScope);  // local scope shadows top-level
-        Map<String, IrSort> functionReturns = new LinkedHashMap<>();
-        functionReturns.putAll(declaredTopLevelLets);
-        functionReturns.putAll(declaredFunctionReturns);  // declared returns win
-        typeEnv.values().removeIf(java.util.Objects::isNull);
-        functionReturns.values().removeIf(java.util.Objects::isNull);
-        return new InferenceContext(typeEnv, functionReturns, types.structShapes(), Map.of(), Map.of(),
-                Map.of(), java.util.Set.of(), java.util.Set.of(), Map.of());
-    }
-
-    /**
-     * The binding sort for a {@code let name:declared = value}, decided by the single nominal engine
-     * ({@link Assignability}) composed with inference (which produced {@code inferred}, the tighter
-     * sort). Generalizes the former {@code structAssignBinding} (slice 1, struct↔struct) to <b>all
-     * trait-free nominal pairs</b> — struct↔struct, primitives, and primitive↔struct, including the
-     * {@code Int→Decimal} embedding — so the retired {@code CoercionResolver} is not needed for them.
-     * A trait-free legality question needs no trait closure, so the parser decides it here (correctly
-     * and cheaply) and <b>throws on a provable mismatch</b> ({@code ILLEGAL}/{@code NEEDS_CAST}), the
-     * same "different types" diagnostic {@code CoercionResolver} raised. Only <b>trait-dependent</b>
-     * legality is deferred post-link (satisfaction is a fact the parser lacks): returns {@code null}
-     * when either side is a trait, an anonymous-aggregate sentinel ({@code _record}/{@code _tuple}),
-     * or otherwise not a decidable nominal pair (a type parameter, an alias, a parametric application,
-     * an unknown floor); the caller then binds at the declared sort (or applies the aggregate sentinel)
-     * and lets the post-link gate rule.
-     *
-     * <p>Binding-sort rule: {@code COERCE} (a value that promotes at IR time, e.g. Int→Decimal) binds
-     * at the bare declared base — a refinement there would become a 0-arg-return obligation the integer
-     * kernel can't prove, so the claim rides the {@code LetIn} instead. A same-base agreement keeps the
-     * tighter {@code inferred} (the old {@code None}); a widen/demote to a different base binds at the
-     * declared sort.
-     */
-    private IrSort nominalBinding(IrSort inferred, IrSort declared, String name, Origin origin)
-            throws ParseException {
-        if (declared == null) return inferred;  // no claim — the plain agreement; keep the narrowing
-        if (!(declared instanceof IrSort.Named)) return null;  // refined/union/etc. → gate judges it
-        String declaredBase = baseSortName(declared);
-        String inferredBase = baseSortName(inferred);
-        if (declaredBase == null || inferredBase == null) return null;   // unknown floor → defer
-        if (types.isTrait(declaredBase) || types.isTrait(inferredBase)) return null;  // satisfaction is post-link
-        // Only a decidable nominal pair (struct or primitive on both sides) is judged here; anonymous
-        // aggregates (_record/_tuple), aliases, and type parameters fall through to the caller.
-        boolean lhsNominal = types.isStruct(declaredBase) || types.isPrimitive(declaredBase);
-        boolean rhsNominal = types.isStruct(inferredBase) || types.isPrimitive(inferredBase);
-        if (!lhsNominal || !rhsNominal) return null;
-        Assignability.Assignment verdict =
-                Assignability.assign(inferred, declared, AssignabilityContext.of(types));
-        if (verdict == Assignability.Assignment.NEEDS_CAST
-                || verdict == Assignability.Assignment.ILLEGAL) {
-            throw new ParseException(
-                    "let '" + name + "' is declared " + describeSort(declared)
-                            + " but its value is " + describeSort(inferred)
-                            + " — these are different types.",
-                    origin);
-        }
-        if (verdict == Assignability.Assignment.COERCE) {
-            return new IrSort.Named(declaredBase, declared.origin());  // bare — the value promotes at IR time
-        }
-        return declaredBase.equals(inferredBase) ? inferred : declared;
-    }
 
     /**
      * The tuple→{@code Stream[T]} element gate (docs/iteration.md §8.6, lifted from the retired
@@ -3242,7 +3107,7 @@ public final class AltParser {
         if (!(pattern instanceof IrSort.Structural sp) || !TUPLE_SENTINEL.equals(sp.name())) {
             return;
         }
-        if (inferMaximalSort(scrutinee) instanceof IrSort.Structural ss
+        if (inference.maximalSort(scrutinee) instanceof IrSort.Structural ss
                 && TUPLE_SENTINEL.equals(ss.name())
                 && ss.members().size() != sp.members().size()) {
             throw new ParseException(
@@ -4458,7 +4323,7 @@ public final class AltParser {
         IrExpr value = parseExpr();
         checkTupleArity(value, sp);
         String synthetic = "__destructure$" + (syntheticCounter++);
-        IrSort valueSort = inferMaximalSort(value);
+        IrSort valueSort = inference.maximalSort(value);
         declaredTopLevelLets.put(synthetic, valueSort);
         // Collect every leaf binder (recursively through nested patterns), then
         // emit one accessor per binder. The accessor's body re-runs the full
@@ -4593,14 +4458,14 @@ public final class AltParser {
             expect(AltToken.Kind.EQUALS);
             value = parseExpr();
         }
-        IrSort inferred = inferMaximalSort(value);
+        IrSort inferred = inference.maximalSort(value);
         // Same binding-sort decision as top-level parseLet — a `let` coerces identically wherever it
         // sits, differing only in scope (James 2026-07-07). The nominal engine ({@link Assignability},
         // via nominalBinding) decides the trait-free cases and throws on a provable mismatch (roadmap
         // §4.5 item 1 — replacing CoercionResolver). A null result defers to the tuple-autobox sentinel
         // / declared-claim below (trait cases judged post-link by the construction/claim gate).
         boolean streamAutobox = false;
-        IrSort binding = nominalBinding(inferred, declaredSort, name, start.origin());
+        IrSort binding = inference.nominalBinding(inferred, declaredSort, name, start.origin());
         if (binding == null) {
             String inferredBase = baseSortName(inferred);
             String declaredBase = baseSortName(declaredSort);
@@ -5108,7 +4973,7 @@ public final class AltParser {
                     if (peek().kind() == AltToken.Kind.COLON) { consume(); s = parseSort(); }
                     expect(AltToken.Kind.EQUALS);
                     IrExpr e = cur != null ? substituteSelf(parseExpr(), cur) : parseExpr();
-                    IrSort bindSort = s != null ? s : inferMaximalSort(e);
+                    IrSort bindSort = s != null ? s : inference.maximalSort(e);
                     bn.add(n.text());
                     bs.add(bindSort);
                     bv.add(e);
@@ -5136,7 +5001,7 @@ public final class AltParser {
                     // production stage: @ := expr.
                     IrExpr e = parseExpr();
                     cur = cur != null ? substituteSelf(e, cur) : e;
-                    currentType = inferMaximalSort(cur);
+                    currentType = inference.maximalSort(cur);
                 }
                 if (atVar != null) currentScope.put(atVar, currentType);
                 if (peek().kind() == AltToken.Kind.ARROW) consume();
@@ -5167,12 +5032,12 @@ public final class AltParser {
 
         if (hasInput) {
             IrSort returnSort = declaredCodomain != null ? declaredCodomain
-                    : currentType != null ? currentType : inferMaximalSort(body);
+                    : currentType != null ? currentType : inference.maximalSort(body);
             return new ParsedClause.Value(
                     new IrExpr.Lambda(params, returnSort, body, open.spanTo(close)));
         }
         // Closed → a sort: `[Base: @==finalAt (& constraints)]` (the in-type pipeline).
-        String base = pinBase != null ? pinBase : baseSortName(inferMaximalSort(body));
+        String base = pinBase != null ? pinBase : baseSortName(inference.maximalSort(body));
         IrExpr defPred = new IrExpr.BinOp(
                 IrExpr.Op.EQ, new IrExpr.SelfRef(open.origin()), body, open.origin());
         IrExpr fullPred = constraints == null
@@ -5241,7 +5106,7 @@ public final class AltParser {
         // (docs/iteration.md §10): real element-type inference from the Source
         // contract (heterogeneous streams, non-literal sources).
         IrSort valueSort = null;
-        if (inferMaximalSort(source) instanceof IrSort.Structural st && !st.members().isEmpty()) {
+        if (inference.maximalSort(source) instanceof IrSort.Structural st && !st.members().isEmpty()) {
             // The element's BASE sort, not the first member's value-singleton:
             // `value` ranges over every element, so it must not inherit the first
             // literal's refinement (e.g. [Int:@==1]) — that would over-narrow the
@@ -5384,7 +5249,7 @@ public final class AltParser {
             // (reading match.scrutinee(), which is always a Var after this method).
             if (b.pattern() instanceof IrSort.Structural sp && !isDeferredPattern(sp)) {
                 result = wrapDestructureBindings(
-                        sp, scrutineeRef, inferMaximalSort(scrutinee), result);
+                        sp, scrutineeRef, inference.maximalSort(scrutinee), result);
             }
             IrSort pattern = b.pattern();
             // A native-anatomy pattern ([Decimal(u, s)]) matches the CARRIER,
@@ -5414,7 +5279,7 @@ public final class AltParser {
         // sort table. Falls back to "_" only when nothing tighter is known
         // (record-literal scrutinees give Structural, calls give the
         // callee's return, etc.).
-        IrSort scrutineeSort = inferMaximalSort(scrutinee);
+        IrSort scrutineeSort = inference.maximalSort(scrutinee);
         return new IrExpr.LetIn(outerLetName, scrutineeSort, scrutinee, match, matchOrigin);
     }
 
@@ -5483,51 +5348,6 @@ public final class AltParser {
         return null;
     }
 
-
-    /** A compact, human-readable rendering of a sort for error messages. */
-    private static String describeSort(IrSort s) {
-        return switch (s) {
-            case IrSort.Named n -> {
-                if (n.typeArgs().isEmpty()) yield n.name();
-                StringBuilder sb = new StringBuilder(n.name()).append("[");
-                for (int i = 0; i < n.typeArgs().size(); i++) {
-                    if (i > 0) sb.append(", ");
-                    sb.append(describeSort(n.typeArgs().get(i)));
-                }
-                yield sb.append("]").toString();
-            }
-            case IrSort.Refined r -> r.name();  // base only; the predicate is elided for readability
-            case IrSort.Structural st -> {
-                if (!TUPLE_SENTINEL.equals(st.name())) yield st.name();
-                StringBuilder sb = new StringBuilder("(");
-                boolean first = true;
-                for (IrSort m : st.members().values()) {
-                    if (!first) sb.append(", ");
-                    sb.append(describeSort(m));
-                    first = false;
-                }
-                yield sb.append(")").toString();
-            }
-            case IrSort.CallSig c -> c.typeName() + "(…)";
-            case IrSort.Union u -> {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < u.branches().size(); i++) {
-                    if (i > 0) sb.append(" | ");
-                    sb.append(describeSort(u.branches().get(i)));
-                }
-                yield sb.toString();
-            }
-            case IrSort.Intersection i -> {
-                StringBuilder sb = new StringBuilder();
-                for (int j = 0; j < i.branches().size(); j++) {
-                    if (j > 0) sb.append(" & ");
-                    sb.append(describeSort(i.branches().get(j)));
-                }
-                yield sb.toString();
-            }
-            case IrSort.Trait t -> t.name();
-        };
-    }
 
     private List<IrExpr> parseArgList() throws ParseException {
         List<IrExpr> args = new ArrayList<>();
