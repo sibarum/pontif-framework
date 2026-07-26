@@ -1,10 +1,7 @@
 package sibarum.pontif.parser;
 
 import sibarum.pontif.core.Origin;
-import sibarum.pontif.core.symbolic.SymExpr;
-import sibarum.pontif.core.types.Sort;
 import sibarum.pontif.ir.CallKinds;
-import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.InferenceContext;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
@@ -12,8 +9,6 @@ import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.predicates.ComplementResult;
-import sibarum.pontif.predicates.PredicateArithmetic;
 import sibarum.pontif.types.Assignability;
 import sibarum.pontif.types.AssignabilityContext;
 import sibarum.pontif.types.TypeCatalog;
@@ -4720,8 +4715,8 @@ public final class AltParser {
             // the IR sees only explicit refinements; totality holds by
             // construction (the complement covers exactly the leftover values).
             if (defaultArmIndex >= 0) {
-                IrSort defaultPattern = computeDefaultArmPattern(
-                        scrutinee, branches, defaultArmIndex, defaultArmOrigin);
+                IrSort defaultPattern = DefaultArmComplement.compute(
+                        inferScrutineeSort(scrutinee), branches, defaultArmIndex, defaultArmOrigin);
                 branches.set(defaultArmIndex,
                         new IrExpr.MatchBranch(defaultPattern, defaultArmResult));
             }
@@ -5334,118 +5329,12 @@ public final class AltParser {
         return t.kind() == AltToken.Kind.IDENT && t.text().equals("_");
     }
 
-    /**
-     * Computes the {@link IrSort.Refined} pattern for a {@code _} default arm.
-     * The predicate is the complement of the union of explicit arms'
-     * predicates, taken over the scrutinee's sort (via
-     * {@link PredicateArithmetic#complement}).
-     *
-     * <p>The result is in IR form so the IR sees only explicit predicates —
-     * the {@code _} is fully desugared by the time it leaves the parser.
-     */
-    private IrSort computeDefaultArmPattern(
-            IrExpr scrutinee,
-            List<IrExpr.MatchBranch> branches,
-            int defaultArmIndex,
-            Origin defaultArmOrigin) {
-        // Where the precise complement isn't computable, `_` falls back to the
-        // universal pattern [_] — ordered match makes that total by
-        // construction (the arm catches exactly what earlier arms didn't).
-        // The precise complement is kept where the kernel can compute it,
-        // because it gives the arm body an exact narrowing rather than `_`.
-        IrSort universal = new IrSort.Named("_", defaultArmOrigin);
-
-        IrSort scrutineeIrSort = inferScrutineeSort(scrutinee);
-        if (scrutineeIrSort == null) {
-            return universal;
-        }
-
-        // Union the explicit arms' predicates as SymExpr.
-        SymExpr unionPredicate = null;
-        for (int i = 0; i < branches.size(); i++) {
-            if (i == defaultArmIndex) continue;
-            IrSort armPattern = branches.get(i).pattern();
-            if (!(armPattern instanceof IrSort.Refined refined)) {
-                return universal;  // destructure / bare arms — no predicate to complement
-            }
-            SymExpr armPred;
-            try {
-                armPred = IrCompiler.compileSymExpr(refined.predicate());
-            } catch (CompileException ce) {
-                return universal;
-            }
-            unionPredicate = (unionPredicate == null) ? armPred : SymExpr.or(unionPredicate, armPred);
-        }
-        // No explicit arms — complement of false = entire domain.
-        if (unionPredicate == null) unionPredicate = SymExpr.bool(false);
-
-        Sort scrutineeSort;
-        try {
-            scrutineeSort = IrCompiler.compileSort(scrutineeIrSort);
-        } catch (CompileException ce) {
-            return universal;
-        }
-
-        ComplementResult complement = PredicateArithmetic.complement(unionPredicate, scrutineeSort);
-        if (complement instanceof ComplementResult.Unknown) {
-            return universal;  // outside the decidable fragment — order does the work
-        }
-        SymExpr complementSym = ((ComplementResult.Computed) complement).predicate();
-        IrExpr complementIr = symExprToIrExpr(complementSym, defaultArmOrigin);
-
-        return new IrSort.Refined(baseSortName(scrutineeIrSort), complementIr, defaultArmOrigin);
-    }
-
     /** Returns the scrutinee's IrSort if it's a known in-scope Var; null otherwise. */
     private IrSort inferScrutineeSort(IrExpr expr) {
         if (expr instanceof IrExpr.Var v) {
             return currentScope.get(v.name());
         }
         return null;
-    }
-
-    /**
-     * Converts a {@link SymExpr} back to an {@link IrExpr}, for the subset of
-     * shapes produced by {@link PredicateArithmetic#complement} (Bool, Lit,
-     * Self, Cmp of those, And, Or). Anything outside that subset is a
-     * framework bug — the complement result should always stay within the
-     * Int-comparison fragment.
-     */
-    private static IrExpr symExprToIrExpr(SymExpr expr, Origin origin) {
-        return switch (expr) {
-            case SymExpr.Bool b -> new IrExpr.Bool(b.value(), origin);
-            case SymExpr.Lit l -> new IrExpr.Lit(l.value(), origin);
-            case SymExpr.Dec d -> new IrExpr.Dec(d.value(), origin);
-            case SymExpr.Self s -> new IrExpr.SelfRef(origin);
-            case SymExpr.Cmp(SymExpr left, SymExpr.CmpOp op, SymExpr right) ->
-                    new IrExpr.BinOp(cmpOpToIrOp(op),
-                            symExprToIrExpr(left, origin),
-                            symExprToIrExpr(right, origin),
-                            origin);
-            case SymExpr.And(SymExpr l, SymExpr r) ->
-                    new IrExpr.BinOp(IrExpr.Op.AND,
-                            symExprToIrExpr(l, origin),
-                            symExprToIrExpr(r, origin),
-                            origin);
-            case SymExpr.Or(SymExpr l, SymExpr r) ->
-                    new IrExpr.BinOp(IrExpr.Op.OR,
-                            symExprToIrExpr(l, origin),
-                            symExprToIrExpr(r, origin),
-                            origin);
-            default -> throw new IllegalStateException(
-                    "Unexpected SymExpr in complement result (outside Int-comparison fragment): " + expr);
-        };
-    }
-
-    private static IrExpr.Op cmpOpToIrOp(SymExpr.CmpOp op) {
-        return switch (op) {
-            case LT -> IrExpr.Op.LT;
-            case LE -> IrExpr.Op.LE;
-            case GT -> IrExpr.Op.GT;
-            case GE -> IrExpr.Op.GE;
-            case EQ -> IrExpr.Op.EQ;
-            case NE -> IrExpr.Op.NE;
-        };
     }
 
     /**
