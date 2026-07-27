@@ -168,6 +168,111 @@ class StructRefinementTest {
         new IrCompiler(new Simplifier(List.of())).compile(module);
     }
 
+    // --- Nested-path refinements (docs/keyed.md "Slice 0") -------------------
+
+    /**
+     * The three-struct fixture behind the doc's motivating example:
+     * {@code struct Leaf(value:Int)}, {@code struct Nested(structs:Leaf, value:Int)},
+     * {@code struct MyType(nested:Nested)}. So {@code @.nested.structs.value} and
+     * {@code @.nested.value} are both {@code Int} paths that can be compared.
+     */
+    private static List<IrStmt> myTypeAliases() {
+        Map<String, IrSort> leaf = new LinkedHashMap<>();
+        leaf.put("value", IrSort.named("Int"));
+
+        Map<String, IrSort> nested = new LinkedHashMap<>();
+        nested.put("structs", IrSort.named("Leaf"));
+        nested.put("value", IrSort.named("Int"));
+
+        Map<String, IrSort> outer = new LinkedHashMap<>();
+        outer.put("nested", IrSort.named("Nested"));
+
+        return List.of(
+                IrStmt.typeAlias("Leaf", IrSort.structural("Leaf", leaf)),
+                IrStmt.typeAlias("Nested", IrSort.structural("Nested", nested)),
+                IrStmt.typeAlias("MyType", IrSort.structural("MyType", outer)));
+    }
+
+    /** {@code @.a.b.c…} — a Self-rooted access chain of the given field path. */
+    private static IrExpr selfPath(String... path) {
+        IrExpr e = IrExpr.self();
+        for (String field : path) {
+            e = IrExpr.fieldAccess(e, field);
+        }
+        return e;
+    }
+
+    private static IrModule myTypeModuleWith(IrSort.Refined paramSort) {
+        List<IrStmt> stmts = new ArrayList<>(myTypeAliases());
+        stmts.add(IrStmt.functionDecl(
+                "f",
+                List.of(new IrParam("m", paramSort)),
+                IrSort.named("Int"),
+                IrExpr.lit(1)));
+        return new IrModule("m", stmts, IrExpr.lit(0));
+    }
+
+    @Test
+    void nestedPathRefinement_compiles() throws Exception {
+        // [MyType:@.nested.structs.value > 0] — a three-hop path, every hop valid.
+        IrSort.Refined paramSort = (IrSort.Refined) IrSort.refined(
+                "MyType",
+                IrExpr.binOp(IrExpr.Op.GT,
+                        selfPath("nested", "structs", "value"),
+                        IrExpr.lit(0)));
+
+        new IrCompiler(new Simplifier(List.of())).compile(myTypeModuleWith(paramSort));
+    }
+
+    @Test
+    void dependentNestedPaths_compile() throws Exception {
+        // The doc's motivating example — two nested paths related to each other:
+        // [MyType:@.nested.structs.value == @.nested.value]
+        IrSort.Refined paramSort = (IrSort.Refined) IrSort.refined(
+                "MyType",
+                IrExpr.binOp(IrExpr.Op.EQ,
+                        selfPath("nested", "structs", "value"),
+                        selfPath("nested", "value")));
+
+        new IrCompiler(new Simplifier(List.of())).compile(myTypeModuleWith(paramSort));
+    }
+
+    @Test
+    void nestedPathWithUnknownFieldMidChain_throws() {
+        // [MyType:@.nested.bogus.value > 0] — `bogus` isn't a field of Nested.
+        IrSort.Refined paramSort = (IrSort.Refined) IrSort.refined(
+                "MyType",
+                IrExpr.binOp(IrExpr.Op.GT,
+                        selfPath("nested", "bogus", "value"),
+                        IrExpr.lit(0)));
+
+        CompileException ex = assertThrows(CompileException.class,
+                () -> new IrCompiler(new Simplifier(List.of())).compile(myTypeModuleWith(paramSort)));
+        assertTrue(ex.getMessage().contains("bogus"),
+                () -> "Expected the offending mid-chain field; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("Nested"),
+                () -> "Expected the struct the bad field was read from; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("nested.bogus"),
+                () -> "Expected the dotted path to the fault; got: " + ex.getMessage());
+    }
+
+    @Test
+    void nestedPathProjectingOffNonStruct_throws() {
+        // [MyType:@.nested.value.foo > 0] — `value` is an Int, not a struct.
+        IrSort.Refined paramSort = (IrSort.Refined) IrSort.refined(
+                "MyType",
+                IrExpr.binOp(IrExpr.Op.GT,
+                        selfPath("nested", "value", "foo"),
+                        IrExpr.lit(0)));
+
+        CompileException ex = assertThrows(CompileException.class,
+                () -> new IrCompiler(new Simplifier(List.of())).compile(myTypeModuleWith(paramSort)));
+        assertTrue(ex.getMessage().contains("not a struct"),
+                () -> "Expected a non-struct-projection diagnostic; got: " + ex.getMessage());
+        assertTrue(ex.getMessage().contains("nested.value"),
+                () -> "Expected the path up to the non-struct hop; got: " + ex.getMessage());
+    }
+
     // --- Runtime: Refinements.satisfies with struct refinements --------------
 
     @Test
@@ -263,6 +368,38 @@ class StructRefinementTest {
                 () -> "Symbolic member should residual, not fail; got " + result);
         assertFalse(result.isPassed(),
                 () -> "Can't pass without knowing the value; got " + result);
+    }
+
+    @Test
+    void runtimeSatisfies_dependentNestedPaths_passWhenEqualFailWhenNot() {
+        // [MyType:@.nested.structs.value == @.nested.value] — evaluate both
+        // nested paths over a concrete record and compare.
+        Sort sort = Sort.refined("MyType",
+                SymExpr.cmp(
+                        SymExpr.fieldAccess(
+                                SymExpr.fieldAccess(
+                                        SymExpr.fieldAccess(SymExpr.self(), "nested"),
+                                        "structs"),
+                                "value"),
+                        SymExpr.CmpOp.EQ,
+                        SymExpr.fieldAccess(
+                                SymExpr.fieldAccess(SymExpr.self(), "nested"),
+                                "value")));
+
+        SymExpr equal = SymExpr.record("MyType", Map.of(
+                "nested", SymExpr.record("Nested", Map.of(
+                        "structs", SymExpr.record("Leaf", Map.of("value", SymExpr.lit(7))),
+                        "value", SymExpr.lit(7)))));
+        assertTrue(Refinements.satisfies(equal, sort, defaultSimplifier()).isPassed(),
+                "Nested paths hold the same value — should pass");
+
+        SymExpr unequal = SymExpr.record("MyType", Map.of(
+                "nested", SymExpr.record("Nested", Map.of(
+                        "structs", SymExpr.record("Leaf", Map.of("value", SymExpr.lit(7))),
+                        "value", SymExpr.lit(9)))));
+        assertInstanceOf(ProofResult.Failed.class,
+                Refinements.satisfies(unequal, sort, defaultSimplifier()),
+                "Nested paths differ — should fail");
     }
 
     // --- End-to-end: compile, then verify struct refinement at runtime -------

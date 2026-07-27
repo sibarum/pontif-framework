@@ -75,6 +75,40 @@ class AltParserSortTest {
         return ((IrExpr.BinOp) r.predicate()).op();
     }
 
+    // --- nested-path refinements (docs/keyed.md "Slice 0") ---
+
+    @Test
+    void refined_nestedSelfPath_buildsFieldAccessChain() throws Exception {
+        // [MyType:@.nested.structs.value == 0] — a three-hop @-rooted chain.
+        IrSort.Refined r = assertInstanceOf(IrSort.Refined.class,
+                sort("[MyType:@.nested.structs.value == 0]"));
+        assertEquals("MyType", r.name());
+        IrExpr.BinOp bop = assertInstanceOf(IrExpr.BinOp.class, r.predicate());
+        assertEquals(IrExpr.Op.EQ, bop.op());
+
+        // left = @.nested.structs.value, nested FieldAccess outermost-first.
+        IrExpr.FieldAccess value = assertInstanceOf(IrExpr.FieldAccess.class, bop.left());
+        assertEquals("value", value.fieldName());
+        IrExpr.FieldAccess structs = assertInstanceOf(IrExpr.FieldAccess.class, value.base());
+        assertEquals("structs", structs.fieldName());
+        IrExpr.FieldAccess nested = assertInstanceOf(IrExpr.FieldAccess.class, structs.base());
+        assertEquals("nested", nested.fieldName());
+        assertInstanceOf(IrExpr.SelfRef.class, nested.base());
+    }
+
+    @Test
+    void refined_dependentNestedPaths_bothSidesAreChains() throws Exception {
+        // The doc's motivating example — two nested paths compared to each other.
+        IrSort.Refined r = assertInstanceOf(IrSort.Refined.class,
+                sort("[MyType:@.nested.structs.value == @.nested.value]"));
+        IrExpr.BinOp bop = assertInstanceOf(IrExpr.BinOp.class, r.predicate());
+        assertEquals(IrExpr.Op.EQ, bop.op());
+        assertInstanceOf(IrExpr.FieldAccess.class, bop.left());
+        IrExpr.FieldAccess rhs = assertInstanceOf(IrExpr.FieldAccess.class, bop.right());
+        assertEquals("value", rhs.fieldName());
+        assertInstanceOf(IrExpr.FieldAccess.class, rhs.base());
+    }
+
     // --- implicit @==EXPR sugar ---
 
     @Test

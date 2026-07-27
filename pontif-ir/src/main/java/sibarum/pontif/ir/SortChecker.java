@@ -1044,7 +1044,7 @@ public final class SortChecker {
                                     + "over a primitive (Int, Bool) or a declared struct.",
                             r.origin());
                 }
-                validateSelfFieldAccesses(r.predicate(), baseStruct, r.origin());
+                validateSelfFieldAccesses(r.predicate(), baseStruct, structDefs, r.origin());
             }
             case IrSort.Structural s -> {
                 // A struct's `[type T]` parameters are bound type variables IN
@@ -1326,56 +1326,59 @@ public final class SortChecker {
     }
 
     /**
-     * Walks a struct-refinement's predicate looking for {@code @.field}
-     * accesses (i.e., {@link IrExpr.FieldAccess} whose base is
-     * {@link IrExpr.SelfRef}) and verifies each {@code field} exists in
-     * the struct. Nested field-access chains are not yet validated past
-     * the first level — covered when sort inference can statically
-     * project nested field sorts.
+     * Walks a struct-refinement's predicate looking for {@code @}-rooted
+     * field-access chains ({@link IrExpr.FieldAccess} whose base is
+     * transitively {@link IrExpr.SelfRef}) and validates every hop of the
+     * chain, projecting the struct type field-by-field so that
+     * {@code @.nested.structs.value} checks {@code nested} against the base
+     * struct, {@code structs} against {@code nested}'s struct, and so on
+     * (docs/keyed.md "Slice 0"). A hop naming a field the current struct
+     * lacks, or projecting a further field off a non-struct sort, is a
+     * compile error reported at the offending path.
      */
     private static void validateSelfFieldAccesses(
             IrExpr predicate,
             IrSort.Structural baseStruct,
+            Map<String, IrSort.Structural> structDefs,
             sibarum.pontif.core.Origin refOrigin) throws CompileException {
         switch (predicate) {
             case IrExpr.FieldAccess fa -> {
-                if (fa.base() instanceof IrExpr.SelfRef) {
-                    if (!baseStruct.members().containsKey(fa.fieldName())) {
-                        throw new CompileException(
-                                "Refinement [" + baseStruct.name() + ":…] references "
-                                        + "@." + fa.fieldName() + " but struct '"
-                                        + baseStruct.name() + "' has no such field; "
-                                        + "available: " + baseStruct.members().keySet(),
-                                fa.origin() != null ? fa.origin() : refOrigin);
-                    }
+                if (isSelfRooted(fa)) {
+                    // A `@`-rooted chain: validate every hop by projecting the
+                    // struct type down the path. Do NOT recurse into the base —
+                    // projectSelfPath already visited it.
+                    projectSelfPath(fa, baseStruct, structDefs, refOrigin);
+                } else {
+                    // Some other base (a field off a let-bound value, etc.):
+                    // it may still contain a Self-rooted chain deeper in.
+                    validateSelfFieldAccesses(fa.base(), baseStruct, structDefs, refOrigin);
                 }
-                validateSelfFieldAccesses(fa.base(), baseStruct, refOrigin);
             }
             case IrExpr.BinOp op -> {
-                validateSelfFieldAccesses(op.left(), baseStruct, refOrigin);
-                validateSelfFieldAccesses(op.right(), baseStruct, refOrigin);
+                validateSelfFieldAccesses(op.left(), baseStruct, structDefs, refOrigin);
+                validateSelfFieldAccesses(op.right(), baseStruct, structDefs, refOrigin);
             }
             case IrExpr.LetIn l -> {
-                validateSelfFieldAccesses(l.value(), baseStruct, refOrigin);
-                validateSelfFieldAccesses(l.body(), baseStruct, refOrigin);
+                validateSelfFieldAccesses(l.value(), baseStruct, structDefs, refOrigin);
+                validateSelfFieldAccesses(l.body(), baseStruct, structDefs, refOrigin);
             }
             case IrExpr.Call c -> {
-                for (IrExpr a : c.args()) validateSelfFieldAccesses(a, baseStruct, refOrigin);
+                for (IrExpr a : c.args()) validateSelfFieldAccesses(a, baseStruct, structDefs, refOrigin);
             }
             case IrExpr.Apply a -> {
-                validateSelfFieldAccesses(a.fn(), baseStruct, refOrigin);
-                for (IrExpr arg : a.args()) validateSelfFieldAccesses(arg, baseStruct, refOrigin);
+                validateSelfFieldAccesses(a.fn(), baseStruct, structDefs, refOrigin);
+                for (IrExpr arg : a.args()) validateSelfFieldAccesses(arg, baseStruct, structDefs, refOrigin);
             }
-            case IrExpr.Lambda lam -> validateSelfFieldAccesses(lam.body(), baseStruct, refOrigin);
+            case IrExpr.Lambda lam -> validateSelfFieldAccesses(lam.body(), baseStruct, structDefs, refOrigin);
             case IrExpr.Match m -> {
-                validateSelfFieldAccesses(m.scrutinee(), baseStruct, refOrigin);
+                validateSelfFieldAccesses(m.scrutinee(), baseStruct, structDefs, refOrigin);
                 for (IrExpr.MatchBranch b : m.branches()) {
-                    validateSelfFieldAccesses(b.result(), baseStruct, refOrigin);
+                    validateSelfFieldAccesses(b.result(), baseStruct, structDefs, refOrigin);
                 }
             }
             case IrExpr.Record r -> {
                 for (IrExpr v : r.members().values()) {
-                    validateSelfFieldAccesses(v, baseStruct, refOrigin);
+                    validateSelfFieldAccesses(v, baseStruct, structDefs, refOrigin);
                 }
             }
             case IrExpr.Lit ignored -> {}
@@ -1387,15 +1390,87 @@ public final class SortChecker {
             case IrExpr.SelfRef ignored -> {}
             case IrExpr.DispatchRef ignored -> {}
             case IrExpr.MethodCall mc -> {
-                validateSelfFieldAccesses(mc.receiver(), baseStruct, refOrigin);
-                for (IrExpr arg : mc.args()) validateSelfFieldAccesses(arg, baseStruct, refOrigin);
+                validateSelfFieldAccesses(mc.receiver(), baseStruct, structDefs, refOrigin);
+                for (IrExpr arg : mc.args()) validateSelfFieldAccesses(arg, baseStruct, structDefs, refOrigin);
             }
             // An iteration construct never appears inside a refinement predicate.
             case IrExpr.Iterate ignored -> {}
             // Nor does an emit statement.
             case IrExpr.Emit ignored -> {}
-            case IrExpr.Cast cast -> validateSelfFieldAccesses(cast.value(), baseStruct, refOrigin);
+            case IrExpr.Cast cast -> validateSelfFieldAccesses(cast.value(), baseStruct, structDefs, refOrigin);
         }
+    }
+
+    /** True when {@code fa}'s base is transitively the {@code @} self-reference. */
+    private static boolean isSelfRooted(IrExpr e) {
+        return switch (e) {
+            case IrExpr.SelfRef ignored -> true;
+            case IrExpr.FieldAccess fa -> isSelfRooted(fa.base());
+            default -> false;
+        };
+    }
+
+    /**
+     * Projects the sort reached by a {@code @}-rooted access chain, validating
+     * each hop against the struct it reads from. {@code @} itself resolves to
+     * {@code rootStruct}; each field hop looks the field up in the struct the
+     * base projects to and returns that field's sort, resolved to a struct for
+     * the next hop. Throws at the first field a struct lacks, or when a further
+     * hop is taken off a non-struct (e.g. {@code @.count.foo} where
+     * {@code count:Int}).
+     */
+    private static IrSort projectSelfPath(
+            IrExpr expr,
+            IrSort.Structural rootStruct,
+            Map<String, IrSort.Structural> structDefs,
+            sibarum.pontif.core.Origin refOrigin) throws CompileException {
+        if (expr instanceof IrExpr.SelfRef) {
+            return rootStruct;
+        }
+        IrExpr.FieldAccess fa = (IrExpr.FieldAccess) expr;
+        IrSort baseSort = projectSelfPath(fa.base(), rootStruct, structDefs, refOrigin);
+        IrSort.Structural baseStruct = asStruct(baseSort, structDefs);
+        sibarum.pontif.core.Origin where = fa.origin() != null ? fa.origin() : refOrigin;
+        if (baseStruct == null) {
+            throw new CompileException(
+                    "Refinement [" + rootStruct.name() + ":…] projects @." + dottedSelfPath(fa)
+                            + " but @." + dottedSelfPath((IrExpr.FieldAccess) fa.base())
+                            + " has sort " + baseSort + ", which is not a struct with fields.",
+                    where);
+        }
+        IrSort fieldSort = baseStruct.members().get(fa.fieldName());
+        if (fieldSort == null) {
+            throw new CompileException(
+                    "Refinement [" + rootStruct.name() + ":…] references @." + dottedSelfPath(fa)
+                            + " but struct '" + baseStruct.name() + "' has no such field '"
+                            + fa.fieldName() + "'; available: " + baseStruct.members().keySet(),
+                    where);
+        }
+        return fieldSort;
+    }
+
+    /**
+     * Resolves a member sort to the struct definition it denotes, so a nested
+     * path can keep projecting: a {@link IrSort.Structural} is itself; a
+     * {@link IrSort.Named} or {@link IrSort.Refined} is looked up by base name
+     * in the module's struct table (a refinement over a struct still projects
+     * its fields). Anything else (a primitive, a type variable, an unresolved
+     * name) is not a struct — {@code null}.
+     */
+    private static IrSort.Structural asStruct(IrSort sort, Map<String, IrSort.Structural> structDefs) {
+        return switch (sort) {
+            case IrSort.Structural s -> s;
+            case IrSort.Named n -> structDefs.get(n.name());
+            case IrSort.Refined r -> structDefs.get(r.name());
+            default -> null;
+        };
+    }
+
+    /** The dotted field path of a {@code @}-rooted chain, e.g. {@code a.b.c}. */
+    private static String dottedSelfPath(IrExpr.FieldAccess fa) {
+        return fa.base() instanceof IrExpr.FieldAccess base
+                ? dottedSelfPath(base) + "." + fa.fieldName()
+                : fa.fieldName();
     }
 
     private static void checkExpr(IrExpr expr, Map<String, IrSort> typeEnv,
