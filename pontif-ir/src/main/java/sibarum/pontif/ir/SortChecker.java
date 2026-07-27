@@ -953,6 +953,30 @@ public final class SortChecker {
     }
 
     /**
+     * A parametric application's type-argument COUNT must equal the head's declared type-parameter
+     * count. Enforced only for a declared struct applied to a NON-EMPTY arg list: a bare reference
+     * (zero args) is the existential "of anything" and is admitted by the widen rules, and a
+     * non-struct head (a builtin parametric trait like {@code Stream}) is the documented
+     * not-yet-trait-aware gap. Invariance of the args themselves is a separate, later check
+     * (see {@link #enforceParametricBase}); this closes only the arity hole in sort positions.
+     */
+    private static void checkParametricArity(
+            String name, List<IrSort> typeArgs, Map<String, IrSort.Structural> structDefs,
+            sibarum.pontif.core.Origin origin) throws CompileException {
+        if (typeArgs.isEmpty()) return;
+        IrSort.Structural decl = structDefs.get(name);
+        if (decl == null) return;  // non-struct head — resolution/incompleteness handled elsewhere
+        int declared = decl.typeParams().size();
+        if (declared != typeArgs.size()) {
+            throw new CompileException(
+                    "Type '" + name + "' applied to " + typeArgs.size()
+                            + " type argument(s), but it declares " + declared
+                            + " type parameter(s).",
+                    origin);
+        }
+    }
+
+    /**
      * @param typeVars in-scope associated-type names — the {@code type X}
      *     members of an enclosing trait. A {@code Named} matching one of these
      *     is a bound type variable, not an unknown sort. Empty at the top level;
@@ -1008,6 +1032,11 @@ public final class SortChecker {
                     }
                     throw unknownSort(n.name(), n.origin());
                 }
+                // A parametric application's arg COUNT must match the head's declared arity
+                // (e.g. `Box[Int, Bool]` for a one-param `Box` is a hard error) — mirroring the
+                // check enforceParametricBase / validateTraitImpl already make for is-a bases and
+                // trait args.
+                checkParametricArity(n.name(), n.typeArgs(), structDefs, n.origin());
                 // Type arguments of a parametric application (`Element[Int]`,
                 // `Element[T]`) are themselves sorts — validate each in scope.
                 for (IrSort arg : n.typeArgs()) {
@@ -1044,6 +1073,9 @@ public final class SortChecker {
                                     + "over a primitive (Int, Bool) or a declared struct.",
                             r.origin());
                 }
+                // Same arity gate as the Named application above, for a parametric refined base
+                // (`[Literal[Int]:…]`).
+                checkParametricArity(r.name(), r.typeArgs(), structDefs, r.origin());
                 validateSelfFieldAccesses(r.predicate(), baseStruct, structDefs, r.origin());
             }
             case IrSort.Structural s -> {

@@ -1,7 +1,9 @@
 package sibarum.pontif.types;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import sibarum.pontif.core.symbolic.Refinements;
 import sibarum.pontif.core.symbolic.Simplifier;
@@ -42,25 +44,56 @@ public final class Assignability {
 
     /** Is a value whose concrete type is {@code sub} usable where {@code sup} is required? */
     public static boolean isA(IrSort sub, IrSort sup, AssignabilityContext ctx) {
+        return isA(sub, sup, ctx, new HashSet<>(), new HashSet<>());
+    }
+
+    /**
+     * Cycle-guarded {@link #isA}. {@code subUnfolding}/{@code supUnfolding} hold the nominal names
+     * currently being <em>widened</em> (a transparent-alias unfold or a nominal-tag → base widen) on
+     * the active recursion path, one set per position. A well-founded (acyclic) catalog never repeats
+     * a name on a single widening path, so these are empty for every real query; only an ill-founded
+     * type ({@code type A : A}, {@code type A : A | Int}, a self-based struct) can revisit a name, and
+     * that is where we stop — treating the ill-founded type as NOT is-a (sound: never a false is-a)
+     * instead of recursing until the stack overflows. Names are added on entry and removed on exit
+     * (backtracking), so a legitimate diamond ({@code Foo : Baz}, {@code Bar : Baz}) is unaffected.
+     */
+    private static boolean isA(IrSort sub, IrSort sup, AssignabilityContext ctx,
+            Set<String> subUnfolding, Set<String> supUnfolding) {
         // Resolve transparent (non-structural) aliases in either position — they are pure names.
         IrSort tSub = transparentTarget(sub, ctx);
-        if (tSub != null) return isA(tSub, sup, ctx);
+        if (tSub != null) {
+            String n = baseName(sub);
+            if (n != null && !subUnfolding.add(n)) return false;           // cyclic alias — ill-founded
+            try {
+                return isA(tSub, sup, ctx, subUnfolding, supUnfolding);
+            } finally {
+                if (n != null) subUnfolding.remove(n);
+            }
+        }
         IrSort tSup = transparentTarget(sup, ctx);
-        if (tSup != null) return isA(sub, tSup, ctx);
+        if (tSup != null) {
+            String n = baseName(sup);
+            if (n != null && !supUnfolding.add(n)) return false;           // cyclic alias — ill-founded
+            try {
+                return isA(sub, tSup, ctx, subUnfolding, supUnfolding);
+            } finally {
+                if (n != null) supUnfolding.remove(n);
+            }
+        }
 
         if (sameType(sub, sup)) return true;                                // reflexive
 
         if (sup instanceof IrSort.Union u) {                               // is-a a union: any branch
-            return u.branches().stream().anyMatch(b -> isA(sub, b, ctx));
+            return u.branches().stream().anyMatch(b -> isA(sub, b, ctx, subUnfolding, supUnfolding));
         }
         if (sub instanceof IrSort.Union u) {                               // a union is-a X: every branch
-            return u.branches().stream().allMatch(b -> isA(b, sup, ctx));
+            return u.branches().stream().allMatch(b -> isA(b, sup, ctx, subUnfolding, supUnfolding));
         }
         if (sup instanceof IrSort.Intersection i) {                        // is-a an intersection: EVERY branch
-            return i.branches().stream().allMatch(b -> isA(sub, b, ctx));
+            return i.branches().stream().allMatch(b -> isA(sub, b, ctx, subUnfolding, supUnfolding));
         }
         if (sub instanceof IrSort.Intersection i) {                        // an intersection is-a X: SOME branch
-            return i.branches().stream().anyMatch(b -> isA(b, sup, ctx));
+            return i.branches().stream().anyMatch(b -> isA(b, sup, ctx, subUnfolding, supUnfolding));
         }
         if (sub instanceof IrSort.CallSig cSub && sup instanceof IrSort.CallSig cSup) {
             // Two call-signature sorts relate by their shared call-kind CAPABILITY,
@@ -74,7 +107,7 @@ public final class Assignability {
                 return kernelImplies(sub, sup);
             }
             if (ks == CallKinds.Kind.DISPATCH && kt == CallKinds.Kind.DISPATCH) {
-                return dispatchSubsumes(cSub, cSup, ctx);
+                return dispatchSubsumes(cSub, cSup, ctx, subUnfolding, supUnfolding);
             }
             return false;
         }
@@ -107,13 +140,21 @@ public final class Assignability {
         if (supIsTrait && ctx.satisfies(baseName(sub), baseName(sup))) return true;
 
         IrSort subBase = nominalBase(sub, ctx);                            // a nominal tag widens to its base
-        if (subBase != null && isA(subBase, sup, ctx)) return true;
+        if (subBase != null) {
+            String n = baseName(sub);
+            if (n != null && !subUnfolding.add(n)) return false;           // cyclic nominal base — ill-founded
+            try {
+                if (isA(subBase, sup, ctx, subUnfolding, supUnfolding)) return true;
+            } finally {
+                if (n != null) subUnfolding.remove(n);
+            }
+        }
 
         // A nominal-tag or trait sup is reached only reflexively / by a descendant / by an impl (all
         // handled above); a bare structure or primitive is NOT-a either.
         if (isNominalTag(sup, ctx) || supIsTrait) return false;
 
-        return structurallySubsumes(sub, sup, ctx);
+        return structurallySubsumes(sub, sup, ctx, subUnfolding, supUnfolding);
     }
 
     /** What binding a value of concrete type {@code from} into a slot declared {@code to} requires. */
@@ -267,11 +308,12 @@ public final class Assignability {
 
     // --- structural leaf (increment 1: shape equality — sound, refinement-precise later) -------------
 
-    private static boolean structurallySubsumes(IrSort sub, IrSort sup, AssignabilityContext ctx) {
+    private static boolean structurallySubsumes(IrSort sub, IrSort sup, AssignabilityContext ctx,
+            Set<String> subUnfolding, Set<String> supUnfolding) {
         if (sub instanceof IrSort.Structural a && sup instanceof IrSort.Structural b) {
             if (!a.members().keySet().equals(b.members().keySet())) return false;
             for (Map.Entry<String, IrSort> e : a.members().entrySet()) {
-                if (!isA(e.getValue(), b.members().get(e.getKey()), ctx)) return false;
+                if (!isA(e.getValue(), b.members().get(e.getKey()), ctx, subUnfolding, supUnfolding)) return false;
             }
             return true;
         }
@@ -309,12 +351,13 @@ public final class Assignability {
      * return is covariant. {@code Refinements.imply} has no dispatch arm, so this is decided directly.
      */
     private static boolean dispatchSubsumes(
-            IrSort.CallSig sub, IrSort.CallSig sup, AssignabilityContext ctx) {
+            IrSort.CallSig sub, IrSort.CallSig sup, AssignabilityContext ctx,
+            Set<String> subUnfolding, Set<String> supUnfolding) {
         if (sub.paramSorts().size() != sup.paramSorts().size()) return false;
         for (int i = 0; i < sub.paramSorts().size(); i++) {
             if (!sameType(sub.paramSorts().get(i), sup.paramSorts().get(i))) return false;
         }
-        return isA(sub.returnSort(), sup.returnSort(), ctx);
+        return isA(sub.returnSort(), sup.returnSort(), ctx, subUnfolding, supUnfolding);
     }
 
     /**
@@ -332,17 +375,41 @@ public final class Assignability {
 
     /** Strip nominal tags (and transparent aliases) down to the underlying structure/primitive. */
     private static IrSort bottomStructure(IrSort t, AssignabilityContext ctx) {
+        return bottomStructure(t, ctx, new HashSet<>());
+    }
+
+    /**
+     * Cycle-guarded {@link #bottomStructure}. {@code seen} holds the nominal names already stripped on
+     * this path; an ill-founded type ({@code type A : A}, a self-based struct) would otherwise strip
+     * forever. On a revisit we stop and return the current sort — the best-defined terminal available —
+     * rather than overflow the stack.
+     */
+    private static IrSort bottomStructure(IrSort t, AssignabilityContext ctx, Set<String> seen) {
+        String n = baseName(t);
+        if (n != null && !seen.add(n)) return t;                           // cyclic — ill-founded, stop
         IrSort transparent = transparentTarget(t, ctx);
-        if (transparent != null) return bottomStructure(transparent, ctx);
+        if (transparent != null) return bottomStructure(transparent, ctx, seen);
         IrSort base = nominalBase(t, ctx);
-        return base != null ? bottomStructure(base, ctx) : t;
+        return base != null ? bottomStructure(base, ctx, seen) : t;
     }
 
     // --- identity ------------------------------------------------------------
 
     private static boolean sameType(IrSort a, IrSort b) {
         if (a instanceof IrSort.Structural sa && b instanceof IrSort.Structural sb) {
-            return sa.name().equals(sb.name()) && sa.members().keySet().equals(sb.members().keySet());
+            // Identity is name + field NAMES + field SORTS. Comparing only the name and key-set would
+            // equate two shapes that share a name but differ in a field's sort — e.g. inference's
+            // synthetic `_tuple`/`_record` shapes, or `P{x:Int}` vs `P{x:Bool}` — and isA's reflexive
+            // shortcut would then return a false is-a (Int wrongly usable as Bool). Field sorts are
+            // compared by sameType (Named members are name-based, so recursion terminates on the
+            // recursive-struct case `Node(next:Node)`).
+            if (!sa.name().equals(sb.name()) || !sa.members().keySet().equals(sb.members().keySet())) {
+                return false;
+            }
+            for (Map.Entry<String, IrSort> e : sa.members().entrySet()) {
+                if (!sameType(e.getValue(), sb.members().get(e.getKey()))) return false;
+            }
+            return true;
         }
         // A call-signature sort is never "same type" by head name alone — two function
         // sorts both have base "Method" yet differ in params/return. Defer to the

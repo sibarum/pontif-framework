@@ -100,7 +100,11 @@ public final class DestructureResolver {
                 default -> stmt;  // TypeAlias / Requires / Exports / NoOp carry no destructure expr
             });
         }
-        return new IrModule(combined.name(), out, rewriteExpr(combined.main(), structs));
+        // A null main() is legitimate (IrModule never requires it); carry it through unchanged,
+        // as the sibling passes (ConstructionGate, AggregatePromotion, MethodOperatorResolver) do —
+        // feeding null into rewriteExpr's switch(e) would NPE on the null selector.
+        IrExpr main = combined.main() == null ? null : rewriteExpr(combined.main(), structs);
+        return new IrModule(combined.name(), out, main);
     }
 
     private static IrStmt.FunctionDecl rewriteFunction(
