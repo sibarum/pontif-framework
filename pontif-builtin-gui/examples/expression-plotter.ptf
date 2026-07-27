@@ -1,0 +1,108 @@
+requires pontif.algebra.{Algebraic, AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow, Sin, Cos, Tan, Exp, Log}
+requires pontif.plot.{expr, zeros, optima, asymptotes, chartView, exportSvg, markup}
+requires pontif.gui.{Button, window, Clickable}
+requires pontif.events.{StdErr}
+requires pontif.core.{Stream}
+
+# EXPRESSION STUDIO — three builtin pieces put together in one GUI.
+#
+#   1. pontif.gui      — a native window with an embedded plot and a Clickable Export button.
+#   2. mathtext        — the equation is typeset (STIX Two Math, the LaTeX alternative) as the
+#                        plot's math title, colour-matched to its curve. chartView renders it.
+#   3. pontif.plot     — the auto-plotter: no domain, no viewport. It auto-frames the interesting
+#                        x-window by SOUND interval enclosure and derives labelled zeros, optima
+#                        and vertical asymptotes.
+#
+# The GUI dispatches on how many variables the expression carries:
+#   1 variable  -> a 2D grid (wired below).
+#   3 variables -> would be a 3D surface   — awaits the new reliable-plotting design.
+#   4 variables -> would be a vector field — awaits the new reliable-plotting design.
+# Only 2D is wired for now; the other arms degrade honestly (typeset the equation, log why).
+#
+# The "expression" is authored as a proven-`Algebraic` function and reflected into its AST with
+# `$f[...].ast` — the reliable substrate the plotter and the typesetter both read. (For a
+# live, type-as-you-go single-variable field instead, the monolithic native `plotInput("...")`
+# is the one-liner; it can't host the variable-count branch this script demonstrates.)
+
+# --- Counting the free variables of an expression -----------------------------------------------
+# There is no builtin for this, so we walk the AST. `AlgExpr` is a CLOSED union, so this match must
+# name every node (no catch-all) — adding a node type would force this to be revisited, by design.
+# `Param(name)` is a variable occurrence; we test one canonical name at a time.
+function orB(a:Bool, b:Bool):Bool -> match a { [Bool:true] -> true  [Bool:false] -> b }
+
+function usesVar(e:AlgExpr, name:String):Bool -> match e {
+  [Const(_)]  -> false
+  [Param(n)]  -> n == name
+  [Add(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Sub(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Mul(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Div(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Pow(b, x)] -> orB(usesVar(b, name), usesVar(x, name))
+  [Sin(a)]    -> usesVar(a, name)
+  [Cos(a)]    -> usesVar(a, name)
+  [Tan(a)]    -> usesVar(a, name)
+  [Exp(a)]    -> usesVar(a, name)
+  [Log(a)]    -> usesVar(a, name)
+}
+
+function boolToInt(b:Bool):Int -> match b { [Bool:true] -> 1  [Bool:false] -> 0 }
+
+# Distinct variables among the canonical names the parser mints (x, y, z, w).
+function varCount(e:AlgExpr):Int ->
+  boolToInt(usesVar(e, "x")) + boolToInt(usesVar(e, "y"))
+  + boolToInt(usesVar(e, "z")) + boolToInt(usesVar(e, "w"))
+
+function isUnivariate(e:AlgExpr):Bool -> varCount(e) == 1
+
+# --- The GUI: an embedded auto-plot beside an Export-SVG button ----------------------------------
+# Subtype the library Button (the orphan rule forbids a method on a type we don't own) and give it a
+# Clickable onClick that exports the exact layers it carries. `this` is the clicked widget.
+struct ExportButton:[Button](text:String, data:_)
+assign trait ExportButton:Clickable {
+  onClick():_ -> ( let done = exportSvg(this.data)  this )
+}
+
+# The wired arm: one variable -> a 2D grid. The layers carry the AST, so chartView typesets the
+# equation as the math title AND reliably draws the curve; the annotation layers add labelled
+# features. chartView is a DIRECT child of the window (a SceneView only fills that way).
+function plot2D(e:AlgExpr):Stream[String] -> (
+  let layers = { expr(e), zeros(e), optima(e), asymptotes(e) }
+  window({title = "Expression Studio — 2D", width = 1100, height = 720}, {
+    chartView({}, layers),
+    ExportButton("Export SVG...", layers)
+  })
+)
+
+# The honest not-yet arm: 3 vars (3D surface) and 4 vars (vector field) await the new
+# reliable-plotting design. We still typeset the equation via markup so the user sees it rendered,
+# and log precisely why the plot is withheld rather than faking a view.
+function plotUnsupported(e:AlgExpr, notation:String):Stream[String] -> (
+  let n = varCount(e)
+  emit StdErr("Expression has " + n + " variables; only single-variable 2D plotting is wired. "
+    + "3 vars -> 3D surface, 4 vars -> vector field: both await the new reliable-plotting design. "
+    + "Typesetting the equation only.")
+  markup(notation)
+)
+
+# Route the expression to the right view by its variable count.
+function plotAuto(e:AlgExpr, notation:String):Stream[String] -> match isUnivariate(e) {
+  [Bool:true]  -> plot2D(e)
+  [Bool:false] -> plotUnsupported(e, notation)
+}
+
+# --- The expressions -----------------------------------------------------------------------------
+# A single-variable rational function: zeros at x = ±2, vertical asymptotes at x = ±1, an optimum
+# at x = 0. The auto-plotter finds and labels all of them with no domain given.
+function f(x:Decimal):Decimal -> (x^2 - 4.0) / (x^2 - 1.0)
+assign proof f:Algebraic
+
+# A three-variable field (a saddle in z). Reflecting it mints a distinct Param per argument, so
+# varCount sees 3 and the router takes the not-yet arm. Swap it into `main` to watch the branch.
+function g(x:Decimal, y:Decimal, z:Decimal):Decimal -> x^2 - y^2 + z
+assign proof g:Algebraic
+
+main (
+  plotAuto($f[Decimal].ast, "y = (x^2 - 4)/(x^2 - 1)")
+  # Try the multivariable branch instead:
+  # plotAuto($g[Decimal, Decimal, Decimal].ast, "f(x,y,z) = x^2 - y^2 + z")
+)
