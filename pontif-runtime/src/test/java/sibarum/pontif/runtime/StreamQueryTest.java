@@ -18,12 +18,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Stream queries (docs/stream-queries.md, Slice A). The `&s:[…]` bracket dispatches on the
  * KIND of its content: a transform arrow `(el)->…` is the per-element map (the iteration
  * multitool); a bare TYPE-SORT `[T:pred]` is a QUERY — a described, not-yet-run retrieval.
- * A terminal op chooses cardinality. Slice A implements `.first()` → the 0-or-1 scalar
- * terminal returning the honest-absence union `[Present(T)|Absent]` (§2.1), via a
+ * A terminal op chooses cardinality. `.first()` → the 0-or-1 scalar terminal returning the
+ * union `[T | Absent]` (the found element itself, or `Absent` — NO `Present` wrapper), via a
  * stop-at-first-hit scan over the existing ACCUMULATOR + STOP engine primitives.
  *
  * <p>`.first()` is 0-or-1 by TAKING one, not by proving uniqueness (§2.1) — it does not care
- * whether more than one element matches. `Absent` is a DISTINCT nominal from
+ * whether more than one element matches. Because the element rides unwrapped, consuming the
+ * result is an ordinary type-guard match (`[T] -> … [_] -> …`) — no imported-struct
+ * destructure, so no linker pass needed. `Absent` is a DISTINCT nominal from
  * `Nothing`/`Break`/`Leaf`/`OutOfRange` (§4.1).
  */
 class StreamQueryTest {
@@ -35,32 +37,17 @@ class StreamQueryTest {
         return new IrInterpreter(simp).eval(compiled);
     }
 
-    // Destructuring an IMPORTED struct (like `Present` from pontif.core) is resolved by
-    // DestructureResolver, which runs only in the ModuleLinker — i.e. the full
-    // PontifCompiler pipeline, not the bare parse+compile above. So the match-on-result
-    // tests (the intended consumption of the [Present(v)|Absent] union) go through the
-    // real linked pipeline.
-    private final PontifCompiler compiler = new PontifCompiler();
-    private final PontifRunner runner = new PontifRunner();
-
-    private String runLinked(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "m.ptf");
-        PontifRunner.RunResult run = runner.run(r, PontifRunner.Engine.INTERPRETER);
-        org.junit.jupiter.api.Assertions.assertFalse(
-                run.isError(), () -> "expected success; got: " + run.text());
-        return run.text();
-    }
-
-    @Test void firstMatch_returnsPresent() throws Exception {
-        assertEquals("Present{value: 2}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+    @Test void firstMatch_returnsTheElement() throws Exception {
+        // A hit returns the found element ITSELF — no Present wrapper.
+        assertEquals("2", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 &s:[Int:@ == 2].first()""")));
     }
 
     @Test void noMatch_returnsAbsent() throws Exception {
         assertEquals("Absent{}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+                requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 &s:[Int:@ == 9].first()""")));
     }
@@ -68,24 +55,25 @@ class StreamQueryTest {
     @Test void takesTheLeadingMatch_ignoresLaterMatches() throws Exception {
         // The predicate matches 2, 3 and 4; `.first()` returns the leading match and does
         // not care that others exist (0-or-1 by taking, not by proving uniqueness).
-        assertEquals("Present{value: 2}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+        assertEquals("2", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 let s = {1, 2, 3, 4}
                 &s:[Int:@ > 1].first()""")));
     }
 
     @Test void emptyStream_returnsAbsent() throws Exception {
         assertEquals("Absent{}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+                requires pontif.core.{Absent}
                 let s = {5, 6, 7}
                 &s:[Int:@ > 100].first()""")));
     }
 
     // --- struct-payload queries (the intended real use: find a record by a field) ---
 
-    @Test void queryOverStructByField_returnsPresentRecord() throws Exception {
-        assertEquals("Present{value: User{id: 2, name: \"b\"}}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+    @Test void queryOverStructByField_returnsTheRecord() throws Exception {
+        // The found record itself, unwrapped.
+        assertEquals("User{id: 2, name: \"b\"}", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 struct User(id:Int, name:String)
                 let s = {User(1, "a"), User(2, "b"), User(3, "c")}
                 &s:[User:@.id == 2].first()""")));
@@ -93,7 +81,7 @@ class StreamQueryTest {
 
     @Test void queryOverStruct_noMatch_returnsAbsent() throws Exception {
         assertEquals("Absent{}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+                requires pontif.core.{Absent}
                 struct User(id:Int, name:String)
                 let s = {User(1, "a"), User(2, "b")}
                 &s:[User:@.id == 9].first()""")));
@@ -103,8 +91,8 @@ class StreamQueryTest {
     // this exercises MATCHING one at runtime through Refinements. ---
 
     @Test void nestedPathPredicate_matchesAtRuntime() throws Exception {
-        assertEquals("Present{value: User{id: 2, name: Name{first: \"b\"}}}", String.valueOf(run("""
-                requires pontif.core.{Present, Absent}
+        assertEquals("User{id: 2, name: Name{first: \"b\"}}", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 struct Name(first:String)
                 struct User(id:Int, name:Name)
                 let s = {User(1, Name("a")), User(2, Name("b"))}
@@ -140,47 +128,45 @@ class StreamQueryTest {
                 &s:[User:@.id > 2].all()""")));
     }
 
-    // --- the result is CONSUMABLE: match on [Present(v)|Absent] (the intended usage) ---
+    // --- the result is CONSUMABLE: match on [T | Absent] (the intended usage) ---
 
-    // NOTE the trailing `[_]` catch-all: the `.first()` result currently infers as the
-    // generic `Stream` sort, so a two-arm `[Present(v)]`/`[Absent]` match can't yet be
-    // proven exhaustive (see lowerQueryFirst — result-sort narrowing is a follow-up). The
-    // catch-all is dead at runtime (the value is always Present or Absent); these tests
-    // prove the union IS consumable — the destructure binds and the arms fire correctly.
+    // The element rides UNWRAPPED, so consumption is an ordinary type-guard match — NO
+    // imported-struct destructure, hence the plain (non-linked) harness suffices. The
+    // trailing `[_]` catch-all is still needed because the `.first()` result currently infers
+    // as the generic `Stream` sort, not `[T | Absent]`, so a two-arm match can't yet be proven
+    // exhaustive (see lowerQueryFirst — result-sort narrowing is the follow-up that removes it).
+    // The `[_]` is the Absent (miss) arm at runtime.
 
-    @Test void matchOnPresent_bindsTheValue() {
-        // The whole point of the union: destructure the found record and use it.
-        assertEquals("2", runLinked("""
-                requires pontif.core.{Present, Absent}
+    @Test void matchOnHit_usesTheElement() throws Exception {
+        assertEquals("2", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 let r = &s:[Int:@ == 2].first()
                 match r
-                  [Present(v)] -> v
-                  [Absent]     -> 0 - 1
-                  [_]          -> 0 - 2"""));
+                  [Int] -> r
+                  [_]   -> 0 - 1""")));
     }
 
-    @Test void matchOnAbsent_takesTheFallbackArm() {
-        assertEquals("-1", runLinked("""
-                requires pontif.core.{Present, Absent}
+    @Test void matchOnMiss_takesTheFallbackArm() throws Exception {
+        assertEquals("-1", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 let r = &s:[Int:@ == 9].first()
                 match r
-                  [Present(v)] -> v
-                  [Absent]     -> 0 - 1
-                  [_]          -> 0 - 2"""));
+                  [Int] -> r
+                  [_]   -> 0 - 1""")));
     }
 
-    @Test void matchOnPresent_overStruct_pullsFieldOut() {
-        assertEquals("\"b\"", runLinked("""
-                requires pontif.core.{Present, Absent}
+    @Test void matchOnHit_overStruct_pullsFieldOut() throws Exception {
+        assertEquals("\"b\"", String.valueOf(run("""
+                requires pontif.core.{Absent}
                 struct User(id:Int, name:String)
                 let s = {User(1, "a"), User(2, "b"), User(3, "c")}
                 let r = &s:[User:@.id == 2].first()
                 match r
-                  [Present(v)] -> v.name
-                  [Absent]     -> "none"
-                  [_]          -> "other\""""));
+                  [User(uid, uname)] -> uname
+                  [_]                -> "none"
+                """)));
     }
 
     // --- disambiguation: the SAME stream, an arrow still maps, a type-sort queries ---

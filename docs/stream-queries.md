@@ -65,14 +65,14 @@ invisible" guarantee (`keyed.md`), now with an explicit place to make the choice
 
 ### 2.1 `.first()` — the 0-or-1 terminal (surface PROPOSED)
 
-The scalar terminal returns **the first matching record, or absence**:
+The scalar terminal returns **the first matching element itself, or absence** — an
+`[T | Absent]` union, with the element **unwrapped** (no `Present(T)` wrapper, RULED —
+James, 2026-07-28):
 
 ```pontif
-let u:[Present(User)|Absent] = &users:[User:@.id == 5].first()
-
-match u {
-  [Present(v)] -> use(v)
-  [Absent]     -> fallback()
+match &users:[User:@.id == 5].first() {
+  [User] -> use(...)          # a hit IS a User — a type-guard arm, scrutinee in scope
+  [_]    -> fallback()        # the Absent (miss) arm
 }
 ```
 
@@ -81,10 +81,22 @@ match u {
   uniqueness." (Contrast the earlier proposal to *derive* the option type from a proof of
   `Unique` — set aside; cardinality comes from the terminal you call, not from the
   predicate's shape.)
-- The return is the honest-absence union `[Present(T)|Absent]` — the same *shape* as
-  `indexed-streams.md`'s `at(i):[Present(T)|OutOfRange]` (absence handled by a match arm,
-  never a thrown error), but **`Absent` is its own nominal — deliberately NOT unified**
-  with `OutOfRange`, `Leaf`, or `Break` (RULED-leaning — James, 2026-07-28; see §4.1).
+- **No `Present(T)` wrapper — the element rides unwrapped (RULED — James).** The result is
+  `[T | Absent]`: a hit is the found element *as itself*, a miss is `Absent`. This is
+  cleaner than the wrapped `[Present(T)|Absent]` and — decisively — makes consuming the
+  result an **ordinary type-guard match** (`[T] -> … [_] -> …`), which needs no
+  imported-struct destructure and therefore **no linker pass**. (Wrapping would force a
+  `[Present(v)]` destructure of an imported `pontif.core` struct, resolvable only in the
+  full `ModuleLinker` pipeline — an ugly requirement the unwrapped form eliminates.) `Absent`
+  is its own nominal — deliberately NOT unified with `OutOfRange`, `Leaf`, or `Break` (§4.1).
+- **The one honest caveat (edge case, ACCEPTED):** if the element type `T` *is* `Absent`
+  (or a union containing it), a found-`Absent` element is indistinguishable from a miss —
+  the collapse the `Present` wrapper would have prevented. This requires a literal
+  `Stream[Absent]`, which is pathological; the clean common case wins. (Revisit only if a
+  real need for querying `Absent`-typed streams appears.)
+- Divergence from `indexed-streams.md`, noted: `at(i)` there is still specced as
+  `[Present(T)|OutOfRange]`. If that surface is built, the same unwrap-to-`[T|OutOfRange]`
+  question applies; not resolved here.
 - **Name (RULED): `.first()`.** Rejected: **`.next()`** — reads as the retired
   `Stream.next()` (`stream-war.md`), the exact collision this doc exists to avoid; it is a
   *stepping* verb, and a query has no cursor to step. Runner-up: **`.peek()`** — aligns
@@ -100,7 +112,7 @@ description (the `keyed.md` "one operation, many cardinalities" thesis):
 
 | Terminal | Cardinality | Result | Status |
 |---|---|---|---|
-| `.first()` | 0-or-1 | `[Present(T)\|Absent]` | LANDED (Slice A) |
+| `.first()` | 0-or-1 | `[T \| Absent]` (element unwrapped) | LANDED (Slice A) |
 | `.all()` | 0-or-many | `Stream[T]` — the `keyed.md` set-face, materialized | LANDED (2026-07-28) |
 | `:Stream[T]` ascription | 0-or-many | `Stream[T]` — the bare-spread materialize | later (needs the reified `Query`) |
 | `.count()` | scalar | `Int` | later |
@@ -186,35 +198,34 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
   `AltParser.parseSpreadAscription` (the `!looksLikeClause()` branch); `.first()` is parsed
   by `parseQueryTerminal` and lowered by `lowerQueryFirst` to a **stop-at-first-hit scan**:
   an `Iterate` with a single `ACCUMULATOR` seeded to `Absent()`, a guard arm on the
-  membership sort that writes `Present(element)` then a `STOP` write (writes process in
-  order, so the accumulator is set *then* the scan halts), and a catch-all arm that threads
-  the accumulator unchanged (conservation). A single ACCUMULATOR output seals to its value
-  directly, so the `Iterate` evaluates to `Present(v)` or `Absent`. **No new engine
-  machinery** — pure parser/IR reuse of the existing `ACCUMULATOR` + `STOP` primitives; the
-  stubbed `KEYED` disposition is not touched. `Present[type T](value:T)` / `Absent()` added
-  to `pontif.core` (distinct nominals, §4.1); the caller `require`s them. `Present`/`Absent`
-  are built as `IrExpr.Record` (struct construction), not `Call` (a struct name is not a
-  declared function). `Present` / `Absent` are non-parametric `pontif.core` structs
-  (`Present(value:_)`); a parametric `Present[T]` waits on result-sort ascription (below).
-  Pinned by `StreamQueryTest` (19), incl. struct-payload queries (`&s:[User:@.id == 2]`),
-  **nested-path predicates** (`&s:[User:@.name.first == "b"]` — KEYED Slice 0's hop-by-hop
-  validation plus `Refinements` runtime projection match multi-hop paths, so queries are
-  not limited to single-hop), predicate conjunction, the arrow-vs-type-sort disambiguation,
-  and **matching the result** (`match r { [Present(v)] -> … [Absent] -> … }`) — the union is
-  consumable end-to-end. Two findings from that coverage, both honest limitations, not bugs:
-  - **Destructuring the result needs the full linker pipeline** — `[Present(v)]` over the
-    imported `pontif.core` struct is resolved by `DestructureResolver`, which runs only in
-    `ModuleLinker` (the `PontifCompiler.compileAlt` path), not the bare `IrCompiler.compile`.
-  - **The `.first()` result infers as the generic `Stream` sort, not `[Present|Absent]`** —
-    so a two-arm `[Present(v)]`/`[Absent]` match is not yet provably exhaustive and needs a
-    `[_]` catch-all. Narrowing it (single-`ACCUMULATOR` `Iterate` result-sort inference =
-    join of init + writes) is the natural follow-up; a coercion `Cast` is the wrong tool
-    (it demands a registered `cast` function). Once narrowed, `Present[T]` becomes worthwhile.
+  membership sort that writes the **bare matching element** then a `STOP` write (writes
+  process in order, so the accumulator is set *then* the scan halts), and a catch-all arm
+  that threads the accumulator unchanged (conservation). A single ACCUMULATOR output seals to
+  its value directly, so the `Iterate` evaluates to the found element or `Absent` — the
+  `[T | Absent]` union, **element unwrapped, no `Present`**. **No new engine machinery** —
+  pure parser/IR reuse of the existing `ACCUMULATOR` + `STOP` primitives; the stubbed `KEYED`
+  disposition is not touched. Only `Absent()` is added to `pontif.core` (a zero-field nominal,
+  the miss value; distinct nominal, §4.1) and built as an `IrExpr.Record` (struct
+  construction), not `Call` (a struct name is not a declared function); the caller
+  `require`s it. Pinned by `StreamQueryTest` (19), incl. struct-payload queries
+  (`&s:[User:@.id == 2]`), **nested-path predicates** (`&s:[User:@.name.first == "b"]` —
+  KEYED Slice 0's hop-by-hop validation plus `Refinements` runtime projection match multi-hop
+  paths, so queries are not limited to single-hop), predicate conjunction, the
+  arrow-vs-type-sort disambiguation, and **matching the result**
+  (`match r { [T] -> … [_] -> … }`) — the union is consumable end-to-end on the plain compile
+  path (no linker). One honest limitation remains (not a bug):
+  - **The `.first()` result infers as the generic `Stream` sort, not `[T | Absent]`** — so a
+    two-arm `[T]`/`[Absent]` match is not yet provably exhaustive and needs a `[_]` catch-all
+    (which serves as the miss arm). Narrowing it (single-`ACCUMULATOR` `Iterate` result-sort
+    inference = join of init + writes, giving `[T | Absent]`) is the natural follow-up; a
+    coercion `Cast` is the wrong tool (it demands a registered `cast` function).
+  - *(Resolved by the unwrap:)* the earlier "destructuring the result needs the full linker
+    pipeline" finding is **gone** — matching `[T]`/`[_]` uses no imported-struct destructure,
+    so `DestructureResolver`/`ModuleLinker` is no longer on the consumption path.
   Un-terminated / unknown-terminal / zip queries are parse errors. **Honest scope:** the standalone
   `Query` value is NOT yet reified — a query must be terminated in place (`.first()`); no
-  index/pushdown (Slice C); no other terminals (Slice D). The `.first()` result element type
-  is `[Present(T)|Absent]` where `T` is the query's element sort, not yet narrowed by the
-  predicate (the §8.6-style imprecision inherited from the guard-filter).
+  index/pushdown (Slice C); the found element is the raw `T`, not narrowed by the predicate
+  (the §8.6-style imprecision inherited from the guard-filter).
 - **Slice B — `assign … index` parse + register (declaration only).**
   Parse `assign [unique|ordinal|cardinal] index name:[ binder:T -> keyExpr ]` into a
   standing key-transform registered against the relation. `SortChecker` discharges the

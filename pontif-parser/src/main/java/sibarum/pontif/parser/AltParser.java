@@ -80,7 +80,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type", "type",
-            "match", "proof", "main", "emit", "action",
+            "match", "proof", "main", "emit", "action", "conduit",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -584,7 +584,7 @@ public final class AltParser {
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
                 "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
-                "action").contains(t.text());
+                "action", "conduit").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -650,10 +650,11 @@ public final class AltParser {
             case "assign"   -> parseAssign();
             case "proof"    -> parseProof();
             case "action"   -> parseAction();
+            case "conduit"  -> parseConduit();
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
-                            + "struct / let / cast / trait / assign / proof / action); executable logic must "
+                            + "struct / let / cast / trait / assign / proof / action / conduit); executable logic must "
                             + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
@@ -1057,6 +1058,127 @@ public final class AltParser {
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
+    }
+
+    /** Monotonic counter making each lowered conduit's synthetic keys unique. */
+    private int conduitSeq = 0;
+
+    /**
+     * The stateful-fold declaration (docs/reactive-gui.md, the Conduit leg):
+     * {@code conduit NAME(e:E, s:S):{R, S} from INIT -> BODY}. A conduit is a {@code scan}
+     * over the temporal stream of a type's events, sitting BETWEEN {@code emit} and the
+     * actions: on each emitted E (or subtype) it folds the current state S with the event,
+     * yielding a {@code {R, S'}} tuple — R dispatched onward to the actions, S' threaded to
+     * the next event. {@code from INIT} is the seed state. The name is diagnostic-only.
+     *
+     * <p>The single-return sugar {@code :S} (dispatch the new state itself) desugars HERE to
+     * the dual {@code {S, S}} form, wrapping BODY so it returns {@code {v, v}} WITHOUT
+     * double-evaluating: {@code (let __conduit_r = BODY  {__conduit_r, __conduit_r})}. The
+     * sugar-vs-explicit fork is read from the parsed return sort: a {@code "_tuple"}
+     * {@link IrSort.Structural} with positional members {@code _0}/{@code _1} is the explicit
+     * dual form; anything else is the sugar.
+     *
+     * <p>Lowered — mirroring {@code action} — to TWO ordinary {@link IrStmt.FunctionDecl}s
+     * under reserved, non-lexable keys sharing a {@code SEQ#NAME} suffix: the fold
+     * ({@code #conduit#…}, params {@code (e, s)}, return {@code {R, S}}, body BODY) and its
+     * init ({@code #conduit-init#…}, 0-arg, return {@code S}, body INIT). The init rides the
+     * {@code pendingTopLevelDecls} channel (the same seam a destructuring let uses to emit
+     * more than one statement); the compile loop pairs the two legs and registers a
+     * CompiledConduit keyed by the event type's bare name.
+     */
+    private IrStmt parseConduit() throws ParseException {
+        AltToken start = expectKeyword("conduit");
+        String name = parseDeclarationName();
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
+        List<ParamConversion> convs = drainParamConversions();
+        if (params.size() != 2) {
+            throw new ParseException(
+                    "a conduit folds an event into state — declare exactly two parameters "
+                            + "(the event e:E and the state s:S); got " + params.size(),
+                    start.origin());
+        }
+        if (!convs.isEmpty()) {
+            throw new ParseException(
+                    "a conduit's parameters cannot be conversions", start.origin());
+        }
+        expect(AltToken.Kind.COLON);
+        IrSort returnSort = parseSort();
+        // `from` is a CONTEXTUAL keyword (an IDENT whose text is "from"), not a globally
+        // reserved word — so it never collides with a user identifier used elsewhere.
+        AltToken fromTok = peek();
+        if (fromTok.kind() != AltToken.Kind.IDENT || !fromTok.text().equals("from")) {
+            throw new ParseException(
+                    "a conduit needs a seed — `:{R, S} from INIT -> BODY`; expected `from`, got "
+                            + fromTok.kind() + " '" + fromTok.text() + "'",
+                    fromTok.origin());
+        }
+        consume();  // from
+        // INIT is the seed expression — no e/s in scope (the state has no prior value yet).
+        // The Pratt expression loop consumes only OP tokens, so it stops at the trailing
+        // top-level `->` (an ARROW, not an OP) rather than reading `INIT -> BODY` as a lambda.
+        // A constructor-call / struct-literal seed (the common case) parses cleanly; a truly
+        // complex seed can be parenthesised.
+        IrExpr init = parseExpr();
+        expect(AltToken.Kind.ARROW);
+
+        boolean explicit = returnSort instanceof IrSort.Structural st
+                && TUPLE_SENTINEL.equals(st.name())
+                && st.members().containsKey("_0") && st.members().containsKey("_1");
+        IrSort stateSort = explicit
+                ? ((IrSort.Structural) returnSort).members().get("_1")
+                : returnSort;
+        IrSort foldReturnSort = explicit
+                ? returnSort
+                : tupleSortOf(stateSort, stateSort, start.origin());
+
+        // BODY sees e and s (the params), mirroring parseAction's body scoping.
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
+        IrExpr body;
+        try {
+            body = wrapParamDestructures(parseExpr(), destrs);
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+
+        // The `:S` sugar dispatches the new state itself as R — wrap BODY so it yields {v, v}
+        // WITHOUT double-evaluating: bind BODY once, tuple the binder twice.
+        IrExpr foldBody = explicit
+                ? body : wrapSingleReturnDesugar(body, stateSort, start.origin());
+
+        String suffix = (conduitSeq++) + "#" + name;
+        pendingTopLevelDecls.add(new IrStmt.FunctionDecl(
+                "#conduit-init#" + suffix, List.of(), stateSort, init, start.origin()));
+        return new IrStmt.FunctionDecl(
+                "#conduit#" + suffix, params, foldReturnSort, foldBody, start.origin());
+    }
+
+    /** A {@code {a, b}} tuple SORT — a {@code "_tuple"} Structural with members {@code _0}/{@code _1}. */
+    private IrSort tupleSortOf(IrSort a, IrSort b, Origin origin) {
+        Map<String, IrSort> members = new LinkedHashMap<>();
+        members.put("_0", a);
+        members.put("_1", b);
+        return new IrSort.Structural(TUPLE_SENTINEL, members, origin);
+    }
+
+    /**
+     * The conduit {@code :S} single-return desugar:
+     * {@code (let __conduit_r = BODY  {__conduit_r, __conduit_r})}. BODY is evaluated once
+     * (bound to the fresh {@code __conduit_r}), then tupled with itself — so a side-effecting
+     * body (one that {@code emit}s) fires exactly once. The binder carries the state sort S
+     * (a non-null declared sort — NameResolver rewrites {@code LetIn.declaredSort()} eagerly).
+     */
+    private IrExpr wrapSingleReturnDesugar(IrExpr body, IrSort stateSort, Origin origin) {
+        String r = "__conduit_r";
+        IrExpr tuple = buildTupleLiteral(
+                List.of(new IrExpr.Var(r, origin), new IrExpr.Var(r, origin)), origin);
+        return new IrExpr.LetIn(r, stateSort, body, tuple, origin);
     }
 
     /**
@@ -4790,39 +4912,40 @@ public final class AltParser {
 
     /**
      * Lowers {@code &s:[T:pred].first()} to a stop-at-first-hit scan (docs/stream-queries.md
-     * §5, Slice A). An {@code ACCUMULATOR} seeded to {@code Absent()} is set to
-     * {@code Present(element)} on the first element that satisfies the membership sort, then
-     * the scan halts (a {@link IrExpr.Write#STOP} write in the same arm, after the accumulator
-     * write); no match leaves the accumulator {@code Absent}. Reuses the existing
-     * ACCUMULATOR + STOP engine primitives — no new disposition. The catch-all arm threads the
-     * accumulator unchanged (conservation: every arm accounts for the channel). Returns the
-     * honest-absence union {@code [Present(T)|Absent]}, distinct nominals
-     * (docs/stream-queries.md §4.1). The caller must {@code require pontif.core.{Present, Absent}}.
+     * §5, Slice A). An {@code ACCUMULATOR} seeded to {@code Absent()} is set to the
+     * <b>bare matching element</b> on the first element that satisfies the membership sort,
+     * then the scan halts (a {@link IrExpr.Write#STOP} write in the same arm, after the
+     * accumulator write); no match leaves the accumulator {@code Absent}. So the result is the
+     * union {@code [T | Absent]} — the found element itself, or {@code Absent} — NOT a
+     * {@code Present(T)} wrapper. Consuming it is an ordinary type-guard match
+     * ({@code match r { [T] -> … [_] -> … }}), which needs no imported-struct destructure and
+     * hence no linker pass. Reuses the existing ACCUMULATOR + STOP engine primitives — no new
+     * disposition. The catch-all arm threads the accumulator unchanged (conservation: every
+     * arm accounts for the channel). Only {@code Absent} need be imported
+     * ({@code require pontif.core.{Absent}}), and only because it is the miss value the scan
+     * seeds; the hit path introduces no nominal of its own.
+     *
+     * <p>NOTE: this Iterate's statically-inferred sort is the generic {@code Stream} (the
+     * default disposition sort), NOT {@code [T | Absent]}. The runtime value is correct (an
+     * element or {@code Absent}), but a two-arm {@code [T]}/{@code [Absent]} match can't yet
+     * be proven exhaustive from the static sort, so it needs a {@code [_]} catch-all.
+     * Narrowing the result sort to {@code [T | Absent]} (single-ACCUMULATOR Iterate
+     * result-sort inference = join of init + writes) is the follow-up that removes the
+     * catch-all.
      */
     private IrExpr lowerQueryFirst(IrExpr source, IrSort elemSort, Origin o) {
         String element = "$q" + (syntheticCounter++);
-        // Construct via IrExpr.Record (the struct-construction node), NOT IrExpr.Call — a
-        // struct name is not a declared function, so a Call would fail CallNameCheck. This is
-        // the same node the parser emits for `Present(x)` / `Absent()` in source
-        // (parsePositionalStructLiteral). Requires pontif.core.{Present, Absent} imported.
-        Map<String, IrExpr> presentMembers = new LinkedHashMap<>();
-        presentMembers.put("value", new IrExpr.Var(element, o));
-        IrExpr present = new IrExpr.Record("Present", presentMembers, o);
+        // The miss value. IrExpr.Record (struct construction), NOT IrExpr.Call — a struct
+        // name is not a declared function, so a Call would fail CallNameCheck. Requires
+        // pontif.core.{Absent} imported.
         IrExpr absent = new IrExpr.Record("Absent", new LinkedHashMap<>(), o);
         IrExpr.OutputSpec out = new IrExpr.OutputSpec("result", IrExpr.OutputKind.ACCUMULATOR, absent);
         IrExpr.Arm hit = new IrExpr.Arm(elemSort, List.of(
-                new IrExpr.Write("result", null, present),
+                new IrExpr.Write("result", null, new IrExpr.Var(element, o)),   // the bare element
                 // STOP's value is ignored (IrExpr.Write.STOP) but must be non-null.
                 new IrExpr.Write(IrExpr.Write.STOP, null, new IrExpr.Var(element, o))));
         IrExpr.Arm miss = new IrExpr.Arm(IrSort.named("_"),
                 List.of(new IrExpr.Write("result", null, new IrExpr.Var("result", o))));
-        // NOTE: this Iterate's statically-inferred sort is the generic `Stream` (the
-        // default disposition sort), NOT `[Present | Absent]`. The runtime value is a
-        // Present or an Absent (correct), but a downstream `match r { [Present(v)] -> …
-        // [Absent] -> … }` currently can't be proven exhaustive from the static sort, so
-        // it needs a `[_]` catch-all. Narrowing the result sort to the union (so the
-        // two-arm match is provably total) is a follow-up — it needs single-ACCUMULATOR
-        // Iterate result-sort inference (join of init + writes), not a coercion Cast.
         return new IrExpr.Iterate(source, element, List.of(out), List.of(hit, miss), o);
     }
 

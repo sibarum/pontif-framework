@@ -1,4 +1,4 @@
-exports @.{Stream, Nothing, Break, Present, Absent}
+exports @.{Stream, Nothing, Break, Absent}
 
 trait Stream[type E]{}
 
@@ -6,15 +6,12 @@ struct Nothing()
 
 struct Break()
 
-# The honest-absence union for a stream query's scalar terminal `.first()`
-# (docs/stream-queries.md §2.1): `Present(v)` carries the found record, `Absent`
-# marks a lookup miss. `Absent` is a DISTINCT nominal from `Nothing`/`Break`/`Leaf`/
-# `OutOfRange` — the four absences answer different questions (docs/stream-queries.md §4.1).
-# `Present` is non-parametric for now (`value:_`, the floor) — a parametric `Present[T]`
-# only pays off once `.first()` ascribes a `[Present(T)|Absent]` result sort (a follow-up;
-# see docs/stream-queries.md §5), and the floor field destructures cleanly today.
-struct Present(value:_)
-
+# The miss value for a stream query's scalar terminal `.first()` (docs/stream-queries.md
+# §2.1): `.first()` returns `[T | Absent]` — the found element itself on a hit, or `Absent`
+# on a miss. There is NO `Present(T)` wrapper: the element rides unwrapped, so consuming the
+# result is an ordinary type-guard match (`[T] -> … [_] -> …`), needing no imported-struct
+# destructure. `Absent` is a DISTINCT nominal from `Nothing`/`Break`/`Leaf`/`OutOfRange` —
+# the absences answer different questions (docs/stream-queries.md §4.1).
 struct Absent()
 
 0
