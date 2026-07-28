@@ -35,6 +35,22 @@ class StreamQueryTest {
         return new IrInterpreter(simp).eval(compiled);
     }
 
+    // Destructuring an IMPORTED struct (like `Present` from pontif.core) is resolved by
+    // DestructureResolver, which runs only in the ModuleLinker — i.e. the full
+    // PontifCompiler pipeline, not the bare parse+compile above. So the match-on-result
+    // tests (the intended consumption of the [Present(v)|Absent] union) go through the
+    // real linked pipeline.
+    private final PontifCompiler compiler = new PontifCompiler();
+    private final PontifRunner runner = new PontifRunner();
+
+    private String runLinked(String src) {
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "m.ptf");
+        PontifRunner.RunResult run = runner.run(r, PontifRunner.Engine.INTERPRETER);
+        org.junit.jupiter.api.Assertions.assertFalse(
+                run.isError(), () -> "expected success; got: " + run.text());
+        return run.text();
+    }
+
     @Test void firstMatch_returnsPresent() throws Exception {
         assertEquals("Present{value: 2}", String.valueOf(run("""
                 requires pontif.core.{Present, Absent}
@@ -124,7 +140,80 @@ class StreamQueryTest {
                 &s:[User:@.id > 2].all()""")));
     }
 
+    // --- the result is CONSUMABLE: match on [Present(v)|Absent] (the intended usage) ---
+
+    // NOTE the trailing `[_]` catch-all: the `.first()` result currently infers as the
+    // generic `Stream` sort, so a two-arm `[Present(v)]`/`[Absent]` match can't yet be
+    // proven exhaustive (see lowerQueryFirst — result-sort narrowing is a follow-up). The
+    // catch-all is dead at runtime (the value is always Present or Absent); these tests
+    // prove the union IS consumable — the destructure binds and the arms fire correctly.
+
+    @Test void matchOnPresent_bindsTheValue() {
+        // The whole point of the union: destructure the found record and use it.
+        assertEquals("2", runLinked("""
+                requires pontif.core.{Present, Absent}
+                let s = {1, 2, 3}
+                let r = &s:[Int:@ == 2].first()
+                match r
+                  [Present(v)] -> v
+                  [Absent]     -> 0 - 1
+                  [_]          -> 0 - 2"""));
+    }
+
+    @Test void matchOnAbsent_takesTheFallbackArm() {
+        assertEquals("-1", runLinked("""
+                requires pontif.core.{Present, Absent}
+                let s = {1, 2, 3}
+                let r = &s:[Int:@ == 9].first()
+                match r
+                  [Present(v)] -> v
+                  [Absent]     -> 0 - 1
+                  [_]          -> 0 - 2"""));
+    }
+
+    @Test void matchOnPresent_overStruct_pullsFieldOut() {
+        assertEquals("\"b\"", runLinked("""
+                requires pontif.core.{Present, Absent}
+                struct User(id:Int, name:String)
+                let s = {User(1, "a"), User(2, "b"), User(3, "c")}
+                let r = &s:[User:@.id == 2].first()
+                match r
+                  [Present(v)] -> v.name
+                  [Absent]     -> "none"
+                  [_]          -> "other\""""));
+    }
+
+    // --- disambiguation: the SAME stream, an arrow still maps, a type-sort queries ---
+
+    @Test void arrowSpreadStillMaps_typeSortQueries() throws Exception {
+        // The fork the whole feature rests on (docs/stream-queries.md §1): an arrow body
+        // is the per-element map; a bare type-sort is a query.
+        assertEquals("{2, 4, 6}", String.valueOf(run("""
+                let s = {1, 2, 3}
+                &s:[ (el:Int) -> el * 2 ]""")));
+        assertEquals("{2, 3}", String.valueOf(run("""
+                let s = {1, 2, 3}
+                &s:[Int:@ > 1].all()""")));
+    }
+
+    // --- predicate conjunction inside a query ---
+
+    @Test void conjunctionPredicate() throws Exception {
+        assertEquals("{2, 3}", String.valueOf(run("""
+                let s = {1, 2, 3, 4}
+                &s:[Int:@ > 1 & @ < 4].all()""")));
+    }
+
     // --- error cases: a query must be terminated by a known terminal op (Slice A) ---
+
+    @Test void zipQuery_isParseError() {
+        // A multi-source `(&a, &b):[T:pred]` query is not supported (docs/stream-queries.md).
+        assertThrows(ParseException.class, () -> run("""
+                let a = {1, 2, 3}
+                let b = {4, 5, 6}
+                (&a, &b):[Int:@ > 1].first()"""));
+    }
+
 
     @Test void missingTerminal_isParseError() {
         // Slice A does not yet reify a standalone Query value, and the Stream-valued

@@ -4816,6 +4816,13 @@ public final class AltParser {
                 new IrExpr.Write(IrExpr.Write.STOP, null, new IrExpr.Var(element, o))));
         IrExpr.Arm miss = new IrExpr.Arm(IrSort.named("_"),
                 List.of(new IrExpr.Write("result", null, new IrExpr.Var("result", o))));
+        // NOTE: this Iterate's statically-inferred sort is the generic `Stream` (the
+        // default disposition sort), NOT `[Present | Absent]`. The runtime value is a
+        // Present or an Absent (correct), but a downstream `match r { [Present(v)] -> …
+        // [Absent] -> … }` currently can't be proven exhaustive from the static sort, so
+        // it needs a `[_]` catch-all. Narrowing the result sort to the union (so the
+        // two-arm match is provably total) is a follow-up — it needs single-ACCUMULATOR
+        // Iterate result-sort inference (join of init + writes), not a coercion Cast.
         return new IrExpr.Iterate(source, element, List.of(out), List.of(hit, miss), o);
     }
 

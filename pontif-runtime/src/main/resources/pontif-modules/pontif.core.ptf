@@ -10,7 +10,10 @@ struct Break()
 # (docs/stream-queries.md §2.1): `Present(v)` carries the found record, `Absent`
 # marks a lookup miss. `Absent` is a DISTINCT nominal from `Nothing`/`Break`/`Leaf`/
 # `OutOfRange` — the four absences answer different questions (docs/stream-queries.md §4.1).
-struct Present[type T](value:T)
+# `Present` is non-parametric for now (`value:_`, the floor) — a parametric `Present[T]`
+# only pays off once `.first()` ascribes a `[Present(T)|Absent]` result sort (a follow-up;
+# see docs/stream-queries.md §5), and the floor field destructures cleanly today.
+struct Present(value:_)
 
 struct Absent()
 

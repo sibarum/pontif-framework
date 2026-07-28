@@ -194,11 +194,23 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
   stubbed `KEYED` disposition is not touched. `Present[type T](value:T)` / `Absent()` added
   to `pontif.core` (distinct nominals, §4.1); the caller `require`s them. `Present`/`Absent`
   are built as `IrExpr.Record` (struct construction), not `Call` (a struct name is not a
-  declared function). Pinned by `StreamQueryTest` (9), incl. struct-payload queries
-  (`&s:[User:@.id == 2]`) and — confirmed working — **nested-path predicates**
-  (`&s:[User:@.name.first == "b"]`): KEYED Slice 0's hop-by-hop validation plus `Refinements`
-  runtime projection match multi-hop paths today, so queries are not limited to single-hop.
-  Un-terminated / unknown-terminal queries are parse errors. **Honest scope:** the standalone
+  declared function). `Present` / `Absent` are non-parametric `pontif.core` structs
+  (`Present(value:_)`); a parametric `Present[T]` waits on result-sort ascription (below).
+  Pinned by `StreamQueryTest` (19), incl. struct-payload queries (`&s:[User:@.id == 2]`),
+  **nested-path predicates** (`&s:[User:@.name.first == "b"]` — KEYED Slice 0's hop-by-hop
+  validation plus `Refinements` runtime projection match multi-hop paths, so queries are
+  not limited to single-hop), predicate conjunction, the arrow-vs-type-sort disambiguation,
+  and **matching the result** (`match r { [Present(v)] -> … [Absent] -> … }`) — the union is
+  consumable end-to-end. Two findings from that coverage, both honest limitations, not bugs:
+  - **Destructuring the result needs the full linker pipeline** — `[Present(v)]` over the
+    imported `pontif.core` struct is resolved by `DestructureResolver`, which runs only in
+    `ModuleLinker` (the `PontifCompiler.compileAlt` path), not the bare `IrCompiler.compile`.
+  - **The `.first()` result infers as the generic `Stream` sort, not `[Present|Absent]`** —
+    so a two-arm `[Present(v)]`/`[Absent]` match is not yet provably exhaustive and needs a
+    `[_]` catch-all. Narrowing it (single-`ACCUMULATOR` `Iterate` result-sort inference =
+    join of init + writes) is the natural follow-up; a coercion `Cast` is the wrong tool
+    (it demands a registered `cast` function). Once narrowed, `Present[T]` becomes worthwhile.
+  Un-terminated / unknown-terminal / zip queries are parse errors. **Honest scope:** the standalone
   `Query` value is NOT yet reified — a query must be terminated in place (`.first()`); no
   index/pushdown (Slice C); no other terminals (Slice D). The `.first()` result element type
   is `[Present(T)|Absent]` where `T` is the query's element sort, not yet narrowed by the
