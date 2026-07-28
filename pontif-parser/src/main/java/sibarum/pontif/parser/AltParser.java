@@ -4765,20 +4765,27 @@ public final class AltParser {
         if (peek().kind() != AltToken.Kind.DOT || peek(1).kind() != AltToken.Kind.IDENT) {
             throw new ParseException(
                     "A stream query `&s:[T:pred]` must be terminated with a terminal op — "
-                            + "e.g. `.first()` (a standalone Query value is not yet supported; "
-                            + "docs/stream-queries.md §2)", peek().origin());
+                            + "e.g. `.first()` (0-or-1) or `.all()` (0-or-many); a standalone "
+                            + "Query value is not yet supported (docs/stream-queries.md §2)",
+                    peek().origin());
         }
-        String terminal = peek(1).text();
-        if (!terminal.equals("first")) {
-            throw new ParseException(
-                    "Unknown query terminal `." + terminal + "()` — Slice A supports `.first()` "
-                            + "(docs/stream-queries.md §2.2)", peek(1).origin());
-        }
+        AltToken termTok = peek(1);
+        String terminal = termTok.text();
         consume();  // `.`
-        consume();  // `first`
+        consume();  // the terminal name
         expect(AltToken.Kind.LPAREN);
         expect(AltToken.Kind.RPAREN);
-        return lowerQueryFirst(source, elemSort, o);
+        // The terminal chooses cardinality (docs/stream-queries.md §2.2): `.first()` →
+        // 0-or-1 `[Present(T)|Absent]`; `.all()` → 0-or-many `Stream[T]` (the keyed.md
+        // "Restrict" face, materialized).
+        return switch (terminal) {
+            case "first" -> lowerQueryFirst(source, elemSort, o);
+            case "all" -> lowerQueryAll(source, elemSort, o);
+            default -> throw new ParseException(
+                    "Unknown query terminal `." + terminal + "()` — supported: `.first()` "
+                            + "(0-or-1), `.all()` (0-or-many) (docs/stream-queries.md §2.2)",
+                    termTok.origin());
+        };
     }
 
     /**
@@ -4810,6 +4817,24 @@ public final class AltParser {
         IrExpr.Arm miss = new IrExpr.Arm(IrSort.named("_"),
                 List.of(new IrExpr.Write("result", null, new IrExpr.Var("result", o))));
         return new IrExpr.Iterate(source, element, List.of(out), List.of(hit, miss), o);
+    }
+
+    /**
+     * Lowers {@code &s:[T:pred].all()} to the 0-or-many query terminal (docs/stream-queries.md
+     * §2.2) — the materialized "Restrict" face (docs/keyed.md): a {@code STREAM} output emits
+     * every element that satisfies the membership sort and drops the rest, yielding
+     * {@code Stream[T]}. Structurally identical to the guard-filter ({@link #lowerGuardFilter}),
+     * but the emitted value is the bare element (no transform body) — a query selects, it does
+     * not map. Scan-correct; no index/pushdown yet (Slice C). Like the guard-filter, the result
+     * element sort stays the broad {@code Stream[T]} — the predicate does not yet narrow it.
+     */
+    private IrExpr lowerQueryAll(IrExpr source, IrSort elemSort, Origin o) {
+        String element = "$q" + (syntheticCounter++);
+        IrExpr.OutputSpec out = new IrExpr.OutputSpec("default", IrExpr.OutputKind.STREAM, null);
+        IrExpr.Arm emit = new IrExpr.Arm(elemSort,
+                List.of(new IrExpr.Write("default", null, new IrExpr.Var(element, o))));
+        IrExpr.Arm drop = new IrExpr.Arm(IrSort.named("_"), List.of());  // no writes → skip, continue
+        return new IrExpr.Iterate(source, element, List.of(out), List.of(emit, drop), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */

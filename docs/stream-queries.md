@@ -98,12 +98,13 @@ match u {
 The same query, other terminals — each a different licensed cardinality over one
 description (the `keyed.md` "one operation, many cardinalities" thesis):
 
-| Terminal | Cardinality | Result |
-|---|---|---|
-| `.first()` | 0-or-1 | `[Present(T)\|Absent]` |
-| materialize (`:Stream[T]` ascription, or `.all()`) | 0-or-many | `Stream[T]` — the current `keyed.md` set-face |
-| `.count()` | scalar | `Int` |
-| *(later)* `.only()` | exactly-1, else error | `T` — the uniqueness-*asserting* sibling of `.first()` |
+| Terminal | Cardinality | Result | Status |
+|---|---|---|---|
+| `.first()` | 0-or-1 | `[Present(T)\|Absent]` | LANDED (Slice A) |
+| `.all()` | 0-or-many | `Stream[T]` — the `keyed.md` set-face, materialized | LANDED (2026-07-28) |
+| `:Stream[T]` ascription | 0-or-many | `Stream[T]` — the bare-spread materialize | later (needs the reified `Query`) |
+| `.count()` | scalar | `Int` | later |
+| `.only()` | exactly-1, else error | `T` — the uniqueness-*asserting* sibling of `.first()` | later |
 
 `.only()` is where a proven/enforced `Unique` would pay off (it may skip the "is there a
 second?" check); deferred with constraint enforcement (§4).
@@ -213,8 +214,13 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
   registered `Unique` index and serves it from the slot map instead of scanning. Results
   and types identical to Slice A **by construction** — this is the correctness-neutrality
   of §3 made real; it can land arbitrarily later without touching meaning.
-- **Slice D — the other terminals** (§2.2: `.all()`/materialize already exists as the
-  `keyed.md` set-face; `.count()`, later `.only()`), and constraint enforcement (§4).
+- **Slice D — the other terminals + the reified `Query`.** `.all()` (0-or-many →
+  `Stream[T]`, the materialized "Restrict" face) — **LANDED (2026-07-28)** via
+  `lowerQueryAll` (a `STREAM`-output `Iterate` emitting matching elements, dropping the
+  rest; structurally the guard-filter but emitting the bare element — a query selects, it
+  does not map; `StreamQueryTest`). Still open: `.count()`, `.only()`, the bare-spread
+  `:Stream[T]` ascription face, reifying `Query` as a first-class bindable value (so
+  `let q = &s:[…]` then `q.first()`), and constraint enforcement (§4).
 
 Slices A/B are surface + correctness; C is the "SQL table whose indexes fall back to
 table scans" payoff and is invisible to results.

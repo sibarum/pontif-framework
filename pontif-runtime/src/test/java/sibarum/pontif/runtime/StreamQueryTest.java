@@ -95,6 +95,35 @@ class StreamQueryTest {
                 &s:[User:@.name.first == "b"].first()""")));
     }
 
+    // --- `.all()` — the 0-or-many terminal: materialize the query to Stream[T] ---
+
+    @Test void all_returnsEveryMatch_asStream() throws Exception {
+        assertEquals("{2, 3, 4}", String.valueOf(run("""
+                let s = {1, 2, 3, 4}
+                &s:[Int:@ > 1].all()""")));
+    }
+
+    @Test void all_noMatch_returnsEmptyStream() throws Exception {
+        assertEquals("{}", String.valueOf(run("""
+                let s = {1, 2, 3}
+                &s:[Int:@ > 100].all()""")));
+    }
+
+    @Test void all_dropsNonMatching_keepsOrder() throws Exception {
+        // Non-matching elements are dropped, matching ones keep source order (a select,
+        // not a map — the emitted value is the bare element).
+        assertEquals("{1, 2, 3}", String.valueOf(run("""
+                let s = {1, 9, 2, 8, 3}
+                &s:[Int:@ < 5].all()""")));
+    }
+
+    @Test void all_overStructByField() throws Exception {
+        assertEquals("{User{id: 3, name: \"c\"}, User{id: 4, name: \"d\"}}", String.valueOf(run("""
+                struct User(id:Int, name:String)
+                let s = {User(1, "a"), User(2, "b"), User(3, "c"), User(4, "d")}
+                &s:[User:@.id > 2].all()""")));
+    }
+
     // --- error cases: a query must be terminated by a known terminal op (Slice A) ---
 
     @Test void missingTerminal_isParseError() {
