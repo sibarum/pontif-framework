@@ -293,7 +293,13 @@ examples needs `=` to lex to `EQ` in predicate position, else the surface is `==
 - **`~=` governance** (above) — PROPOSED, unruled.
 - **Index-direction storage** — forward / inverse / both is a per-*relation* choice
   (not a type property). Ruled that it's inferred from which retrievals the program
-  performs; the explicit override spelling is unspecified.
+  performs; the explicit override spelling is a **candidate**: `assign unique index
+  name:[ binder:T -> keyExpr ]` (a standing, correctness-neutral eager-build hint) —
+  see `stream-queries.md` §3.
+- **Scalar (0-or-1) retrieval** — the set-valued filter above has a scalar sibling: a
+  bare-type-sort spread is a first-class **`Query`**, and a terminal op (`.first()`)
+  fetches 0-or-1 as `[Present(T)|Absent]`. Ruled 2026-07-28; spec in
+  `stream-queries.md`.
 - **`emit` and maintenance.** Insert-time upkeep of secondary indexes is the
   deferred effects-by-shell `emit` (`sort-transforms.md`) landing in the KEYED
   shell — an effect injected by shape. MVP retrieval doesn't need it; it's the

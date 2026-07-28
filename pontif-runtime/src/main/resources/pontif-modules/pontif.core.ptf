@@ -1,9 +1,17 @@
-exports @.{Stream, Nothing, Break}
+exports @.{Stream, Nothing, Break, Present, Absent}
 
 trait Stream[type E]{}
 
 struct Nothing()
 
 struct Break()
+
+# The honest-absence union for a stream query's scalar terminal `.first()`
+# (docs/stream-queries.md §2.1): `Present(v)` carries the found record, `Absent`
+# marks a lookup miss. `Absent` is a DISTINCT nominal from `Nothing`/`Break`/`Leaf`/
+# `OutOfRange` — the four absences answer different questions (docs/stream-queries.md §4.1).
+struct Present[type T](value:T)
+
+struct Absent()
 
 0

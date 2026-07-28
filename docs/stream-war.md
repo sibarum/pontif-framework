@@ -608,7 +608,12 @@ needs today and costs a new IR node + pass threading, so it's left as a possible
 1. **Single-pass vs re-observable spine** (§2) — the base `Stream` contract.
 2. **`Nothing`'s identity** — a fresh `pontif.core` type, or unified with the
    `std.common` `Leaf` / a shared absence-value family (and the `Present|OutOfRange`
-   option shape, `indexed-streams.md` §8)?
+   option shape, `indexed-streams.md` §8)? **RESOLVED toward separation (2026-07-28,
+   James):** `Nothing`/`Break`/`Leaf`/`OutOfRange`/`Absent` are kept as **distinct
+   nominals** — they answer different questions from different call-stacks; the
+   separation is the statement. See `stream-queries.md` §4.1. (`Nothing` stays its own
+   `pontif.core` type; a shared *trait* is still permissible, a collapse to one nominal
+   is not.)
 3. **Conservation ledger treatment of lossy** (§5).
 4. **`pontif.core` contents + `std.stream` retirement** — repurpose `std.stream` or
    stand up `pontif.core` and retire it.

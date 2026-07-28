@@ -281,7 +281,10 @@ unprovable → hazard).
 
 1. **`Present` / `OutOfRange`** member names; whether `OutOfRange` joins the
    `std.common` terminal family with `Leaf`, and whether `Present(T)` reuses a
-   future option-shaped union (§2 rung 1).
+   future option-shaped union (§2 rung 1). **`OutOfRange` NOT unified with `Leaf` /
+   the absence family (RESOLVED 2026-07-28, James)** — a leaf, a stream-end, an invalid
+   index, and a query-miss are semantically distinct and keep distinct nominals; see
+   `stream-queries.md` §4.1. (Member-name spelling still open; a shared *trait* is fine.)
 2. **Array purity** (§4) — does `Indexed` make `Array` pure-side for random access,
    and is the action-side framing now *only* about un-indexed bulk iteration?
    (Set aside by the additive ruling; revisit if it bites.)

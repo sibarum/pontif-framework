@@ -4642,10 +4642,24 @@ public final class AltParser {
         }
         expect(AltToken.Kind.COLON);
         if (!looksLikeClause()) {
+            // The bracket is not a transform arrow/fragment — it is a bare TYPE-SORT,
+            // which makes `&s:[…]` a QUERY, not a per-element map (the membership /
+            // identity-transform branch of the spectrum; docs/stream-queries.md §1). A
+            // query is described-not-run; a terminal op chooses cardinality. Slice A
+            // supports `.first()` → [Present(T)|Absent] (docs/stream-queries.md §2.1).
+            if (peek().kind() == AltToken.Kind.LBRACKET) {
+                if (sources.size() > 1) {
+                    throw new ParseException(
+                            "A stream query `&s:[T:pred]` takes a single stream — a "
+                                    + "`(&a, &b)` zip query is not supported (docs/stream-queries.md)",
+                            o);
+                }
+                return parseQueryTerminal(sources.get(0), o);
+            }
             throw new ParseException(
-                    "`&s:[…]` expects an inline transform here — a fragment "
-                            + "`[ (el:Int) -> … ]` or a conversion chain `[Int -> @… -> R]` "
-                            + "(docs/arrows.md, docs/stream-war.md §3)",
+                    "`&s:[…]` expects an inline transform (`[ (el:Int) -> … ]` / "
+                            + "`[Int -> @… -> R]`) or a type-sort query (`[T:pred]`) "
+                            + "(docs/arrows.md, docs/stream-war.md §3, docs/stream-queries.md)",
                     peek().origin());
         }
         IrExpr.Lambda frag = parseClause();
@@ -4735,6 +4749,67 @@ public final class AltParser {
         IrExpr.Arm emit = new IrExpr.Arm(guard, List.of(new IrExpr.Write("default", null, body)));
         IrExpr.Arm drop = new IrExpr.Arm(IrSort.named("_"), List.of());  // no writes → skip, continue
         return new IrExpr.Iterate(source, element, List.of(out), List.of(emit, drop), o);
+    }
+
+    /**
+     * Parses the terminal op of a stream QUERY {@code &s:[T:pred].TERMINAL()}
+     * (docs/stream-queries.md §2). The bracket is a bare type-sort (membership), not a
+     * transform — so {@code &s:[T:pred]} <em>describes</em> a retrieval and a terminal op
+     * chooses the cardinality. Slice A implements {@code .first()} → the 0-or-1 scalar
+     * terminal returning {@code [Present(T)|Absent]}. The standalone {@code Query} value is
+     * not yet reified (Slice D), so a query must be terminated in place; a missing or unknown
+     * terminal is a helpful parse error rather than a silent map.
+     */
+    private IrExpr parseQueryTerminal(IrExpr source, Origin o) throws ParseException {
+        IrSort elemSort = parseSort();   // the `[T:pred]` membership sort
+        if (peek().kind() != AltToken.Kind.DOT || peek(1).kind() != AltToken.Kind.IDENT) {
+            throw new ParseException(
+                    "A stream query `&s:[T:pred]` must be terminated with a terminal op — "
+                            + "e.g. `.first()` (a standalone Query value is not yet supported; "
+                            + "docs/stream-queries.md §2)", peek().origin());
+        }
+        String terminal = peek(1).text();
+        if (!terminal.equals("first")) {
+            throw new ParseException(
+                    "Unknown query terminal `." + terminal + "()` — Slice A supports `.first()` "
+                            + "(docs/stream-queries.md §2.2)", peek(1).origin());
+        }
+        consume();  // `.`
+        consume();  // `first`
+        expect(AltToken.Kind.LPAREN);
+        expect(AltToken.Kind.RPAREN);
+        return lowerQueryFirst(source, elemSort, o);
+    }
+
+    /**
+     * Lowers {@code &s:[T:pred].first()} to a stop-at-first-hit scan (docs/stream-queries.md
+     * §5, Slice A). An {@code ACCUMULATOR} seeded to {@code Absent()} is set to
+     * {@code Present(element)} on the first element that satisfies the membership sort, then
+     * the scan halts (a {@link IrExpr.Write#STOP} write in the same arm, after the accumulator
+     * write); no match leaves the accumulator {@code Absent}. Reuses the existing
+     * ACCUMULATOR + STOP engine primitives — no new disposition. The catch-all arm threads the
+     * accumulator unchanged (conservation: every arm accounts for the channel). Returns the
+     * honest-absence union {@code [Present(T)|Absent]}, distinct nominals
+     * (docs/stream-queries.md §4.1). The caller must {@code require pontif.core.{Present, Absent}}.
+     */
+    private IrExpr lowerQueryFirst(IrExpr source, IrSort elemSort, Origin o) {
+        String element = "$q" + (syntheticCounter++);
+        // Construct via IrExpr.Record (the struct-construction node), NOT IrExpr.Call — a
+        // struct name is not a declared function, so a Call would fail CallNameCheck. This is
+        // the same node the parser emits for `Present(x)` / `Absent()` in source
+        // (parsePositionalStructLiteral). Requires pontif.core.{Present, Absent} imported.
+        Map<String, IrExpr> presentMembers = new LinkedHashMap<>();
+        presentMembers.put("value", new IrExpr.Var(element, o));
+        IrExpr present = new IrExpr.Record("Present", presentMembers, o);
+        IrExpr absent = new IrExpr.Record("Absent", new LinkedHashMap<>(), o);
+        IrExpr.OutputSpec out = new IrExpr.OutputSpec("result", IrExpr.OutputKind.ACCUMULATOR, absent);
+        IrExpr.Arm hit = new IrExpr.Arm(elemSort, List.of(
+                new IrExpr.Write("result", null, present),
+                // STOP's value is ignored (IrExpr.Write.STOP) but must be non-null.
+                new IrExpr.Write(IrExpr.Write.STOP, null, new IrExpr.Var(element, o))));
+        IrExpr.Arm miss = new IrExpr.Arm(IrSort.named("_"),
+                List.of(new IrExpr.Write("result", null, new IrExpr.Var("result", o))));
+        return new IrExpr.Iterate(source, element, List.of(out), List.of(hit, miss), o);
     }
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */
