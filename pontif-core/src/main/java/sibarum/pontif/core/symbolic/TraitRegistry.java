@@ -105,6 +105,35 @@ public final class TraitRegistry {
         return false;
     }
 
+    /**
+     * Qualifier-tolerant {@link #satisfies}: the trait is matched by its BARE name (the suffix
+     * after {@code '/'}), so a caller holding a bared key — e.g. an event-action bucket keyed by
+     * the event type's base name — resolves against a fully-qualified registration
+     * ({@code mod/GuiEvent}). The type is tried both as given and bare. Used by trait-aware event
+     * routing (docs/reactive-gui.md §1), where bucket keys are bare but registrations are FQN.
+     */
+    public boolean satisfiesBareTrait(String bareTrait, String typeName) {
+        if (bareTrait == null || typeName == null) return false;
+        String wantTrait = bare(bareTrait);
+        String bareType = bare(typeName);
+        Set<String> traitNames = new HashSet<>(satisfiers.keySet());
+        traitNames.addAll(declaredTraits);
+        traitNames.addAll(baseTrait.keySet());
+        traitNames.addAll(baseTrait.values());
+        for (String t : traitNames) {
+            if (bare(t).equals(wantTrait) && (satisfies(t, typeName) || satisfies(t, bareType))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String bare(String name) {
+        if (name == null) return null;
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
+    }
+
     /** Read-only view of the satisfier set for a trait — empty if unregistered. */
     public Set<String> satisfiersOf(String traitName) {
         Set<String> set = satisfiers.get(traitName);

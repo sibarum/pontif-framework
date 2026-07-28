@@ -75,30 +75,32 @@ class EventEmitTest {
 
     @Test
     void userStructNamedStdOut_doesNotHijackTheBuiltinConduit() {
-        // Routing keys on the EXACT qualified type. A user's own `struct StdOut` —
-        // even one that IS an Event — is a different type (not pontif.events/StdOut),
-        // so it must NOT route to the process stdout: it fails closed, printing nothing.
+        // Routing keys on the EXACT qualified type. A user's own `struct StdOut` is a different
+        // type (not pontif.events/StdOut), so it does NOT route to the process stdout. With no
+        // consumer of its own it is a silent no-op (docs/reactive-gui.md) — the security property
+        // (no hijack of the builtin) is guaranteed by exact-qualified sink keying, not by an error.
         Output o = run("""
                 requires pontif.events.{Event}
                 struct StdOut(text:String)
                 assign trait StdOut:Event{}
                 main ( emit StdOut("leak?")  0 )""");
-        assertTrue(o.result().isError(),
-                () -> "a non-conduit event must fail closed, not print; got " + o.result().text());
-        assertEquals("", o.out(), "the builtin stdout conduit must not be hijacked");
+        assertFalse(o.result().isError(),
+                () -> "an unconsumed emit is a no-op, not an error; got " + o.result().text());
+        assertEquals("", o.out(), "the builtin stdout conduit must not be hijacked — nothing prints");
     }
 
     @Test
-    void emit_rejectsANonEvent_atCompileTime() {
-        // The Event guard: emitting a struct that does not assign trait Event is a
-        // compile error (the master-era `emit(e:Event)` contract, restored).
+    void emit_ofANonEvent_isANoOp() {
+        // emit accepts ANY value (docs/reactive-gui.md): there is no Event requirement. A struct
+        // that assigns no trait and has no consumer emits cleanly and does nothing — fire-and-forget
+        // into the void, not a compile error.
         Output o = run("""
                 struct Ping(n:Int)
                 main ( emit Ping(1)  0 )""");
-        assertTrue(o.result().isError(), "emitting a non-Event must be rejected");
-        assertTrue(o.result().text().contains("Event"),
-                () -> "error should mention the Event requirement; got " + o.result().text());
-        assertEquals("", o.out());
+        assertFalse(o.result().isError(),
+                () -> "emitting a non-Event with no consumer must be a legal no-op; got " + o.result().text());
+        assertEquals("0", o.result().text(), "emit is write-only; main's value is its trailing expr");
+        assertEquals("", o.out(), "no consumer — nothing is printed");
     }
 
     @Test

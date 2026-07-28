@@ -85,12 +85,11 @@ public final class IrCompiler {
         // validates fields it couldn't resolve here.
         SortChecker.check(resolved);
 
-        // Event guard (docs/events.md): an `emit EVENT` may only emit an Event. The
-        // retired `emit(e:Event)` function enforced this via its parameter sort; with
-        // `emit` a statement keyword this dedicated walk re-establishes it (reject a
-        // provable non-Event; lenient on unknowns). Post-SortChecker so the event's
-        // construction is already well-formed.
-        EventEmitCheck.check(resolved);
+        // NOTE (docs/reactive-gui.md): there is deliberately NO "emit must be an Event" guard.
+        // emit accepts ANY value — an event with no consumer is a silent no-op by design (a
+        // consuming application MAY subscribe; if none does, the emit costs nothing), so there is
+        // nothing to reject at compile time. Isolation is achieved by using a distinct type
+        // hierarchy, not by an Event marker. (The former EventEmitCheck pass is retired.)
 
         // Overload-overlap check: pairwise per function name, reject provable
         // ambiguity at compile time. Unknown cases (kernel can't decide) pass
@@ -124,6 +123,13 @@ public final class IrCompiler {
         // `#action#`-keyed FunctionDecl (the parser's lowering, mirroring a coercion) is
         // compiled as an ordinary function AND recorded here so `emit` can fire it.
         Map<String, List<CompiledModule.CompiledAction>> actionsByType = new LinkedHashMap<>();
+        // Conduits (docs/reactive-gui.md) arrive as TWO synthetic FunctionDecls sharing a
+        // `seq#NAME` suffix: the fold (`#conduit#…`, params (e,s), return {R,S}) and its init
+        // (`#conduit-init#…`, 0-arg, return S). Collect each leg by that suffix here, then pair
+        // them after the loop into a CompiledConduit keyed by the event type's bare name.
+        Map<String, CompiledModule.CompiledFunction> conduitFolds = new LinkedHashMap<>();
+        Map<String, String> conduitEventKeys = new LinkedHashMap<>();
+        Map<String, CompiledModule.CompiledFunction> conduitInits = new LinkedHashMap<>();
         // Functions carrying an `assign proof f:Algebraic` claim — mirrors
         // InferenceContext.fromModule so the runtime tags a metareference's concrete
         // nominal (AlgebraicDispatch/DispatchBase) the same way the sort stamp does.
@@ -152,6 +158,26 @@ public final class IrCompiler {
                                 .computeIfAbsent(key, k -> new ArrayList<>())
                                 .add(new CompiledModule.CompiledAction(
                                         compiledSorts.get(eventSort), cf));
+                    }
+                    // A conduit's init leg (`#conduit-init#SEQ#NAME`) — a 0-arg seed function.
+                    // Checked FIRST: "#conduit-init#" does not contain the substring "#conduit#"
+                    // (the marker needs `#conduit` immediately followed by `#`), so the two legs
+                    // never cross-match. Collect by the shared `SEQ#NAME` suffix.
+                    if (fd.name().contains("#conduit-init#")) {
+                        String suffix = fd.name().substring(
+                                fd.name().indexOf("#conduit-init#") + "#conduit-init#".length());
+                        conduitInits.put(suffix, cf);
+                    } else if (fd.name().contains("#conduit#")) {
+                        String suffix = fd.name().substring(
+                                fd.name().indexOf("#conduit#") + "#conduit#".length());
+                        // The event type is the first parameter's sort (e:E), keyed by its bare
+                        // name exactly as actions key their match type.
+                        IrSort eventSort = fd.params().get(0).sort();
+                        String base = Coercions.baseName(eventSort);
+                        int slash = base == null ? -1 : base.lastIndexOf('/');
+                        String key = slash < 0 ? base : base.substring(slash + 1);
+                        conduitFolds.put(suffix, cf);
+                        conduitEventKeys.put(suffix, key);
                     }
                 }
                 case IrStmt.TraitImpl ti -> {
@@ -203,9 +229,33 @@ public final class IrCompiler {
 
         registerSortsInExpr(resolved.main(), compiledSorts);
 
+        // Pair each conduit's fold with its init by their shared `SEQ#NAME` suffix, then key
+        // the CompiledConduit by the event type's bare name. A second conduit for the same
+        // event type is a compile error — a stateful fold is unique per type (the ordered
+        // multi-conduit pipeline is a later step).
+        Map<String, CompiledModule.CompiledConduit> conduitsByType = new LinkedHashMap<>();
+        for (Map.Entry<String, CompiledModule.CompiledFunction> e : conduitFolds.entrySet()) {
+            String suffix = e.getKey();
+            String eventKey = conduitEventKeys.get(suffix);
+            CompiledModule.CompiledFunction init = conduitInits.get(suffix);
+            if (init == null) {
+                throw new IllegalStateException(
+                        "conduit fold '" + suffix + "' has no paired init decl — the parser must "
+                                + "emit both #conduit# and #conduit-init# for one conduit");
+            }
+            if (conduitsByType.containsKey(eventKey)) {
+                throw new CompileException(
+                        "duplicate conduit for event type '" + eventKey + "' — a stateful fold "
+                                + "is unique per type");
+            }
+            conduitsByType.put(eventKey,
+                    new CompiledModule.CompiledConduit(eventKey, e.getValue(), init));
+        }
+
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
-                structRegistry, topLevelLets, actionsByType, algebraicFunctions, effectiveSorts);
+                structRegistry, topLevelLets, actionsByType, algebraicFunctions, effectiveSorts,
+                conduitsByType);
     }
 
     /** The local head-constructor name of a {@code proof} tree ({@code Algebraic}), or null. */

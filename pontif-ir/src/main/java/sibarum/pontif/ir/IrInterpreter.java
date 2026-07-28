@@ -66,6 +66,16 @@ public final class IrInterpreter {
     private final java.util.concurrent.atomic.AtomicLong emitSeq = new java.util.concurrent.atomic.AtomicLong();
 
     /**
+     * The persistent state cell of each conduit (docs/reactive-gui.md, the stateful-fold
+     * leg), keyed by the conduit's unique key (its fold decl name — unique via the parser's
+     * per-conduit sequence). A conduit is a {@code scan} over the temporal stream of a type's
+     * events: {@link #fireEvent} threads {@code S} across emits here, seeding it lazily from
+     * the conduit's {@code init} the first time the type is emitted. Not shared across runs —
+     * one interpreter per program, like {@link #outstanding}.
+     */
+    private final Map<String, Object> conduitState = new java.util.HashMap<>();
+
+    /**
      * Async work dispatched but not yet delivered — the {@link Pending} handles a {@code … on Gpu}
      * iteration produces (docs/gpu-kernels.md, slice 2). The program stays live until every one
      * resolves; {@link #eval(CompiledModule)} drains them after {@code main} (drive-to-quiescence),
@@ -313,20 +323,9 @@ public final class IrInterpreter {
             throw new RuntimeCheckException(
                     "emit expects a named event struct, got an anonymous aggregate", emit.origin());
         }
-        String typeName = rec.typeName();
-        String bare = bareName(typeName);
-
-        // Fail closed only when there is no consumer at all — a likely typo, not a
-        // deliberate fire-and-forget. (A registered action that doesn't match THIS instance is
-        // a legitimate no-op; that is decided inside fireEvent.)
-        if (NativeFunctions.get(typeName) == null
-                && !module.hasActionsFor(typeName) && !module.hasActionsFor(bare)) {
-            throw new RuntimeCheckException(
-                    "No consumer for event type '" + typeName + "' — emit routes to the builtin "
-                            + "StdOut/StdErr sinks or to a declared `action` matching this type "
-                            + "(docs/events.md)",
-                    emit.origin());
-        }
+        // No fail-closed guard (docs/reactive-gui.md): an event with no matching action / conduit /
+        // sink is a deliberate no-op — fireEvent simply fires nothing. emit is a fire-and-forget
+        // broadcast; a consumer may or may not exist.
         fireEvent(rec, module, emit.origin());
         return eval(emit.body(), env, module);
     }
@@ -345,9 +344,95 @@ public final class IrInterpreter {
         if (eventListener != null) {
             eventListener.onEmit(rec, emitSeq.incrementAndGet(), origin);
         }
+        // The conduit leg (docs/reactive-gui.md) sits BETWEEN emit and the actions: a stateful
+        // fold over the temporal stream of the type's events. Trait-aware match, exactly like
+        // actions — the emitted type's own conduit plus any keyed by a trait it satisfies.
+        List<CompiledModule.CompiledConduit> conduits = module.conduitsMatching(typeName);
+        if (conduits.size() > 1) {
+            throw new RuntimeCheckException(
+                    "multiple conduits match event type '" + typeName + "' — a single event "
+                            + "matching several conduits (the ordered pipeline) is not yet "
+                            + "supported; declare at most one conduit for a type-or-ancestor",
+                    origin);
+        }
+        if (conduits.size() == 1) {
+            CompiledModule.CompiledConduit conduit = conduits.get(0);
+            RecordValue dispatched = foldThroughConduit(conduit, rec, module);
+            if (dispatched != null) dispatchToActions(dispatched, module, origin);  // null = dropped
+            return;
+        }
+        // No conduit: the emitted event reaches the actions directly (the unchanged path).
+        dispatchToActions(rec, module, origin);
+    }
+
+    /**
+     * Runs one emitted event through its conduit (docs/reactive-gui.md, Step 2): reads the
+     * conduit's current state {@code S} from its persistent cell (seeding it lazily from
+     * {@code init} on first sight), evaluates the fold body with {@code e} = the event and
+     * {@code s} = the state, extracts the positional {@code {R, S'}} tuple, threads {@code S'}
+     * back into the cell, and returns {@code R} — the same-type event dispatched onward to the
+     * actions. {@code R} must be the SAME event type as the incoming event (transform the data, not
+     * the type) or the {@code Nothing} omission value; {@code Nothing} drops the event (returns
+     * {@code null} — no action fires — with the state still threaded). To change the event type,
+     * re-emit a new event from the fold body ({@code emit …}), which routes independently.
+     */
+    private RecordValue foldThroughConduit(
+            CompiledModule.CompiledConduit conduit, RecordValue rec, CompiledModule module) {
+        String key = conduit.fold().decl().name();
+        if (!conduitState.containsKey(key)) {
+            conduitState.put(key, eval(conduit.init().body(), Environment.empty(), module));
+        }
+        Object state = conduitState.get(key);
+        CompiledModule.CompiledFunction fold = conduit.fold();
+        Environment foldEnv = Environment.empty()
+                .extend(fold.params().get(0).name(), rec)
+                .extend(fold.params().get(1).name(), state);
+        Object folded = eval(fold.body(), foldEnv, module);
+        if (!(folded instanceof RecordValue tuple) || !"_tuple".equals(tuple.typeName())) {
+            throw new RuntimeCheckException(
+                    "conduit '" + conduitDisplayName(fold) + "' must return a {R, S'} tuple, got "
+                            + (folded == null ? "null" : folded.getClass().getSimpleName()),
+                    fold.body().origin());
+        }
+        conduitState.put(key, tuple.members().get("_1"));   // thread S' (even when the event is dropped)
+        Object r = tuple.members().get("_0");
+        // Drop (docs/reactive-gui.md): Nothing in the dispatched slot swallows the event — no action
+        // fires — while the new state still threads. The lossy-filter face of scan.
+        if (isNothing(r)) return null;
+        if (!(r instanceof RecordValue out)) {
+            throw new RuntimeCheckException(
+                    "conduit '" + conduitDisplayName(fold) + "' dispatched slot must be the same "
+                            + "event type or Nothing, got "
+                            + (r == null ? "null" : r.getClass().getSimpleName()),
+                    fold.body().origin());
+        }
+        // A conduit transforms an event's DATA but not its TYPE — to change type, re-emit. The
+        // dispatched value must carry the same (bare) type as the event that entered the fold.
+        if (!bareName(out.typeName()).equals(bareName(rec.typeName()))) {
+            throw new RuntimeCheckException(
+                    "conduit '" + conduitDisplayName(fold) + "' must return the same event type it "
+                            + "received (" + bareName(rec.typeName()) + ") or Nothing — transform the "
+                            + "data, not the type; to change type, re-emit. Got "
+                            + bareName(out.typeName()),
+                    fold.body().origin());
+        }
+        return out;
+    }
+
+    /**
+     * Dispatches an event value to the reaction leg (docs/events.md): every declared
+     * {@code action} whose match-filter {@code rec} satisfies (declaration order; each a
+     * 1-param function run for effect), then the native {@link NativeFunctions} sink if any.
+     * Called with either a conduit's output {@code R} or, when no conduit matches, the raw
+     * emitted event.
+     */
+    private void dispatchToActions(RecordValue rec, CompiledModule module, Origin origin) {
+        String typeName = rec.typeName();
         SymExpr sym = toSymExpr(rec);
-        List<CompiledModule.CompiledAction> actions = module.actionsFor(typeName);
-        if (actions.isEmpty()) actions = module.actionsFor(bareName(typeName));
+        // Trait-aware routing (docs/reactive-gui.md §1): the emitted type's own bucket plus every
+        // trait bucket it is-a member of, most-specific first. The per-action matchSort test below
+        // still gates refinements, so a supertype Action only fires on instances it truly matches.
+        List<CompiledModule.CompiledAction> actions = module.actionsMatching(typeName);
         for (CompiledModule.CompiledAction action : actions) {
             if (Refinements.satisfies(sym, action.matchSort(), checker(module))
                     instanceof ProofResult.Passed) {
@@ -364,6 +449,13 @@ public final class IrInterpreter {
         if (sink != null) {
             sink.apply(rec, origin);
         }
+    }
+
+    /** The author-visible name of a conduit, recovered from its {@code #conduit#N#name} key. */
+    private static String conduitDisplayName(CompiledModule.CompiledFunction fn) {
+        String key = fn.decl().name();
+        int hash = key.lastIndexOf('#');
+        return hash < 0 ? key : key.substring(hash + 1);
     }
 
     /** The author-visible name of an action reaction, recovered from its {@code #action#N#name} key. */

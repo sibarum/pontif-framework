@@ -1071,12 +1071,13 @@ public final class AltParser {
      * yielding a {@code {R, S'}} tuple — R dispatched onward to the actions, S' threaded to
      * the next event. {@code from INIT} is the seed state. The name is diagnostic-only.
      *
-     * <p>The single-return sugar {@code :S} (dispatch the new state itself) desugars HERE to
-     * the dual {@code {S, S}} form, wrapping BODY so it returns {@code {v, v}} WITHOUT
-     * double-evaluating: {@code (let __conduit_r = BODY  {__conduit_r, __conduit_r})}. The
-     * sugar-vs-explicit fork is read from the parsed return sort: a {@code "_tuple"}
-     * {@link IrSort.Structural} with positional members {@code _0}/{@code _1} is the explicit
-     * dual form; anything else is the sugar.
+     * <p>The dispatched slot R must be the SAME event type as the incoming event (transform the
+     * data, not the type; or return {@code Nothing} to drop it) — enforced at fold time. The
+     * single-return sugar {@code :S} means "pass the event through UNCHANGED, return just the new
+     * state" and desugars HERE to {@code {e, BODY}} (the event param, then BODY as the state) — BODY
+     * appears once, no double-evaluation. The sugar-vs-explicit fork is read from the parsed return
+     * sort: a {@code "_tuple"} {@link IrSort.Structural} with positional members {@code _0}/{@code _1}
+     * is the explicit {@code {E, S}} form; anything else is the {@code :S} sugar.
      *
      * <p>Lowered — mirroring {@code action} — to TWO ordinary {@link IrStmt.FunctionDecl}s
      * under reserved, non-lexable keys sharing a {@code SEQ#NAME} suffix: the fold
@@ -1127,12 +1128,18 @@ public final class AltParser {
         boolean explicit = returnSort instanceof IrSort.Structural st
                 && TUPLE_SENTINEL.equals(st.name())
                 && st.members().containsKey("_0") && st.members().containsKey("_1");
+        IrSort eventSort = params.get(0).sort();
         IrSort stateSort = explicit
                 ? ((IrSort.Structural) returnSort).members().get("_1")
                 : returnSort;
+        // The dispatched slot must be the SAME event type — a conduit transforms an event's DATA (or
+        // drops it via Nothing), never its TYPE; to change type, re-emit (docs/reactive-gui.md). So
+        // the fold return is {E, S}. The `:S` sugar means "pass the event through UNCHANGED, return
+        // just the new state" → {e, BODY}; the explicit {E, S} form is for transforming the event's
+        // data or returning Nothing to drop it. Same-type / drop is enforced at fold time.
         IrSort foldReturnSort = explicit
                 ? returnSort
-                : tupleSortOf(stateSort, stateSort, start.origin());
+                : tupleSortOf(eventSort, stateSort, start.origin());
 
         // BODY sees e and s (the params), mirroring parseAction's body scoping.
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
@@ -1147,10 +1154,12 @@ public final class AltParser {
             currentScope.putAll(savedScope);
         }
 
-        // The `:S` sugar dispatches the new state itself as R — wrap BODY so it yields {v, v}
-        // WITHOUT double-evaluating: bind BODY once, tuple the binder twice.
+        // `:S` sugar → {e, BODY}: the event passes through unchanged (slot R), BODY is the new state
+        // (slot S). BODY appears exactly once, so there is no double-evaluation.
         IrExpr foldBody = explicit
-                ? body : wrapSingleReturnDesugar(body, stateSort, start.origin());
+                ? body
+                : buildTupleLiteral(List.of(
+                        new IrExpr.Var(params.get(0).name(), start.origin()), body), start.origin());
 
         String suffix = (conduitSeq++) + "#" + name;
         pendingTopLevelDecls.add(new IrStmt.FunctionDecl(
@@ -1165,20 +1174,6 @@ public final class AltParser {
         members.put("_0", a);
         members.put("_1", b);
         return new IrSort.Structural(TUPLE_SENTINEL, members, origin);
-    }
-
-    /**
-     * The conduit {@code :S} single-return desugar:
-     * {@code (let __conduit_r = BODY  {__conduit_r, __conduit_r})}. BODY is evaluated once
-     * (bound to the fresh {@code __conduit_r}), then tupled with itself — so a side-effecting
-     * body (one that {@code emit}s) fires exactly once. The binder carries the state sort S
-     * (a non-null declared sort — NameResolver rewrites {@code LetIn.declaredSort()} eagerly).
-     */
-    private IrExpr wrapSingleReturnDesugar(IrExpr body, IrSort stateSort, Origin origin) {
-        String r = "__conduit_r";
-        IrExpr tuple = buildTupleLiteral(
-                List.of(new IrExpr.Var(r, origin), new IrExpr.Var(r, origin)), origin);
-        return new IrExpr.LetIn(r, stateSort, body, tuple, origin);
     }
 
     /**

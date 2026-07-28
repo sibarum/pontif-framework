@@ -110,16 +110,77 @@ class ActionReactionTest {
     }
 
     @Test
-    void emit_withNoSinkAndNoAction_stillFailsClosed() {
-        // The fail-closed guard survives: an event type with neither a sink nor any
-        // registered action has no consumer at all — a likely typo.
+    void action_onSupertypeTrait_firesForSubtypeEmit() {
+        // Trait-aware routing (docs/reactive-gui.md §1): emit-ing a concrete Click fires both the
+        // exact-type action AND the umbrella action on the GuiEvent supertype trait, but NOT the
+        // sibling Resize action — which shares no membership with Click and is never iterated.
+        Output o = run("""
+                requires pontif.events.{Event, StdOut}
+                trait GuiEvent{}
+                assign trait GuiEvent:Event{}
+                struct Click(id:Int)
+                assign trait Click:GuiEvent{}
+                struct Resize(w:Int)
+                assign trait Resize:GuiEvent{}
+                action onClick(e:Click) -> emit StdOut("click ")  e
+                action onAnyGui(e:GuiEvent) -> emit StdOut("gui ")  e
+                action onResize(e:Resize) -> emit StdOut("resize ")  e
+                main ( emit Click(1)  0 )""");
+        assertFalse(o.result().isError(), () -> "program errored: " + o.result().text());
+        assertEquals("click gui ", o.out(),
+                "Click fires its own action and the GuiEvent umbrella, most-specific first; Resize never fires");
+    }
+
+    @Test
+    void action_onlySupertypeConsumer_doesNotFailClosed() {
+        // The fail-closed guard is trait-aware: a subtype emit whose ONLY consumer is a supertype
+        // action must route, not error as "no consumer".
+        Output o = run("""
+                requires pontif.events.{Event, StdOut}
+                trait GuiEvent{}
+                assign trait GuiEvent:Event{}
+                struct Click(id:Int)
+                assign trait Click:GuiEvent{}
+                action onAnyGui(e:GuiEvent) -> emit StdOut("gui")  e
+                main ( emit Click(1)  0 )""");
+        assertFalse(o.result().isError(),
+                () -> "a supertype action is a consumer under trait-aware routing: " + o.result().text());
+        assertEquals("gui", o.out());
+    }
+
+    @Test
+    void action_refinedSupertypeFilter_gatesSubtypeEmit() {
+        // A refinement on the umbrella action still gates: only Clicks past the filter fire it.
+        String prog = """
+                requires pontif.events.{Event, StdOut}
+                trait GuiEvent{}
+                assign trait GuiEvent:Event{}
+                struct Click(id:Int)
+                assign trait Click:GuiEvent{}
+                action onBigId(e:[Click:@.id > 5]) -> emit StdOut("big")  e
+                action onAnyGui(e:GuiEvent) -> emit StdOut("gui")  e
+                """;
+        Output hit = run(prog + "main ( emit Click(9)  0 )");
+        assertFalse(hit.result().isError(), () -> "errored: " + hit.result().text());
+        assertEquals("biggui", hit.out(), "Click(9) passes the refinement and the umbrella");
+        Output miss = run(prog + "main ( emit Click(1)  0 )");
+        assertFalse(miss.result().isError(), () -> "errored: " + miss.result().text());
+        assertEquals("gui", miss.out(), "Click(1) fails the refinement; only the umbrella fires");
+    }
+
+    @Test
+    void emit_withNoSinkAndNoAction_isANoOp() {
+        // No fail-closed guard (docs/reactive-gui.md): an event with neither a sink nor any action
+        // is a deliberate no-op — fire-and-forget into the void. emit stays write-only, so main's
+        // value is its trailing expression.
         Output o = run("""
                 requires pontif.events.{Event}
                 struct Tick(n:Int)
                 assign trait Tick:Event{}
-                main ( emit Tick(1)  0 )""");
-        assertTrue(o.result().isError(), "an event with no consumer must fail closed");
-        assertTrue(o.result().text().contains("consumer"),
-                () -> "error should name the missing consumer; got " + o.result().text());
+                main ( emit Tick(1)  42 )""");
+        assertFalse(o.result().isError(),
+                () -> "an unconsumed emit is a no-op, not an error; got " + o.result().text());
+        assertEquals("42", o.result().text());
+        assertEquals("", o.out());
     }
 }
