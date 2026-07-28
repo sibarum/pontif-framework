@@ -640,7 +640,17 @@ public final class Refinements {
         if (!(looser instanceof SymExpr.Cmp(SymExpr ll, SymExpr.CmpOp lop, SymExpr lr))) {
             return ProofResult.residual(looser);
         }
-        if (!(tl instanceof SymExpr.Self) || !(ll instanceof SymExpr.Self)) {
+        // Both comparisons must constrain the SAME pure Self-rooted subject —
+        // Self itself (`[Int:@>0]`) or a field-projection chain off it
+        // (`[Point:@.x>0]`, `[MyType:@.a.b>0]`). A field projection is a pure,
+        // deterministic read, so `@.x` denotes ONE value across both predicates:
+        // the exact property that made bare-Self bound reasoning sound, now
+        // extended to projections. Different subjects (`@.x` vs `@.y`) fail the
+        // equality test and stay Residual — never a false Failed. The bound
+        // kernel already treats a projection as an opaque linear atom (it keys
+        // its coeff map on arbitrary SymExpr), so no kernel change is needed —
+        // only this gate widened from "is Self" to "same Self-rooted subject".
+        if (!tl.equals(ll) || !isSelfRootedSubject(tl)) {
             return ProofResult.residual(looser);
         }
         java.math.BigDecimal ta = asNumeric(tr);
@@ -652,15 +662,30 @@ public final class Refinements {
         // does the tighter predicate, as a hypothesis, discharge the looser as a
         // goal? This subsumes and strengthens the former hand-rolled order table
         // (it also proves e.g. @>3 ⟹ @!=0). A non-discharge on this
-        // constant-bounded Self shape is a genuine non-implication → Failed;
-        // shapes the guards above reject stay Residual (undecided), preserving
-        // the Failed ⟺ provably-not-implied distinction the callers rely on.
+        // constant-bounded same-subject shape is a genuine non-implication →
+        // Failed; shapes the guards above reject stay Residual (undecided),
+        // preserving the Failed ⟺ provably-not-implied distinction callers rely on.
         boolean holds = BoundAnalysis.discharge(
                 BoundAnalysis.Domain.DECIMAL, java.util.List.of(tighter), looser);
         return holds
                 ? ProofResult.passed()
                 : ProofResult.failed(
-                        "Self " + top + " " + ta + " does not imply Self " + lop + " " + la);
+                        tl + " " + top + " " + ta + " does not imply " + ll + " " + lop + " " + la);
+    }
+
+    /**
+     * A pure Self-rooted subject term: {@code @} itself, or a field-projection
+     * chain {@code @.a.b…} whose root is {@code @}. These are the terms whose
+     * value is fully determined by the value under refinement, so the same term
+     * appearing in two predicates denotes the same value — the soundness
+     * premise the arithmetic-implication gate rests on.
+     */
+    private static boolean isSelfRootedSubject(SymExpr e) {
+        return switch (e) {
+            case SymExpr.Self ignored -> true;
+            case SymExpr.FieldAccess fa -> isSelfRootedSubject(fa.base());
+            default -> false;
+        };
     }
 
     /**

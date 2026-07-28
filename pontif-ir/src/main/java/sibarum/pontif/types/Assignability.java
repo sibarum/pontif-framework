@@ -126,6 +126,17 @@ public final class Assignability {
             return !(sup instanceof IrSort.Refined) || refinementImplies(sub, sup);
         }
 
+        // Two refinements over the SAME base: neither widens to the other, and for a
+        // REGISTERED base (a struct/native) the nominal-tag guard below short-circuits to
+        // false before structurallySubsumes could reach the kernel. Decide it directly —
+        // sub's predicate must imply sup's ([Point:@.x>0] is-a [Point:@.x>=0]). Abstains to
+        // false on predicates the kernel can't prove (sound — never a false is-a); reflexive
+        // identical predicates are already handled by the predicate-aware sameType above.
+        if (sub instanceof IrSort.Refined && sup instanceof IrSort.Refined
+                && baseName(sub) != null && baseName(sub).equals(baseName(sup))) {
+            return refinementImplies(sub, sup);
+        }
+
         // A refinement widens to its own bare base — drop the predicate: [Decimal:@==0] is-a Decimal,
         // [Int:@>0] is-a Int, [Point:@.x>0] is-a Point. structurallySubsumes agrees, but the
         // isNominalTag/trait guard below would short-circuit a registered base (a Native like Decimal,

@@ -265,6 +265,43 @@ class AssignabilityTest {
         assertFalse(Assignability.isA(INT, gt0, ctx()));   // bare Int can't prove @>0
     }
 
+    /** A `Point(x:Int, y:Int)` struct registered so its refinements compile. */
+    private static AssignabilityContext pointCtx() {
+        TypeCatalog cat = new TypeCatalog();
+        Map<String, IrSort> m = new LinkedHashMap<>();
+        m.put("x", INT);
+        m.put("y", INT);
+        cat.register("Point",
+                new TypeInfo.Struct((IrSort.Structural) IrSort.structural("Point", m)));
+        return AssignabilityContext.of(cat, Map.of());
+    }
+
+    /** {@code [Point:@.field <op> bound]} — a refinement on a field projection. */
+    private static IrSort refinedPointField(String field, IrExpr.Op op, long bound) {
+        IrExpr pred = new IrExpr.BinOp(op,
+                new IrExpr.FieldAccess(new IrExpr.SelfRef(Origin.NONE), field, Origin.NONE),
+                new IrExpr.Lit(bound, Origin.NONE), Origin.NONE);
+        return new IrSort.Refined("Point", pred, Origin.NONE);
+    }
+
+    @Test
+    void refinementPreciseSubsumption_overFieldProjection() {
+        // The generalized arithmetic-implication gate (Refinements.tryArithmeticImplication):
+        // a projection `@.x` is a pure subject, so bound reasoning applies just as it does
+        // to bare `@` — provided BOTH predicates constrain the SAME projection.
+        AssignabilityContext c = pointCtx();
+        IrSort xGt0 = refinedPointField("x", IrExpr.Op.GT, 0);   // [Point:@.x>0]
+        IrSort xGe0 = refinedPointField("x", IrExpr.Op.GE, 0);   // [Point:@.x>=0]
+        IrSort yGt0 = refinedPointField("y", IrExpr.Op.GT, 0);   // [Point:@.y>0]
+
+        assertTrue(Assignability.isA(xGt0, xGe0, c));   // @.x>0 ⟹ @.x>=0  (was Residual→false before)
+        assertFalse(Assignability.isA(xGe0, xGt0, c));  // @.x>=0 does NOT imply @.x>0 (0 is a counterexample)
+        assertTrue(Assignability.isA(xGt0, xGt0, c));   // reflexive (alpha-equivalence)
+        // Different projection subjects don't relate: @.x>0 says nothing about @.y — a sound
+        // abstain (false), never a false is-a from equating unrelated fields.
+        assertFalse(Assignability.isA(xGt0, yGt0, c));
+    }
+
     // --- intersection ------------------------------------------------------
 
     @Test
