@@ -4,18 +4,16 @@ requires pontif.events.{StdOut}
 # A clickable widget (docs/extensions.md): subtype the library Button into a type YOU own (so you
 # may legally give it a method — the orphan rule forbids methods on the library Button), and assign
 # Clickable with an onClick that emits. `this` is the clicked widget.
-struct PushButton:[Button](text:String)
+struct PushButton:[Button](id:String, text:String)
 assign trait PushButton:Clickable {
   onClick():_ -> emit StdOut("button clicked!")  this
 }
 
-# Elements are constructed directly (capitalized structs); `window` is the action that renders the
-# tree. The let-chain ends in window(...) as the trailing expression.
-# Elements are constructed positionally (like PushButton); `window` is the action that renders the
-# tree. The let-chain ends in window(...) as the trailing expression.
+# Elements are constructed positionally (capitalized structs), each with a stable `id` first (the
+# handle for isolated updates / a Button's Clicked); `window` renders the retained tree once.
 main (
-  let lbl = Label("Press the Button")
-  let btn = PushButton("Press me")
+  let lbl = Label("msg", "Press the Button")
+  let btn = PushButton("press", "Press me")
   window({title = "Title"}, {
     Column("center", "middle", {lbl, btn})
   })

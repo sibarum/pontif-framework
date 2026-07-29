@@ -1,15 +1,15 @@
 requires pontif.gui.{Label, Button, Column, window, Clickable}
 requires pontif.events.{StdOut}
 
-struct PushButton:[Button](text:String)
+struct PushButton:[Button](id:String, text:String)
 assign trait PushButton:Clickable {
   onClick():_ -> emit StdOut("Button clicked") this
 }
 
 
 main (
-  let lbl = Label{text="Press the Button"}
-  let btn = PushButton{text="Press me"}
+  let lbl = Label{id="msg", text="Press the Button"}
+  let btn = PushButton{id="press", text="Press me"}
   window({title = "Title"}, {
     Column("center", "middle",
       {lbl, btn}

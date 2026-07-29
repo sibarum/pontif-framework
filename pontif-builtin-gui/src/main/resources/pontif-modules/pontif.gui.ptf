@@ -1,14 +1,14 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, Column, LinePlot, window, Clickable, GuiEvent, Clicked, Draw}
+exports @.{Label, Button, Column, LinePlot, window, Clickable, GuiEvent, Clicked, SetText}
 
-# Elements are ordinary structs you CONSTRUCT directly — Label{text = "hi"},
-# Button{text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
-# The bridge walks the resulting record tree, switching on each element's type name.
-# children is `_` so any aggregate of elements fits (it is validated structurally as
-# the bridge renders it).
-struct Label(text:String)
-struct Button(text:String)
+# Elements are ordinary structs you CONSTRUCT directly — Label{id = "count", text = "0"},
+# Button{id = "inc", text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
+# The bridge walks the resulting record tree ONCE, switching on each element's type name.
+# `id` is the stable handle for isolated updates (SetText) and for a Button's Clicked; the bridge
+# records id -> component as it builds. children is `_` so any aggregate of elements fits.
+struct Label(id:String, text:String)
+struct Button(id:String, text:String)
 struct Column(justify:String, align:String, children:_)
 
 # A 2D line chart over two number aggregates: LinePlot({0.0,1.0,4.0}, {0.0,1.0,2.0}).
@@ -28,17 +28,17 @@ trait Clickable { onClick():_ }
 trait GuiEvent{}
 assign trait GuiEvent:Event{}
 
-# A NOTIFICATION (past-tense: "it happened"): a widget was clicked. `id` identifies which
-# one — for a plain Button the bridge fires the button's text as the id. Clicked is-a
-# GuiEvent, so the app's `GuiEvent` conduit folds it.
+# A NOTIFICATION (past-tense: "it happened"): the widget with this `id` was clicked. Clicked is-a
+# GuiEvent, so the app's single `GuiEvent` conduit folds it into the model.
 struct Clicked(id:String)
 assign trait Clicked:GuiEvent{}
 
-# A COMMAND (imperative: "cause a render"): render `tree`. This is the render-sink event —
-# `emit Draw(view(model))` from the conduit stashes the new element tree and re-paints the
-# window. `tree` is permissive `_` so any element record (a Column, a Label, …) fits.
-struct Draw(tree:_)
-assign trait Draw:Event{}
+# A COMMAND (imperative: "cause it"): set the text of the retained widget with this `id`. This is an
+# ISOLATED update — `emit SetText("count", n + "")` from the conduit mutates just that one widget in
+# place (dasum's identity-keyed store), never rebuilding the tree. The dasum-blessed update pattern;
+# siblings (SetChecked, SetChildren, …) will join it as the widget set grows.
+struct SetText(id:String, text:String)
+assign trait SetText:Event{}
 
 # The window action (native; the placeholder body is never run): opens a window
 # rendering the given root tree on the root thread, until closed.

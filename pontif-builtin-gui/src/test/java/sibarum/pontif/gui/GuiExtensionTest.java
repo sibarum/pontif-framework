@@ -35,11 +35,11 @@ class GuiExtensionTest {
         CompileResult result = new PontifCompiler().compileAlt("""
                 requires pontif.gui.{Label, Button, Column, window, Clickable}
                 requires pontif.events.{StdOut}
-                struct PushButton:[Button](text:String)
+                struct PushButton:[Button](id:String, text:String)
                 assign trait PushButton:Clickable { onClick():_ -> emit StdOut("hi")  this }
                 main (
-                  let lbl = Label("hi")
-                  let btn = PushButton("go")
+                  let lbl = Label("greeting", "hi")
+                  let btn = PushButton("go-btn", "go")
                   window({title = "t"}, { Column("center", "middle", {lbl, btn}) })
                 )""", "gui.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
@@ -56,22 +56,23 @@ class GuiExtensionTest {
     void reactiveCounterProgram_typeChecks() {
         Extensions.install(new GuiExtension());
 
-        // The reactive loop (docs/reactive-gui.md, Slice 1): a GuiEvent conduit folds Clicked into a
-        // Model and re-emits Draw(view(model)); the Draw sink repaints. This only compiles + links
-        // (the GuiEvent conduit, the Draw command, the view fn); the actual click→increment repaint is
-        // verified manually (needs GLFW): exec:exec -Dptf=examples/reactive-counter.ptf. Kept in sync
-        // with examples/reactive-counter.ptf.
+        // The reactive loop (docs/reactive-gui.md): the tree is built ONCE; a GuiEvent conduit folds
+        // Clicked into a Model and emits the ISOLATED command SetText("count", …), which the SetText
+        // sink applies to that one retained widget — no rebuild. This only compiles + links (the id'd
+        // widgets, the conduit, the SetText command); the actual click→increment repaint is verified
+        // manually (needs GLFW): exec:exec -Dptf=examples/reactive-counter.ptf. Kept in sync with
+        // examples/reactive-counter.ptf.
         CompileResult result = new PontifCompiler().compileAlt("""
-                requires pontif.gui.{Label, Button, Column, window, GuiEvent, Clicked, Draw}
+                requires pontif.gui.{Label, Button, Column, window, GuiEvent, Clicked, SetText}
                 struct Model(count:Int)
-                function view(m:Model):_ ->
-                  Column("center", "middle", { Label(m.count + ""), Button("increment") })
                 conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
                   let m2 = match e { [Clicked] -> Model(s.count + 1)  [_] -> s }
-                  emit Draw(view(m2))
+                  emit SetText("count", m2.count + "")
                   m2
                 )
-                main ( window({title = "Counter"}, view(Model(0))) )""", "reactive-counter.ptf");
+                main ( window({title = "Counter"}, {
+                  Column("center", "middle", { Label("count", "0"), Button("inc", "increment") })
+                }) )""", "reactive-counter.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "reactive counter program should type-check + link; got "
                         + (result instanceof CompileResult.Failed f ? f.error().text() : result));

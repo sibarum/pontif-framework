@@ -35,12 +35,13 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Pontif";
         Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
-        // Reactive host (docs/reactive-gui.md): the children arg is the initial tree (view(model0));
-        // a Draw sink republishes it on each event. Thread ctx so the loop can rebuild on the root
-        // thread.
-        RecordValue initial = rootTree instanceof RecordValue rv ? rv : emptyTuple();
-        return GuiTree.openWindowReactive(title, cfgInt(args, 0, "width", WIDTH),
-                cfgInt(args, 0, "height", HEIGHT), initial, ctx);
+        // Retained reactive host (docs/reactive-gui.md): build the id'd widget tree ONCE and render
+        // it; interactivity is isolated updates (a click fires Clicked; the conduit emits SetText,
+        // which mutates one retained widget). Thread ctx so the build + the click handlers'
+        // fireEvent run on the root thread.
+        RecordValue tree = rootTree instanceof RecordValue rv ? rv : emptyTuple();
+        return GuiTree.openWindow(title, cfgInt(args, 0, "width", WIDTH),
+                cfgInt(args, 0, "height", HEIGHT), tree, ctx);
     }
 
     /**

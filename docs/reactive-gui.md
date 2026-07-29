@@ -80,36 +80,45 @@ and runs `foldThroughConduit` inside `fireEvent`, threading `S` and dispatching 
 
 ---
 
-## 3. The reactive GUI loop
+## 3. The reactive GUI loop — build once, isolated updates
+
+**dasum is retained-mode and fragile: build the tree ONCE, then make ISOLATED updates through the
+event system.** Do NOT rebuild the tree per event, and do NOT build a reconciler/diff — both are
+off-script for dasum and invite its threading / render-order / identity gremlins (dasum keys
+caret / selection / scroll / undo / highlight on Component IDENTITY via `IdentityHashMap` stores; a
+rebuild orphans all of it, and dasum has no reconciliation to make a rebuild cheap or
+identity-preserving). This is the pattern the editor and every dasum app use.
 
 `pontif.gui` types: `trait GuiEvent` (umbrella), `struct Clicked(id)` (notification),
-`struct Draw(tree)` (render command).
+`struct SetText(id, text)` (an isolated update command). Widgets carry a stable `id` — the address
+for updates and for a `Button`'s `Clicked`.
 
 ```
-window opens rendering view(initialModel)
-  → Button click  → GuiTree.wireInput fires  ctx.fireEvent(Clicked{id})
-  → the GuiEvent conduit folds the model, and re-emits  Draw(view(model2))
-  → the Draw native effect (GuiExtension.effects) → GuiTree.publish stashes the tree
-      + dasum Invalidator.invalidate()
-  → the window loop (openWindowReactive) rebuilds the dasum component tree from the latest
-      published tree on the next dirty frame, and repaints
+window(cfg, tree) builds the retained id'd widget tree ONCE (a build-time id → Component registry)
+  → Button click → GuiTree.wireInput fires ctx.fireEvent(Clicked{id})
+  → the GuiEvent conduit folds the model, and emits a TARGETED command  SetText("count", …)
+  → the SetText native effect (GuiExtension.effects) → GuiTree.setText looks the widget up by id
+      and mutates it via dasum TextStates.setContent (identity-keyed) + invalidate
+  → the loop repaints on the next dirty frame — the SAME retained tree, one widget changed
 ```
 
 - **Source:** the click callback (`wireInput`) runs on the root thread during the event loop, so
-  `ctx.fireEvent(Clicked)` → conduit → re-emitted `Draw` → the sink all execute on the root thread.
-  GL-safe with no scheduler (single-threaded v1).
-- **Sink:** a `NativeFunctions.Effect` gets `(RecordValue, Origin)` — **no `ctx`** — so it must not
-  build components. It stashes the raw Pontif tree + invalidates; the **loop** (which holds `ctx`)
-  rebuilds via `toComponent(tree, ctx)` on the root thread. Reuses dasum's `Invalidator`/`EventLoop`
-  — **no dasum changes**.
+  `ctx.fireEvent(Clicked)` → conduit → the emitted `SetText` → the sink all execute on the root
+  thread. GL-safe, no scheduler (single-threaded v1).
+- **Update sink:** a `NativeFunctions.Effect` gets `(RecordValue, Origin)` — no `ctx`, and it never
+  builds components. It addresses an already-built widget by id and mutates dasum's own state store
+  (`TextStates.setContent`, which invalidates). Future commands (`SetChecked`, `SetChildren` via
+  `DynamicChildren`, …) register alongside it. Reuses dasum's `Invalidator`/`EventLoop` — **no dasum
+  changes** (and if a hard capability is ever missing, the rule is to **extend dasum** with a
+  first-class tested widget, not to work around it in the bridge).
+- To change what's shown structurally (not just text), emit the matching targeted command; there is
+  no whole-tree re-render.
 - Example: [`pontif-builtin-gui/examples/reactive-counter.ptf`](../pontif-builtin-gui/examples/reactive-counter.ptf).
 
-**Identity-across-re-render hazard (fixed):** a repaint swaps the whole Component tree, but dasum's
-hover/hit-test state (`HoverState`) refreshes only on cursor *move*. The fix: `wireInput`'s **press**
-handler hit-tests the *live* tree at the cursor (as release already did) instead of the stale hover
-cache — so a click registers even when a prior click repainted and the mouse hasn't moved. The same
-hazard governs caret/focus/scroll (dasum keys those by Component identity); Slice 3's widget-`id`
-scheme is how that persists across rebuilds.
+**Click-after-update fix:** `wireInput`'s **press** handler hit-tests the *live* tree at the cursor
+(as release already did) rather than the move-only `HoverState` cache — so a click registers even
+when a prior click just repainted and the mouse hasn't moved (the identity-across-repaint hazard at
+the input layer; correct regardless of render strategy).
 
 ---
 
@@ -125,24 +134,32 @@ scheme is how that persists across rebuilds.
   threaded `S` (a Pontif value).
 - **Conduit output changing the event type / re-entering the conduit machinery** — ruled out to
   avoid cascade edge cases; type-change is an explicit `emit` instead (§2).
+- **Whole-tree rebuild (`view(model)` → replace the dasum tree each event).** An early GUI slice did
+  this (a `Draw(tree)` sink + a loop that rebuilt from the latest tree). Rejected after checking the
+  editor: dasum is retained-mode and discarding component identity every event orphans its
+  identity-keyed caret/scroll/selection/undo state (breaks the moment `TextField` exists), and dasum
+  has no reconciliation to make it cheap. Replaced by build-once + isolated updates (§3).
+- **A custom reconciler/diff over dasum.** Would make `view(model)` rebuild efficient and
+  identity-preserving, but it is off-script for a fragile toolkit we'd then be fighting; the safe,
+  tested path is dasum's own retained + targeted-update model. If something is hard, extend dasum.
 
 ---
 
 ## 5. Built vs. next
 
 **Built:** the conduit (scan, same-type-or-drop, `:S` sugar, ancestry match, re-emit for
-type-change); emit-any-value/no-op; trait-aware routing; the reactive `pontif.gui` loop
-(`Clicked` source, `Draw` sink, `openWindowReactive` host) + the press-hit-test fix; the headless
-data-flow test + the hand-verified counter window.
+type-change); emit-any-value/no-op; trait-aware routing; the retained reactive `pontif.gui` loop —
+`Clicked` source, build-once id'd tree with an `id → Component` registry, `SetText` isolated-update
+sink (`GuiTree.setText` via dasum `TextStates`), the press-hit-test fix; the headless data-flow test
++ the hand-verified counter window.
 
-**Next — Slice 3 (input elements):**
-- A stable **widget-`id` scheme** — today a plain `Button` uses its *text* as `Clicked.id`, so
-  identical labels collide; needed before dynamic lists (which would mint colliding ids) and for
-  focus/caret persistence (key dasum's identity-scoped `TextStates` by the Pontif id).
-- `TextField(id, text)` + a `TextChanged` notification (dasum's editable-text plumbing already
-  exists) — unlocks the multi-expression **calculator**.
-- `Row`, `Checkbox` (dasum `Ui.row()` exists). Dynamic lists fall out of `view` mapping over the
-  model — no list element needed.
+**Next — Slice 3 (input elements), all on the isolated-update model:**
+- `TextField(id, text)` + a `TextChanged(id, text)` notification (dasum's editable-text plumbing
+  already exists) — unlocks the multi-expression **calculator**. Input state (caret/selection) lives
+  in dasum's identity-keyed `TextStates` on the retained component — preserved for free (no rebuild).
+- `Checkbox(id, on)` + `Toggled(id, on)`; `Row` (dasum `Ui.row()` exists).
+- Dynamic lists: a `SetChildren(id, elements)` command over dasum `DynamicChildren` (mutate a
+  retained container's child list in place) — the dasum-blessed way to change structure.
 
 **Deferred:** the multi-conduit ordered pipeline (§2); a backstop for infinite re-emit loops (a
 rate-limited/clocked conduit is a possible future distinct semantic); the scheduler / worker-thread
@@ -152,8 +169,10 @@ story (events.md Slice 2) for off-root-thread emits.
 
 ## 6. For a fresh instance
 
-Keep app logic (`view`, `update`, routing) in Pontif; keep GL and the frame loop in dasum; keep the
-bridge thin (a click source + a render sink). If you find yourself wanting to apply a Pontif function
-from a native, or to hold the model in a Java cell, stop — the loop drifted out of the substrate
-(§4). Start Slice 3 with the widget-`id` scheme (a correctness prerequisite), then `TextField`, then
-rebuild the calculator on the reactive substrate.
+Keep app logic (`update`, routing) in Pontif; keep GL, the frame loop, AND all retained widget state
+in dasum; keep the bridge thin (a click source + isolated-update sinks). The cardinal rule: **build
+the dasum tree once, update it through isolated event-driven commands — never rebuild it, never diff
+it.** If you find yourself wanting to apply a Pontif function from a native, hold the model in a Java
+cell, rebuild the tree, or write a reconciler, stop — you've gone off-script (§4). If a GUI need
+doesn't map cleanly onto dasum's blessed API, extend dasum with a first-class capability rather than
+hacking the bridge. Start Slice 3 with `TextField` on the isolated-update model, then the calculator.

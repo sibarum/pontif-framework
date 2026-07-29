@@ -1,34 +1,34 @@
-# The first reactive Pontif GUI (docs/reactive-gui.md, Slice 1). A counter window whose label
-# increments on every button click, with ZERO app state held in Java — the model is a Pontif
-# value threaded as the conduit's state S.
+# The first reactive Pontif GUI (docs/reactive-gui.md). A counter window whose label increments on
+# every button click, with ZERO app state held in Java — the model is a Pontif value threaded as the
+# conduit's state S. dasum is retained-mode: the tree is built ONCE and updates are ISOLATED.
 #
-# The loop (docs/reactive-gui.md §1):
-#   click a Button -> the bridge fires Clicked{id = "increment"}  (an inbound emit)
-#   -> the `app` conduit folds the Clicked into the Model (state S), re-emits Draw(view(model2))
-#   -> the Draw native sink stashes the new element tree, marks it dirty, wakes the window loop
-#   -> the loop rebuilds the dasum tree from the stashed Pontif tree and repaints.
+# The loop:
+#   click the Button -> the bridge fires Clicked{id = "inc"}  (an inbound emit)
+#   -> the `app` conduit folds the Clicked into the Model (state S), and emits a TARGETED command
+#      SetText("count", …) — an isolated update, not a re-render
+#   -> the SetText sink mutates just the "count" Label in place (dasum's identity-keyed store) and
+#      wakes the window loop to repaint. The tree is never rebuilt.
 #
 # Run it (needs a display + GLFW; NOT headless):
 #   mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/reactive-counter.ptf
-requires pontif.gui.{Label, Button, Column, window, GuiEvent, Clicked, Draw}
+requires pontif.gui.{Label, Button, Column, window, GuiEvent, Clicked, SetText}
 
 # The app model — a Pontif value, threaded as the conduit's state S.
 struct Model(count:Int)
 
-# view : Model -> element tree. `n + ""` int->string (a String operand makes + concatenate);
-# there is no intToStr builtin.
-function view(m:Model):_ ->
-  Column("center", "middle", { Label(m.count + ""), Button("increment") })
-
-# The stateful fold (the crown jewel): every GUI event folds the Model and re-emits a Draw
-# command with the freshly-rendered tree. A Clicked bumps the count; any other GUI event passes
-# the model through unchanged. `[_]` is the open-world catch-all the open GuiEvent trait requires.
-# The `:Model` pass-through sugar returns the new state (the fold body) as S.
+# The stateful fold (the crown jewel): every GUI event folds the Model and emits an ISOLATED update
+# for what changed. A Clicked bumps the count and sets the "count" label's text; any other GUI event
+# passes the model through unchanged. `[_]` is the open-world catch-all the open GuiEvent trait
+# requires. The `:Model` pass-through sugar returns the new state (the fold body) as S; `n + ""` is
+# int->string (a String operand makes + concatenate) — there is no intToStr builtin.
 conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
   let m2 = match e { [Clicked] -> Model(s.count + 1)  [_] -> s }
-  emit Draw(view(m2))
+  emit SetText("count", m2.count + "")
   m2
 )
 
-# Open the window rendering view(initialModel); the conduit + Draw sink drive every repaint.
-main ( window({title = "Counter"}, view(Model(0))) )
+# Build the retained tree ONCE: a "count" label (the SetText target) and an "inc" button (fires
+# Clicked{id="inc"}). The conduit's SetText commands mutate the label in place thereafter.
+main ( window({title = "Counter"}, {
+  Column("center", "middle", { Label("count", "0"), Button("inc", "increment") })
+}) )
