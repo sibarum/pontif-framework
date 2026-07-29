@@ -108,20 +108,21 @@ final class GuiTree {
         }
         return switch (bareType(rv.typeName())) {
             case "Label" -> {
-                Component c = new Component.Text(str(rv, "text"), Em.of(2f), TEXT);
+                Component c = Ui.text(str(rv, "text")).size(Em.of(2f)).color(TEXT).build();
                 register(str(rv, "id"), c);  // addressable for SetText(id, …)
                 yield c;
             }
             case "TextField" -> {
                 String id = str(rv, "id");
-                // Uncontrolled editable field (docs/reactive-gui.md §7). withEditable(true) forces
-                // interactive+selectable+editable on and leaves acceptsTab=false, so Tab cycles focus
-                // rather than inserting a tab — right for a single-expression field. The field owns its
-                // buffer; caret/selection live in the identity-keyed TextState sidecar.
-                // withWidth gives the field a stable, clickable extent even while empty (a bare Text
-                // sizes to its glyphs, so a zero-content field would collapse to nothing).
-                Component.Text field = new Component.Text(str(rv, "text"), Em.of(2f), TEXT)
-                        .withEditable(true).withWidth(Em.of(18f));
+                // Uncontrolled editable field (docs/reactive-gui.md §7), built through the blessed
+                // Ui.text().editable() path — NOT the raw constructor. editable() forces
+                // interactive+selectable on (the caret pipeline needs both) and leaves acceptsTab
+                // false, so Tab cycles focus rather than inserting a tab — right for a single-line
+                // field. width() gives it a stable, clickable extent even while empty (an empty
+                // editable Text has no glyphs; editable() alone would fall back to the builder's
+                // anti-collapse default width, but we want a wider field here).
+                Component.Text field = (Component.Text) Ui.text(str(rv, "text"))
+                        .size(Em.of(2f)).color(TEXT).editable().width(Em.of(18f)).build();
                 // Register the FINAL instance: withEditable/withWidth each return a NEW record, and
                 // TextStates / FocusState are identity-keyed, so both the SetText registry entry and
                 // the onContentChange listener must key on the exact instance placed in the tree.

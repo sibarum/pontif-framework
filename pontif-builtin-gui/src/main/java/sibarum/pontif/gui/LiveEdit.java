@@ -58,14 +58,15 @@ final class LiveEdit {
                 .background(PLOT_BG).height(Em.of(3f)).grow(0).interactive(false).build();
         PlotView titleView = new PlotView(titleSV);
 
-        // content, fontGroup, fontSize, color, width, height, padding, wrapWidth, clip,
-        // interactive, selectable, editable, acceptsTab, flexGrow
-        Component.Text input = new Component.Text(initial, FontGroups.DEFAULT, Em.of(1.3f), TEXT,
-                null, null, Em.of(0.4f), null, true, true, true, true, false, 1);
-        Component.Text status = new Component.Text("", FontGroups.DEFAULT, Em.of(0.95f), ERR_COLOR,
-                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
-        Component label = new Component.Text("f(x) =", FontGroups.DEFAULT, Em.of(1.2f), TEXT,
-                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
+        // Built through Ui.text() (never the raw constructor): the input is an editable, clipped
+        // field that grows to fill the row (grow(1) → the flex share sizes it, so no default width);
+        // the label + status are non-editable interactive texts.
+        Component.Text input = (Component.Text) Ui.text(initial).size(Em.of(1.3f)).color(TEXT)
+                .padding(Em.of(0.4f)).clip().editable().grow(1).build();
+        Component.Text status = (Component.Text) Ui.text("").size(Em.of(0.95f)).color(ERR_COLOR)
+                .padding(Em.of(0.4f)).clip().interactive(true).build();
+        Component label = Ui.text("f(x) =").size(Em.of(1.2f)).color(TEXT)
+                .padding(Em.of(0.4f)).clip().interactive(true).build();
 
         Debouncer debounce = new Debouncer(280);
         TextStates.onContentChange(input,
@@ -148,10 +149,10 @@ final class LiveEdit {
         LaidOut[] last = {null};                           // the current good render, re-fit on resize
         SceneStates.onViewportResize(mathSV, px -> { if (last[0] != null) showMathFitted(mathView, mathSV, last[0], mc); });
 
-        Component.Text input = new Component.Text(initial, FontGroups.DEFAULT, Em.of(1.3f), TEXT,
-                null, null, Em.of(0.4f), null, true, true, true, true, false, 1);
-        Component.Text status = new Component.Text("", FontGroups.DEFAULT, Em.of(0.95f), ERR_COLOR,
-                null, null, Em.of(0.4f), null, true, false, false, false, false, 0);
+        Component.Text input = (Component.Text) Ui.text(initial).size(Em.of(1.3f)).color(TEXT)
+                .padding(Em.of(0.4f)).clip().editable().grow(1).build();
+        Component.Text status = (Component.Text) Ui.text("").size(Em.of(0.95f)).color(ERR_COLOR)
+                .padding(Em.of(0.4f)).clip().interactive(true).build();
 
         Debouncer debounce = new Debouncer(220);
         TextStates.onContentChange(input,

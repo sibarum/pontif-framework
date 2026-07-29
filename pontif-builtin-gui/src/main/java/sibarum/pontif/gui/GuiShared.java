@@ -67,7 +67,8 @@ final class GuiShared {
 
     /** A visible red error label — an unknown/broken node renders as this rather than failing silently. */
     static Component errorLabel(String message) {
-        return new Component.Text(message, sibarum.dasum.gui.core.em.Em.of(1f), new Color(0.95f, 0.4f, 0.4f, 1f));
+        return Ui.text(message).size(sibarum.dasum.gui.core.em.Em.of(1f))
+                .color(new Color(0.95f, 0.4f, 0.4f, 1f)).build();
     }
 
     /** A colour channel clamped to the renderable [0,1] range (a {@link Color} out of range throws). */

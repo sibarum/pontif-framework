@@ -2,8 +2,8 @@ package sibarum.pontif.gui;
 
 import sibarum.dasum.gui.core.component.AlignItems;
 import sibarum.dasum.gui.core.component.Component;
-import sibarum.dasum.gui.core.component.Direction;
 import sibarum.dasum.gui.core.component.JustifyContent;
+import sibarum.dasum.gui.core.ui.Ui;
 import sibarum.dasum.gui.core.em.Em;
 import sibarum.dasum.gui.core.render.Color;
 import sibarum.dasum.gui.vis.math.CameraRig;
@@ -485,9 +485,9 @@ final class SceneBuilder {
         SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D
         if (build.bar() == null) return view;
         // Colorbar key beside the scene: the view flex-grows to fill, the bar takes its own width.
-        return new Component.Flex(null, null, Em.of(0.6f), TRANSPARENT,
-                Direction.ROW, JustifyContent.START, AlignItems.STRETCH, Em.of(0.8f),
-                List.of(view, colorbar(build.bar())), false, 1);
+        return Ui.row().fill().grow(1).padding(Em.of(0.6f)).gap(Em.of(0.8f))
+                .justify(JustifyContent.START).align(AlignItems.STRETCH)
+                .add(view).add(colorbar(build.bar())).build();
     }
 
     // --- Box-aspect normalization: map data-space coordinates into a display cube ---------------
@@ -555,17 +555,18 @@ final class SceneBuilder {
     private static Component colorbar(Bar bar) {
         int steps = 24;
         List<Component> col = new ArrayList<>();
-        col.add(new Component.Text(fmtNum(bar.hi()), Em.of(0.85f), TEXT));
+        col.add(Ui.text(fmtNum(bar.hi())).size(Em.of(0.85f)).color(TEXT).build());
         for (int i = steps - 1; i >= 0; i--) {           // top row = highest value
             float[] c = colorFor(bar.colormap(), i / (float) (steps - 1));
-            col.add(new Component.Flex(Em.of(2.4f), Em.of(0.32f), Em.ZERO, new Color(c[0], c[1], c[2], 1f),
-                    Direction.COLUMN, JustifyContent.CENTER, AlignItems.CENTER, Em.ZERO,
-                    List.of(), false, 0));
+            // A fixed-size colored swatch = a Box (fixed width+height, background, no children).
+            col.add(Ui.box().size(Em.of(2.4f), Em.of(0.32f))
+                    .background(new Color(c[0], c[1], c[2], 1f)).build());
         }
-        col.add(new Component.Text(fmtNum(bar.lo()), Em.of(0.85f), TEXT));
-        return new Component.Flex(Em.of(4f), null, Em.of(0.4f), TRANSPARENT,
-                Direction.COLUMN, JustifyContent.CENTER, AlignItems.CENTER, Em.of(0.15f),
-                col, false, 0);
+        col.add(Ui.text(fmtNum(bar.lo())).size(Em.of(0.85f)).color(TEXT).build());
+        // Fixed width (explicit basis); height fits content and the parent row's STRETCH align fills
+        // it vertically beside the scene.
+        return Ui.column().width(Em.of(4f)).padding(Em.of(0.4f)).gap(Em.of(0.15f))
+                .justify(JustifyContent.CENTER).align(AlignItems.CENTER).addAll(col).build();
     }
 
     // --- 3D graduations: a labeled, tick-marked bounding box (docs/plotting.md) ---------------
