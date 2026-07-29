@@ -1,4 +1,4 @@
-requires pontif.gui.{Label, Button, Column, window, ButtonEvent, Clickable}
+requires pontif.gui.{Label, Button, Column, window, Clickable}
 requires pontif.events.{StdOut}
 
 struct PushButton:[Button](text:String)

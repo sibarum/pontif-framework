@@ -1,6 +1,6 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, Column, LinePlot, window, ButtonEvent, Clickable, GuiEvent, Clicked, Draw}
+exports @.{Label, Button, Column, LinePlot, window, Clickable, GuiEvent, Clicked, Draw}
 
 # Elements are ordinary structs you CONSTRUCT directly — Label{text = "hi"},
 # Button{text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -21,10 +21,6 @@ struct LinePlot(xs:_, ys:_)
 #   struct PushButton:[Button](text:String)
 #   assign trait PushButton:Clickable { onClick():_ -> emit StdOut("hi")  this }
 trait Clickable { onClick():_ }
-
-# Fired when a button placed in the tree is clicked, carrying its label.
-struct ButtonEvent(label:String)
-assign trait ButtonEvent:Event{}
 
 # The reactive substrate (docs/reactive-gui.md). One conduit folds ALL GUI events into
 # the app model by matching this umbrella trait (via ancestry), so an app writes a single
