@@ -153,10 +153,17 @@ type-change); emit-any-value/no-op; trait-aware routing; the retained reactive `
 sink (`GuiTree.setText` via dasum `TextStates`), the press-hit-test fix; the headless data-flow test
 + the hand-verified counter window.
 
-**Next — Slice 3 (input elements), all on the isolated-update model:**
-- `TextField(id, text)` + a `TextChanged(id, text)` notification (dasum's editable-text plumbing
-  already exists) — unlocks the multi-expression **calculator**. Input state (caret/selection) lives
-  in dasum's identity-keyed `TextStates` on the retained component — preserved for free (no rebuild).
+**Slice 3 (input elements), all on the isolated-update model:**
+- ✅ **LANDED** — `TextField(id, text)` + a `TextChanged(id, text)` notification. Built exactly per
+  §7: an editable `Component.Text` (`withEditable(true)`), registered as the final fluent instance,
+  `TextStates.onContentChange` → `fireEvent(TextChanged)`, the two-field `element(...)` overload, and
+  the `wireInput` press-branch focus fix (`FocusState.set` on an editable-Text hit) — without which
+  keystrokes were silently swallowed. Input state (caret/selection) lives in dasum's identity-keyed
+  `TextStates` on the retained component, preserved for free (no rebuild). Uncontrolled: the field
+  owns its buffer; the conduit drives *other* widgets. Verified: `examples/reactive-textfield.ptf`
+  (type→echo into a separate Label, hand-run) + two headless tests (type-check + the `TextChanged`
+  data-flow fold) in `GuiExtensionTest`. Next sub-slice toward the multi-expression **calculator**:
+  wire `TextChanged` → `ExprParser` → `SetText` a result `Label`.
 - `Checkbox(id, on)` + `Toggled(id, on)`; `Row` (dasum `Ui.row()` exists).
 - Dynamic lists: a `SetChildren(id, elements)` command over dasum `DynamicChildren` (mutate a
   retained container's child list in place) — the dasum-blessed way to change structure.

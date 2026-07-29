@@ -45,6 +45,15 @@ final class GuiShared {
         return new RecordValue(type, m);
     }
 
+    /** A two-field notification element, e.g. {@code TextChanged(id, text)} — the struct's members in
+     *  declaration order. Sibling of the single-field {@link #element(String, String, String)}. */
+    static RecordValue element(String type, String f1, String v1, String f2, String v2) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put(f1, new StringValue(v1));
+        m.put(f2, new StringValue(v2));
+        return new RecordValue(type, m);
+    }
+
     /** A plot/scene viewport built through the {@code Ui} builder — fill + grow + interactive by
      *  default (a scene has no intrinsic size, so filling its slot is the correct default and keeps a
      *  plot from collapsing when it isn't the whole window). The plot background is applied here. */

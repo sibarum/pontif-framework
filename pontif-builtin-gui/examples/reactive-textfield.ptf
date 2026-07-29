@@ -1,0 +1,34 @@
+# Slice 3 (docs/reactive-gui.md §7): the editable TextField, proving the full input loop with ZERO
+# app state in Java — the typed string lives only as the conduit's state S, and each keystroke drives
+# a DIFFERENT widget (the uncontrolled-input pattern; we never write the field back).
+#
+# The loop:
+#   type in the field -> the bridge fires TextChanged{id = "expr", text = <buffer>}  (inbound emit)
+#   -> the `app` conduit folds the current text into the Model and emits an ISOLATED SetText("echo", …)
+#   -> the SetText sink mutates just the "echo" Label in place (dasum identity-keyed store) and wakes
+#      the loop to repaint. The field keeps its own caret/selection (never rebuilt, never written back).
+#
+# Run it (needs a display + GLFW; NOT headless):
+#   mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/reactive-textfield.ptf
+requires pontif.gui.{Label, TextField, Column, window, GuiEvent, TextChanged, SetText}
+
+# The app model — the current field text, threaded as the conduit's state S.
+struct Model(text:String)
+
+# The stateful fold: a TextChanged carries the field's live buffer; fold it into the Model and echo it
+# (here, prefixed) into a SEPARATE result Label. Any other GUI event passes the model through. `[_]`
+# is the open-world catch-all the open GuiEvent trait requires.
+conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
+  let m2 = match e { [TextChanged] -> Model(e.text)  [_] -> s }
+  emit SetText("echo", "you typed: " + m2.text)
+  m2
+)
+
+# Build the retained tree ONCE: an editable "expr" field (fires TextChanged) and a separate "echo"
+# Label (the SetText target). Click the field to focus it, then type.
+main ( window({title = "TextField"}, {
+  Column("center", "middle", {
+    TextField("expr", ""),
+    Label("echo", "you typed: ")
+  })
+}) )

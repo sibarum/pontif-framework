@@ -114,6 +114,67 @@ class GuiExtensionTest {
     }
 
     @Test
+    void reactiveTextFieldProgram_typeChecks() {
+        Extensions.install(new GuiExtension());
+
+        // Slice 3 (docs/reactive-gui.md §7): an editable TextField fires TextChanged{id, text}; the
+        // GuiEvent conduit folds the live buffer into a Model and emits the ISOLATED SetText to a
+        // SEPARATE result Label (uncontrolled input — the field is never written back). This only
+        // compiles + links (the TextField/TextChanged shapes, the two-field notification, the
+        // conduit); the actual type→echo repaint is verified manually (needs GLFW):
+        // exec:exec -Dptf=examples/reactive-textfield.ptf. Kept in sync with that example.
+        CompileResult result = new PontifCompiler().compileAlt("""
+                requires pontif.gui.{Label, TextField, Column, window, GuiEvent, TextChanged, SetText}
+                struct Model(text:String)
+                conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
+                  let m2 = match e { [TextChanged] -> Model(e.text)  [_] -> s }
+                  emit SetText("echo", "you typed: " + m2.text)
+                  m2
+                )
+                main ( window({title = "TextField"}, {
+                  Column("center", "middle", { TextField("expr", ""), Label("echo", "you typed: ") })
+                }) )""", "reactive-textfield.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, result,
+                () -> "reactive textfield program should type-check + link; got "
+                        + (result instanceof CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
+    void reactiveConduit_foldsTextChangedAcrossEmits_headless() {
+        // The TextField DATA-FLOW, executed without a window: a GuiEvent conduit folds each
+        // TextChanged (matched via the GuiEvent ancestor trait, the arm refining `e` to read `text`)
+        // into a threaded Model, then emits the current text so we observe the buffer advancing across
+        // edits. Proves the type→conduit→state path (the GLFW repaint that a live SetText drives needs
+        // a window); sibling of the Clicked fold test above.
+        Extensions.install(new GuiExtension());
+        PrintStream origOut = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+            var compiled = new PontifCompiler().compileAlt("""
+                    requires pontif.gui.{GuiEvent, TextChanged}
+                    requires pontif.events.{StdOut}
+                    struct Model(text:String)
+                    conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
+                      let m2 = match e { [TextChanged] -> Model(e.text)  [_] -> s }
+                      emit StdOut(m2.text)  emit StdOut("|")
+                      m2
+                    )
+                    main ( emit TextChanged("expr", "x")  emit TextChanged("expr", "x^")  emit TextChanged("expr", "x^2")  0 )""",
+                    "reactive-textfield-fold.ptf");
+            assertInstanceOf(CompileResult.Compiled.class, compiled,
+                    () -> "reactive-textfield-fold program should link; got "
+                            + (compiled instanceof CompileResult.Failed f ? f.error().text() : compiled));
+            var result = new PontifRunner().run(compiled, Engine.INTERPRETER);
+            assertFalse(result.isError(), () -> "program errored: " + result.text());
+        } finally {
+            System.setOut(origOut);
+        }
+        assertEquals("x|x^|x^2|", out.toString(StandardCharsets.UTF_8),
+                "the conduit threads each TextChanged buffer across the three edit emits (ancestor-matched)");
+    }
+
+    @Test
     void linePlotProgram_linksAgainstExtension() {
         Extensions.install(new GuiExtension());
 

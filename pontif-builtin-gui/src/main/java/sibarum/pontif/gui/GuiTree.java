@@ -112,6 +112,26 @@ final class GuiTree {
                 register(str(rv, "id"), c);  // addressable for SetText(id, …)
                 yield c;
             }
+            case "TextField" -> {
+                String id = str(rv, "id");
+                // Uncontrolled editable field (docs/reactive-gui.md §7). withEditable(true) forces
+                // interactive+selectable+editable on and leaves acceptsTab=false, so Tab cycles focus
+                // rather than inserting a tab — right for a single-expression field. The field owns its
+                // buffer; caret/selection live in the identity-keyed TextState sidecar.
+                Component.Text field = new Component.Text(str(rv, "text"), Em.of(2f), TEXT)
+                        .withEditable(true);
+                // Register the FINAL instance: withEditable returns a NEW record, and TextStates /
+                // FocusState are identity-keyed, so both the SetText registry entry and the
+                // onContentChange listener must key on the exact instance placed in the tree.
+                register(id, field);
+                // Fire TextChanged{id, text} on every edit — the inbound-emit door for typing. The
+                // app conduit folds it (parse/eval) and drives OTHER widgets; it never writes back
+                // here (uncontrolled). onContentChange also fires on programmatic setContent, so do
+                // not SetText this same field from the conduit (feedback loop; §7 cautions).
+                TextStates.onContentChange(field, s ->
+                        ctx.fireEvent(element("pontif.gui/TextChanged", "id", id, "text", s)));
+                yield field;
+            }
             case "Button" -> {
                 String id = str(rv, "id");
                 // The inbound-emit door (docs/reactive-gui.md, G2): a click fires a `Clicked`
@@ -174,6 +194,11 @@ final class GuiTree {
                         ? HitTest.test(r, lr, (float) InputState.mouseX(), (float) InputState.mouseY())
                         : null;
                 HoverState.update(hit);
+                // THE FOCUS GAP (docs/reactive-gui.md §7): onMouseDown places the caret but does NOT
+                // set focus, and every char/key handler early-returns unless FocusState.focused() is
+                // an editable Text — so keystrokes are silently swallowed until focus is set. Set it
+                // here when the press lands on an editable Text. (The counter never needed this.)
+                if (hit instanceof Component.Text t && t.editable()) FocusState.set(hit);
                 // Focus an editable Text under the cursor (caret placement / selection start).
                 TextInputController.onMouseDown(hit, InputState.mouseX(),
                         InputState.mouseY(), (mods & Glfw.GLFW_MOD_SHIFT) != 0);

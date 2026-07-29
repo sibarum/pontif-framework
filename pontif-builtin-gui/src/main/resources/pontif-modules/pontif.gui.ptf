@@ -1,6 +1,6 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, Column, LinePlot, window, Clickable, GuiEvent, Clicked, SetText}
+exports @.{Label, Button, TextField, Column, LinePlot, window, Clickable, GuiEvent, Clicked, TextChanged, SetText}
 
 # Elements are ordinary structs you CONSTRUCT directly — Label{id = "count", text = "0"},
 # Button{id = "inc", text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -9,6 +9,12 @@ exports @.{Label, Button, Column, LinePlot, window, Clickable, GuiEvent, Clicked
 # records id -> component as it builds. children is `_` so any aggregate of elements fits.
 struct Label(id:String, text:String)
 struct Button(id:String, text:String)
+# An editable single-expression text field (docs/reactive-gui.md §7). `text` is the INITIAL content;
+# thereafter the field OWNS its buffer (uncontrolled input) — dasum manages caret/selection, and each
+# edit fires TextChanged{id, text}. The app conduit folds that and drives OTHER widgets (a result
+# Label via SetText); it does NOT write the field back (that would fight the caret). Programmatic
+# SetText on a NON-edited field (a "Clear" button) is still safe.
+struct TextField(id:String, text:String)
 struct Column(justify:String, align:String, children:_)
 
 # A 2D line chart over two number aggregates: LinePlot({0.0,1.0,4.0}, {0.0,1.0,2.0}).
@@ -32,6 +38,12 @@ assign trait GuiEvent:Event{}
 # GuiEvent, so the app's single `GuiEvent` conduit folds it into the model.
 struct Clicked(id:String)
 assign trait Clicked:GuiEvent{}
+
+# A NOTIFICATION: the editable TextField with this `id` now holds `text` (fired on every edit). Like
+# Clicked it is-a GuiEvent, so the app's one conduit folds it — typically parsing/evaluating `text`
+# and emitting SetText to a RESULT widget. Uncontrolled: do not SetText the field being edited.
+struct TextChanged(id:String, text:String)
+assign trait TextChanged:GuiEvent{}
 
 # A COMMAND (imperative: "cause it"): set the text of the retained widget with this `id`. This is an
 # ISOLATED update — `emit SetText("count", n + "")` from the conduit mutates just that one widget in
