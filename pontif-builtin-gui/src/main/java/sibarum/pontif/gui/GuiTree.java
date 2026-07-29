@@ -118,11 +118,13 @@ final class GuiTree {
                 // interactive+selectable+editable on and leaves acceptsTab=false, so Tab cycles focus
                 // rather than inserting a tab — right for a single-expression field. The field owns its
                 // buffer; caret/selection live in the identity-keyed TextState sidecar.
+                // withWidth gives the field a stable, clickable extent even while empty (a bare Text
+                // sizes to its glyphs, so a zero-content field would collapse to nothing).
                 Component.Text field = new Component.Text(str(rv, "text"), Em.of(2f), TEXT)
-                        .withEditable(true);
-                // Register the FINAL instance: withEditable returns a NEW record, and TextStates /
-                // FocusState are identity-keyed, so both the SetText registry entry and the
-                // onContentChange listener must key on the exact instance placed in the tree.
+                        .withEditable(true).withWidth(Em.of(18f));
+                // Register the FINAL instance: withEditable/withWidth each return a NEW record, and
+                // TextStates / FocusState are identity-keyed, so both the SetText registry entry and
+                // the onContentChange listener must key on the exact instance placed in the tree.
                 register(id, field);
                 // Fire TextChanged{id, text} on every edit — the inbound-emit door for typing. The
                 // app conduit folds it (parse/eval) and drives OTHER widgets; it never writes back
@@ -130,7 +132,12 @@ final class GuiTree {
                 // not SetText this same field from the conduit (feedback loop; §7 cautions).
                 TextStates.onContentChange(field, s ->
                         ctx.fireEvent(element("pontif.gui/TextChanged", "id", id, "text", s)));
-                yield field;
+                // A bare Text draws no fill/border, so an empty field would be invisible. Wrap it in a
+                // visible box; the interactive Text stays the hit-test / focus / SetText target (the
+                // box is non-interactive, so a click inside lands on the child Text).
+                yield Ui.box().padding(Em.of(0.4f)).background(FIELD_BG)
+                        .border(Em.of(0.1f), FIELD_BORDER).cornerRadius(Em.of(0.3f))
+                        .child(field).build();
             }
             case "Button" -> {
                 String id = str(rv, "id");
