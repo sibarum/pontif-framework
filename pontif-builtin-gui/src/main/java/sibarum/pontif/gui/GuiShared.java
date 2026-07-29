@@ -29,8 +29,8 @@ final class GuiShared {
     static final Color BACKGROUND = new Color(0.05f, 0.07f, 0.12f, 1f);
     static final Color PLOT_BG = new Color(0.04f, 0.05f, 0.08f, 1f);
     static final Color SERIES_COLOR = new Color(0.40f, 0.80f, 1.0f, 1f);
-    /** An editable TextField's box fill + border — a bare Text draws no background, so the field is
-     *  wrapped in a visible box (a zero-content editable Text otherwise lays out to nothing). */
+    /** An editable TextField's frame fill + border — a bare Text draws no background, so the field is
+     *  wrapped in a fit-content Ui.column() frame (a zero-content editable Text lays out to nothing). */
     static final Color FIELD_BG = new Color(0.12f, 0.14f, 0.20f, 1f);
     static final Color FIELD_BORDER = new Color(0.40f, 0.45f, 0.55f, 1f);
 

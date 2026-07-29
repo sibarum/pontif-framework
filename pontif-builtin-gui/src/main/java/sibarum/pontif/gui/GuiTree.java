@@ -132,12 +132,15 @@ final class GuiTree {
                 // not SetText this same field from the conduit (feedback loop; §7 cautions).
                 TextStates.onContentChange(field, s ->
                         ctx.fireEvent(element("pontif.gui/TextChanged", "id", id, "text", s)));
-                // A bare Text draws no fill/border, so an empty field would be invisible. Wrap it in a
-                // visible box; the interactive Text stays the hit-test / focus / SetText target (the
-                // box is non-interactive, so a click inside lands on the child Text).
-                yield Ui.box().padding(Em.of(0.4f)).background(FIELD_BG)
+                // A bare Text draws no fill/border, so wrap it in a styled frame. Use Ui.column()
+                // (fit-content on both axes by default) — NOT Ui.box(), which is the fixed-size
+                // primitive and demands explicit width+height. The column hugs the field (its fixed
+                // 18em width + our padding) and carries the fill/border. The interactive Text stays
+                // the hit-test / focus / SetText target (the column is non-interactive, so a click
+                // inside descends to the child Text — HitTest returns the deepest INTERACTIVE node).
+                yield Ui.column().padding(Em.of(0.4f)).background(FIELD_BG)
                         .border(Em.of(0.1f), FIELD_BORDER).cornerRadius(Em.of(0.3f))
-                        .child(field).build();
+                        .add(field).build();
             }
             case "Button" -> {
                 String id = str(rv, "id");
