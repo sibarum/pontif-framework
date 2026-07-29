@@ -175,4 +175,86 @@ the dasum tree once, update it through isolated event-driven commands — never 
 it.** If you find yourself wanting to apply a Pontif function from a native, hold the model in a Java
 cell, rebuild the tree, or write a reconciler, stop — you've gone off-script (§4). If a GUI need
 doesn't map cleanly onto dasum's blessed API, extend dasum with a first-class capability rather than
-hacking the bridge. Start Slice 3 with `TextField` on the isolated-update model, then the calculator.
+hacking the bridge. Start Slice 3 with `TextField` on the isolated-update model (§7), then the calculator.
+
+---
+
+## 7. Slice 3 hand-off — `TextField` (design + technical approach)
+
+The next build. Grounded in the dasum editable-text API (verified 2026-07-29); file refs are into
+`dasum-gui-shi` unless noted.
+
+### Shapes
+- Element: `struct TextField(id:String, text:String)` — `text` is the initial content. (Exported;
+  built in `GuiTree.toComponent` like `Label`.)
+- Notification: `struct Clicked`-sibling `struct TextChanged(id:String, text:String)` assigned
+  `GuiEvent` (so the one app conduit folds it via ancestry). Past-tense = notification (§ naming).
+
+### Decision: UNCONTROLLED input (the field owns its text)
+The `TextField` owns its buffer; dasum manages caret/selection. On edit it fires
+`TextChanged(id, text)`; the conduit folds that into the model and drives *other* widgets
+(`SetText` on a result label), but does **not** write the field back. Rationale:
+- It's dasum's natural mode — editable text lives in the `TextState` sidecar keyed by the component.
+- Controlled (round-trip each keystroke → `SetText` back into the field the user is typing in) is
+  *technically survivable* — `TextStates.setContent` is safe on a focused field, it **clamps**
+  caret/selection to the new length rather than clobbering (`input/TextStates.java` setContent) —
+  but `setContent` doesn't reposition the caret to the edit site, and `onContentChange` fires on
+  programmatic writes too (feedback risk; see below). So avoid it for the field being edited.
+- Programmatic `SetText` on a TextField is still fine for *non-editing* moments (a "Clear" button,
+  seeding a non-focused field) — the clamp makes it safe. Just don't drive the actively-typed field.
+
+### Technical approach (concrete)
+1. **Build an editable `Component.Text`.** No `Ui.textField` builder exists; editability is boolean
+   fields on the record. Cleanest: `new Component.Text(text, Em.of(2f), TEXT).withEditable(true)` —
+   `withEditable(true)` forces `interactive`+`selectable`+`editable` on (`component/Component.java`
+   `withEditable`), and leaves `acceptsTab=false` (the 3-arg default), which is what you want for a
+   single-line-ish field (Tab then cycles focus instead of inserting `\t`). NOTE there is no
+   single-line *type* — `onEnter` inserts `\n` and nothing intercepts it; a single-expression field
+   just reacts live and ignores newlines. There is **no submit/commit hook** — react to
+   `TextChanged` live (debounce in the conduit if needed), the way `plotInput` re-evals on the fly.
+2. **Register it** in the `GuiTree` widget registry (`register(id, field)`) — the SetText/address path.
+3. **Wire the change notification:** `TextStates.onContentChange(field, s -> ctx.fireEvent(
+   element("pontif.gui/TextChanged", "id", id, "text", s)))`. Capture `ctx` (as the Button's onClick
+   does). **Register against the FINAL Text instance** — every `withX` returns a *new* record, and
+   `TextStates`/`FocusState` are identity-keyed, so register after any fluent chain. (Confirm
+   `element(...)` accepts two key/value pairs; extend if it only did one.)
+4. **THE FOCUS GAP — required, currently missing.** `TextInputController.onMouseDown` (called from
+   `GuiTree.wireInput`'s press handler) sets caret/selection but does **NOT** call `FocusState.set`.
+   The char/key handlers all early-return unless `FocusState.focused()` is an editable Text — so
+   **typing won't route until focus is set.** The counter never needed this (no editable text). Add
+   to `wireInput`'s PRESS branch: after computing `hit`, `if (hit instanceof Component.Text t &&
+   t.editable()) FocusState.set(hit);`. Import `sibarum.dasum.gui.core.input.FocusState`. Without
+   this, the field builds and shows but silently swallows keystrokes.
+5. Char/key/backspace/arrows/clipboard already route to the focused editable via the existing
+   `wireInput` → `TextInputController` wiring — nothing else to add once focus is set.
+
+### Cautions (from the dasum map)
+- **Feedback loop:** `onContentChange` fires on *both* user typing and programmatic `setContent`
+  (single mutation path). The only guard is `setContent`'s identical-string early-return. Uncontrolled
+  input sidesteps this; if you ever `SetText` a field with a live `onContentChange`, ensure you're not
+  creating a set→emit→set cycle.
+- **The "little colored boxes while typing" bug = the phantom hover caret** (`TextState.hoverCaretIndex`,
+  drawn by `Render` as a translucent quad, shown only on hover of a selectable-but-unfocused Text).
+  dasum clears it defensively on setContent/keypress/edit/cursor-move. If a new field flashes stray
+  boxes, it's an uncleared `hoverCaretIndex` — not a mystery, a known locus.
+- **Identity fragility:** keep the exact Text instance you put in the tree in the registry and as the
+  `onContentChange` key; a reconstructed (`withX`) instance loses its sidecar unless `TextStates.migrate`.
+- **Listener cleanup (open):** `onContentChange` has no unregister; only `TextStates.clear` /
+  `Components.detach` drop listeners. We build once per window and clear the widget registry on
+  close, but do **not** currently clear `TextStates` — fine while one window runs per process; if
+  multiple windows/sessions in one process become real, clear `TextStates` for the tree on close.
+
+### Integration target: the calculator
+`TextField` for the expression → `TextChanged` → the `app` conduit folds the current expression
+string into the model, parses it (reuse `ExprParser` / `pontif.algebra`), evaluates, and `SetText`s a
+**result `Label`** (a different widget). Live, no submit. The *multi-expression* calculator
+(add / enable / delete rows) additionally needs `SetChildren(id, elements)` over dasum
+`DynamicChildren` (a dynamic-list command) — treat that as its own sub-slice after single-expression
+works. Watch for debounce (per-keystroke parse is likely fine to start; if not, debounce in the
+conduit as pure Pontif, not in the bridge).
+
+### Open questions to resolve when starting
+- `element(...)` arity (two kv pairs) — verify/extend.
+- Whether to give `Label` an editable sibling vs. one `TextField` element (recommend a distinct
+  `TextField` element — clearer than an `editable` flag on `Label`).
+- Debounce policy for `TextChanged` (start without; add in the conduit if parse-per-keystroke stutters).
