@@ -35,8 +35,12 @@ public final class DasumBridge {
         String title = cfgStr(args, 0, "title");
         if (title.isEmpty()) title = "Pontif";
         Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
-        return GuiTree.openWindowWithRoot(title, cfgInt(args, 0, "width", WIDTH), cfgInt(args, 0, "height", HEIGHT),
-                false, () -> GuiTree.toComponent(rootTree, ctx));
+        // Reactive host (docs/reactive-gui.md): the children arg is the initial tree (view(model0));
+        // a Draw sink republishes it on each event. Thread ctx so the loop can rebuild on the root
+        // thread.
+        RecordValue initial = rootTree instanceof RecordValue rv ? rv : emptyTuple();
+        return GuiTree.openWindowReactive(title, cfgInt(args, 0, "width", WIDTH),
+                cfgInt(args, 0, "height", HEIGHT), initial, ctx);
     }
 
     /**

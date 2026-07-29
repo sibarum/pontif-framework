@@ -1,6 +1,6 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, Column, LinePlot, window, ButtonEvent, Clickable}
+exports @.{Label, Button, Column, LinePlot, window, ButtonEvent, Clickable, GuiEvent, Clicked, Draw}
 
 # Elements are ordinary structs you CONSTRUCT directly — Label{text = "hi"},
 # Button{text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -25,6 +25,24 @@ trait Clickable { onClick():_ }
 # Fired when a button placed in the tree is clicked, carrying its label.
 struct ButtonEvent(label:String)
 assign trait ButtonEvent:Event{}
+
+# The reactive substrate (docs/reactive-gui.md). One conduit folds ALL GUI events into
+# the app model by matching this umbrella trait (via ancestry), so an app writes a single
+# stateful fold over `GuiEvent` rather than one per widget kind.
+trait GuiEvent{}
+assign trait GuiEvent:Event{}
+
+# A NOTIFICATION (past-tense: "it happened"): a widget was clicked. `id` identifies which
+# one — for a plain Button the bridge fires the button's text as the id. Clicked is-a
+# GuiEvent, so the app's `GuiEvent` conduit folds it.
+struct Clicked(id:String)
+assign trait Clicked:GuiEvent{}
+
+# A COMMAND (imperative: "cause a render"): render `tree`. This is the render-sink event —
+# `emit Draw(view(model))` from the conduit stashes the new element tree and re-paints the
+# window. `tree` is permissive `_` so any element record (a Column, a Label, …) fits.
+struct Draw(tree:_)
+assign trait Draw:Event{}
 
 # The window action (native; the placeholder body is never run): opens a window
 # rendering the given root tree on the root thread, until closed.

@@ -5,6 +5,7 @@ import sibarum.dasum.gui.core.component.Component;
 import sibarum.dasum.gui.core.em.Em;
 import sibarum.dasum.gui.core.em.EmContext;
 import sibarum.dasum.gui.core.event.EventLoop;
+import sibarum.dasum.gui.core.event.Invalidator;
 import sibarum.dasum.gui.core.input.FocusState;
 import sibarum.dasum.gui.core.input.Handlers;
 import sibarum.dasum.gui.core.input.HoverState;
@@ -56,6 +57,30 @@ final class GuiTree {
     private static Component pressTarget;
 
     /**
+     * The reactive host (docs/reactive-gui.md §6, G3). The {@code Draw} native sink has no
+     * {@code ctx} and must not build components — it only stashes the raw Pontif element tree here
+     * (the "pending root") + marks it dirty and wakes the loop. The window loop (running on the root
+     * thread) rebuilds the dasum tree from {@link #pendingTree} on the next dirty frame. Only ONE
+     * window runs at a time (the loop blocks the root thread), so a single static holder suffices; it
+     * is cleared when the window closes. {@code volatile} because a worker thread may {@code emit}
+     * Draw in a later slice — today the emit is on the root thread and {@link Invalidator} handles the
+     * cross-thread wake either way.
+     */
+    private static volatile RecordValue pendingTree;
+    private static volatile boolean pendingDirty;
+
+    /**
+     * The render-sink seam ({@code pontif.gui/Draw} effect → here): stash the new element tree, mark
+     * it dirty, and wake the event loop. Called from {@code fireEvent}'s effect dispatch — no GL, no
+     * component building (that happens on the root thread in the window loop).
+     */
+    static void publish(RecordValue tree) {
+        pendingTree = tree;
+        pendingDirty = true;
+        Invalidator.invalidate();
+    }
+
+    /**
      * Recursively turns an element record (or a {@code _tuple} of them) into a dasum component.
      * The heart of the declarative UI: it switches on the record's (bare) type name. An unknown
      * node renders as a visible error label rather than failing silently.
@@ -76,8 +101,11 @@ final class GuiTree {
             case "Label" -> new Component.Text(str(rv, "text"), Em.of(2f), TEXT);
             case "Button" -> {
                 String t = str(rv, "text");
+                // The inbound-emit door (docs/reactive-gui.md, G2): a click fires a `Clicked`
+                // notification tagged with the button's text as its id. The app's GuiEvent conduit
+                // folds it into the model and re-emits Draw; see publish() / the reactive host.
                 yield Themed.button(t, Em.of(10f), Variant.PRIMARY, 0,
-                        () -> ctx.fireEvent(element("pontif.gui/ButtonEvent", "label", t)));
+                        () -> ctx.fireEvent(element("pontif.gui/Clicked", "id", t)));
             }
             // Ui.column() defaults (align=STRETCH) make children fill the cross axis, so a nested
             // plot/scene resolves instead of collapsing; the user's justify/align still apply. grow(1)
@@ -118,13 +146,26 @@ final class GuiTree {
         GlfwCallbacks.setMouseButtonListener((w, button, action, mods) -> {
             if (button != Glfw.GLFW_MOUSE_BUTTON_LEFT) return;
             if (action == Glfw.GLFW_PRESS) {
+                // Hit-test the LIVE tree at the cursor — do NOT trust the hover cache. A reactive
+                // re-render (a Draw repaint) swaps the whole Component tree, but HoverState only
+                // refreshes on cursor MOVE; a second click at the same spot would otherwise arm a
+                // stale (dead) component that can never match the release's fresh hit-test, so the
+                // click silently no-ops until the mouse moves. Probing the current layout here (as
+                // the release branch does) makes a click register regardless of movement or repaint;
+                // we refresh HoverState from the same probe so the cache stays consistent.
+                LayoutResult lr = LatestLayout.result();
+                Component r = LatestLayout.root();
+                Component hit = (lr != null && r != null)
+                        ? HitTest.test(r, lr, (float) InputState.mouseX(), (float) InputState.mouseY())
+                        : null;
+                HoverState.update(hit);
                 // Focus an editable Text under the cursor (caret placement / selection start).
-                TextInputController.onMouseDown(HoverState.hovered(), InputState.mouseX(),
+                TextInputController.onMouseDown(hit, InputState.mouseX(),
                         InputState.mouseY(), (mods & Glfw.GLFW_MOD_SHIFT) != 0);
                 // Let a viewport claim the press first; if it does, don't also arm a button click.
                 boolean scene = SceneViewController.onMouseDown(
-                        HoverState.hovered(), InputState.mouseX(), InputState.mouseY());
-                pressTarget = scene ? null : HoverState.hovered();
+                        hit, InputState.mouseX(), InputState.mouseY());
+                pressTarget = scene ? null : hit;
             } else if (action == Glfw.GLFW_RELEASE) {
                 SceneViewController.onMouseUp();
                 LayoutResult lr = LatestLayout.result();
@@ -199,6 +240,48 @@ final class GuiTree {
      *  use the {@link GuiShared#WIDTH}×{@link GuiShared#HEIGHT} default overload. */
     static Object openWindowWithRoot(String title, int width, int height, boolean enableBloom,
             java.util.function.Supplier<Component> rootFactory) {
+        return openWindowCore(title, width, height, enableBloom, rootFactory, null);
+    }
+
+    /**
+     * The <b>reactive</b> window (docs/reactive-gui.md, Slice 1): opens a window whose root is
+     * rebuilt from the pending Pontif tree whenever a {@code Draw} sink publishes a new one. The
+     * initial tree ({@code view(initialModel)}, the {@code window(...)} children arg) seeds the
+     * pending root so the first frame renders it; thereafter {@code emit Draw(view(model))} from the
+     * app's conduit drives repaints. The {@code ctx} is threaded in from {@link DasumBridge#openWindow}
+     * so the loop can call {@link #toComponent} on the root thread (the only thread allowed to touch
+     * GL). The static pending-root holder is cleared when the window closes.
+     */
+    static Object openWindowReactive(String title, int width, int height,
+            RecordValue initialTree, NativeCalls.Context ctx) {
+        pendingTree = initialTree;
+        pendingDirty = false;  // the initial factory below builds initialTree; Draw marks it dirty
+        java.util.function.Supplier<Component> factory = () -> toComponent(initialTree, ctx);
+        // The per-frame rebuild hook: rebuild only when a Draw has published a new tree.
+        java.util.function.Supplier<Component> rebuild = () -> {
+            if (!pendingDirty) return null;
+            pendingDirty = false;
+            RecordValue t = pendingTree;
+            return t == null ? null : toComponent(t, ctx);
+        };
+        try {
+            return openWindowCore(title, width, height, false, factory, rebuild);
+        } finally {
+            pendingTree = null;
+            pendingDirty = false;
+        }
+    }
+
+    /**
+     * The shared window core. Builds the initial root via {@code rootFactory} after GL + font setup,
+     * then renders in the loop until the window closes. When {@code rebuild} is non-null (the reactive
+     * host), each frame first asks it for a new root; a non-null answer replaces + re-lints the root
+     * (this is how a published {@code Draw} tree repaints). Static plot/GUI windows pass
+     * {@code rebuild == null} and render their build-once root forever.
+     */
+    private static Object openWindowCore(String title, int width, int height, boolean enableBloom,
+            java.util.function.Supplier<Component> rootFactory,
+            java.util.function.Supplier<Component> rebuild) {
         try (GlfwContext glfw = GlfwContext.init();
              Window win = Window.create(width, height, title);
              Batcher batcher = new Batcher()) {
@@ -221,12 +304,13 @@ final class GuiTree {
             AtlasData mathAtlas = AtlasData.loadFromResource("/dasum/atlas/math.json");
             FontGroups.register(FontGroup.of("math", mathAtlas, mathTexture));
 
-            // Build components after font + Em setup, so styled widgets resolve correctly.
-            Component root = rootFactory.get();
+            // Build components after font + Em setup, so styled widgets resolve correctly. Held in a
+            // one-cell array so the reactive rebuild hook can swap it in-place inside the loop.
+            Component[] root = { rootFactory.get() };
             // Layout guardrail (docs/plotting.md): lint the built tree BEFORE rendering. Fonts are
             // registered and Em is set, so the geometry pass can lay it out — a collapsed plot/scene
             // (the plot-in-a-column trap) throws here with a fix hint instead of rendering blank.
-            Ui.lint(root);
+            Ui.lint(root[0]);
             wireInput();
 
             // 3D plot windows opt into HDR + bloom: the frame renders into an offscreen HDR target,
@@ -235,6 +319,15 @@ final class GuiTree {
             if (bloom != null) bloom.init();
 
             EventLoop loop = new EventLoop(win, () -> {
+                // Reactive rebuild: if a Draw sink published a new tree since last frame, rebuild the
+                // dasum root from it (root thread, GL-safe) and re-lint before laying it out.
+                if (rebuild != null) {
+                    Component next = rebuild.get();
+                    if (next != null) {
+                        root[0] = next;
+                        Ui.lint(root[0]);
+                    }
+                }
                 int fbW = win.framebufferWidth();
                 int fbH = win.framebufferHeight();
                 float[] projection = Projection.orthoTopLeft(fbW, fbH);
@@ -242,10 +335,10 @@ final class GuiTree {
                 Gl.glViewport(0, 0, fbW, fbH);
                 Gl.glClearColor(BACKGROUND.r(), BACKGROUND.g(), BACKGROUND.b(), BACKGROUND.a());
                 Gl.glClear(Gl.GL_COLOR_BUFFER_BIT);
-                LayoutResult layout = Layout.compute(root, new PixelRect(0f, 0f, fbW, fbH));
-                LatestLayout.store(root, layout);  // required so hit-testing has coordinates
+                LayoutResult layout = Layout.compute(root[0], new PixelRect(0f, 0f, fbW, fbH));
+                LatestLayout.store(root[0], layout);  // required so hit-testing has coordinates
                 batcher.beginFrame(fbH);
-                Render.render(root, layout, batcher, projection);
+                Render.render(root[0], layout, batcher, projection);
                 batcher.endFrame(projection);
                 if (bloom != null) bloom.end(fbW, fbH);     // bloom + composite to the screen
             });
