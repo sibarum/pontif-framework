@@ -1121,6 +1121,22 @@ class PlotExtensionTest {
     }
 
     @Test
+    void calculatorExample_compilesAndTypechecks() throws Exception {
+        // Guards examples/calculator.ptf (the single-expression calculator POC): reads the ACTUAL
+        // example file off disk and links it, so the on-disk POC can't drift out of a working state.
+        // The single-expression pipeline — reflect an Algebraic function's AST, typeset it as the
+        // chartView title, auto-plot with labelled zeros/optima/asymptotes, and an Export-SVG button.
+        // Compiles + links only (the window itself needs GLFW).
+        Extensions.install(new PlotExtension());
+        Extensions.install(new GuiExtension());
+        String source = java.nio.file.Files.readString(java.nio.file.Path.of("examples/calculator.ptf"));
+        var result = new PontifCompiler().compileAlt(source, "calculator.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
+                () -> "calculator POC example should link; got "
+                        + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
     void exportSvg_buildsSemanticClassedMarkupThroughTheSharedScene() {
         // The full Pontif -> AnnotatedChart -> PlotScene2D (shared IR) -> SVG path (the Save dialog
         // itself needs a window, so it's exercised manually). The rational function contributes a

@@ -1,0 +1,51 @@
+requires pontif.algebra.{Algebraic}
+requires pontif.plot.{expr, zeros, optima, asymptotes, chartView, exportSvg}
+requires pontif.gui.{Button, window, Clickable}
+requires pontif.core.{Stream}
+
+# THE CALCULATOR — proof-of-concept, single-expression slice.
+#
+# The end goal is a calculator where you type an expression, see it typeset for reading, and get it
+# auto-plotted with all the interesting features labelled — with several expressions you can add,
+# enable/disable, and delete, plus an adjustable (optionally log-scaled) viewport. That full app
+# needs a REACTIVE Pontif GUI (mutable app state + re-render on events, a text-input element, a
+# checkbox, and a dynamic list) that pontif.gui does not expose yet: `window(...)` renders its tree
+# once and a Clickable onClick cannot change the UI (GuiExtension.java: "reactively updating a
+# rendered element ... is the next slice"). So this POC pins the SINGLE-expression pipeline
+# end-to-end — everything the spec asks for one expression at a time — as the foundation that the
+# reactive slice will later multiply.
+#
+# What this demonstrates, and the piece it stands in for:
+#   * "type in an expression"   -> authored here as a proven-`Algebraic` function and reflected to
+#                                  its AST with `$f[Decimal].ast`. (Live type-as-you-go for a single
+#                                  variable already exists as the native one-liner `plotInput("...")`;
+#                                  it can't yet carry the labels + export this path shows.)
+#   * "rendered for reading"    -> chartView typesets the equation as a colour-matched math title.
+#   * "auto-plotted with labels"-> the reliable auto-plotter frames the x-window by sound interval
+#                                  enclosure (no domain given) and derives labelled zeros, optima,
+#                                  and vertical asymptotes.
+#   * export                    -> a Clickable button writes the exact composited layers to SVG.
+
+# The expression the calculator evaluates. A rational function chosen to exercise every label:
+# zeros at x = ±2, vertical asymptotes at x = ±1, and an optimum at x = 0.
+function f(x:Decimal):Decimal -> (x^2 - 4.0) / (x^2 - 1.0)
+assign proof f:Algebraic
+
+# Export the exact layers the chart carries to SVG on click. The orphan rule forbids adding a method
+# to the library `Button`, so we subtype it into a type we own and give THAT the Clickable trait.
+# `this` is the clicked widget; `this.data` is the layer tuple it was constructed with.
+struct ExportButton:[Button](text:String, data:_)
+assign trait ExportButton:Clickable {
+  onClick():_ -> ( let done = exportSvg(this.data)  this )
+}
+
+main (
+  let e = $f[Decimal].ast
+  # The layers: the reliable curve (which also seeds the typeset title), then the three annotation
+  # overlays. chartView is a DIRECT child of the window — a SceneView only fills that way.
+  let layers = { expr(e), zeros(e), optima(e), asymptotes(e) }
+  window({title = "Pontif Calculator (POC) — single expression", width = 1100, height = 720}, {
+    chartView({}, layers),
+    ExportButton("Export SVG...", layers)
+  })
+)
