@@ -39,6 +39,7 @@ import sibarum.dasum.gui.core.render.DrawCommand;
 import sibarum.dasum.gui.core.render.Projection;
 import sibarum.dasum.gui.core.render.Texture;
 import sibarum.dasum.gui.core.status.Status;
+import sibarum.dasum.gui.core.status.Severity;
 import sibarum.dasum.gui.core.text.AtlasData;
 import sibarum.dasum.gui.core.text.FontGroup;
 import sibarum.dasum.gui.core.text.FontGroups;
@@ -106,12 +107,6 @@ public final class App {
 
     /** Font group key for the monospace atlas (registered alongside the primary one). */
     private static final String MONO_FONT_GROUP = "mono";
-
-    /** Running count of lines written to the event log — cumulative "so far" (never
-     *  decremented when old events age out of the in-memory history). Bumped by the
-     *  {@link #onLogEvent} subscriber; drives the idle ribbon message. */
-    private static final java.util.concurrent.atomic.AtomicLong logLineCount =
-            new java.util.concurrent.atomic.AtomicLong(0L);
 
     private static final String UNTITLED_LABEL = "(untitled)";
     private static final String DEFAULT_FILE_NAME = "untitled.ptf";
@@ -224,12 +219,9 @@ public final class App {
      *  never run mid-keystroke. */
     private static volatile long settledVersion = -1L;
 
-    /** The error message currently parked in the ribbon's default slot, so the
-     *  per-frame caret check only republishes when it actually changes. */
-    private static String shownErrorMessage = null;
-    /** The idle (non-error) message last published — a contextual hint or the log-line
-     *  count — so the per-frame refresh republishes only when the text changes. */
-    private static String shownIdleMessage = null;
+    /** The caret-error text last pushed as the status bar's contextual override, so the
+     *  per-frame caret check only republishes (or clears) when it actually changes. */
+    private static String shownContextual = null;
 
     // Caret-hint cache: the parse-backed inScope/exporters lookups are too heavy to run
     // every frame, but only change when the token under the caret or the buffer changes.
@@ -355,10 +347,9 @@ public final class App {
                     Icon.DEFAULT_FONT_GROUP,
                     Icons.CHEVRON_UP, Icons.CHEVRON_DOWN, Icons.X, Icons.SEARCH));
 
-                // Count every log line for the idle ribbon indicator (before the first
-                // setDefaultMessage, so the count and the message stay in step).
-                Status.subscribe(App::onLogEvent);
-                Status.setDefaultMessage(idleStatusMessage(), Variant.DEFAULT);
+                // The idle bar is the status ledger's own "N new" counter now; the editor
+                // only feeds it alerts (Status.good/bad/notify) and a contextual override
+                // for caret errors (updateErrorStatus). No app-owned idle message.
                 Status.setCloseIcon(Icons.X);
                 Component root = Status.wrap(buildUi());
                 wireInput(win, cursors);
@@ -660,7 +651,7 @@ public final class App {
     private static void launchProgram(String jvmMainClass, String nativeFlag, String sourceName,
                                       String code, Path resolveDir, String successMessage) {
         String resolveArg = resolveDir != null ? resolveDir.toString() : "";
-        Status.info("launching " + sourceName + " ...");
+        Status.notify("launching " + sourceName + " ...");
         Thread worker = new Thread(() -> {
             Path tmp = null;
             DebugServer debug = null;
@@ -685,7 +676,7 @@ public final class App {
                 String captured = drainAndCapture(proc);
                 int exit = proc.waitFor();
                 if (exit == 0) {
-                    Status.success(successMessage);
+                    Status.good(successMessage);
                 } else {
                     // The process-level exit code is the crash backstop: a hard death (segfault,
                     // System.exit, OOM) never gets to send RunFailed over the debug port, so this
@@ -695,10 +686,10 @@ public final class App {
                     String details = captured.isBlank()
                             ? "The program exited with code " + exit + " and produced no output."
                             : null;
-                    Status.error(sourceName + " exited with code " + exit, details);
+                    Status.bad(sourceName + " exited with code " + exit, details);
                 }
             } catch (IOException | InterruptedException e) {
-                Status.error("Could not launch " + sourceName + ": " + e.getMessage(), String.valueOf(e));
+                Status.bad("Could not launch " + sourceName + ": " + e.getMessage(), String.valueOf(e));
             } finally {
                 if (debug != null) {
                     debug.close();
@@ -766,7 +757,7 @@ public final class App {
         try {
             return DebugServer.start(new DebugServer.Listener() {
                 @Override public void onRunStarted(String src) {
-                    Status.info("run started: " + src);
+                    Status.notify("run started: " + src);
                 }
                 @Override public void onEvent(long seq, String typeName, sibarum.elektro.queue.dyn.DynValue payload) {
                     Status.log("event #" + seq + " " + typeName + " " + payload);
@@ -775,15 +766,15 @@ public final class App {
                     Status.log("action " + reactionName + " reacted to " + eventType);
                 }
                 @Override public void onRunCompleted(String resultText) {
-                    Status.success("run completed -> " + resultText);
+                    Status.good("run completed -> " + resultText);
                 }
                 @Override public void onRunFailed(String message, int line, int col) {
                     String at = (line > 0) ? " (" + line + ":" + col + ")" : "";
-                    Status.error("run failed" + at, message);
+                    Status.bad("run failed" + at, message);
                 }
             });
         } catch (RuntimeException e) {
-            Status.warn("debug port unavailable (" + e.getMessage() + "); running untapped");
+            Status.bad("debug port unavailable (" + e.getMessage() + "); running untapped");
             return null;
         }
     }
@@ -966,7 +957,7 @@ public final class App {
         updateFilenameLabel();
         if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), "", null);
         TextStates.setContent(codeText, "");
-        Status.success("New file");
+        Status.good("New file");
     }
 
     private static void onOpenClicked() {
@@ -984,7 +975,7 @@ public final class App {
         if (session != null) session.onDocumentChanged(RecoveryStore.keyFor(null), src, null);
         TextStates.setContent(codeText, src);
         activeTab.set(EDITOR_TAB);
-        Status.success("Loaded sample: " + sample.title());
+        Status.good("Loaded sample: " + sample.title());
     }
 
     /** Read {@code path} into the editor and adopt it as the current document.
@@ -1006,11 +997,11 @@ public final class App {
                         path.toAbsolutePath().normalize().toString());
             }
             TextStates.setContent(codeText, content);  // fires onEditorContentChanged → highlight + live-compile
-            if (announce) Status.success("Opened " + path.getFileName());
+            if (announce) Status.good("Opened " + path.getFileName());
             return true;
         } catch (IOException e) {
             if (announce) {
-                Status.error("Error opening " + path.getFileName() + ": " + e.getMessage(), path.toString());
+                Status.bad("Error opening " + path.getFileName() + ": " + e.getMessage(), path.toString());
             }
             return false;
         }
@@ -1049,9 +1040,9 @@ public final class App {
                 session.onSaved(prevKey, RecoveryStore.keyFor(path), content,
                         path.toAbsolutePath().normalize().toString());
             }
-            Status.success("Saved " + path.getFileName());
+            Status.good("Saved " + path.getFileName());
         } catch (IOException e) {
-            Status.error("Error saving " + path.getFileName() + ": " + e.getMessage(), path.toString());
+            Status.bad("Error saving " + path.getFileName() + ": " + e.getMessage(), path.toString());
         }
     }
 
@@ -1112,7 +1103,7 @@ public final class App {
 
         String activeKey = RecoveryStore.keyFor(currentFile);
         if (session != null && session.hasRecovery(activeKey)) {
-            Status.info("Unsaved changes from a previous session are available for "
+            Status.notify("Unsaved changes from a previous session are available for "
                     + documentDisplayName() + " — open the System menu to recover.");
         }
     }
@@ -1171,20 +1162,20 @@ public final class App {
         Optional<String> recovered = session == null ? Optional.empty() : session.recover(key);
         OverlayStack.pop();
         if (recovered.isEmpty()) {
-            Status.warn("No recovery available for " + documentDisplayName());
+            Status.bad("No recovery available for " + documentDisplayName());
             return;
         }
         // Replaces the editor buffer; the same file stays open. The recovered
         // text now differs from disk, so it's treated as unsaved until saved
         // (at which point the recovery copy is deleted).
         TextStates.setContent(codeText, recovered.get());
-        Status.success("Recovered " + documentDisplayName() + " — save to keep the changes.");
+        Status.good("Recovered " + documentDisplayName() + " — save to keep the changes.");
     }
 
     private static void onPurgeAllClicked() {
         int removed = session == null ? 0 : session.purgeAll();
         OverlayStack.pop();
-        Status.success("Purged " + removed + " recovery file" + (removed == 1 ? "" : "s"));
+        Status.good("Purged " + removed + " recovery file" + (removed == 1 ? "" : "s"));
     }
 
     // --- Input wiring: GLFW callbacks → framework controllers ---
@@ -1491,7 +1482,7 @@ public final class App {
     private static void handleNavigateOrImportAtCaret(Component.Text view) {
         int[] w = caretIdentBounds(view);
         if (w == null) {
-            Status.info("Put the caret on a name to navigate to it or add its requires.");
+            Status.notify("Put the caret on a name to navigate to it or add its requires.");
             return;
         }
         navigateFrom(view, TextStates.contentOf(view).substring(w[0], w[1]));
@@ -1512,7 +1503,7 @@ public final class App {
      */
     private static void navigateFrom(Component.Text source, String name) {
         if (DefinitionNavigator.isPrimitive(name)) {
-            Status.info("'" + name + "' is a builtin primitive — no source or import.");
+            Status.notify("'" + name + "' is a builtin primitive — no source or import.");
             return;
         }
         String content = TextStates.contentOf(source);
@@ -1540,9 +1531,9 @@ public final class App {
             if (DefinitionNavigator.resolve(content, name, resolveDir()).isPresent()) {
                 openDefinition(content, name);   // resolvable but not importable — just show it
             } else if (editor) {
-                Status.warn("No definition or exporting module found for '" + name + "'.");
+                Status.bad("No definition or exporting module found for '" + name + "'.");
             } else {
-                Status.warn("No definition for '" + name + "' reachable from this view.");
+                Status.bad("No definition for '" + name + "' reachable from this view.");
             }
         } else if (exporters.size() == 1) {
             addRequires(exporters.get(0), name);
@@ -1575,7 +1566,7 @@ public final class App {
         DefinitionNavigator.RequiresEdit edit =
                 DefinitionNavigator.insertRequires(TextStates.contentOf(codeText), module, name);
         if (!edit.changed()) {
-            Status.info(edit.message());
+            Status.notify(edit.message());
             return;
         }
         TextStates.setContent(codeText, edit.text());
@@ -1585,7 +1576,7 @@ public final class App {
                 : caret;
         ts.caretIndex = newCaret;
         ts.selectionAnchor = newCaret;
-        Status.success(edit.message() + " — Ctrl+click/Ctrl+Enter again to open it.");
+        Status.good(edit.message() + " — Ctrl+click/Ctrl+Enter again to open it.");
     }
 
     // Module explorer palette colors.
@@ -1701,7 +1692,7 @@ public final class App {
         ts.caretIndex = Math.max(0, Math.min(end, len));
         ts.hoverCaretIndex = -1;
         scrollEditorPending = true;   // scroll once the caret's line has a layout rect
-        Status.success("Jumped to the definition of '" + name + "' in this file.");
+        Status.good("Jumped to the definition of '" + name + "' in this file.");
         Invalidator.invalidate();
     }
 
@@ -1719,13 +1710,13 @@ public final class App {
      *  Primitives and misses flash an explanatory status instead of switching tabs. */
     private static void openDefinition(String fromContent, String name) {
         if (DefinitionNavigator.isPrimitive(name)) {
-            Status.info("'" + name + "' is a builtin primitive — no source to open.");
+            Status.notify("'" + name + "' is a builtin primitive — no source to open.");
             return;
         }
         Optional<DefinitionNavigator.Target> found = DefinitionNavigator.resolve(
                 fromContent, name, resolveDir());
         if (found.isEmpty()) {
-            Status.warn("No definition found for '" + name + "'.");
+            Status.bad("No definition found for '" + name + "'.");
             return;
         }
         DefinitionNavigator.Target def = found.get();
@@ -1750,7 +1741,7 @@ public final class App {
         ts.hoverCaretIndex = -1;
         activeTab.set(DEFINITION_TAB);
         scrollDefnPending = true;   // scroll once the tab's text has a layout rect
-        Status.success("Definition of '" + name + "' in " + def.moduleLabel()
+        Status.good("Definition of '" + name + "' in " + def.moduleLabel()
                 + " — Esc to return to the editor.");
     }
 
@@ -2023,7 +2014,7 @@ public final class App {
                 session.onSaved(key, key, content, file.toAbsolutePath().normalize().toString());
             }
         } catch (IOException e) {
-            Status.error("Autosave failed for " + file.getFileName() + ": " + e.getMessage());
+            Status.bad("Autosave failed for " + file.getFileName() + ": " + e.getMessage());
         }
     }
 
@@ -2037,34 +2028,21 @@ public final class App {
         for (ErrorMark m : errorMarks) {
             if (caret >= m.start() && caret <= m.end()) { near = m.message(); break; }
         }
-        // The ribbon's default (idle) slot: an error at the caret wins, carrying a
-        // contextual Auto-Action hint when the token offers one (un-imported → require;
-        // resolvable-but-misused → go to definition); otherwise the log count. This
-        // method is the single author of the default message, runs each frame, and
-        // republishes only when the shown text changes.
+        // Surface the nearest caret error (plus its Auto-Action hint when the token offers
+        // one: un-imported → require; resolvable-but-misused → go to definition) as the
+        // status bar's CONTEXTUAL OVERRIDE — shown only while the caret sits on an error,
+        // and cleared otherwise, reverting the bar to its own ledger counter. Runs each
+        // frame; republishes only when the shown text changes.
+        String full = null;
         if (near != null) {
             String hint = caretHint();
-            String full = hint != null ? near + "   " + hint : near;
-            if (!full.equals(shownErrorMessage)) {
-                shownErrorMessage = full;
-                shownIdleMessage = null;
-                Status.setDefaultMessage(full, Variant.ERROR);
-            }
-            return;
+            full = hint != null ? near + "   " + hint : near;
         }
-        shownErrorMessage = null;
-        String idle = idleStatusMessage();
-        if (!idle.equals(shownIdleMessage)) {
-            shownIdleMessage = idle;
-            Status.setDefaultMessage(idle, Variant.DEFAULT);
+        if (!java.util.Objects.equals(full, shownContextual)) {
+            shownContextual = full;
+            if (full != null) Status.setContextualMessage(full, Severity.BAD);
+            else Status.clearContextualMessage();
         }
-    }
-
-    /** The idle ribbon message: the running count of lines written to the event log,
-     *  plus the click-to-view affordance. The lowest-priority default-slot content. */
-    private static String idleStatusMessage() {
-        long n = logLineCount.get();
-        return n + (n == 1 ? " line" : " lines") + " written to the event log — click here to view.";
     }
 
     /**
@@ -2106,15 +2084,6 @@ public final class App {
                     : "Hint: Ctrl+click '" + name + "' to auto-require it.";
         }
         return "Hint: Ctrl+click '" + name + "' to go to its definition.";
-    }
-
-    /** Status log subscriber: tally each event's lines (message + any detail lines,
-     *  matching how the log dialog renders it). The visible message is owned by
-     *  {@link #updateErrorStatus}, which runs every frame and picks up the new count;
-     *  this only advances the counter. Runs on the logging thread — the counter is atomic. */
-    private static void onLogEvent(sibarum.dasum.gui.core.status.StatusEvent e) {
-        int lines = 1 + (e.hasDetails() ? e.details().split("\\R").length : 0);
-        logLineCount.addAndGet(lines);
     }
 
     /** Red underline beneath each error's token (or its {@code requires} statement),
