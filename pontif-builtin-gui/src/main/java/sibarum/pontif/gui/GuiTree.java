@@ -161,15 +161,15 @@ final class GuiTree {
                 // immediately without a click first (tightening the idea→result loop). Only if nothing
                 // else has grabbed focus yet — a later field or a click still wins.
                 if (FocusState.focused() == null) FocusState.set(field);
-                // A bare Text draws no fill/border, so wrap it in a styled frame. Use Ui.column()
-                // (fit-content on both axes by default) — NOT Ui.box(), which is the fixed-size
-                // primitive and demands explicit width+height. The column hugs the field (its fixed
-                // 18em width + our padding) and carries the fill/border. The interactive Text stays
-                // the hit-test / focus / SetText target (the column is non-interactive, so a click
-                // inside descends to the child Text — HitTest returns the deepest INTERACTIVE node).
-                yield Ui.column().padding(Em.of(0.4f)).background(FIELD_BG)
-                        .border(Em.of(0.1f), FIELD_BORDER).cornerRadius(Em.of(0.3f))
-                        .add(field).build();
+                // A bare Text draws no fill, so wrap it in a Ui.column() frame with a FLAT background
+                // — deliberately NOT rounded/bordered. The Batcher draws every ROUNDED fill on top of
+                // every FLAT fill (its documented cross-bucket ordering), so a rounded/bordered frame
+                // paints over the caret + selection (both flat quads emitted by the text renderer),
+                // hiding them even though editing works — the "invisible caret/selection" bug. A flat
+                // background is a flat quad submitted before the child's caret/selection in the same
+                // bucket, so they show on top. The interactive Text stays the hit-test/focus/SetText
+                // target (the column is non-interactive; HitTest returns the deepest INTERACTIVE node).
+                yield Ui.column().padding(Em.of(0.4f)).background(FIELD_BG).add(field).build();
             }
             case "Button" -> {
                 String id = str(rv, "id");
