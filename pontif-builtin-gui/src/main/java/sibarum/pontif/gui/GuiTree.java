@@ -198,8 +198,11 @@ final class GuiTree {
                 // Build the SceneView with an explicit grow so it fills its backing panel below.
                 Component.SceneView view = (Component.SceneView) Ui.sceneView()
                         .background(PLOT_BG).grow(1).build();
+                // Uniform (aspect-preserving) camera for now: fill mode (fillViewport(true)) stretches
+                // the world-space axis labels + gridlines and skews them. True fill without skew needs
+                // screen-space chrome (labels/ticks/grid at fixed pixel size) — a dasum-vis slice.
                 sibarum.dasum.gui.vis.plot.PlotView pv =
-                        new sibarum.dasum.gui.vis.plot.PlotView(view).fillViewport(true);
+                        new sibarum.dasum.gui.vis.plot.PlotView(view);
                 plots.put(id, new PlotEntry(pv, ctx));
                 ChartBuilder.plotExprInto(pv, str(rv, "expr"), ctx);  // no-op if blank/unparseable
                 // A padded backing panel (solid PLOT_BG) around the plot: the SceneView no longer runs
