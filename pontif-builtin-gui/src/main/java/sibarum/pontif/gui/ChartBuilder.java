@@ -111,20 +111,40 @@ final class ChartBuilder {
         }
         if (xlo > xhi) return false;   // nothing valid — keep the last good plot
 
-        // Pass 2: resample every curve across the shared [xlo, xhi] at full resolution.
-        List<Series> all = new ArrayList<>();
-        for (int i = 0; i < asts.size(); i++) {
-            RecordValue ast = asts.get(i);
-            if (ast == null) continue;
-            Color col = SERIES_PALETTE[i % SERIES_PALETTE.length];
-            try {
-                all.addAll(buildReliableSeries(xlo, xhi, resampleReliable(ast, xlo, xhi, ctx), col));
-            } catch (RuntimeException ex) {
-                // skip this expression; a bad one never blanks the others
+        // Pass 2: resample every curve across the shared [xlo, xhi], and gather EVERY curve's bounded
+        // values into one set for a SHARED robust y-range. All curves must clip + pole-aim to the same
+        // [ymin, ymax], else a curve blows up only to its own band — e.g. 1/x's asymptote stopping
+        // short of the frame edge while a taller neighbour sets the frame.
+        List<java.util.List<ReliableSeries.ReliableSpan>> perCurve = new ArrayList<>();
+        List<Double> allBounds = new ArrayList<>();
+        for (RecordValue ast : asts) {
+            java.util.List<ReliableSeries.ReliableSpan> spans = null;
+            if (ast != null) {
+                try {
+                    spans = resampleReliable(ast, xlo, xhi, ctx);
+                    allBounds.addAll(reliableBounds(spans));
+                } catch (RuntimeException ex) {
+                    spans = null;
+                }
             }
+            perCurve.add(spans);
+        }
+        double[] yr = allBounds.isEmpty() ? new double[]{-1, 1} : robustRange(allBounds);
+
+        // Pass 3: build each curve clipped + pole-aimed to the SHARED y-range.
+        List<Series> all = new ArrayList<>();
+        for (int i = 0; i < perCurve.size(); i++) {
+            java.util.List<ReliableSeries.ReliableSpan> spans = perCurve.get(i);
+            if (spans == null) continue;
+            all.addAll(buildReliableSeries(xlo, xhi, spans, SERIES_PALETTE[i % SERIES_PALETTE.length], yr));
         }
         if (all.isEmpty()) return false;
-        view.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, all), all, PlotStyle.defaults());
+
+        // Frame EXACTLY to the shared window × y-range (Axis.linear, no extra padding) so a pole
+        // branch — clipped to [ymin, ymax] — reaches the very top/bottom edge.
+        PlotFrame frame = new PlotFrame(0f, 0f, 10f, 5.5f,
+                Axis.linear(xlo, xhi), Axis.linear(yr[0], yr[1]));
+        view.showLinePlot(frame, all, PlotStyle.defaults());
         return true;
     }
 
