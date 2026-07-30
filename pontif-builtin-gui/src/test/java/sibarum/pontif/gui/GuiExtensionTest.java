@@ -175,6 +175,31 @@ class GuiExtensionTest {
     }
 
     @Test
+    void reactivePlotterProgram_typeChecks() {
+        Extensions.install(new GuiExtension());
+
+        // Slice A (docs/reactive-gui.md): TextField fires TextChanged; the conduit folds the live
+        // expression into a Model and emits the ISOLATED SetPlot to the retained ExprPlot (re-plotted
+        // in place, never rebuilt). This only compiles + links (the ExprPlot/SetPlot shapes, the
+        // conduit, the SetPlot sink); the live type→plot reframe is verified manually (needs GLFW):
+        // exec:exec -Dptf=examples/reactive-plotter.ptf. Kept in sync with that example.
+        CompileResult result = new PontifCompiler().compileAlt("""
+                requires pontif.gui.{TextField, ExprPlot, window, GuiEvent, TextChanged, SetPlot}
+                struct Model(expr:String)
+                conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4") -> (
+                  let m2 = match e { [TextChanged] -> Model(e.text)  [_] -> s }
+                  emit SetPlot("plot", m2.expr)
+                  m2
+                )
+                main ( window({title = "Plotter"}, {
+                  TextField("expr", "x^2 - 4"), ExprPlot("plot", "x^2 - 4")
+                }) )""", "reactive-plotter.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, result,
+                () -> "reactive plotter program should type-check + link; got "
+                        + (result instanceof CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
     void linePlotProgram_linksAgainstExtension() {
         Extensions.install(new GuiExtension());
 

@@ -1,0 +1,31 @@
+# The reactive plotter (docs/reactive-gui.md, Slice A) — the compulsive type→plot loop, single
+# expression. Type a math expression and the curve reframes live, with ZERO app state in Java: the
+# expression string lives only as the conduit's state S.
+#
+# The loop:
+#   type in the field -> the bridge fires TextChanged{id = "expr", text = <buffer>}
+#   -> the `app` conduit folds the text into the Model and emits SetPlot("plot", text)
+#   -> the SetPlot sink re-plots the RETAINED ExprPlot in place (parse + reliable-sample + auto-frame),
+#      never rebuilding the SceneView. A half-typed expression keeps the last good plot.
+#
+# Run it (needs a display + GLFW; NOT headless):
+#   mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/reactive-plotter.ptf
+requires pontif.gui.{TextField, ExprPlot, window, GuiEvent, TextChanged, SetPlot}
+
+# The app model — the current expression text, threaded as the conduit's state S.
+struct Model(expr:String)
+
+# The stateful fold: a TextChanged carries the field's live buffer; fold it into the Model and re-plot.
+# `[_]` is the open-world catch-all the open GuiEvent trait requires.
+conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4") -> (
+  let m2 = match e { [TextChanged] -> Model(e.text)  [_] -> s }
+  emit SetPlot("plot", m2.expr)
+  m2
+)
+
+# Build the retained tree ONCE: an editable "expr" field seeded with the initial expression, and the
+# "plot" ExprPlot (the SetPlot target). Both are direct window children so the SceneView fills.
+main ( window({title = "Plotter", width = 1000, height = 700}, {
+  TextField("expr", "x^2 - 4"),
+  ExprPlot("plot", "x^2 - 4")
+}) )

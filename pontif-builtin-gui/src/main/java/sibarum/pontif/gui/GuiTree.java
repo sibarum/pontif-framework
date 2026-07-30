@@ -74,6 +74,30 @@ final class GuiTree {
     }
 
     /**
+     * Retained expr-plot widgets ({@code ExprPlot}) addressable by id for the {@code SetPlot} command.
+     * Kept separate from {@link #widgets} because a plot update re-publishes scene data to a retained
+     * {@link sibarum.dasum.gui.vis.plot.PlotView} (never a rebuild), and the reliable sampler needs the
+     * {@code ctx} captured when the plot was built. Cleared with the window like {@link #widgets}.
+     */
+    private static final java.util.Map<String, PlotEntry> plots = new java.util.HashMap<>();
+    private record PlotEntry(sibarum.dasum.gui.vis.plot.PlotView view, NativeCalls.Context ctx) {}
+
+    /**
+     * Apply an isolated expr-plot update (the {@code pontif.gui/SetPlot} sink): re-plot the retained
+     * SceneView with this id from the expression string, IN PLACE (no rebuild — the camera survives).
+     * Unparseable/half-typed text keeps the last good plot ({@link ChartBuilder#plotExprInto} returns
+     * false and leaves it). An unknown id is a no-op logged to StdErr.
+     */
+    static void setPlot(String id, String expr) {
+        PlotEntry e = plots.get(id);
+        if (e == null) {
+            System.err.println("SetPlot: no plot widget with id '" + id + "' in the current window");
+            return;
+        }
+        ChartBuilder.plotExprInto(e.view(), expr, e.ctx());
+    }
+
+    /**
      * Apply an isolated text update to a retained widget (the {@code pontif.gui/SetText} sink): set
      * the component's content through dasum {@link TextStates}, which mutates the identity-keyed
      * sidecar and invalidates — NO rebuild. An unknown id is a no-op logged to StdErr (a likely typo
@@ -161,6 +185,18 @@ final class GuiTree {
                     .justify(justify(str(rv, "justify"))).align(align(str(rv, "align")))
                     .addAll(childrenOf(rv, ctx)).build();
             case "LinePlot" -> buildLinePlot(rv);
+            // A RETAINED, reactive expression plot (docs/reactive-gui.md, Slice A): a SceneView drawn
+            // from `expr` and updatable in place via SetPlot(id, expr). Registered in `plots` (not
+            // `widgets`) with the build ctx, which the reliable sampler needs. Initial draw here;
+            // later edits re-publish without rebuilding (the camera survives).
+            case "ExprPlot" -> {
+                String id = str(rv, "id");
+                Component.SceneView view = plotSceneView();  // fill + grow + interactive
+                sibarum.dasum.gui.vis.plot.PlotView pv = new sibarum.dasum.gui.vis.plot.PlotView(view);
+                plots.put(id, new PlotEntry(pv, ctx));
+                ChartBuilder.plotExprInto(pv, str(rv, "expr"), ctx);  // no-op if blank/unparseable
+                yield view;
+            }
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
             // chart `chart(...)` opens standalone, but as a component so it can sit in a layout
             // beside a user Button whose onClick calls exportSvg on the same layers.
@@ -307,10 +343,12 @@ final class GuiTree {
     static Object openWindow(String title, int width, int height,
             RecordValue tree, NativeCalls.Context ctx) {
         widgets.clear();
+        plots.clear();
         try {
             return openWindowCore(title, width, height, false, () -> toComponent(tree, ctx));
         } finally {
             widgets.clear();
+            plots.clear();
         }
     }
 

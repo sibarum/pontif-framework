@@ -79,6 +79,28 @@ final class ChartBuilder {
     }
 
     /**
+     * Reactive expr-plot update (docs/reactive-gui.md, Slice A): parse {@code exprText}, sample it
+     * reliably, and republish the series to the RETAINED {@code view} <b>in place</b> — never
+     * rebuilding the SceneView, so the camera + GL scene survive and the update is cheap (the same
+     * discipline as {@code plotInput}'s live listener, but driven by the {@code SetPlot} command).
+     * Returns false — leaving the last good plot untouched — when the text won't parse or sample, so a
+     * half-typed expression never blanks the plot.
+     */
+    static boolean plotExprInto(PlotView view, String exprText, NativeCalls.Context ctx) {
+        if (exprText == null) return false;
+        java.util.Optional<RecordValue> parsed = ExprParser.parse(exprText);
+        if (parsed.isEmpty()) return false;
+        try {
+            List<Series> series = sampleReliableJava(parsed.get(), ctx);
+            if (series.isEmpty()) return false;
+            view.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series), series, PlotStyle.defaults());
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    /**
      * The shared 2D line-chart component: a {@link Component.SceneView} carrying the given
      * {@link Series} published through a {@link PlotView}, axes auto-ranged over ALL series, with
      * gridlines + tick labels (from {@link PlotStyle#defaults()}), pan/zoom enabled.

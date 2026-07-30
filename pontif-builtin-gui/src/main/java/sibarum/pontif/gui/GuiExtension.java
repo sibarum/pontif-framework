@@ -56,6 +56,11 @@ public final class GuiExtension implements Extension {
      */
     @Override
     public Map<String, NativeFunctions.Effect> effects() {
-        return Map.of("SetText", (event, origin) -> GuiTree.setText(str(event, "id"), str(event, "text")));
+        return Map.of(
+            "SetText", (event, origin) -> GuiTree.setText(str(event, "id"), str(event, "text")),
+            // The reactive expr-plot sink (docs/reactive-gui.md, Slice A): re-plot the retained
+            // ExprPlot with this id, in place. Sibling of SetText — Pontif decides what to plot, the
+            // bridge renders it.
+            "SetPlot", (event, origin) -> GuiTree.setPlot(str(event, "id"), str(event, "expr")));
     }
 }

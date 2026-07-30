@@ -1,6 +1,6 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, TextField, Column, LinePlot, window, Clickable, GuiEvent, Clicked, TextChanged, SetText}
+exports @.{Label, Button, TextField, Column, LinePlot, ExprPlot, window, Clickable, GuiEvent, Clicked, TextChanged, SetText, SetPlot}
 
 # Elements are ordinary structs you CONSTRUCT directly — Label{id = "count", text = "0"},
 # Button{id = "inc", text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -21,6 +21,12 @@ struct Column(justify:String, align:String, children:_)
 # The bridge converts xs/ys to double[] and renders them in a Component.SceneView
 # (dasum-vis), with pan-on-drag / zoom-on-scroll. `_` so any numeric aggregate fits.
 struct LinePlot(xs:_, ys:_)
+
+# A RETAINED, reactive expression plot (docs/reactive-gui.md, Slice A): draws `expr` (a math string
+# like "x^2 - 4") auto-framed, and is addressable by `id` for live re-plotting via SetPlot(id, expr).
+# The bridge holds the SceneView and re-publishes its data in place on each SetPlot — never rebuilt,
+# so the camera survives. This is the plotting twin of Label/SetText.
+struct ExprPlot(id:String, expr:String)
 
 # A widget the bridge renders as a clickable button and invokes on click. Make your
 # own button by subtyping Button and assigning Clickable with an onClick that emits:
@@ -51,6 +57,13 @@ assign trait TextChanged:GuiEvent{}
 # siblings (SetChecked, SetChildren, …) will join it as the widget set grows.
 struct SetText(id:String, text:String)
 assign trait SetText:Event{}
+
+# A COMMAND: re-plot the retained ExprPlot with this `id` from the expression string `expr`. Like
+# SetText this is an ISOLATED update — the bridge re-publishes the SceneView's data in place (never a
+# rebuild; the camera survives). A half-typed / unparseable `expr` keeps the last good plot. This is
+# what makes the calculator's type→plot loop live: `emit SetPlot("plot", m2.expr)` from the conduit.
+struct SetPlot(id:String, expr:String)
+assign trait SetPlot:Event{}
 
 # The window action (native; the placeholder body is never run): opens a window
 # rendering the given root tree on the root thread, until closed.
