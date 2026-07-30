@@ -134,6 +134,11 @@ public final class IrCompiler {
         // InferenceContext.fromModule so the runtime tags a metareference's concrete
         // nominal (AlgebraicDispatch/DispatchBase) the same way the sort stamp does.
         java.util.Set<String> algebraicFunctions = new java.util.LinkedHashSet<>();
+        // Standing index declarations (docs/stream-queries.md §3) by the bare name of the
+        // element type they key. A `#index#SEQ#KIND#NAME` FunctionDecl (the parser's lowering,
+        // mirroring #action#) is compiled as an ordinary function AND recorded here; a list per
+        // type since several views may key one T differently. Slice B: recorded, drives nothing.
+        Map<String, List<CompiledModule.CompiledIndex>> indexesByType = new LinkedHashMap<>();
 
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
@@ -163,6 +168,23 @@ public final class IrCompiler {
                     // Checked FIRST: "#conduit-init#" does not contain the substring "#conduit#"
                     // (the marker needs `#conduit` immediately followed by `#`), so the two legs
                     // never cross-match. Collect by the shared `SEQ#NAME` suffix.
+                    // A standing index (`#index#SEQ#KIND#NAME`): record it under the element
+                    // type's bare name (the single param's sort), recovering KIND and NAME from
+                    // the key. `contains` not `startsWith` — the linker may module-qualify.
+                    if (fd.name().contains("#index#")) {
+                        String suffix = fd.name().substring(
+                                fd.name().indexOf("#index#") + "#index#".length());
+                        String[] parts = suffix.split("#", 3);   // SEQ, KIND, NAME
+                        String kind = parts.length > 1 ? parts[1] : "";
+                        String idxName = parts.length > 2 ? parts[2] : suffix;
+                        IrSort elemSort = fd.params().get(0).sort();
+                        String base = Coercions.baseName(elemSort);
+                        int slash = base == null ? -1 : base.lastIndexOf('/');
+                        String key = slash < 0 ? base : base.substring(slash + 1);
+                        indexesByType
+                                .computeIfAbsent(key, k -> new ArrayList<>())
+                                .add(new CompiledModule.CompiledIndex(idxName, kind, key, cf));
+                    }
                     if (fd.name().contains("#conduit-init#")) {
                         String suffix = fd.name().substring(
                                 fd.name().indexOf("#conduit-init#") + "#conduit-init#".length());
@@ -255,7 +277,7 @@ public final class IrCompiler {
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
                 structRegistry, topLevelLets, actionsByType, algebraicFunctions, effectiveSorts,
-                conduitsByType);
+                conduitsByType, indexesByType);
     }
 
     /** The local head-constructor name of a {@code proof} tree ({@code Algebraic}), or null. */

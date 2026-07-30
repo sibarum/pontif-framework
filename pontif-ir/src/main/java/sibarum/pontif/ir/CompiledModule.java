@@ -20,7 +20,8 @@ public record CompiledModule(
         Map<String, List<CompiledAction>> actionsByType,
         java.util.Set<String> algebraicFunctions,
         Map<Origin.Span, IrSort> effectiveSorts,
-        Map<String, CompiledConduit> conduitsByType) {
+        Map<String, CompiledConduit> conduitsByType,
+        Map<String, List<CompiledIndex>> indexesByType) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
@@ -56,6 +57,23 @@ public record CompiledModule(
         // through the matching conduit (a scan over the type's temporal event stream), then
         // dispatches the conduit's output to the actions. Threaded exactly like actionsByType.
         conduitsByType = Map.copyOf(conduitsByType);
+        // Standing index declarations (docs/stream-queries.md §3, docs/keyed.md) by the bare
+        // name of the element type they key. Populated from `#index#`-keyed FunctionDecls (the
+        // parser's lowering, mirroring #action#/#conduit#). A list per type — an index is a
+        // NAMED key-mapping decoupled from T's identity, so several views over one T coexist.
+        // Slice B: declared + type-checked, drives no structure; Slice C's pushdown reads it.
+        indexesByType = Map.copyOf(indexesByType);
+    }
+
+    /** Back-compat constructor for callers predating the index registry (Slice B). */
+    public CompiledModule(String name, DispatchTable dispatch,
+            Map<FunctionDecl, CompiledFunction> functions, IrExpr main,
+            Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
+            List<String> topLevelLets, Map<String, List<CompiledAction>> actionsByType,
+            java.util.Set<String> algebraicFunctions, Map<Origin.Span, IrSort> effectiveSorts,
+            Map<String, CompiledConduit> conduitsByType) {
+        this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
+                actionsByType, algebraicFunctions, effectiveSorts, conduitsByType, Map.of());
     }
 
     /** Back-compat: a module with no conduits (the pre-conduit shape). */
@@ -140,6 +158,18 @@ public record CompiledModule(
      * to fire. The reaction's value is discarded.
      */
     public record CompiledAction(Sort matchSort, CompiledFunction reaction) {}
+
+    /**
+     * A standing index declaration (docs/stream-queries.md §3, docs/keyed.md) — Slice B. A
+     * NAMED key-mapping {@code T → K} over the element type {@code elementType}, decoupled from
+     * {@code T}'s intrinsic identity (several views over one {@code T} may key it differently).
+     * {@code kind} ∈ {@code unique|ordinal|cardinal} is a HINT for the physical structure the
+     * optimizer may build (Slice C) — it is NOT enforced here. {@code keyFunction} is the
+     * lowered {@code #index#} key-transform (a 1-param function {@code (n:T)} whose body is the
+     * projection producing {@code K}).
+     */
+    public record CompiledIndex(String name, String kind, String elementType,
+            CompiledFunction keyFunction) {}
 
     /**
      * The Conduit registered for the event type named {@code typeName} (its base name, as

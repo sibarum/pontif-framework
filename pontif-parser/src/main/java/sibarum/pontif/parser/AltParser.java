@@ -2173,12 +2173,60 @@ public final class AltParser {
      * {@code assign trait …} (trait impl) vs {@code assign proof …}
      * (return-refinement proof).
      */
+    /** Index-kind words for `assign <kind> index …` — contextual, not reserved. */
+    private static final Set<String> INDEX_KINDS = Set.of("unique", "ordinal", "cardinal");
+
+    private int indexSeq = 0;
+
     private IrStmt parseAssign() throws ParseException {
         AltToken next = peek(1);  // the token after "assign"
         if (next.kind() == AltToken.Kind.IDENT && next.text().equals("proof")) {
             return parseAssignProof();
         }
+        // `assign <unique|ordinal|cardinal> index NAME:[ (n:T) -> key ]` — a standing index
+        // declaration (docs/stream-queries.md §3, docs/keyed.md). The kind word and `index`
+        // are contextual (not reserved), disambiguated by `<kind> index` appearing together.
+        if (next.kind() == AltToken.Kind.IDENT && INDEX_KINDS.contains(next.text())
+                && peek(2).kind() == AltToken.Kind.IDENT && peek(2).text().equals("index")) {
+            return parseAssignIndex();
+        }
         return parseAssignTrait();
+    }
+
+    /**
+     * A standing index declaration (docs/stream-queries.md §3, docs/keyed.md):
+     * {@code assign <kind> index NAME:[ (n:T) -> keyExpr ]}, {@code kind ∈ unique|ordinal|cardinal}.
+     * An index is a NAMED key-mapping {@code T → K} decoupled from {@code T}'s intrinsic identity —
+     * several views over one {@code T} may key it differently (James, 2026-07-29). {@code K} is a
+     * value carrying {@code {hashCode, equals}} (a type with that trait, or a tuple of primitive
+     * value types that get it for free); a compound key is the fragment's tuple return.
+     *
+     * <p>Lowered — mirroring {@code action}/{@code conduit} — to an ordinary
+     * {@link IrStmt.FunctionDecl} under a reserved, non-lexable {@code #index#<seq>#<kind>#<name>}
+     * key, so every downstream pass handles it uniformly and the key-transform's body is
+     * <b>type-checked for free</b> (its projection validated against {@code T}). This slice (B1)
+     * only parses + type-checks; registration (B2) and structure/pushdown (Slice C) follow. It
+     * drives no structure and enforces no uniqueness constraint — the kind is a hint only.
+     */
+    private IrStmt parseAssignIndex() throws ParseException {
+        AltToken start = expectKeyword("assign");
+        String kind = expect(AltToken.Kind.IDENT).text();   // unique | ordinal | cardinal
+        expect(AltToken.Kind.IDENT);                         // "index" (guaranteed by dispatch)
+        String name = parseDeclarationName();
+        expect(AltToken.Kind.COLON);
+        if (!looksLikeClause()) {
+            throw new ParseException(
+                    "an index declaration expects a key-transform fragment `[ (n:T) -> keyExpr ]` "
+                            + "after `:` (docs/stream-queries.md §3)", peek().origin());
+        }
+        IrExpr.Lambda frag = parseClause();
+        if (frag.params().size() != 1) {
+            throw new ParseException(
+                    "an index key-transform takes exactly one parameter (the element `n:T`); got "
+                            + frag.params().size(), start.origin());
+        }
+        String key = "#index#" + (indexSeq++) + "#" + kind + "#" + name;
+        return new IrStmt.FunctionDecl(key, frag.params(), IrSort.named("_"), frag.body(), start.origin());
     }
 
     /**

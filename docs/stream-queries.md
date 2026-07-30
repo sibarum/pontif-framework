@@ -3,8 +3,9 @@
 Status: **DESIGN — PROPOSED (2026-07-28); Slice A LANDED (2026-07-28).** Converged in a
 design conversation with James; the two load-bearing rulings (the bracket-content
 disambiguation and terminal-operation cardinality) are **RULED**, the surface names are
-**PROPOSED**. Slice A (`.first()` over a bare-type-sort query, scan-correct) is implemented
-and green (`StreamQueryTest`) — see §5.
+**PROPOSED**. Landed & green: Slice A (`.first()`), `.all()`, `[T|Absent]` result-sort
+narrowing (`StreamQueryTest`), and Slice B (`assign … index` parse + register,
+`AssignIndexTest`) — see §3, §5.
 Builds on `keyed.md` (the KEYED disposition — filtering, keys, index/scan duality),
 on `stream-war.md` (the `&s:[…]` transform-spectrum and the *no external `next()`*
 ruling), and on `indexed-streams.md` (the `[Present(T)|OutOfRange]` honest-absence
@@ -126,31 +127,47 @@ second?" check); deferred with constraint enforcement (§4).
 
 ---
 
-## 3. `assign … index` — the explicit, correctness-neutral hint (PROPOSED)
+## 3. `assign … index` — the explicit, correctness-neutral hint (RULED; Slice B1+B2 LANDED)
 
 `keyed.md`'s open edge left the *explicit* index spelling unspecified (it defaults to
-inferring indexes from the retrievals the program performs). This is a candidate spelling
-for that override — a **standing, eager** index declaration decoupled from any spread
-site:
+inferring indexes from the retrievals the program performs). This is the ruled spelling for
+that override — a **standing** index declaration:
 
 ```pontif
-assign unique index myStream:[ n:MyType -> n.unique.property ]
+assign unique index byId:[ (n:User) -> n.id ]           # a named key-mapping User → Int
+assign unique index byBoth:[ (n:User) -> {n.id, n.name} ]   # compound key (tuple)
 ```
 
-- Reuses the `assign` impl verb (as in `assign trait T : B`) — consistent.
-- The body `[ n:MyType -> n.unique.property ]` is a **key sort-transform**, the same key
-  mechanism `keyed.md` already uses inline (`(p:[Person -> @.id -> Int:@unique])`); the
-  named-binder form is the "explicit conversion" arm of the transform spectrum.
-- `unique` binds the `Unique` trait; `ordinal` / `cardinal` are the sibling forms.
-  A **compound index** is a body returning a tuple (or struct-treated-as-tuple); its
-  collision rule is the tuple's generated **structural `Unique`** — already ruled by
-  `keyed.md`.
-- **Correctness-neutral (RULED — the KEYED law restated).** `assign … index` is an
-  *eager-build hint / optimizer directive only*. It never changes the meaning or the type
-  of any retrieval; with or without it, `&s:[sort].first()` returns the same value. It
-  only moves a retrieval from scan to slot-probe. This must be stated at the gate — the
-  same "index/scan is invisible" invariant `keyed.md` rests on. Removing every `assign …
-  index` from a program changes performance, never results.
+- **An index is a NAMED key-mapping `T → K`, decoupled from `T`'s intrinsic identity
+  (RULED — James, 2026-07-29).** `K` is a value carrying `{hashCode, equals}` — either a
+  type with that trait, or a **tuple of primitive value types** that get it for free (the
+  "reflection equals-builder, generated at compile time"; keyed.md's structural `Unique`).
+  The decoupling is the point: several **views** over one `T` may key it *differently*, so
+  uniqueness is not read off `T`'s trait membership — it's declared per index. Hence the
+  registry holds **many indexes per type**, each with its own name.
+- Reuses the `assign` impl verb (as in `assign trait T : B`) — consistent. `unique` /
+  `ordinal` / `cardinal` are contextual (not reserved), disambiguated by `<kind> index`.
+- The body `[ (n:T) -> keyExpr ]` is the **key-transform fragment**; a compound key is a
+  tuple return.
+- **`unique`/`ordinal`/`cardinal` is a KIND hint only (RULED — James, 2026-07-29):** it
+  selects the physical structure the optimizer *may* build (slot / sorted / bucket, keyed.md's
+  three key-traits). It is **not** enforced against data here — uniqueness-constraint
+  enforcement is out of scope (§4).
+- **Correctness-neutral (the KEYED law restated).** `assign … index` is an *eager-build hint
+  / optimizer directive only*. It never changes the meaning or type of any retrieval; with or
+  without it, `&s:[sort].first()` returns the same value. Removing every `assign … index`
+  changes performance, never results.
+
+**Implementation (Slice B1+B2, LANDED 2026-07-30).** Mirrors `action`/`conduit`: the parser
+(`AltParser.parseAssignIndex`) lowers the declaration to an ordinary `IrStmt.FunctionDecl`
+under a reserved, non-lexable `#index#SEQ#KIND#NAME` key with params `(n:T)` and body the
+key-projection — so **the projection is type-checked for free** (a bad field is a compile
+error, `AssignIndexTest`). `IrCompiler` recognizes the `#index#` prefix and registers a
+`CompiledModule.CompiledIndex{name, kind, elementType, keyFunction}` in a new
+`indexesByType : Map<String, List<CompiledIndex>>` (one list per element type — the
+decoupled-views model). **No new `IrStmt`, no new pass.** Drives no structure yet; Slice C's
+pushdown will read the registry. `CompiledModule` gained a back-compat constructor so existing
+call sites are untouched.
 
 ---
 
@@ -236,17 +253,20 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
   `Query` value is NOT yet reified — a query must be terminated in place (`.first()`); no
   index/pushdown (Slice C); the found element is the raw `T`, not narrowed by the predicate
   (the §8.6-style imprecision inherited from the guard-filter).
-- **Slice B — `assign … index` parse + register (declaration only).**
-  Parse `assign [unique|ordinal|cardinal] index name:[ binder:T -> keyExpr ]` into a
-  standing key-transform registered against the relation. `SortChecker` discharges the
-  trait claim (`@unique`, …) exactly as it does an inline key. **Drives no structure** —
-  pure declaration, mirroring `keyed.md` Slice 1's "declared and type-checked but does not
-  yet drive structure."
+- **Slice B — `assign … index` parse + register — LANDED (2026-07-30).**
+  `assign <unique|ordinal|cardinal> index NAME:[ (n:T) -> keyExpr ]` parses (B1) to a marker
+  `#index#SEQ#KIND#NAME` `FunctionDecl` — so the key-projection is **type-checked for free**
+  (bad field → compile error) — and `IrCompiler` registers it (B2) in
+  `CompiledModule.indexesByType` (`Map<String, List<CompiledIndex>>`, one list per element
+  type; `CompiledIndex{name, kind, elementType, keyFunction}`). Mirrors `action`/`conduit`:
+  no new `IrStmt`, no new pass. **Drives no structure**, enforces no constraint — kind is a
+  hint. Pinned by `AssignIndexTest` (6). See §3 for the model (named, decoupled key-mapping).
 - **Slice C — pushdown (pure performance).**
-  The optimizer recognizes a `.first()` whose query pins a projection matching a
-  registered `Unique` index and serves it from the slot map instead of scanning. Results
-  and types identical to Slice A **by construction** — this is the correctness-neutrality
-  of §3 made real; it can land arbitrarily later without touching meaning.
+  The optimizer recognizes a `.first()`/`.all()` whose query pins a projection matching a
+  registered index (read from `indexesByType`) and serves it from the slot/sorted structure
+  instead of scanning. Results and types identical **by construction** — the
+  correctness-neutrality of §3 made real; can land arbitrarily later without touching meaning.
+  (This is the first consumer of the Slice B registry.)
 - **Slice D — the other terminals + the reified `Query`.** `.all()` (0-or-many →
   `Stream[T]`, the materialized "Restrict" face) — **LANDED (2026-07-28)** via
   `lowerQueryAll` (a `STREAM`-output `Iterate` emitting matching elements, dropping the
