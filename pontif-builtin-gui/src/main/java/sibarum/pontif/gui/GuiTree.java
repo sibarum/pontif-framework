@@ -214,21 +214,19 @@ final class GuiTree {
             // later edits re-publish without rebuilding (the camera survives).
             case "ExprPlot" -> {
                 String id = str(rv, "id");
-                // Build the SceneView with an explicit grow so it fills its backing panel below.
-                Component.SceneView view = (Component.SceneView) Ui.sceneView()
-                        .background(PLOT_BG).grow(1).build();
-                // Uniform (aspect-preserving) camera for now: fill mode (fillViewport(true)) stretches
-                // the world-space axis labels + gridlines and skews them. True fill without skew needs
-                // screen-space chrome (labels/ticks/grid at fixed pixel size) — a dasum-vis slice.
+                // The SceneView fills its slot by default (SceneViewBuilder = fill + grow(1)); return
+                // it directly so it takes all the leftover space as the window's growing child. (No
+                // wrapping panel — that added nesting + a competing grow that shrank the plot.)
+                // Uniform (aspect-preserving) camera for now: fill mode skews the world-space chrome;
+                // true fill without skew needs the screen-space-chrome plot rewrite (task).
+                Component.SceneView view = (Component.SceneView) Ui.sceneView().background(PLOT_BG).build();
                 sibarum.dasum.gui.vis.plot.PlotView pv =
                         new sibarum.dasum.gui.vis.plot.PlotView(view);
                 plots.put(id, new PlotEntry(pv, ctx));
-                ChartBuilder.plotExprInto(pv, str(rv, "expr"), ctx);  // no-op if blank/unparseable
-                // A padded backing panel (solid PLOT_BG) around the plot: the SceneView no longer runs
-                // flush to the window edges (where axis labels / the curve were getting cropped) — it
-                // sits inside a defined panel with a margin. fill()+grow(1) so the panel still fills
-                // the window; the SceneView grows within, inset by the padding.
-                yield Ui.column().fill().grow(1).background(PLOT_BG).padding(Em.of(0.8f)).add(view).build();
+                // Seed with ALL initial expressions (String or aggregate) so every curve shows before
+                // the first keystroke — the conduit does not emit on startup.
+                ChartBuilder.plotExprInto(pv, rv.members().get("exprs"), ctx);
+                yield view;
             }
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
             // chart `chart(...)` opens standalone, but as a component so it can sit in a layout

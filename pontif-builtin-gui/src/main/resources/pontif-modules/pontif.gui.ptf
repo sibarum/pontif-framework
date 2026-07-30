@@ -25,11 +25,13 @@ struct Column(justify:String, align:String, children:_)
 # (dasum-vis), with pan-on-drag / zoom-on-scroll. `_` so any numeric aggregate fits.
 struct LinePlot(xs:_, ys:_)
 
-# A RETAINED, reactive expression plot (docs/reactive-gui.md, Slice A): draws `expr` (a math string
-# like "x^2 - 4") auto-framed, and is addressable by `id` for live re-plotting via SetPlot(id, expr).
-# The bridge holds the SceneView and re-publishes its data in place on each SetPlot — never rebuilt,
-# so the camera survives. This is the plotting twin of Label/SetText.
-struct ExprPlot(id:String, expr:String)
+# A RETAINED, reactive expression plot (docs/reactive-gui.md). `exprs` is the INITIAL content — a
+# single expression string ("x^2 - 4") or an aggregate of them ({"x^2 - 4", "sin(x)"}) — drawn
+# auto-framed, every one composited as its own colour-coded curve. Addressable by `id` for live
+# re-plotting via SetPlot(id, exprs); the bridge holds the SceneView and re-publishes its data in
+# place (never rebuilt, so the camera survives). Seed it with the SAME set the conduit starts from,
+# so all curves show before the first keystroke. The plotting twin of Label/SetText.
+struct ExprPlot(id:String, exprs:_)
 
 # A widget the bridge renders as a clickable button and invokes on click. Make your
 # own button by subtyping Button and assigning Clickable with an onClick that emits:

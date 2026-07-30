@@ -35,13 +35,13 @@ conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") 
   m2
 )
 
-# Build the retained tree ONCE: a column of three editable fields (seeded), and the "plot" ExprPlot
-# that all three composite into. Both are direct window children so the plot fills.
+# Build the retained tree ONCE: three editable fields (colour-coded to their curves) and the "plot"
+# ExprPlot they all composite into. All are DIRECT window children — the fields fit their height and
+# the plot (fill + grow by default) takes all the leftover space, so it fills the window. ExprPlot is
+# seeded with the SAME three expressions the conduit starts from, so every curve shows immediately.
 main ( window({title = "Calculator — multiple functions", width = 1000, height = 720}, {
-  Column("start", "stretch", {
-    TextField("f0", "x^2 - 4", 0),
-    TextField("f1", "sin(x)", 1),
-    TextField("f2", "1 / x", 2)
-  }),
-  ExprPlot("plot", "x^2 - 4")
+  TextField("f0", "x^2 - 4", 0),
+  TextField("f1", "sin(x)", 1),
+  TextField("f2", "1 / x", 2),
+  ExprPlot("plot", {"x^2 - 4", "sin(x)", "1 / x"})
 }) )
