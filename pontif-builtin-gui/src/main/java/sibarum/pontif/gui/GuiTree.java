@@ -18,6 +18,7 @@ import sibarum.dasum.gui.core.layout.LayoutResult;
 import sibarum.dasum.gui.core.layout.PixelRect;
 import sibarum.dasum.gui.core.layout.Render;
 import sibarum.dasum.gui.core.render.Batcher;
+import sibarum.dasum.gui.core.render.Color;
 import sibarum.dasum.gui.core.render.Projection;
 import sibarum.dasum.gui.core.render.Texture;
 import sibarum.dasum.gui.core.text.AtlasData;
@@ -159,8 +160,12 @@ final class GuiTree {
                 // field. width() gives it a stable, clickable extent even while empty (an empty
                 // editable Text has no glyphs; editable() alone would fall back to the builder's
                 // anti-collapse default width, but we want a wider field here).
+                // `hue` colour-codes the field to a plot-series palette slot so it matches the curve
+                // it drives (calculator); hue < 0 (or out of range) = the neutral text colour.
+                int hue = rv.members().get("hue") instanceof Long l ? l.intValue() : -1;
+                Color fieldFg = hue >= 0 && hue < SERIES_PALETTE.length ? SERIES_PALETTE[hue] : TEXT;
                 Component.Text field = (Component.Text) Ui.text(str(rv, "text"))
-                        .size(Em.of(2f)).color(TEXT).editable().width(Em.of(18f)).build();
+                        .size(Em.of(2f)).color(fieldFg).editable().width(Em.of(18f)).build();
                 // Register the FINAL instance: withEditable/withWidth each return a NEW record, and
                 // TextStates / FocusState are identity-keyed, so both the SetText registry entry and
                 // the onContentChange listener must key on the exact instance placed in the tree.

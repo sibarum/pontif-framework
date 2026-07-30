@@ -28,7 +28,7 @@ conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
 # Label (the SetText target). Click the field to focus it, then type.
 main ( window({title = "TextField"}, {
   Column("center", "middle", {
-    TextField("expr", ""),
+    TextField("expr", "", -1),
     Label("echo", "you typed: ")
   })
 }) )

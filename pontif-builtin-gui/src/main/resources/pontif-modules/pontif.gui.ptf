@@ -14,7 +14,10 @@ struct Button(id:String, text:String)
 # edit fires TextChanged{id, text}. The app conduit folds that and drives OTHER widgets (a result
 # Label via SetText); it does NOT write the field back (that would fight the caret). Programmatic
 # SetText on a NON-edited field (a "Clear" button) is still safe.
-struct TextField(id:String, text:String)
+# `hue` colour-codes the field's text to a plot-series palette slot (0,1,2,…) so a field visually
+# matches the curve it drives — the calculator sets each field's hue to its curve index. hue < 0 is
+# the default (neutral) text colour, for fields not tied to a curve.
+struct TextField(id:String, text:String, hue:Int)
 struct Column(justify:String, align:String, children:_)
 
 # A 2D line chart over two number aggregates: LinePlot({0.0,1.0,4.0}, {0.0,1.0,2.0}).

@@ -132,7 +132,7 @@ class GuiExtensionTest {
                   m2
                 )
                 main ( window({title = "TextField"}, {
-                  Column("center", "middle", { TextField("expr", ""), Label("echo", "you typed: ") })
+                  Column("center", "middle", { TextField("expr", "", -1), Label("echo", "you typed: ") })
                 }) )""", "reactive-textfield.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "reactive textfield program should type-check + link; got "
@@ -192,7 +192,7 @@ class GuiExtensionTest {
                   m2
                 )
                 main ( window({title = "Plotter"}, {
-                  TextField("expr", "x^2 - 4"), ExprPlot("plot", "x^2 - 4")
+                  TextField("expr", "x^2 - 4", 0), ExprPlot("plot", "x^2 - 4")
                 }) )""", "reactive-plotter.ptf");
         assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "reactive plotter program should type-check + link; got "
@@ -227,7 +227,7 @@ class GuiExtensionTest {
                 )
                 main ( window({title = "Calc"}, {
                   Column("start", "stretch", {
-                    TextField("f0", "x^2 - 4"), TextField("f1", "sin(x)"), TextField("f2", "1 / x")
+                    TextField("f0", "x^2 - 4", 0), TextField("f1", "sin(x)", 1), TextField("f2", "1 / x", 2)
                   }),
                   ExprPlot("plot", "x^2 - 4")
                 }) )""", "calculator-multi.ptf");

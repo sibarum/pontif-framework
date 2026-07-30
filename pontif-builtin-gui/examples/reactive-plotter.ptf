@@ -26,6 +26,6 @@ conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4") -> (
 # Build the retained tree ONCE: an editable "expr" field seeded with the initial expression, and the
 # "plot" ExprPlot (the SetPlot target). Both are direct window children so the SceneView fills.
 main ( window({title = "Plotter", width = 1000, height = 700}, {
-  TextField("expr", "x^2 - 4"),
+  TextField("expr", "x^2 - 4", 0),
   ExprPlot("plot", "x^2 - 4")
 }) )
