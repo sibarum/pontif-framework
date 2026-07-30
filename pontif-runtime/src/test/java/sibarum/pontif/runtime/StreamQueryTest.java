@@ -37,6 +37,22 @@ class StreamQueryTest {
         return new IrInterpreter(simp).eval(compiled);
     }
 
+    // Naming an imported nominal (`[Absent]`) as a match-arm SORT needs pontif.core's struct
+    // registry merged in — which the ModuleLinker does but the bare parse+compile above does
+    // not. (This is sort-name resolution, NOT a destructure — the unwrapped result still needs
+    // no DestructureResolver.) So the tests that write an explicit `[Absent]` arm go through
+    // the full PontifCompiler pipeline, exactly as a real multi-file program would.
+    private final PontifCompiler compiler = new PontifCompiler();
+    private final PontifRunner runner = new PontifRunner();
+
+    private String runLinked(String src) {
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "m.ptf");
+        PontifRunner.RunResult res = runner.run(r, PontifRunner.Engine.INTERPRETER);
+        org.junit.jupiter.api.Assertions.assertFalse(
+                res.isError(), () -> "expected success; got: " + res.text());
+        return res.text();
+    }
+
     @Test void firstMatch_returnsTheElement() throws Exception {
         // A hit returns the found element ITSELF — no Present wrapper.
         assertEquals("2", String.valueOf(run("""
@@ -132,41 +148,52 @@ class StreamQueryTest {
 
     // The element rides UNWRAPPED, so consumption is an ordinary type-guard match — NO
     // imported-struct destructure, hence the plain (non-linked) harness suffices. The
-    // trailing `[_]` catch-all is still needed because the `.first()` result currently infers
-    // as the generic `Stream` sort, not `[T | Absent]`, so a two-arm match can't yet be proven
-    // exhaustive (see lowerQueryFirst — result-sort narrowing is the follow-up that removes it).
-    // The `[_]` is the Absent (miss) arm at runtime.
+    // `.first()` result infers as the union `[T | Absent]` (single-ACCUMULATOR Iterate
+    // result-sort inference), so a two-arm `[T]`/`[Absent]` match is provably exhaustive —
+    // NO `[_]` catch-all needed.
 
-    @Test void matchOnHit_usesTheElement() throws Exception {
-        assertEquals("2", String.valueOf(run("""
+    @Test void matchOnHit_usesTheElement() {
+        assertEquals("2", runLinked("""
                 requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 let r = &s:[Int:@ == 2].first()
                 match r
-                  [Int] -> r
-                  [_]   -> 0 - 1""")));
+                  [Int]    -> r
+                  [Absent] -> 0 - 1"""));
     }
 
-    @Test void matchOnMiss_takesTheFallbackArm() throws Exception {
-        assertEquals("-1", String.valueOf(run("""
+    @Test void matchOnMiss_takesTheAbsentArm() {
+        assertEquals("-1", runLinked("""
                 requires pontif.core.{Absent}
                 let s = {1, 2, 3}
                 let r = &s:[Int:@ == 9].first()
                 match r
-                  [Int] -> r
-                  [_]   -> 0 - 1""")));
+                  [Int]    -> r
+                  [Absent] -> 0 - 1"""));
     }
 
-    @Test void matchOnHit_overStruct_pullsFieldOut() throws Exception {
-        assertEquals("\"b\"", String.valueOf(run("""
+    @Test void matchOnHit_overStruct_pullsFieldOut() {
+        assertEquals("\"b\"", runLinked("""
                 requires pontif.core.{Absent}
                 struct User(id:Int, name:String)
                 let s = {User(1, "a"), User(2, "b"), User(3, "c")}
                 let r = &s:[User:@.id == 2].first()
                 match r
                   [User(uid, uname)] -> uname
-                  [_]                -> "none"
-                """)));
+                  [Absent]           -> "none"
+                """));
+    }
+
+    @Test void twoArmMatch_isExhaustiveWithoutCatchAll() {
+        // The narrowing payoff: `[T]`/`[Absent]` with NO `[_]` compiles (provably total),
+        // because `.first()` now infers as the union `[Int | Absent]`.
+        assertEquals("20", runLinked("""
+                requires pontif.core.{Absent}
+                let s = {5, 10, 15}
+                let r = &s:[Int:@ > 8].first()
+                match r
+                  [Int]    -> r * 2
+                  [Absent] -> 0"""));
     }
 
     // --- disambiguation: the SAME stream, an arrow still maps, a type-sort queries ---

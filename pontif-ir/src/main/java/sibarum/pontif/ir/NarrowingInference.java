@@ -573,6 +573,19 @@ public final class NarrowingInference {
      * is a stream regardless).
      */
     private static IrSort inferIterate(IrExpr.Iterate it, InferenceContext ctx) {
+        // Single ACCUMULATOR output — the scalar query terminal `.first()`
+        // (docs/stream-queries.md §2.1): the result is the accumulator's VALUE, not a
+        // stream. Its sort is the union of the seed (init) and every non-self-threading
+        // write to it — e.g. `.first()` seeds `Absent` and writes the matched element,
+        // giving `[T | Absent]`. Without this, the fall-through below would seal a single
+        // non-STREAM output to a bare `Stream`, defeating a downstream `[T]`/`[Absent]`
+        // exhaustive match. (Multi-output Iterates — fold/scan/fork/generator — keep the
+        // existing behaviour: their scalar channels aren't the whole result.)
+        if (it.outputs().size() == 1
+                && it.outputs().get(0).kind() == IrExpr.OutputKind.ACCUMULATOR) {
+            IrSort acc = inferAccumulatorResult(it, it.outputs().get(0), ctx);
+            if (acc != null) return acc;
+        }
         Map<String, List<IrSort>> writtenByOutput = new LinkedHashMap<>();
         for (IrExpr.OutputSpec os : it.outputs()) {
             writtenByOutput.put(os.name(), new ArrayList<>());
@@ -608,6 +621,58 @@ public final class NarrowingInference {
     /** {@code Stream[elem]}, or bare {@code Stream} when the element sort is unknown. */
     private static IrSort streamSort(IrSort elem) {
         return new IrSort.Named("Stream", elem == null ? List.of() : List.of(elem), Origin.NONE);
+    }
+
+    /**
+     * The result sort of a single-ACCUMULATOR Iterate (the `.first()` query terminal): the
+     * union of the seed (init) and each non-self-threading write to the accumulator, widened
+     * to base sorts (so `[T:pred]` → `T`, since a downstream match wants `[T]` not the
+     * refinement). Self-threading writes (`Write(acc, Var(acc))`, the conservation pass-through
+     * arm) contribute nothing and are skipped. Returns {@code null} — deferring to the bare
+     * {@code Stream} fall-through — if any contributing sort can't be inferred, so this only
+     * ever narrows, never lies.
+     */
+    private static IrSort inferAccumulatorResult(
+            IrExpr.Iterate it, IrExpr.OutputSpec os, InferenceContext ctx) {
+        Map<String, IrSort> byBase = new LinkedHashMap<>();  // dedup by base name
+        if (os.init() != null) {
+            IrSort s = infer(os.init(), ctx);
+            if (s == null) return null;
+            IrSort b = accBase(s);
+            byBase.putIfAbsent(accBaseName(b), b);
+        }
+        for (IrExpr.Arm arm : it.arms()) {
+            InferenceContext armCtx = ctx.withVar(it.element(), arm.pattern());
+            for (IrExpr.Write w : arm.writes()) {
+                if (!w.output().equals(os.name())) continue;
+                if (w.value() instanceof IrExpr.Var v && v.name().equals(os.name())) {
+                    continue;  // self-threading pass-through — no new type
+                }
+                IrSort s = infer(w.value(), armCtx);
+                if (s == null) return null;
+                IrSort b = accBase(s);
+                byBase.putIfAbsent(accBaseName(b), b);
+            }
+        }
+        if (byBase.isEmpty()) return null;
+        List<IrSort> branches = new ArrayList<>(byBase.values());
+        return branches.size() == 1 ? branches.get(0) : new IrSort.Union(branches, Origin.NONE);
+    }
+
+    /** Widen a refinement to its base ({@code [T:pred]} → {@code T}); other sorts unchanged. */
+    private static IrSort accBase(IrSort s) {
+        return s instanceof IrSort.Refined r
+                ? new IrSort.Named(r.name(), r.typeArgs(), Origin.NONE)
+                : s;
+    }
+
+    private static String accBaseName(IrSort s) {
+        return switch (s) {
+            case IrSort.Named n -> n.name();
+            case IrSort.Refined r -> r.name();
+            case IrSort.Structural st -> st.name();
+            default -> s.toString();
+        };
     }
 
     /**

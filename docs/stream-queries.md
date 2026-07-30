@@ -71,10 +71,13 @@ James, 2026-07-28):
 
 ```pontif
 match &users:[User:@.id == 5].first() {
-  [User] -> use(...)          # a hit IS a User — a type-guard arm, scrutinee in scope
-  [_]    -> fallback()        # the Absent (miss) arm
+  [User]   -> use(...)        # a hit IS a User — a type-guard arm, scrutinee in scope
+  [Absent] -> fallback()      # the miss arm — provably exhaustive, no `[_]` needed
 }
 ```
+
+(`.first()` infers as the union `[User | Absent]`, so the two arms are provably total —
+result-sort narrowing landed 2026-07-29; see §5.)
 
 - It is **0-or-1 by *taking* one, not by proving one** (RULED — James): `.first()` does
   **not** care whether more than one element matches. It is "sample a match," not "assert
@@ -212,16 +215,23 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
   KEYED Slice 0's hop-by-hop validation plus `Refinements` runtime projection match multi-hop
   paths, so queries are not limited to single-hop), predicate conjunction, the
   arrow-vs-type-sort disambiguation, and **matching the result**
-  (`match r { [T] -> … [_] -> … }`) — the union is consumable end-to-end on the plain compile
-  path (no linker). One honest limitation remains (not a bug):
-  - **The `.first()` result infers as the generic `Stream` sort, not `[T | Absent]`** — so a
-    two-arm `[T]`/`[Absent]` match is not yet provably exhaustive and needs a `[_]` catch-all
-    (which serves as the miss arm). Narrowing it (single-`ACCUMULATOR` `Iterate` result-sort
-    inference = join of init + writes, giving `[T | Absent]`) is the natural follow-up; a
-    coercion `Cast` is the wrong tool (it demands a registered `cast` function).
+  (`match r { [T] -> … [Absent] -> … }`) — the union is consumable end-to-end. Both
+  earlier findings are now **resolved**:
+  - **Result-sort narrowing — LANDED (2026-07-29).** `.first()` infers as the union
+    `[T | Absent]`, so a two-arm `[T]`/`[Absent]` match is **provably exhaustive with no
+    `[_]` catch-all** (`StreamQueryTest.twoArmMatch_isExhaustiveWithoutCatchAll`). The fix is
+    a single-`ACCUMULATOR` case in `NarrowingInference.inferIterate` (`inferAccumulatorResult`):
+    a lone accumulator output's result sort is the base-widened union of its seed (`Absent`)
+    and every non-self-threading write to it (the matched element → `T`), giving `[T | Absent]`
+    — instead of the fall-through that sealed a single non-STREAM output to a bare `Stream`.
+    Scoped to single-output accumulators, so multi-output Iterates (fold/scan/fork/generator)
+    are untouched. A coercion `Cast` was the wrong tool (it demands a registered `cast`
+    function); sort *inference* is the right layer.
   - *(Resolved by the unwrap:)* the earlier "destructuring the result needs the full linker
-    pipeline" finding is **gone** — matching `[T]`/`[_]` uses no imported-struct destructure,
-    so `DestructureResolver`/`ModuleLinker` is no longer on the consumption path.
+    pipeline" finding is **gone** — matching `[T]`/`[Absent]` uses no imported-struct
+    destructure, so `DestructureResolver` is off the consumption path. (Naming `[Absent]` as an
+    arm still resolves the imported nominal as a *sort* via the normal module registry — which
+    every real multi-file compile has; only the bare single-file test harness lacks it.)
   Un-terminated / unknown-terminal / zip queries are parse errors. **Honest scope:** the standalone
   `Query` value is NOT yet reified — a query must be terminated in place (`.first()`); no
   index/pushdown (Slice C); the found element is the raw `T`, not narrowed by the predicate
