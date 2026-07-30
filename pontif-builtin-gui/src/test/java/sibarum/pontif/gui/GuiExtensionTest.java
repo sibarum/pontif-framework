@@ -200,6 +200,59 @@ class GuiExtensionTest {
     }
 
     @Test
+    void multiExpressionCalculatorProgram_typeChecks() {
+        Extensions.install(new GuiExtension());
+
+        // Slice B1 (docs/reactive-gui.md): several TextFields, each firing TextChanged; the conduit
+        // routes the edit to a Model slot (string == dispatch) and emits SetPlot with an AGGREGATE of
+        // expressions, which the bridge composites into one plot. Only compiles + links (the multi
+        // SetPlot payload, the per-id fold); the live multi-curve plot is verified manually (needs
+        // GLFW): exec:exec -Dptf=examples/calculator-multi.ptf. Kept in sync with that example.
+        CompileResult result = new PontifCompiler().compileAlt("""
+                requires pontif.gui.{TextField, ExprPlot, Column, window, GuiEvent, TextChanged, SetPlot}
+                struct Model(f0:String, f1:String, f2:String)
+                conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") -> (
+                  let m2 = match e {
+                    [TextChanged] -> match (e.id == "f0") {
+                      [Bool:true]  -> Model(e.text, s.f1, s.f2)
+                      [Bool:false] -> match (e.id == "f1") {
+                        [Bool:true]  -> Model(s.f0, e.text, s.f2)
+                        [Bool:false] -> Model(s.f0, s.f1, e.text)
+                      }
+                    }
+                    [_] -> s
+                  }
+                  emit SetPlot("plot", {m2.f0, m2.f1, m2.f2})
+                  m2
+                )
+                main ( window({title = "Calc"}, {
+                  Column("start", "stretch", {
+                    TextField("f0", "x^2 - 4"), TextField("f1", "sin(x)"), TextField("f2", "1 / x")
+                  }),
+                  ExprPlot("plot", "x^2 - 4")
+                }) )""", "calculator-multi.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, result,
+                () -> "multi-expression calculator should type-check + link; got "
+                        + (result instanceof CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
+    void reactiveStatusCommand_typeChecks() {
+        Extensions.install(new GuiExtension());
+        // The reactive Status command (docs/status.md) links + folds via the GuiEvent conduit.
+        CompileResult result = new PontifCompiler().compileAlt("""
+                requires pontif.gui.{GuiEvent, Clicked, Status}
+                struct Model(n:Int)
+                conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
+                  emit Status("clicked", "good")  s
+                )
+                main ( emit Clicked("b")  0 )""", "reactive-status.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, result,
+                () -> "reactive Status program should link; got "
+                        + (result instanceof CompileResult.Failed f ? f.error().text() : result));
+    }
+
+    @Test
     void linePlotProgram_linksAgainstExtension() {
         Extensions.install(new GuiExtension());
 

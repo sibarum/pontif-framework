@@ -1,0 +1,47 @@
+# THE MULTI-EXPRESSION CALCULATOR (docs/reactive-gui.md, Slice B1) — several functions plotted
+# together, live. Type in any field and every curve re-composites into the one plot as you type, each
+# a different colour, auto-framed over all of them. Zero app state in Java: the three expression
+# strings live only as the conduit's state S.
+#
+# The loop:
+#   type in a field -> the bridge fires TextChanged{id, text}
+#   -> the `app` conduit folds the new text into the matching Model slot and emits
+#      SetPlot("plot", {all three exprs})
+#   -> the SetPlot sink re-plots the retained ExprPlot in place, compositing every expression that
+#      parses (a half-typed / invalid one is simply skipped — the others keep drawing).
+#
+# Run it (needs a display + GLFW; NOT headless):
+#   mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/calculator-multi.ptf
+requires pontif.gui.{TextField, ExprPlot, Column, window, GuiEvent, TextChanged, SetPlot}
+
+# The app model — three expression strings, threaded as the conduit's state S.
+struct Model(f0:String, f1:String, f2:String)
+
+# The stateful fold: a TextChanged carries the edited field's id + live buffer. Route it to the
+# matching Model slot (string `==` returns Bool; the third field is the else case), then re-plot ALL
+# three. `[_]` is the open-world catch-all the open GuiEvent trait requires.
+conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") -> (
+  let m2 = match e {
+    [TextChanged] -> match (e.id == "f0") {
+      [Bool:true]  -> Model(e.text, s.f1, s.f2)
+      [Bool:false] -> match (e.id == "f1") {
+        [Bool:true]  -> Model(s.f0, e.text, s.f2)
+        [Bool:false] -> Model(s.f0, s.f1, e.text)
+      }
+    }
+    [_] -> s
+  }
+  emit SetPlot("plot", {m2.f0, m2.f1, m2.f2})
+  m2
+)
+
+# Build the retained tree ONCE: a column of three editable fields (seeded), and the "plot" ExprPlot
+# that all three composite into. Both are direct window children so the plot fills.
+main ( window({title = "Calculator — multiple functions", width = 1000, height = 720}, {
+  Column("start", "stretch", {
+    TextField("f0", "x^2 - 4"),
+    TextField("f1", "sin(x)"),
+    TextField("f2", "1 / x")
+  }),
+  ExprPlot("plot", "x^2 - 4")
+}) )

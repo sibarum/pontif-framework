@@ -58,9 +58,12 @@ public final class GuiExtension implements Extension {
     public Map<String, NativeFunctions.Effect> effects() {
         return Map.of(
             "SetText", (event, origin) -> GuiTree.setText(str(event, "id"), str(event, "text")),
-            // The reactive expr-plot sink (docs/reactive-gui.md, Slice A): re-plot the retained
-            // ExprPlot with this id, in place. Sibling of SetText — Pontif decides what to plot, the
-            // bridge renders it.
-            "SetPlot", (event, origin) -> GuiTree.setPlot(str(event, "id"), str(event, "expr")));
+            // The reactive expr-plot sink (docs/reactive-gui.md): re-plot the retained ExprPlot with
+            // this id, in place. `exprs` is a single string or an aggregate of them; the bridge
+            // composites each that parses. Pontif decides what to plot, the bridge renders it.
+            "SetPlot", (event, origin) -> GuiTree.setPlot(str(event, "id"), event.members().get("exprs")),
+            // The reactive status sink (docs/status.md): surface a message on the bar. Slice B uses it
+            // for parse errors — a ledger entry + a faint transient alert, never a popup.
+            "Status", (event, origin) -> GuiTree.status(str(event, "text"), str(event, "kind")));
     }
 }

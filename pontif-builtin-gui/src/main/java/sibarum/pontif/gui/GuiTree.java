@@ -88,13 +88,27 @@ final class GuiTree {
      * Unparseable/half-typed text keeps the last good plot ({@link ChartBuilder#plotExprInto} returns
      * false and leaves it). An unknown id is a no-op logged to StdErr.
      */
-    static void setPlot(String id, String expr) {
+    static void setPlot(String id, Object exprs) {
         PlotEntry e = plots.get(id);
         if (e == null) {
             System.err.println("SetPlot: no plot widget with id '" + id + "' in the current window");
             return;
         }
-        ChartBuilder.plotExprInto(e.view(), expr, e.ctx());
+        ChartBuilder.plotExprInto(e.view(), exprs, e.ctx());
+    }
+
+    /**
+     * Apply an isolated status update (the {@code pontif.gui/Status} sink): surface a message on the
+     * retained status ribbon (docs/status.md) — a ledger entry plus a brief, faintly-tinted alert.
+     * {@code kind} maps to the ledger's severity: "good"/"bad" → good/bad alerts, else a neutral
+     * notice. Never a popup.
+     */
+    static void status(String text, String kind) {
+        switch (kind == null ? "" : kind) {
+            case "good" -> sibarum.dasum.gui.core.status.Status.good(text);
+            case "bad"  -> sibarum.dasum.gui.core.status.Status.bad(text);
+            default      -> sibarum.dasum.gui.core.status.Status.notify(text);
+        }
     }
 
     /**
@@ -359,7 +373,10 @@ final class GuiTree {
         widgets.clear();
         plots.clear();
         try {
-            return openWindowCore(title, width, height, false, () -> toComponent(tree, ctx));
+            // Wrap the app's tree in the status ribbon (docs/status.md): a reactive window gets the
+            // ledger at the bottom for free, and `emit Status(...)` from the conduit surfaces there.
+            return openWindowCore(title, width, height, false,
+                    () -> sibarum.dasum.gui.core.status.Status.wrap(toComponent(tree, ctx)));
         } finally {
             widgets.clear();
             plots.clear();

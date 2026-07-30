@@ -1,6 +1,6 @@
 requires pontif.core.{Stream}
 requires pontif.events.{Event}
-exports @.{Label, Button, TextField, Column, LinePlot, ExprPlot, window, Clickable, GuiEvent, Clicked, TextChanged, SetText, SetPlot}
+exports @.{Label, Button, TextField, Column, LinePlot, ExprPlot, window, Clickable, GuiEvent, Clicked, TextChanged, SetText, SetPlot, Status}
 
 # Elements are ordinary structs you CONSTRUCT directly — Label{id = "count", text = "0"},
 # Button{id = "inc", text = "go"}, Column{justify = "center", align = "middle", children = {a, b}}.
@@ -58,12 +58,20 @@ assign trait TextChanged:GuiEvent{}
 struct SetText(id:String, text:String)
 assign trait SetText:Event{}
 
-# A COMMAND: re-plot the retained ExprPlot with this `id` from the expression string `expr`. Like
-# SetText this is an ISOLATED update — the bridge re-publishes the SceneView's data in place (never a
-# rebuild; the camera survives). A half-typed / unparseable `expr` keeps the last good plot. This is
-# what makes the calculator's type→plot loop live: `emit SetPlot("plot", m2.expr)` from the conduit.
-struct SetPlot(id:String, expr:String)
+# A COMMAND: re-plot the retained ExprPlot with this `id`. `exprs` is either a single expression
+# string ("x^2 - 4") or an aggregate of them ({"x^2 - 4", "sin(x)"}) — the bridge composites every
+# one that parses into the plot as its own colour-coded curve, auto-framed over all of them. Like
+# SetText this is an ISOLATED, in-place update (the SceneView is never rebuilt; the camera survives);
+# unparseable entries are skipped, keeping the last good plot. This drives the multi-expression
+# calculator: `emit SetPlot("plot", m2.exprs)` from the conduit, live as you type.
+struct SetPlot(id:String, exprs:_)
 assign trait SetPlot:Event{}
+
+# A COMMAND: surface a message on the status bar (docs/status.md). `kind` is "good" | "bad" | anything
+# else (neutral). A "bad" is how the calculator reports a parse error without a popup — it flashes on
+# the bar, tints faintly, and lands in the event-log ledger. `emit Status("no real roots", "bad")`.
+struct Status(text:String, kind:String)
+assign trait Status:Event{}
 
 # The window action (native; the placeholder body is never run): opens a window
 # rendering the given root tree on the root thread, until closed.

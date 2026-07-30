@@ -24,6 +24,7 @@ import sibarum.dasum.gui.vis.scene.InteractionSpec;
 import sibarum.dasum.gui.vis.scene.Layer;
 import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.pontif.core.types.RecordValue;
+import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.NativeCalls;
 
 import java.util.ArrayList;
@@ -86,18 +87,43 @@ final class ChartBuilder {
      * Returns false — leaving the last good plot untouched — when the text won't parse or sample, so a
      * half-typed expression never blanks the plot.
      */
-    static boolean plotExprInto(PlotView view, String exprText, NativeCalls.Context ctx) {
-        if (exprText == null) return false;
-        java.util.Optional<RecordValue> parsed = ExprParser.parse(exprText);
-        if (parsed.isEmpty()) return false;
-        try {
-            List<Series> series = sampleReliableJava(parsed.get(), ctx);
-            if (series.isEmpty()) return false;
-            view.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, series), series, PlotStyle.defaults());
-            return true;
-        } catch (RuntimeException ex) {
-            return false;
+    static boolean plotExprInto(PlotView view, Object exprsValue, NativeCalls.Context ctx) {
+        List<String> exprs = exprStrings(exprsValue);
+        List<Series> all = new ArrayList<>();
+        int idx = 0;
+        for (String e : exprs) {
+            // idx advances per expression (not per valid one) so each row keeps a stable palette
+            // colour even while a neighbour is mid-edit / unparseable.
+            Color col = SERIES_PALETTE[idx % SERIES_PALETTE.length];
+            idx++;
+            if (e == null || e.isBlank()) continue;
+            java.util.Optional<RecordValue> parsed = ExprParser.parse(e);
+            if (parsed.isEmpty()) continue;
+            try {
+                for (Series s : sampleReliableJava(parsed.get(), ctx)) {
+                    all.add(new Series(s.xs(), s.ys(), col, s.style(), s.thicknessWorld()));
+                }
+            } catch (RuntimeException ex) {
+                // skip this expression; a bad one never blanks the others
+            }
         }
+        if (all.isEmpty()) return false;   // nothing valid — keep the last good plot
+        view.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, all), all, PlotStyle.defaults());
+        return true;
+    }
+
+    /** Normalize the SetPlot {@code exprs} payload — a single Pontif string, or an aggregate of them
+     *  ({@code _tuple} of strings) — to a list of expression strings in order. */
+    private static List<String> exprStrings(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof StringValue s) {
+            out.add(s.content());
+        } else if (value instanceof RecordValue rv) {
+            for (Object m : rv.members().values()) {
+                if (m instanceof StringValue s) out.add(s.content());
+            }
+        }
+        return out;
     }
 
     /**
