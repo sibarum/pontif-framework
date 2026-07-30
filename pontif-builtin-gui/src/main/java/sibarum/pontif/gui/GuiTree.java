@@ -157,6 +157,10 @@ final class GuiTree {
                 // not SetText this same field from the conduit (feedback loop; §7 cautions).
                 TextStates.onContentChange(field, s ->
                         ctx.fireEvent(element("pontif.gui/TextChanged", "id", id, "text", s)));
+                // Auto-focus the FIRST editable field built, so the caret shows and the user can type
+                // immediately without a click first (tightening the idea→result loop). Only if nothing
+                // else has grabbed focus yet — a later field or a click still wins.
+                if (FocusState.focused() == null) FocusState.set(field);
                 // A bare Text draws no fill/border, so wrap it in a styled frame. Use Ui.column()
                 // (fit-content on both axes by default) — NOT Ui.box(), which is the fixed-size
                 // primitive and demands explicit width+height. The column hugs the field (its fixed
@@ -191,11 +195,17 @@ final class GuiTree {
             // later edits re-publish without rebuilding (the camera survives).
             case "ExprPlot" -> {
                 String id = str(rv, "id");
-                Component.SceneView view = plotSceneView();  // fill + grow + interactive
+                // Build the SceneView with an explicit grow so it fills its backing panel below.
+                Component.SceneView view = (Component.SceneView) Ui.sceneView()
+                        .background(PLOT_BG).grow(1).build();
                 sibarum.dasum.gui.vis.plot.PlotView pv = new sibarum.dasum.gui.vis.plot.PlotView(view);
                 plots.put(id, new PlotEntry(pv, ctx));
                 ChartBuilder.plotExprInto(pv, str(rv, "expr"), ctx);  // no-op if blank/unparseable
-                yield view;
+                // A padded backing panel (solid PLOT_BG) around the plot: the SceneView no longer runs
+                // flush to the window edges (where axis labels / the curve were getting cropped) — it
+                // sits inside a defined panel with a margin. fill()+grow(1) so the panel still fills
+                // the window; the SceneView grows within, inset by the padding.
+                yield Ui.column().fill().grow(1).background(PLOT_BG).padding(Em.of(0.8f)).add(view).build();
             }
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated
             // chart `chart(...)` opens standalone, but as a component so it can sit in a layout
