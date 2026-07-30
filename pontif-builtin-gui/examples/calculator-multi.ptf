@@ -20,7 +20,7 @@ struct Model(f0:String, f1:String, f2:String)
 # The stateful fold: a TextChanged carries the edited field's id + live buffer. Route it to the
 # matching Model slot (string `==` returns Bool; the third field is the else case), then re-plot ALL
 # three. `[_]` is the open-world catch-all the open GuiEvent trait requires.
-conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") -> (
+conduit app(e:GuiEvent, s:Model):Model from Model("x^2", "2x", "1/x") -> (
   let m2 = match e {
     [TextChanged] -> match (e.id == "f0") {
       [Bool:true]  -> Model(e.text, s.f1, s.f2)
@@ -40,8 +40,8 @@ conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") 
 # the plot (fill + grow by default) takes all the leftover space, so it fills the window. ExprPlot is
 # seeded with the SAME three expressions the conduit starts from, so every curve shows immediately.
 main ( window({title = "Calculator — multiple functions", width = 1000, height = 720}, {
-  TextField("f0", "x^2 - 4", 0),
-  TextField("f1", "sin(x)", 1),
-  TextField("f2", "1 / x", 2),
-  ExprPlot("plot", {"x^2 - 4", "sin(x)", "1 / x"})
+  TextField("f0", "x^2", 0),
+  TextField("f1", "2x", 1),
+  TextField("f2", "1/x", 2),
+  ExprPlot("plot", {"x^2", "2x", "1/x"})
 }) )
