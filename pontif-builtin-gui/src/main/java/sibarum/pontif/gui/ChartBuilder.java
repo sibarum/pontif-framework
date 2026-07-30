@@ -89,25 +89,41 @@ final class ChartBuilder {
      */
     static boolean plotExprInto(PlotView view, Object exprsValue, NativeCalls.Context ctx) {
         List<String> exprs = exprStrings(exprsValue);
-        List<Series> all = new ArrayList<>();
-        int idx = 0;
+        // Pass 1: parse each expression and UNION their auto-frame windows. Every curve is then
+        // sampled over this SHARED x-domain — otherwise a large-range expression expands the plot
+        // while the others (sampled only over their own smaller windows) show as tiny stubs. asts is
+        // kept parallel to the expression list (null = blank/unparseable) so palette colours stay
+        // stable per row while a neighbour is mid-edit.
+        List<RecordValue> asts = new ArrayList<>();
+        double xlo = Double.POSITIVE_INFINITY, xhi = Double.NEGATIVE_INFINITY;
         for (String e : exprs) {
-            // idx advances per expression (not per valid one) so each row keeps a stable palette
-            // colour even while a neighbour is mid-edit / unparseable.
-            Color col = SERIES_PALETTE[idx % SERIES_PALETTE.length];
-            idx++;
-            if (e == null || e.isBlank()) continue;
-            java.util.Optional<RecordValue> parsed = ExprParser.parse(e);
-            if (parsed.isEmpty()) continue;
-            try {
-                for (Series s : sampleReliableJava(parsed.get(), ctx)) {
-                    all.add(new Series(s.xs(), s.ys(), col, s.style(), s.thicknessWorld()));
+            RecordValue ast = (e == null || e.isBlank()) ? null : ExprParser.parse(e).orElse(null);
+            if (ast != null) {
+                try {
+                    double[] w = autoFrameJava(ast, ctx);
+                    xlo = Math.min(xlo, w[0]);
+                    xhi = Math.max(xhi, w[1]);
+                } catch (RuntimeException ex) {
+                    ast = null;   // can't frame it → treat as absent
                 }
+            }
+            asts.add(ast);
+        }
+        if (xlo > xhi) return false;   // nothing valid — keep the last good plot
+
+        // Pass 2: resample every curve across the shared [xlo, xhi] at full resolution.
+        List<Series> all = new ArrayList<>();
+        for (int i = 0; i < asts.size(); i++) {
+            RecordValue ast = asts.get(i);
+            if (ast == null) continue;
+            Color col = SERIES_PALETTE[i % SERIES_PALETTE.length];
+            try {
+                all.addAll(buildReliableSeries(xlo, xhi, resampleReliable(ast, xlo, xhi, ctx), col));
             } catch (RuntimeException ex) {
                 // skip this expression; a bad one never blanks the others
             }
         }
-        if (all.isEmpty()) return false;   // nothing valid — keep the last good plot
+        if (all.isEmpty()) return false;
         view.showLinePlot(LinePlot.autoFrame(0f, 0f, 10f, 5.5f, all), all, PlotStyle.defaults());
         return true;
     }
@@ -116,7 +132,9 @@ final class ChartBuilder {
      *  ({@code _tuple} of strings) — to a list of expression strings in order. */
     private static List<String> exprStrings(Object value) {
         List<String> out = new ArrayList<>();
-        if (value instanceof StringValue s) {
+        if (value instanceof String s) {           // ExprPlot's initial draw passes a raw Java String
+            out.add(s);
+        } else if (value instanceof StringValue s) {
             out.add(s.content());
         } else if (value instanceof RecordValue rv) {
             for (Object m : rv.members().values()) {

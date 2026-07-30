@@ -258,8 +258,10 @@ final class ReliableSeries {
     }
 
     /** Java mirror of pontif.plot's autoFrame: scan 256 probe columns over [-32,32], widening to the
-     *  span of features (a pole, or a sign flip between real columns); fall back to [-10,10]. */
-    private static double[] autoFrameJava(RecordValue ast, NativeCalls.Context ctx) {
+     *  span of features (a pole, or a sign flip between real columns); fall back to [-10,10].
+     *  Package-visible so a multi-curve plot can UNION each expression's window and resample all
+     *  curves over the shared frame (via {@link #resampleReliable}). */
+    static double[] autoFrameJava(RecordValue ast, NativeCalls.Context ctx) {
         double prevReal = 7, lo = 1e6, hi = -1e6;
         boolean any = false;
         for (int i = 0; i < 256; i++) {
