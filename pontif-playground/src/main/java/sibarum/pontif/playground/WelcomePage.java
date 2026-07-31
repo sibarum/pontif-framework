@@ -58,7 +58,7 @@ final class WelcomePage {
     static Component build(Consumer<Samples.Sample> onOpen) {
         FlexBuilder page = Ui.column().fit().padding(Em.of(1.2f)).gap(Em.of(0.9f)).align(AlignItems.START)
                 .add(Ui.text("Welcome to the Pontif editor").size(Em.of(1.5f)).color(HEADING_FG))
-                .add(Ui.text("Pick a sample to load it into the editor, then press Run or Window to see it render.")
+                .add(Ui.text("Pick a sample to load it into the editor, then press Run to see it render.")
                         .size(Em.of(0.95f)).color(DESC_FG).wrap(Em.of(48f)));
 
         for (Samples.Sample s : Samples.ALL) page.add(card(s, onOpen));

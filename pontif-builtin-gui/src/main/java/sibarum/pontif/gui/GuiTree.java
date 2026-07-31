@@ -33,6 +33,8 @@ import sibarum.dasum.gui.natives.glfw.Glfw;
 import sibarum.dasum.gui.natives.glfw.GlfwCallbacks;
 import sibarum.dasum.gui.vis.DasumVis;
 import sibarum.dasum.gui.vis.pointcloud.SceneViewController;
+import sibarum.dasum.gui.vis.scene.InteractionSpec;
+import sibarum.dasum.gui.vis.scene.SceneStates;
 import sibarum.dasum.gui.vis.render.BloomPass;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.IrInterpreter;
@@ -81,13 +83,45 @@ final class GuiTree {
      * {@code ctx} captured when the plot was built. Cleared with the window like {@link #widgets}.
      */
     private static final java.util.Map<String, PlotEntry> plots = new java.util.HashMap<>();
-    private record PlotEntry(sibarum.dasum.gui.vis.plot.PlotView view, NativeCalls.Context ctx) {}
+
+    /**
+     * Retained expr-plot state: the dasum {@link sibarum.dasum.gui.vis.plot.PlotView}, the build
+     * {@code ctx} (the reliable sampler needs it), the last-good {@code exprs} payload (so a
+     * camera-driven pan/zoom resample knows WHAT to sample over the new window), and a single-slot
+     * {@code pending} future that coalesces rapid camera changes into one debounced resample.
+     */
+    private static final class PlotEntry {
+        final sibarum.dasum.gui.vis.plot.PlotView view;
+        final NativeCalls.Context ctx;
+        volatile Object exprs;                                    // last-good; resampled on explore
+        java.util.concurrent.ScheduledFuture<?> pending;         // guarded by `this`
+        PlotEntry(sibarum.dasum.gui.vis.plot.PlotView view, NativeCalls.Context ctx, Object exprs) {
+            this.view = view; this.ctx = ctx; this.exprs = exprs;
+        }
+        sibarum.dasum.gui.vis.plot.PlotView view() { return view; }
+        NativeCalls.Context ctx() { return ctx; }
+    }
+
+    /**
+     * Off-thread debounce worker for interactive-explore resampling. Daemon so it never holds the JVM
+     * open; single-threaded so resamples serialize. Sampling ({@code evalInterval}) is heavy — it must
+     * not run on the GLFW callback thread — and {@code SceneStates.publish} is lock-free, so
+     * publishing the fresh geometry from here is safe.
+     */
+    private static final java.util.concurrent.ScheduledExecutorService plotResampler =
+            java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "pontif-plot-explore");
+                t.setDaemon(true);
+                return t;
+            });
+    private static final long RESAMPLE_DEBOUNCE_MS = 180;
 
     /**
      * Apply an isolated expr-plot update (the {@code pontif.gui/SetPlot} sink): re-plot the retained
      * SceneView with this id from the expression string, IN PLACE (no rebuild — the camera survives).
-     * Unparseable/half-typed text keeps the last good plot ({@link ChartBuilder#plotExprInto} returns
-     * false and leaves it). An unknown id is a no-op logged to StdErr.
+     * Also refreshes the entry's last-good {@code exprs} so a subsequent pan/zoom resamples the NEW
+     * functions. Unparseable/half-typed text keeps the last good plot ({@link
+     * ChartBuilder#plotExprInto} returns false and leaves it). An unknown id is a no-op logged to StdErr.
      */
     static void setPlot(String id, Object exprs) {
         PlotEntry e = plots.get(id);
@@ -95,7 +129,38 @@ final class GuiTree {
             System.err.println("SetPlot: no plot widget with id '" + id + "' in the current window");
             return;
         }
+        e.exprs = exprs;
         ChartBuilder.plotExprInto(e.view(), exprs, e.ctx());
+    }
+
+    /**
+     * Schedule a debounced resample for the plot with this id (called on every camera change while
+     * the user pans/zooms). Cancels any pending resample and reschedules, so a continuous drag fires
+     * exactly one resample once it settles. The camera has already moved the existing curve — this
+     * fills in crisp geometry over the newly-visible window.
+     */
+    private static void scheduleResample(String id) {
+        PlotEntry e = plots.get(id);
+        if (e == null) return;
+        synchronized (e) {
+            if (e.pending != null) e.pending.cancel(false);
+            e.pending = plotResampler.schedule(() -> resampleToView(id),
+                    RESAMPLE_DEBOUNCE_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /**
+     * Resample the plot's expressions over the camera's CURRENT visible world rect and republish in
+     * place at that same camera (no re-frame — {@link sibarum.dasum.gui.vis.plot.PlotView#updateSeries}).
+     * Reading {@code visibleWorldRect()} here (at fire time, on the worker thread) uses the LATEST
+     * camera, so a burst of drag events collapses to one resample of where the user actually landed.
+     */
+    private static void resampleToView(String id) {
+        PlotEntry e = plots.get(id);
+        if (e == null) return;
+        float[] rect = e.view().visibleWorldRect();   // [xmin,xmax,ymin,ymax] at the current camera
+        if (rect == null) return;
+        ChartBuilder.plotExprInto(e.view(), e.exprs, e.ctx(), rect);
     }
 
     /**
@@ -157,15 +222,17 @@ final class GuiTree {
                 // Ui.text().editable() path — NOT the raw constructor. editable() forces
                 // interactive+selectable on (the caret pipeline needs both) and leaves acceptsTab
                 // false, so Tab cycles focus rather than inserting a tab — right for a single-line
-                // field. width() gives it a stable, clickable extent even while empty (an empty
-                // editable Text has no glyphs; editable() alone would fall back to the builder's
-                // anti-collapse default width, but we want a wider field here).
+                // field. The fixed extent lives on the wrapping frame column (below), not on the
+                // Text: a Text with an explicit width inside the frame's default align=STRETCH would
+                // have that width silently ignored (and trip the ui-lint 'stretch-ignores-size'
+                // warning). With the width on the frame and the Text left to STRETCH, the field
+                // fills a stable 18em box even while empty — the clickable extent we want — cleanly.
                 // `hue` colour-codes the field to a plot-series palette slot so it matches the curve
                 // it drives (calculator); hue < 0 (or out of range) = the neutral text colour.
                 int hue = rv.members().get("hue") instanceof Long l ? l.intValue() : -1;
                 Color fieldFg = hue >= 0 && hue < SERIES_PALETTE.length ? SERIES_PALETTE[hue] : TEXT;
                 Component.Text field = (Component.Text) Ui.text(str(rv, "text"))
-                        .size(Em.of(2f)).color(fieldFg).editable().width(Em.of(18f)).build();
+                        .size(Em.of(2f)).color(fieldFg).editable().build();
                 // Register the FINAL instance: withEditable/withWidth each return a NEW record, and
                 // TextStates / FocusState are identity-keyed, so both the SetText registry entry and
                 // the onContentChange listener must key on the exact instance placed in the tree.
@@ -186,7 +253,7 @@ final class GuiTree {
                 // order, so the frame no longer occludes them.) The interactive Text stays the
                 // hit-test/focus/SetText target (the column is non-interactive; HitTest returns the
                 // deepest INTERACTIVE node).
-                yield Ui.column().padding(Em.of(0.4f)).background(FIELD_BG)
+                yield Ui.column().width(Em.of(18f)).padding(Em.of(0.4f)).background(FIELD_BG)
                         .border(Em.of(0.1f), FIELD_BORDER).cornerRadius(Em.of(0.3f))
                         .add(field).build();
             }
@@ -223,10 +290,19 @@ final class GuiTree {
                 Component.SceneView view = (Component.SceneView) Ui.sceneView().background(PLOT_BG).build();
                 sibarum.dasum.gui.vis.plot.PlotView pv =
                         new sibarum.dasum.gui.vis.plot.PlotView(view).fillViewport(true);
-                plots.put(id, new PlotEntry(pv, ctx));
+                Object exprs = rv.members().get("exprs");
+                plots.put(id, new PlotEntry(pv, ctx, exprs));
+                // Interactive EXPLORE: give the plot dasum's 2D pan/zoom camera (drag translates the
+                // range, scroll zooms about the cursor) instead of the ORBIT_3D default — this is a
+                // FUNCTION plot, not a 3D scene. The camera transform slides the existing curve for
+                // free (the last-good preview while dragging); onCameraChange then debounces an
+                // off-thread resample over the new visible window and republishes crisp geometry at
+                // the same camera (no jump). See resampleToView / PlotView.updateSeries.
+                SceneStates.setInteraction(view, InteractionSpec.panZoom2d());
+                SceneStates.onCameraChange(view, cam -> scheduleResample(id));
                 // Seed with ALL initial expressions (String or aggregate) so every curve shows before
                 // the first keystroke — the conduit does not emit on startup.
-                ChartBuilder.plotExprInto(pv, rv.members().get("exprs"), ctx);
+                ChartBuilder.plotExprInto(pv, exprs, ctx);
                 yield view;
             }
             // An embeddable annotated chart (pontif.plot chartView): the same reliable/annotated

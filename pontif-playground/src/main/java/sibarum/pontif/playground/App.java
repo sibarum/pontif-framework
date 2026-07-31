@@ -16,6 +16,7 @@ import sibarum.dasum.gui.core.input.FocusState;
 import sibarum.dasum.gui.core.input.Handlers;
 import sibarum.dasum.gui.core.input.HoverState;
 import sibarum.dasum.gui.core.input.InputState;
+import sibarum.dasum.gui.core.input.ScrollFocusFrame;
 import sibarum.dasum.gui.core.input.ScrollStates;
 import sibarum.dasum.gui.core.input.ScrollbarController;
 import sibarum.dasum.gui.core.input.TabsController;
@@ -453,7 +454,9 @@ public final class App {
 
     private static Component buildUi() {
         Component runBtn    = Themed.iconButton(Icons.PLAY,     "Run",     Em.of(6f),   Variant.PRIMARY, 0, App::onRunClicked);
-        Component guiBtn    = Themed.button("Window", Em.of(7f), Variant.SUCCESS, 0, App::onRunGuiClicked);
+        // The "Window" button was removed: Run already routes GUI programs to the windowed
+        // launcher (see onRunClicked → isGuiProgram → onRunGuiClicked), so a separate button
+        // was redundant. onRunGuiClicked stays as that internal path.
         Component newBtn    = Themed.iconButton(Icons.FILE,     Em.of(2f), Variant.DEFAULT, 0, App::onNewClicked);
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
@@ -470,7 +473,7 @@ public final class App {
         Component toolbar = new Component.Flex(
             null, Em.of(3f), Em.of(0.5f), TOOLBAR_BG,
             Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
-            List.of(runBtn, guiBtn, newBtn, openBtn, saveBtn, saveAsBtn, modulesBtn, filenameLabel, systemBtn),
+            List.of(runBtn, newBtn, openBtn, saveBtn, saveAsBtn, modulesBtn, filenameLabel, systemBtn),
             false, 0);
 
         // Editable code editor — monospace, accepts tab, wraps to its pane
@@ -489,6 +492,10 @@ public final class App {
         onEditorContentChanged(DEFAULT_CODE);
 
         codeScroll = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, codeText, false, 1);
+        // Draw the editor's focus ring on the scroll viewport's fixed frame rather than
+        // on the (scrolled) text content, so the blue outline doesn't slide out of view
+        // as you scroll — the "scroll lives inside the focus boundary" behavior.
+        ScrollFocusFrame.enable(codeScroll);
         Component codePane = codeScroll;
 
         // Read-only combined proof-graph view (receipt graph + conservation
@@ -539,6 +546,7 @@ public final class App {
             true, true, false, false, 1).withLineNumbers(true);
 
         definitionScroll = new Component.Scroll(null, null, Em.ZERO, EDITOR_BG, definitionText, false, 1);
+        ScrollFocusFrame.enable(definitionScroll);
         Component definitionPane = definitionScroll;
 
         // Info tab: the Welcome page — a gallery of sample programs. Clicking a card loads
@@ -1197,6 +1205,9 @@ public final class App {
             if (ctrl && key == 'X' && TextInputController.onCut(window.handle()))  return;
             if (ctrl && key == 'V' && TextInputController.onPaste(window.handle())) return;
             if (ctrl && key == 'A' && TextInputController.onSelectAll())            return;
+            // Ctrl+D — duplicate the current line, or the full lines spanned by the
+            // selection (the selection is first grown out to whole lines). Editor only.
+            if (ctrl && key == 'D' && FocusState.focused() == codeText) { duplicateEditorLines(); return; }
             if (ctrl && key == 'Z') {
                 if (shift) { if (TextInputController.onRedo()) return; }
                 else       { if (TextInputController.onUndo()) return; }
@@ -1237,6 +1248,10 @@ public final class App {
             if (key == Glfw.GLFW_KEY_BACKSPACE && TextInputController.onBackspace(ctrl)) return;
             if (key == Glfw.GLFW_KEY_DELETE    && TextInputController.onDelete(ctrl))    return;
             if (key == Glfw.GLFW_KEY_ENTER     && TextInputController.onEnter())         return;
+            // Tab in the editor is an indentation macro (spaces, not a tab char — a tab
+            // doesn't render in the mono atlas anyway); see handleEditorTab. Elsewhere it
+            // falls through to the framework's plain tab insert / focus cycling.
+            if (key == Glfw.GLFW_KEY_TAB && FocusState.focused() == codeText) { handleEditorTab(); return; }
             if (key == Glfw.GLFW_KEY_TAB       && TextInputController.onTab())           return;
             if (TextInputController.onKey(key, shift, ctrl)) return;
             // Tab strip: Left/Right/Home/End cycle tabs, but only when a Tabs
@@ -1441,6 +1456,125 @@ public final class App {
         if (hit instanceof Component.Text t && t.selectable()) return CursorManager.CursorShape.IBEAM;
         if (hit != null) return CursorManager.CursorShape.HAND;
         return CursorManager.CursorShape.ARROW;
+    }
+
+    // --- Editor indentation macros (Tab, Ctrl+D) ---
+    // Tab and Ctrl+D are handled here rather than by TextInputController so the
+    // editor gets space-based, grid-aligned indentation instead of a literal tab
+    // char (which the mono atlas can't even render). All three mutate the buffer
+    // through TextStates.setContent — the same path the app's other programmatic
+    // edits use (see addRequires) — then reposition the caret/selection.
+
+    /** One indentation level, in spaces. Pontif source indents two spaces per level. */
+    private static final int INDENT = 2;
+
+    /**
+     * Tab in the editor (IntelliJ-style). With a selection: grow it out to whole lines
+     * and prefix {@link #INDENT} spaces to each. With no selection, at the line start or
+     * when whitespace-then-text sits to the right of the caret: jump the caret past that
+     * whitespace and advance the leading indent to the next {@code INDENT} stop. Anywhere
+     * else in a line: insert spaces to the next tab stop. Tab always moves the indent
+     * forward by one stop (never a no-op) — one press, one indent.
+     */
+    private static void handleEditorTab() {
+        TextState ts = TextStates.of(codeText);
+        String content = TextStates.contentOf(codeText);
+        int len = content.length();
+        if (ts.hasSelection()) {
+            indentSelectedLines(content, clamp(ts.selectionStart(), len), clamp(ts.selectionEnd(), len));
+            return;
+        }
+        int caret = clamp(ts.caretIndex, len);
+        int lineStart = content.lastIndexOf('\n', caret - 1) + 1;
+        int lineEnd = content.indexOf('\n', caret);
+        if (lineEnd < 0) lineEnd = len;
+
+        int afterWs = caret;
+        while (afterWs < lineEnd && content.charAt(afterWs) == ' ') afterWs++;
+        boolean atLineStart = caret == lineStart;
+        boolean wsRightWithText = afterWs > caret && afterWs < lineEnd;
+
+        int insertAt;
+        int addCount;
+        int newCaret;
+        if (atLineStart || wsRightWithText) {
+            // Jump to the end of the whitespace to the right, then advance the leading
+            // run of spaces to the next INDENT stop (1..INDENT spaces — always advances).
+            int jump = afterWs;
+            int runStart = jump;
+            while (runStart > lineStart && content.charAt(runStart - 1) == ' ') runStart--;
+            int spacesBefore = jump - runStart;
+            addCount = INDENT - (spacesBefore % INDENT);
+            insertAt = jump;
+            newCaret = jump + addCount;
+        } else {
+            int col = caret - lineStart;
+            addCount = INDENT - (col % INDENT);
+            insertAt = caret;
+            newCaret = caret + addCount;
+        }
+
+        String updated = content.substring(0, insertAt) + " ".repeat(addCount) + content.substring(insertAt);
+        TextStates.setContent(codeText, updated);
+        TextState ns = TextStates.of(codeText);
+        ns.caretIndex = newCaret;
+        ns.selectionAnchor = newCaret;
+        Invalidator.invalidate();
+    }
+
+    /** Prefix {@link #INDENT} spaces to every line touched by {@code [selStart, selEnd)},
+     *  and leave the whole (now-indented) block selected. */
+    private static void indentSelectedLines(String content, int selStart, int selEnd) {
+        int len = content.length();
+        int firstLineStart = content.lastIndexOf('\n', selStart - 1) + 1;
+        int blockEnd = blockLineEnd(content, selStart, selEnd, len);
+        String before = content.substring(0, firstLineStart);
+        String block = content.substring(firstLineStart, blockEnd);
+        String after = content.substring(blockEnd);
+        String pad = " ".repeat(INDENT);
+        String[] lines = block.split("\n", -1);
+        StringBuilder sb = new StringBuilder(block.length() + pad.length() * lines.length);
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(pad).append(lines[i]);
+        }
+        TextStates.setContent(codeText, before + sb + after);
+        TextState ns = TextStates.of(codeText);
+        ns.selectionAnchor = firstLineStart;
+        ns.caretIndex = blockEnd + pad.length() * lines.length;
+        Invalidator.invalidate();
+    }
+
+    /** Ctrl+D — duplicate the whole lines spanned by the selection (or the caret's
+     *  line when there's none), inserting the copy directly below, and select the copy. */
+    private static void duplicateEditorLines() {
+        TextState ts = TextStates.of(codeText);
+        String content = TextStates.contentOf(codeText);
+        int len = content.length();
+        int selStart = ts.hasSelection() ? clamp(ts.selectionStart(), len) : clamp(ts.caretIndex, len);
+        int selEnd   = ts.hasSelection() ? clamp(ts.selectionEnd(), len)   : selStart;
+        int firstLineStart = content.lastIndexOf('\n', selStart - 1) + 1;
+        int blockEnd = blockLineEnd(content, selStart, selEnd, len);
+        String block = content.substring(firstLineStart, blockEnd);
+        String updated = content.substring(0, blockEnd) + "\n" + block + content.substring(blockEnd);
+        TextStates.setContent(codeText, updated);
+        TextState ns = TextStates.of(codeText);
+        int dupStart = blockEnd + 1;               // just past the inserted newline
+        ns.selectionAnchor = dupStart;
+        ns.caretIndex = dupStart + block.length();
+        Invalidator.invalidate();
+    }
+
+    /** End offset of the last line touched by {@code [selStart, selEnd)} — the next
+     *  newline at/after the last selected char, or the buffer end. */
+    private static int blockLineEnd(String content, int selStart, int selEnd, int len) {
+        int lastCharPos = selEnd > selStart ? selEnd - 1 : selEnd;
+        int nl = content.indexOf('\n', lastCharPos);
+        return nl < 0 ? len : nl;
+    }
+
+    private static int clamp(int v, int len) {
+        return Math.max(0, Math.min(v, len));
     }
 
     // --- Ctrl+click "go to definition" + Ctrl-hover link underline ---
