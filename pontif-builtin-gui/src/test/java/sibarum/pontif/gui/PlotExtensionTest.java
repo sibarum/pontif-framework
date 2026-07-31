@@ -327,6 +327,43 @@ class PlotExtensionTest {
     }
 
     @Test
+    void scene_superimposes2dCurveOnA3dSurface_inOneViewport() {
+        // The superimposition step: a 2D curve and a 3D surface composite into ONE scene (one orbit
+        // viewport). The curve becomes a LineLayer on the z = 0 plane; the surface a TriangleLayer
+        // mesh. World Y is up for both, so the line and the surface share the vertical axis.
+        Extensions.install(new PlotExtension());
+        Object[] capturedLayers = new Object[1];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{AlgExpr, Param, Add, Mul}
+                        requires pontif.plot.{Curve2D, curve, surfaceExpr, scene}
+                        struct Diagonal()
+                        assign trait Diagonal:Curve2D {
+                          at(x:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal}] -> {-3.0, 3.0}
+                        }
+                        let g:AlgExpr = Add(Mul(Param("x"), Param("x")), Mul(Param("y"), Param("y")))
+                        scene({title = "2D + 3D"}, { curve(Diagonal()), surfaceExpr(g) })""", "mix.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "mixed 2D+3D scene should run; got " + r.text());
+        assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
+
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
+        assertEquals(2, build.layers().size(), "the 2D curve line + the surface mesh");
+        assertInstanceOf(LineLayer.class, build.layers().get(0), "2D curve → a z=0 polyline");
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(1),
+                "surface → a triangle mesh");
+    }
+
+    @Test
     void chart_overlaysMultipleCurves_withDistinctColors() {
         Extensions.install(new PlotExtension());
 

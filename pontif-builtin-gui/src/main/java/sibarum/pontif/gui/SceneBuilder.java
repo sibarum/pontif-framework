@@ -190,6 +190,10 @@ final class SceneBuilder {
                         }
                     }
                     case "Cloud" -> geometry.add(cloudLayer(rv, b));
+                    case "Curve" -> {
+                        Layer l = curveLayer3d(rv, b);   // a 2D curve superimposed on the z = 0 plane
+                        if (l != null) geometry.add(l);
+                    }
                     case "Volume" -> {
                         Layer l = volumeLayer(rv, b);
                         if (l != null) {
@@ -213,6 +217,34 @@ final class SceneBuilder {
         float textHeight = 0.06f * b.span();   // legible relative to the scene, not a fixed world size
         for (RecordValue rv : texts) layers.add(text3dLayer(rv, textHeight));
         return new SceneBuild(layers, b.min(), b.max(), bar);
+    }
+
+    /**
+     * A 2D {@code Curve} record → a {@link LineLayer} polyline in the z = 0 plane: point i is
+     * {@code (xs[i], ys[i], 0)}. This is how a 2D function plot superimposes in a 3D scene — the curve
+     * lies on the world X–Y plane at z = 0, and since world Y is up (a surface's height axis) the line
+     * and a surface share the vertical axis, so {@code scene({…}, {curve(f), surface(g)})} shows both
+     * in one orbit viewport. Colour is the curve's explicit {@code {r,g,b}} when {@code colored}, else
+     * the first palette slot. Contributes its points to the scene bounds so the framing includes it.
+     */
+    private static Layer curveLayer3d(RecordValue rv, Bounds b) {
+        double[] xs = doubles(rv.members().get("xs"));
+        double[] ys = doubles(rv.members().get("ys"));
+        int n = Math.min(xs.length, ys.length);
+        if (n < 2) return null;
+        int segs = n - 1;
+        float[] ep = new float[segs * 6];
+        for (int i = 0; i < segs; i++) {
+            int o = i * 6;
+            ep[o]     = (float) xs[i];     ep[o + 1] = (float) ys[i];     ep[o + 2] = 0f;
+            ep[o + 3] = (float) xs[i + 1]; ep[o + 4] = (float) ys[i + 1]; ep[o + 5] = 0f;
+            b.add(xs[i], ys[i], 0.0);
+        }
+        b.add(xs[n - 1], ys[n - 1], 0.0);
+        Color c = rv.members().get("colored") instanceof Boolean col && col
+                ? new Color(clamp01(memberD(rv, "r")), clamp01(memberD(rv, "g")), clamp01(memberD(rv, "b")), 1f)
+                : SERIES_PALETTE[0];
+        return new LineLayer(ep, filledColor(ep.length, c));
     }
 
     /**

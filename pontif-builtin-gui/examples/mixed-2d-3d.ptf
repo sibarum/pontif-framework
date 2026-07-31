@@ -1,0 +1,21 @@
+# A 2D plot and a 3D plot in ONE orbit viewport (the superimposition step toward the single-space
+# vision). A 2D curve lives on the z = 0 plane; a 3D surface rises around it. Because world Y is the
+# "up" axis for both, the line and the surface share the vertical axis and read as one coherent scene.
+# Drag to orbit, scroll to zoom — the same viewport holds both.
+requires pontif.algebra.{AlgExpr, Param, Sin, Cos, Mul}
+requires pontif.math.{cos}
+requires pontif.plot.{Curve2D, curve, color, surfaceExpr, scene}
+
+# The 2D plot: y = cos(x), a Curve2D over [-6, 6]. `scene` draws it as a polyline on the z = 0 plane.
+struct Cosine()
+assign trait Cosine:Curve2D {
+  at(x:Decimal):Decimal -> cos(x)
+  domain():[{Decimal,Decimal}] -> {0.0 - 6.0, 6.0}
+}
+
+# The 3D plot: z = sin(x)·cos(y), the egg-carton surface, sampled from its AST.
+let g:AlgExpr = Mul(Sin(Param("x")), Cos(Param("y")))
+
+# Compose both. `color` paints the 2D curve bright yellow so it stands out against the surface.
+scene({title = "y = cos(x)   and   z = sin(x)·cos(y)"},
+      { color(curve(Cosine()), {1.0, 0.9, 0.2}), surfaceExpr(g) })
