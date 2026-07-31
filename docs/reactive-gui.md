@@ -265,3 +265,91 @@ conduit as pure Pontif, not in the bridge).
 - Whether to give `Label` an editable sibling vs. one `TextField` element (recommend a distinct
   `TextField` element — clearer than an `editable` flag on `Label`).
 - Debounce policy for `TextChanged` (start without; add in the conduit if parse-per-keystroke stutters).
+
+---
+
+## 8. Session hand-off (2026-07-31) — the GUI + plot marathon
+
+This session took the reactive GUI from `TextField` through a renderer rewrite to a fully **parametric**
+plot. Both repos commit directly to master (no branches). What landed, where it lives, the next slice.
+
+### Landed
+
+- **Input (Slice 3):** `TextField(id, text, hue)` + `TextChanged(id, text)`. Focus fix in
+  `GuiTree.wireInput` (press sets `FocusState` on an editable Text, else keystrokes are swallowed).
+  `hue` colour-codes the field text to a `SERIES_PALETTE` slot so it matches its curve. The field is a
+  **flat**-background `Ui.column` frame — a rounded/bordered one hid the caret (see uber-pipeline).
+  Examples: `reactive-textfield.ptf`.
+- **Builder migration (dasum + bridge):** `TextBuilder.editable()`/`clip()` added, so an editable
+  field no longer needs the raw `Component.Text` constructor; the whole bridge (`GuiTree`,
+  `GuiShared`, `LiveEdit`, `SceneBuilder`) migrated off raw `new Component.*` onto `Ui.*`. Rule in the
+  dasum README ("Integrating from another codebase": build through `Ui.*`; raw constructors forfeit
+  the layout-correctness defaults).
+- **Status bar remodel** (dasum `status` pkg + `docs/status.md`): ledger-only, no default message.
+  Every entry is a log; three orthogonal axes — surface (alert vs history-only), severity
+  (GOOD/NEUTRAL/BAD, *faint pre-attentive theme-aware* tint), channel (USER/TECHNICAL, future filter).
+  Idle = "N new" seen-counter (opening the log clears it). Two app-owned slots that are NOT logs:
+  docked field (`setDockedMessage`) and contextual override (`setContextualMessage`/`clear`, for a
+  caret-error etc.). Leading-zone priority: contextual → active alert → "N new". Playground migrated.
+  Reactive `Status(text, kind)` command wired; the reactive window wraps its tree in `Status.wrap`.
+- **Uber-pipeline (dasum render — the big one):** replaced the 3-bucket Batcher (flat/rounded/glyph
+  flushed in a FIXED order — the source of the "caret/selection hidden behind a rounded frame" bug)
+  with ONE uber-shader (`unified.vert`/`.frag`) + `UnifiedAccumulator` drawing every primitive in a
+  single submission-ordered stream. Cross-primitive z-order is correct **by construction**. One branch
+  point in the frag on `a_kind` (flat/rounded/glyph = how coverage is computed). Old
+  accumulators/materials/6 shaders removed. `sampler2DArray` (literal one-draw-call) deliberately
+  **skipped** — negligible ROI. No z-buffer (wrong tool for alpha-blended 2D UI).
+- **Reactive plot (Slices A + B1):** `ExprPlot(id, exprs)` + `SetPlot(id, exprs)`. `exprs` = a string
+  or an aggregate; the bridge composites each that parses as its own colour-coded curve, sampled over
+  a SHARED window with a SHARED robust y-range (so 1/x's poles reach the frame edges and every curve
+  spans the full width), framed exactly via `Axis.linear`. Multi-expression calculator:
+  `calculator-multi.ptf`. Sampling reuses `ExprParser` + `ReliableSeries` (Pontif-side; needs the
+  `evalInterval` native).
+- **Parametric plot (screen-space chrome — the finale):** fixes skew/crop/thin labels. Root cause:
+  ALL chrome was world-space geometry through the one camera, so it couldn't fill the data AND keep
+  chrome fixed-size. The cut (after rejecting a separate-pass overlay — it would desync in 3D, not
+  depth-blend, and split the data-anchored annotations): keep ONE camera transform for every
+  **position** (sync + depth + blend + annotation coherence, 2D and 3D); make only text **size** (and
+  later line **width**) screen-space. `TextLayer.withPixelSize(true)` — anchor projected by the MVP,
+  glyphs offset in fixed pixels (`scene-text.vert` `u_pixelMode`). `PlotFrame.chrome` tick labels are
+  pixel-sized; fill camera re-enabled on `ExprPlot`. Plus **per-axis tick density** from the viewport
+  pixels (`PlotView.retickByPixels` + a constructor viewport-resize listener) — each axis's label
+  count tracks its own pixel extent, recomputed on resize.
+
+**State:** calculator works — multiple colour-coded functions live in one plot; it fills the viewport,
+labels stay crisp/fixed-size/unskewed at any aspect, density auto-adapts per axis on resize. Tests:
+dasum-core 192/0, dasum-vis 73/0, gui 68/0; Pontif clean-installs.
+
+### Next slice — interactive pan/zoom-EXPLORE plot
+
+The one clunky thing: drag currently orbits the scene (drags the box). Make it explore the FUNCTION.
+The elegant enabler: **the data range is now the single source of truth** — because the chrome is
+screen-space and range-driven, you don't pan a camera, you change the visible
+`[xmin,xmax]×[ymin,ymax]` and re-sample; the chrome + fill follow for free.
+
+- Drag → translate the range (pixel Δ → data Δ); scroll → scale about the cursor. **Disable the
+  `SceneViewController` scene-orbit for 2D plots**; route drag/scroll to a range handler.
+- On range change → re-sample the expressions over the new `[xlo,xhi]`
+  (`ReliableSeries.resampleReliable` already takes an explicit window), rebuild the frame, republish.
+- **Async/progressive:** sample on a debounced worker thread (the `plotInput` `Debouncer` pattern),
+  show last-good while dragging, fill new territory in when the sample lands.
+- **Seam:** dasum reports "range is now [xlo,xhi,ylo,yhi]" → the bridge re-samples async (Pontif
+  `evalInterval`) → republishes. Same producer/consumer split as the rest. Feel-sensitive — tune drag
+  sensitivity, zoom-about-cursor, debounce with eyes on it.
+
+### Other deferred
+
+- **Thick gridlines/curves:** screen-space pixel-width `LineLayer` (quad expansion in the vertex
+  shader, same technique as pixel text). `glLineWidth` is NOT viable (unbound + core-GL-capped).
+- **Boundary refactor (agreed, not done):** move the band→overlay composition (shared y-range,
+  clip/pole-aim, exact framing) from Pontif `ReliableSeries`/`ChartBuilder` into dasum-vis; leave only
+  `evalInterval` sampling → spans in Pontif. Pair with the pan/zoom or thick-line work.
+- **Feature/asymptote marker labels** (`PlotScene2DRenderer`, the chartView/annotated path) are still
+  world-sized `TextLayer`s → would skew under fill. The reactive `ExprPlot` path doesn't emit them
+  (curves + ticks only), so it's latent, not visible in the calculator. Give them `.withPixelSize(true)`
+  when that path goes parametric.
+- **Slice B2 (dynamic rows):** add/enable/delete expression rows via `SetChildren(id, elements)` over
+  dasum `DynamicChildren`. Those discrete events are the natural home for `emit Status(...)`
+  (per-keystroke Status would spam the bar — why B1 didn't fire it).
+- **Status future ideas** (`docs/status.md`): temporal grouping + disposition extraction,
+  repetitive-logger consolidation, the log filter.
