@@ -1,0 +1,15 @@
+# Expression-driven 3D surface — the plotter's first step into 3D (docs/reactive-gui.md next-step).
+# z = f(x, y) sampled from ONE algebraic AST, the 3D sibling of `plotExpr`. The north-star: an
+# expression's VARIABLE COUNT chooses its dimensionality — 1 variable → a 2D curve, 2 → a surface,
+# 3 → a volume. Here the AST names x AND y, so `plotSurfaceExpr` grid-samples z = f(x, y) (via the
+# multi-variable `evalSafeAt`) and opens an orbitable surface: drag to orbit, scroll to zoom.
+#
+# The AST is hand-built here because the string parser that reads `sin(x)*cos(y)` lives in the GUI
+# bridge (the reactive box is the NEXT step); this standalone path takes the AlgExpr directly, the
+# same shape `$f[Decimal].ast` yields for a one-variable function.
+requires pontif.algebra.{AlgExpr, Param, Sin, Cos, Mul}
+requires pontif.plot.{plotSurfaceExpr}
+
+# z = sin(x) · cos(y) — the classic "egg-carton" ripple, a few periods across the default [-6, 6]² box.
+let z:AlgExpr = Mul(Sin(Param("x")), Cos(Param("y")))
+plotSurfaceExpr(z)

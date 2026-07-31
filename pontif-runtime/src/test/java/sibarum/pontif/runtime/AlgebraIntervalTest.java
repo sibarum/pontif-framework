@@ -86,6 +86,33 @@ class AlgebraIntervalTest {
     }
 
     @Test
+    void evalSafeAtBindsTwoVariablesByName() {
+        // z = x*x + y*y at (3, 4) = 25 — the N-variable point eval binds each Param by NAME from the
+        // record, the basis for grid-sampling a surface z = f(x, y). (25.00, not 25.0: BigDecimal
+        // preserves the operands' scale — 9.00 + 16.00.)
+        assertEquals("25.00", run("""
+                requires pontif.algebra.{AlgExpr, Param, Add, Mul, Undefined, evalSafeAt}
+                let e:AlgExpr = Add(Mul(Param("x"), Param("x")), Mul(Param("y"), Param("y")))
+                evalSafeAt(e, {x = 3.0, y = 4.0})
+                """));
+    }
+
+    @Test
+    void evalSafeAtReturnsUndefinedAtADomainGap() {
+        // log(x) at x = -1 is off-domain → Undefined (the TOTAL eval leaves a gap, never throws), so a
+        // surface sampler can flatten that vertex instead of aborting the whole grid.
+        assertEquals("\"gap\"", run("""
+                requires pontif.algebra.{AlgExpr, Param, Log, Undefined, evalSafeAt}
+                let e:AlgExpr = Log(Param("x"))
+                let z = evalSafeAt(e, {x = 0.0 - 1.0})
+                match z {
+                  [Undefined] -> "gap"
+                  [_]         -> "value"
+                }
+                """));
+    }
+
+    @Test
     void sinOverAWideColumnSaturatesToTheFullRange() {
         // sin(x) over [0, 10] spans more than a full period → the sound enclosure is exactly [-1, 1]
         // (the periodic-extrema rule: a max and a min are both enclosed).

@@ -1,6 +1,6 @@
 exports @.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
            Sin, Cos, Tan, Exp, Log, Algebraic, Undefined, Interval, Unbounded,
-           eval, evalAt, evalSafe, evalInterval}
+           eval, evalAt, evalSafe, evalSafeAt, evalInterval}
 
 # Undefined: the honest result of evaluating an expression at a point outside its
 # domain — a pole (1/0), an even root of a negative, a non-finite transcendental. It
@@ -77,5 +77,10 @@ function evalInterval(e:AlgExpr, lo:Decimal, hi:Decimal):[Interval | Unbounded |
 # N-argument surface (`eval` is the one-variable convenience). The binding is
 # dynamically typed (`_`); a statically-typed point is the next slice.
 function evalAt(e:AlgExpr, at:_):Decimal -> 0.0
+# evalSafeAt: the TOTAL sibling of `evalAt` — binds each variable by name from `{x = …, y = …}`
+# like evalAt, but yields `Undefined` at a domain gap instead of failing closed (the multi-variable
+# `evalSafe`). Sampling a surface z = f(x, y) on a grid crosses poles and off-domain points, so the
+# sampler needs this to leave a gap there rather than abort the grid. Placeholder body (native runs).
+function evalSafeAt(e:AlgExpr, at:_):[Decimal | Undefined] -> Undefined()
 
 0

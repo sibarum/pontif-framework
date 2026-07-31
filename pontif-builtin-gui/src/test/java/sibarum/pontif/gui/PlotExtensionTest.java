@@ -82,6 +82,56 @@ class PlotExtensionTest {
     }
 
     @Test
+    void varCount_readsDimensionalityFromVariables() {
+        // The north-star spine: an expression's VARIABLE COUNT chooses its plot dimensionality
+        // (1 → 2D curve, 2 → surface, 3 → volume), by the x/y/z axis convention. usesVar/varCount
+        // walk the closed AlgExpr union. Here x*x + y*y names x and y → dimensionality 2.
+        Extensions.install(new PlotExtension());
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{AlgExpr, Param, Add, Mul}
+                        requires pontif.plot.{varCount}
+                        let e:AlgExpr = Add(Mul(Param("x"), Param("x")), Mul(Param("y"), Param("y")))
+                        varCount(e)""", "vars.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "varCount program should run; got " + r.text());
+        assertEquals("2", r.text(), "x*x + y*y uses two spatial variables");
+    }
+
+    @Test
+    void plotSurfaceExpr_gridSamplesTwoVariableExpression() {
+        // Expression-driven surface: z = x*x + y*y sampled on the 33×33 grid over the default
+        // [-6, 6]² box via evalSafeAt, handed to the native renderSurface. Corner i=0 is (x,y) =
+        // (-6, -6) → z = 72. Captures the grid without opening a window.
+        Extensions.install(new PlotExtension());
+        double[][] captured = new double[1][];
+        double[][] domain = new double[1][];
+        NativeCalls.NativeCall stub = (args, ctx) -> {
+            captured[0] = GuiShared.doubles(args.get(0));
+            domain[0] = new double[]{
+                ((BigDecimal) args.get(1)).doubleValue(), ((BigDecimal) args.get(2)).doubleValue(),
+                ((BigDecimal) args.get(3)).doubleValue(), ((BigDecimal) args.get(4)).doubleValue()};
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderSurface", stub);
+        NativeCalls.register("pontif.plot/renderSurface", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{AlgExpr, Param, Add, Mul}
+                        requires pontif.plot.{plotSurfaceExpr}
+                        let e:AlgExpr = Add(Mul(Param("x"), Param("x")), Mul(Param("y"), Param("y")))
+                        plotSurfaceExpr(e)""", "surface.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "plotSurfaceExpr program should run; got " + r.text());
+        assertNotNull(captured[0], "renderSurface should have received the zs grid");
+        assertEquals(1089, captured[0].length, "33×33 surface grid");
+        assertArrayEquals(new double[]{-6.0, 6.0, -6.0, 6.0}, domain[0], 1e-9, "default box");
+        assertEquals(72.0, captured[0][0], 1e-9, "z at the (-6,-6) corner = 36 + 36");
+    }
+
+    @Test
     void plotLine_runtimeSampleRate_choosesPointCount() {
         Extensions.install(new PlotExtension());
 

@@ -1,5 +1,7 @@
 requires pontif.core.{Stream, Nothing}
-requires pontif.algebra.{AlgExpr, Sub, Interval, Unbounded, Undefined, evalInterval}
+requires pontif.algebra.{AlgExpr, Const, Param, Add, Sub, Mul, Div, Pow,
+                         Sin, Cos, Tan, Exp, Log,
+                         Interval, Unbounded, Undefined, evalInterval, evalSafeAt}
 requires pontif.math.{sign, min, max}
 exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            Surface, Cloud, Text3D, surface, surfaceFine, cloud, text3d,
@@ -8,7 +10,8 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            ExprLayer, MarkLayer, VLineLayer, expr,
            zeros, optima, asymptotes, intersections,
            ChartView, chartView, exportSvg, exportMathSvg, plotInput,
-           markup, exportMarkupSvg, markupInput}
+           markup, exportMarkupSvg, markupInput,
+           usesVar, varCount, surfaceExpr, plotSurfaceExpr}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -680,6 +683,76 @@ function expr(e:AlgExpr, xlo:Decimal, xhi:Decimal):ExprLayer -> (
 function expr(e:AlgExpr):ExprLayer -> (
   let [{xlo, xhi}] = autoFrame(e)
   expr(e, xlo, xhi)
+)
+
+# --- Expression-driven surfaces: z = f(x, y) from one algebraic AST ----------------
+# The single-expression plotter's step into 3D. The SAME AlgExpr the 2D reliable path plots
+# becomes a SURFACE when it names two variables — the north-star being that an expression's
+# VARIABLE COUNT chooses its dimensionality (1 var → a 2D curve, 2 → a surface, 3 → a volume).
+# Dimensionality is read here by the x/y/z AXIS CONVENTION: x is the first axis, y the second,
+# z the third. Sampled by POINT via evalSafeAt (the existing N-variable evaluator) over a grid;
+# a domain gap flattens to 0 for now (gap-aware meshing is a later slice — the smooth demo
+# surfaces don't reach one). Mapping arbitrary variable names onto the axes is a later
+# generalisation (it needs a dynamically-keyed binding record).
+
+# Bool OR — the sibling of andB (a returned Bool, never used as a match subject).
+function orB(a:Bool, b:Bool):Bool -> match a { [Bool:true] -> true  [Bool:false] -> b }
+
+# Does the expression name the variable `name` anywhere in its tree? A structural walk of the
+# closed AlgExpr union — the basis for reading an expression's plot dimensionality.
+function usesVar(e:AlgExpr, name:String):Bool -> match e {
+  [Const(c)]  -> false
+  [Param(n)]  -> n == name
+  [Add(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Sub(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Mul(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Div(l, r)] -> orB(usesVar(l, name), usesVar(r, name))
+  [Pow(b, x)] -> orB(usesVar(b, name), usesVar(x, name))
+  [Sin(a)]    -> usesVar(a, name)
+  [Cos(a)]    -> usesVar(a, name)
+  [Tan(a)]    -> usesVar(a, name)
+  [Exp(a)]    -> usesVar(a, name)
+  [Log(a)]    -> usesVar(a, name)
+}
+
+# How many of the spatial axes x, y, z the expression uses — its plot dimensionality:
+# 1 → a 2D curve, 2 → a surface, 3 → a volume (the x/y/z convention above).
+function varCount(e:AlgExpr):Int ->
+  boolToInt(usesVar(e, "x")) + boolToInt(usesVar(e, "y")) + boolToInt(usesVar(e, "z"))
+
+# One grid height: evalSafeAt at (x, y), a domain gap flattened to 0 (provisional — see above). The
+# result is `[Decimal | Undefined]`; matching `[Undefined]` (a struct — decidable) and letting the
+# `[_]` arm pass the value through is the total shape (a bare `[Decimal]` scalar arm can't be proven
+# exhaustive). Returns `_` — the value flows straight into the `_`-typed `zs` grid, so it needn't
+# narrow to a static Decimal (mirrors how the grid is already untyped).
+function surfaceZAt(e:AlgExpr, x:Decimal, y:Decimal):_ -> (
+  let z = evalSafeAt(e, {x = x, y = y})
+  match z {
+    [Undefined] -> 0.0
+    [_]         -> z
+  }
+)
+
+# Sample z = f(x, y) over an explicit box into a Surface layer (33×33 grid, row = i/33,
+# col = i%33) — the expression sibling of `surface`, composable via `scene(cfg, {…})`.
+function surfaceExpr(e:AlgExpr, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal):Surface -> (
+  let dx = (xhi - xlo) / 32.0
+  let dy = (yhi - ylo) / 32.0
+  let zs = &surfaceIndices:[ (i:Int) -> surfaceZAt(e, xlo + (i % 33) * dx, ylo + (i / 33) * dy) ]
+  Surface(zs, xlo, xhi, ylo, yhi, 1.0, "cool", false)
+)
+
+# Default box [-6, 6] × [-6, 6] — a few periods of a trig surface, a wide bowl for a paraboloid.
+function surfaceExpr(e:AlgExpr):Surface -> surfaceExpr(e, 0.0 - 6.0, 6.0, 0.0 - 6.0, 6.0)
+
+# Open an orbitable 3D window plotting z = f(x, y) directly — the surface sibling of plotExpr.
+function plotSurfaceExpr(e:AlgExpr, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal):Stream[String] -> (
+  let s = surfaceExpr(e, xlo, xhi, ylo, yhi)
+  renderSurface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi)
+)
+function plotSurfaceExpr(e:AlgExpr):Stream[String] -> (
+  let s = surfaceExpr(e)
+  renderSurface(s.zs, s.xlo, s.xhi, s.ylo, s.yhi)
 )
 
 0

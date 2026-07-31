@@ -122,6 +122,31 @@ public final class AlgebraExtension implements Extension {
                 return new RecordValue(qn("Undefined"), new LinkedHashMap<>());
             }
         });
+        // evalSafeAt: the TOTAL N-variable eval — evalAt's by-name binding with evalSafe's domain-gap
+        // catch. A surface z = f(x, y) sampled on a grid WILL step onto poles / off-domain points
+        // (log of a non-positive, an even root of a negative); this returns `Undefined` there instead
+        // of aborting the whole grid, so the sampler can leave that vertex as a gap. Structural errors
+        // (not an AlgExpr, an unbound variable) still propagate — only genuine domain gaps are caught.
+        m.put("evalSafeAt", (args, ctx) -> {
+            Object at = args.get(1);
+            if (!(at instanceof RecordValue point)) {
+                throw new RuntimeCheckException(
+                        "evalSafeAt: the binding must be a record `{name = value, …}`, got " + at,
+                        Origin.NONE);
+            }
+            try {
+                return evalNode(args.get(0), name -> {
+                    Object v = point.members().get(name);
+                    if (v == null) {
+                        throw new RuntimeCheckException(
+                                "evalSafeAt: no binding for variable '" + name + "' in " + point, Origin.NONE);
+                    }
+                    return decimal(v);
+                });
+            } catch (AlgebraicDomainException undefinedHere) {
+                return new RecordValue(qn("Undefined"), new LinkedHashMap<>());
+            }
+        });
         // evalInterval: the INTERVAL evaluator — a sound enclosure of { f(x) : x in [lo, hi] }, the
         // reliable-plotting substrate (docs/reliable-plotting.md slice 1). It is the generalisation
         // of evalSafe from a point to a whole pixel column: returns Interval(lo,hi) | Unbounded |
