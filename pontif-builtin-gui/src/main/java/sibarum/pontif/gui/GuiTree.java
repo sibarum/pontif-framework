@@ -217,11 +217,12 @@ final class GuiTree {
                 // The SceneView fills its slot by default (SceneViewBuilder = fill + grow(1)); return
                 // it directly so it takes all the leftover space as the window's growing child. (No
                 // wrapping panel — that added nesting + a competing grow that shrank the plot.)
-                // Uniform (aspect-preserving) camera for now: fill mode skews the world-space chrome;
-                // true fill without skew needs the screen-space-chrome plot rewrite (task).
+                // Fill mode: the data stretches to fill the viewport. The chrome no longer skews with
+                // it — tick labels are now screen-space pixel-sized (PlotFrame.chrome + the scene-text
+                // pixel path), positioned by the camera but drawn at a fixed pixel height.
                 Component.SceneView view = (Component.SceneView) Ui.sceneView().background(PLOT_BG).build();
                 sibarum.dasum.gui.vis.plot.PlotView pv =
-                        new sibarum.dasum.gui.vis.plot.PlotView(view);
+                        new sibarum.dasum.gui.vis.plot.PlotView(view).fillViewport(true);
                 plots.put(id, new PlotEntry(pv, ctx));
                 // Seed with ALL initial expressions (String or aggregate) so every curve shows before
                 // the first keystroke — the conduit does not emit on startup.
