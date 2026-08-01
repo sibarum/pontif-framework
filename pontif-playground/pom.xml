@@ -61,6 +61,16 @@
             <artifactId>pontif-gpu</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Vulkan graphics (`pontif.vulkan`, docs/vulkan.md): self-registers via ServiceLoader, so
+             the editor's live compiler + the "Run" subprocess resolve `pontif.vulkan`. A windowed
+             program (routed to GuiLauncher, main thread) that opens a Vulkan window presenting a
+             SupirVast core-IR shader. Pulls SuperVast's windowed host (dev.supirvast:vastir-preview)
+             + LWJGL onto the classpath. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-vulkan</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.dasum.gui</groupId>
             <artifactId>dasum-core</artifactId>

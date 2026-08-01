@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-builtin-vulkan</artifactId>
+
+    <!--
+        The Vulkan graphics extension: the `pontif.vulkan` language surface + the native that opens a
+        Vulkan window presenting a fullscreen shader authored in SupirVast's `core` IR (compiled to
+        SPIR-V). Phase 0/3 spike: the shader is a fixed constant color; a Pontif-authored fragment
+        lands in a later phase.
+
+        Like pontif-gpu, this rides on SupirVast (dev.supirvast:*, which must be `mvn install`-ed in
+        ~/.m2). It reuses the windowed host from vastir-preview and the fullscreen shader primitives
+        from vastir-tools. Discovered via ServiceLoader when on the classpath; the editor bundles it
+        by declaring it as a dependency (pontif-playground/pom.xml).
+    -->
+    <dependencies>
+        <dependency>
+            <groupId>dev.supirvast</groupId>
+            <artifactId>vastir-preview</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>

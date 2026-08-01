@@ -596,7 +596,8 @@ public final class App {
      * GLFW root thread). Mirrored here as literals to keep the editor from
      * instantiating the dasum-bearing extensions just to read a name.
      */
-    private static final java.util.Set<String> GUI_MODULES = java.util.Set.of("pontif.gui", "pontif.plot");
+    private static final java.util.Set<String> GUI_MODULES =
+            java.util.Set.of("pontif.gui", "pontif.plot", "pontif.vulkan");
 
     /** True when the buffer directly {@code requires} a windowed module (see
      *  {@link #GUI_MODULES}). Line-based on the single-line {@code requires} form,

@@ -1,0 +1,8 @@
+exports @.{vulkanWindow}
+
+# The Vulkan window action (native; the placeholder body is never run): opens a window presenting a
+# fullscreen shader authored in SupirVast's core IR (compiled to SPIR-V), on the root thread, until
+# closed. Phase 0/3 spike: the shader is a fixed constant color; a Pontif-authored fragment is next.
+function vulkanWindow(title:String, width:Int, height:Int):_ -> {}
+
+0

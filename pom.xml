@@ -33,6 +33,10 @@
              even without a Vulkan device. -->
         <module>pontif-supirvast</module>
         <module>pontif-gpu</module>
+        <!-- Vulkan graphics (docs/vulkan.md): the `pontif.vulkan` surface + the native that opens a
+             Vulkan window presenting a SupirVast core-IR shader. Like pontif-gpu it depends on
+             SuperVast (dev.supirvast:*), which must be `mvn install`-ed in ~/.m2. -->
+        <module>pontif-builtin-vulkan</module>
     </modules>
 
     <properties>
