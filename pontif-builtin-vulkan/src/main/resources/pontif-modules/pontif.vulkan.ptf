@@ -1,32 +1,21 @@
-exports @.{vulkanWindow, renderSdf, Vec2, Vec3, length, dot, normalize, min, max, clamp, mix, smoothstep, sqrt, abs}
+requires pontif.linalg.{Vec2}
 
-# Vector values for shader code — plain records, lowered structurally to core vectors by
-# pontif-supirvast (a Vec2 literal -> a SPIR-V vec2, `.x`/`.y` -> a component extract). The bodies here
-# are never run: a shader function is READ (reflected) and lowered to SPIR-V, not evaluated on the CPU.
-struct Vec2(x:Decimal, y:Decimal)
-struct Vec3(x:Decimal, y:Decimal, z:Decimal)
+exports @.{vulkanWindow, renderSdf, Frame}
 
-# pontif.math intrinsics a shader body may call — each maps to a core MathCall in the lowering. Placeholder
-# bodies (never executed); declared so a shader function type-checks.
-function length(v:Vec2):Decimal -> 0.0
-function dot(a:Vec2, b:Vec2):Decimal -> 0.0
-function normalize(v:Vec2):Vec2 -> v
-function min(a:Decimal, b:Decimal):Decimal -> a
-function max(a:Decimal, b:Decimal):Decimal -> a
-function clamp(x:Decimal, lo:Decimal, hi:Decimal):Decimal -> x
-function mix(a:Decimal, b:Decimal, t:Decimal):Decimal -> a
-function smoothstep(e0:Decimal, e1:Decimal, x:Decimal):Decimal -> x
-function sqrt(x:Decimal):Decimal -> x
-function abs(x:Decimal):Decimal -> x
+# The per-frame uniform block a shader may take as a second parameter — `time` (seconds) and `resolution`
+# (framebuffer size in pixels). The host pushes it every frame; `f.time` / `f.resolution` lower to
+# push-constant reads. This is what makes a shader animate. (Graphics-specific, so it lives here; the vector
+# types it uses come from pontif.linalg.)
+struct Frame(time:Decimal, resolution:Vec2)
 
 # The window action (native; the placeholder body is never run): opens a window presenting a
 # fullscreen shader authored in SupirVast's core IR (compiled to SPIR-V), on the root thread, until
 # closed. Phase 0 spike: the shader is a fixed constant color.
 function vulkanWindow(title:String, width:Int, height:Int):_ -> {}
 
-# renderSdf(shade): present a Vulkan window shading each pixel by a Pontif function of screen (x, y).
-# The function is reflected and its body lowered to a SPIR-V fragment through the core IR — the shader
-# is authored in Pontif, not GLSL. `shade` is passed as a function value (a named 2-arg function).
+# renderSdf(shade): present a Vulkan window shading each pixel by a Pontif function of screen uv (and an
+# optional Frame). The function is reflected and its body lowered to a SPIR-V fragment through the core IR —
+# the shader is authored in Pontif, not GLSL. `shade` is passed as a function value: `$shade[Vec2, Frame]`.
 function renderSdf(shade:_):_ -> {}
 
 0

@@ -48,7 +48,7 @@ class ScalarFieldFragmentTest {
         components.put("x", new IrExpr.BinOp(IrExpr.Op.SUB, x, half, O));
         components.put("y", new IrExpr.BinOp(IrExpr.Op.SUB, y, half, O));
         IrExpr p = new IrExpr.Record("Vec2", components, null, O);
-        IrExpr length = new IrExpr.Call("length", List.of(p), O);
+        IrExpr length = new IrExpr.MethodCall(p, "length", List.of(), O);   // p.length(), a vector method
         return new IrExpr.BinOp(IrExpr.Op.SUB, length, new IrExpr.Dec(new BigDecimal("0.3"), O), O);
     }
 

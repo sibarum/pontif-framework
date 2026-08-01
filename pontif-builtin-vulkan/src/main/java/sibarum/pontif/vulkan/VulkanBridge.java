@@ -4,7 +4,6 @@ import dev.supirvast.vastir.preview.WindowedVulkanContext;
 import dev.supirvast.vastir.tools.Fullscreen;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
-import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.supirvast.ScalarFieldFragment;
 
@@ -67,8 +66,7 @@ public final class VulkanBridge {
                     "renderSdf expects a 2-argument shader function (x, y) or its name; reflection requires "
                             + "running under the interpreter engine");
         }
-        List<String> params = fn.params().stream().map(IrParam::name).toList();
-        byte[] fragmentSpirv = ScalarFieldFragment.lower(params, fn.body());
+        byte[] fragmentSpirv = ScalarFieldFragment.lowerParams(fn.params(), fn.body());
         byte[] vertexSpirv = Fullscreen.triangleVertexWithUvSpirv();
         int maxFrames = envInt("PONTIF_VULKAN_MAX_FRAMES", 0);
         try (WindowedVulkanContext window = new WindowedVulkanContext("Pontif — SDF", DEFAULT_WIDTH, DEFAULT_HEIGHT,

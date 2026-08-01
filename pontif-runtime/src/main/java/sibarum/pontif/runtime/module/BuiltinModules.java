@@ -75,6 +75,10 @@ public final class BuiltinModules {
         // pontif.math = the SPIR-V GLSL.std.450 set; pontif.math.ext = the CPU-only extras.
         Extensions.install(MathExtension.INSTANCE);
         Extensions.install(MathExtExtension.INSTANCE);
+        // The linear-algebra library (pontif.linalg) is pure Pontif — vector types with their utilities as
+        // instance methods, method bodies delegating to pontif.math's scalars. No native calls; installed
+        // AFTER pontif.math, which its source requires. A shader's vector method lowers to a SPIR-V op.
+        Extensions.install(LinalgExtension.INSTANCE);
         // The algebra extension (pontif.algebra) is pure-JDK too — it reflects an
         // `assign proof f:Algebraic` function's body into a first-class AST and evaluates
         // it. The runtime substrate for differential programming (docs/metatypes.md).

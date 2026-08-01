@@ -98,12 +98,12 @@ public final class ExprLowering {
             case IrExpr.Record record -> lowerVectorRecord(record, scope);
             case IrExpr.FieldAccess access -> lowerSwizzle(access, scope);
             case IrExpr.Call call -> lowerIntrinsic(call, scope);
+            case IrExpr.MethodCall call -> lowerVectorMethod(call, scope);
 
             // --- unsupported in v1: each fails closed with a source-located witness ---
             case IrExpr.Chr chr -> throw LoweringError.charLiteral(chr);
             case IrExpr.Str str -> throw LoweringError.stringLiteral(str);
             case IrExpr.SelfRef self -> throw LoweringError.selfRef(self);
-            case IrExpr.MethodCall call -> throw LoweringError.methodCall(call);
             case IrExpr.Lambda lambda -> throw LoweringError.lambda(lambda);
             case IrExpr.Apply apply -> throw LoweringError.apply(apply);
             case IrExpr.DispatchRef ref -> throw LoweringError.dispatchRef(ref);
@@ -192,6 +192,15 @@ public final class ExprLowering {
     /** {@code pontif.math} intrinsic names → their {@code core} {@link MathFn}. */
     private static final Map<String, MathFn> MATH = mathTable();
 
+    /** Vector instance-method names ({@code v.length()}, {@code a.dot(b)}, …) → their {@code core} {@link MathFn}. */
+    private static final Map<String, MathFn> VECTOR_METHOD = Map.of(
+            "length", MathFn.LENGTH,
+            "dot", MathFn.DOT,
+            "distance", MathFn.DISTANCE,
+            "normalize", MathFn.NORMALIZE,
+            "cross", MathFn.CROSS,
+            "reflect", MathFn.REFLECT);
+
     /** Intrinsics that reduce a vector to its scalar component type (result is {@code float}, not a vector). */
     private static final Set<MathFn> REDUCING = Set.of(MathFn.LENGTH, MathFn.DOT, MathFn.DISTANCE);
 
@@ -209,17 +218,48 @@ public final class ExprLowering {
      */
     private Block lowerVectorRecord(IrExpr.Record record, Scope scope) {
         int n = record.members().size();
-        if (!isFloat() || n < 2 || n > 4 || !("Vec" + n).equals(bare(record.typeName()))) {
+        if (!isFloat() || n < 2 || n > 4) {
             throw LoweringError.record(record);
         }
+        // Structural: any record/tuple of 2..4 float-typed members is a vector (a named Vec2/Vec3 is just the
+        // ergonomic spelling). A record whose members are not all floats is not a vector — fail closed.
         List<Statement> stmts = new ArrayList<>();
         List<Expr> components = new ArrayList<>();
         for (IrExpr member : record.members().values()) {
             Block b = lower(member, scope);
+            if (!(b.value().type() instanceof Type.Float)) {
+                throw LoweringError.record(record);
+            }
             stmts.addAll(b.statements());
             components.add(b.value());
         }
         return new Block(stmts, new Expr.VectorConstruct(vectorType(n), components));
+    }
+
+    /**
+     * A vector method call — {@code v.length()}, {@code a.dot(b)}, {@code v.normalize()} — lowers to the same
+     * {@code core} {@link Expr.MathCall} the free intrinsic would, with the receiver as the first argument. This
+     * is where the "methods on the type, not the dispatch" rule meets the GPU: the receiver's declared method
+     * body (pure Pontif) is bypassed in favour of the native op. Non-vector methods still fail closed.
+     */
+    private Block lowerVectorMethod(IrExpr.MethodCall call, Scope scope) {
+        String name = bare(call.methodName());
+        MathFn fn = isFloat() ? VECTOR_METHOD.get(name) : null;
+        if (fn == null) {
+            throw LoweringError.methodCall(call);
+        }
+        List<Statement> stmts = new ArrayList<>();
+        List<Expr> args = new ArrayList<>();
+        Block receiver = lower(call.receiver(), scope);
+        stmts.addAll(receiver.statements());
+        args.add(receiver.value());
+        for (IrExpr arg : call.args()) {
+            Block b = lower(arg, scope);
+            stmts.addAll(b.statements());
+            args.add(b.value());
+        }
+        Type result = intrinsicResultType(fn, args);
+        return new Block(stmts, new Expr.MathCall(fn, result, args));
     }
 
     /** A {@code v.x}/{@code .y}/{@code .z}/{@code .w} (or {@code .r/.g/.b/.a}) swizzle → a component extract. */
@@ -246,6 +286,19 @@ public final class ExprLowering {
             Block b = lower(arg, scope);
             stmts.addAll(b.statements());
             args.add(b.value());
+        }
+
+        // A vector instance method reaches the IR dispatch-flattened to a `Type.method` free call with the
+        // receiver as the first argument (a reflected `v.length()` is `Call("Vec2.length", [v])`). Recognize
+        // the method suffix and lower to the same native op — the receiver is already args[0].
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0) {
+            MathFn method = isFloat() ? VECTOR_METHOD.get(name.substring(dot + 1)) : null;
+            if (method == null) {
+                throw LoweringError.unsupportedExpr(call, "Call '" + name + "(...)'",
+                        "only pontif.linalg vector methods and pontif.math intrinsics lower in a shader body");
+            }
+            return new Block(stmts, new Expr.MathCall(method, intrinsicResultType(method, args), args));
         }
 
         Integer width = VEC_CONSTRUCTOR.get(name);
@@ -315,13 +368,9 @@ public final class ExprLowering {
     }
 
     private static Map<String, MathFn> mathTable() {
+        // Geometric ops (length/dot/normalize/cross/distance/reflect) are NOT here — they are instance methods
+        // on the vector type (see VECTOR_METHOD), not free functions. This table is the free SCALAR surface.
         Map<String, MathFn> m = new java.util.HashMap<>();
-        m.put("length", MathFn.LENGTH);
-        m.put("dot", MathFn.DOT);
-        m.put("distance", MathFn.DISTANCE);
-        m.put("normalize", MathFn.NORMALIZE);
-        m.put("cross", MathFn.CROSS);
-        m.put("reflect", MathFn.REFLECT);
         m.put("pow", MathFn.POW);
         m.put("sqrt", MathFn.SQRT);
         m.put("abs", MathFn.ABS);

@@ -1,0 +1,37 @@
+requires pontif.math.{sqrt}
+
+exports @.{Vec2, Vec3, Vec4, Vec2Ops, Vec3Ops, Vec4Ops}
+
+# Linear algebra: vector (and, in time, matrix / quaternion) values. Plain immutable records with their
+# utilities as INSTANCE METHODS — `v.length()`, `a.dot(b)`, `v.normalize()` — not free dispatch functions.
+# On the CPU the methods run as ordinary Pontif (delegating to pontif.math's scalar `sqrt`); on the GPU a
+# shader's `v.length()` lowers directly to the native SPIR-V op (pontif-supirvast). Scalar math stays free in
+# pontif.math (sin/sqrt/…) — the numeric-familiarity exception.
+
+struct Vec2(x:Decimal, y:Decimal)
+struct Vec3(x:Decimal, y:Decimal, z:Decimal)
+struct Vec4(x:Decimal, y:Decimal, z:Decimal, w:Decimal)
+
+trait Vec2Ops { length():Decimal, dot(w:Vec2):Decimal, distance(w:Vec2):Decimal, normalize():Vec2 }
+assign trait Vec2:Vec2Ops {
+  length():Decimal -> sqrt(this.x * this.x + this.y * this.y)
+  dot(w:Vec2):Decimal -> this.x * w.x + this.y * w.y
+  distance(w:Vec2):Decimal -> Vec2(this.x - w.x, this.y - w.y).length()
+  normalize():Vec2 -> Vec2(this.x / this.length(), this.y / this.length())
+}
+
+trait Vec3Ops { length():Decimal, dot(w:Vec3):Decimal, distance(w:Vec3):Decimal, normalize():Vec3 }
+assign trait Vec3:Vec3Ops {
+  length():Decimal -> sqrt(this.x * this.x + this.y * this.y + this.z * this.z)
+  dot(w:Vec3):Decimal -> this.x * w.x + this.y * w.y + this.z * w.z
+  distance(w:Vec3):Decimal -> Vec3(this.x - w.x, this.y - w.y, this.z - w.z).length()
+  normalize():Vec3 -> Vec3(this.x / this.length(), this.y / this.length(), this.z / this.length())
+}
+
+trait Vec4Ops { length():Decimal, dot(w:Vec4):Decimal }
+assign trait Vec4:Vec4Ops {
+  length():Decimal -> sqrt(this.x * this.x + this.y * this.y + this.z * this.z + this.w * this.w)
+  dot(w:Vec4):Decimal -> this.x * w.x + this.y * w.y + this.z * w.z + this.w * w.w
+}
+
+0
