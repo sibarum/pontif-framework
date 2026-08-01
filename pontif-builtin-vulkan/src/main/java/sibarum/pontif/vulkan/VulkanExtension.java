@@ -28,6 +28,8 @@ public final class VulkanExtension implements Extension {
 
     @Override
     public Map<String, NativeCalls.NativeCall> calls() {
-        return Map.of("vulkanWindow", VulkanBridge::openVulkanWindow);
+        return Map.of(
+                "vulkanWindow", VulkanBridge::openVulkanWindow,
+                "renderSdf", VulkanBridge::renderSdf);
     }
 }

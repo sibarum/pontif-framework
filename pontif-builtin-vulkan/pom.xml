@@ -27,6 +27,13 @@
             <artifactId>vastir-preview</artifactId>
             <version>0.1.0-SNAPSHOT</version>
         </dependency>
+        <!-- The Pontif -> core fragment lowerer (ScalarFieldFragment / ExprLowering): turns a Pontif
+             shader function's IR into SPIR-V. Pulls SuperVast core transitively. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-supirvast</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-runtime</artifactId>

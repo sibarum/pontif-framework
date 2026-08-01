@@ -39,22 +39,24 @@ public final class ScalarFieldFragment {
     }
 
     /**
-     * Lowers {@code body} (a Pontif expression in the two coordinate parameters named by {@code paramNames}) to
-     * fragment SPIR-V. The parameters bind to the {@code vUv} varying's two components; the scalar result is
-     * written to {@code fragColor} as {@code vec4(v, v, v, 1)}.
+     * Lowers {@code body} (a Pontif expression in its coordinate parameters) to fragment SPIR-V. The parameters
+     * bind to the {@code vUv} varying: a single {@code Vec2} parameter receives the whole {@code uv}; two scalar
+     * parameters receive its {@code x} and {@code y} components. The scalar result is written to
+     * {@code fragColor} as {@code vec4(v, v, v, 1)}.
      */
     public static byte[] lower(List<String> paramNames, IrExpr body) {
-        if (paramNames.size() != 2) {
-            throw new IllegalArgumentException(
-                    "a 2D scalar field takes exactly two coordinate parameters, got " + paramNames);
-        }
         InterfaceVar vUv = InterfaceVar.input("vUv", 0, VEC2);
         InterfaceVar fragColor = InterfaceVar.output("fragColor", 0, VEC4);
 
         Expr uv = new Expr.InterfaceRead(vUv);
-        Scope scope = Scope.empty()
-                .with(paramNames.get(0), new Expr.VectorExtract(uv, 0))
-                .with(paramNames.get(1), new Expr.VectorExtract(uv, 1));
+        Scope scope = switch (paramNames.size()) {
+            case 1 -> Scope.empty().with(paramNames.get(0), uv);   // shade(uv:Vec2)
+            case 2 -> Scope.empty()                                // shade(x, y)
+                    .with(paramNames.get(0), new Expr.VectorExtract(uv, 0))
+                    .with(paramNames.get(1), new Expr.VectorExtract(uv, 1));
+            default -> throw new IllegalArgumentException(
+                    "a 2D field takes a single Vec2 parameter or two scalar (x, y) parameters, got " + paramNames);
+        };
 
         ExprLowering.Block field = new ExprLowering(F32).lower(body, scope);
         Expr v = field.value();

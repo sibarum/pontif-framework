@@ -209,7 +209,7 @@ public final class ExprLowering {
      */
     private Block lowerVectorRecord(IrExpr.Record record, Scope scope) {
         int n = record.members().size();
-        if (!isFloat() || n < 2 || n > 4 || !("Vec" + n).equals(record.typeName())) {
+        if (!isFloat() || n < 2 || n > 4 || !("Vec" + n).equals(bare(record.typeName()))) {
             throw LoweringError.record(record);
         }
         List<Statement> stmts = new ArrayList<>();

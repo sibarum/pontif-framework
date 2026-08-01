@@ -4,7 +4,9 @@ import dev.supirvast.vastir.preview.WindowedVulkanContext;
 import dev.supirvast.vastir.tools.Fullscreen;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
+import sibarum.pontif.ir.IrParam;
 import sibarum.pontif.ir.NativeCalls;
+import sibarum.pontif.supirvast.ScalarFieldFragment;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -39,6 +41,37 @@ public final class VulkanBridge {
         byte[] vertexSpirv = Fullscreen.triangleVertexSpirv();
         byte[] fragmentSpirv = Fullscreen.constantColorFragmentSpirv(0.11, 0.22, 0.44, 1.0);
         try (WindowedVulkanContext window = new WindowedVulkanContext(title, width, height,
+                vertexSpirv, Fullscreen.ENTRY_POINT, fragmentSpirv, Fullscreen.ENTRY_POINT)) {
+            window.run(maxFrames);
+        }
+        return new IrInterpreter.DriveResult();
+    }
+
+    /**
+     * {@code renderSdf(shade)}: reflect a Pontif shader function of two coordinates {@code (x, y)}, lower its
+     * body to a SPIR-V fragment ({@link ScalarFieldFragment}), pair it with the UV-emitting fullscreen vertex,
+     * and present the field in a Vulkan window. The shader is authored in Pontif and compiled through the core
+     * IR — no GLSL. Returns the inert for-effect result.
+     */
+    public static Object renderSdf(List<Object> args, NativeCalls.Context ctx) {
+        if (args.isEmpty()) {
+            throw new IllegalArgumentException("renderSdf expects a shader function of (x, y)");
+        }
+        // Accept either a function VALUE (a lambda / metareference) or the NAME of a 2-arg function.
+        Object shade = args.get(0);
+        NativeCalls.ReflectedFunction fn = shade instanceof StringValue s
+                ? ctx.reflectFunctionByName(s.content(), 2)
+                : ctx.reflectFunction(shade);
+        if (fn == null) {
+            throw new IllegalArgumentException(
+                    "renderSdf expects a 2-argument shader function (x, y) or its name; reflection requires "
+                            + "running under the interpreter engine");
+        }
+        List<String> params = fn.params().stream().map(IrParam::name).toList();
+        byte[] fragmentSpirv = ScalarFieldFragment.lower(params, fn.body());
+        byte[] vertexSpirv = Fullscreen.triangleVertexWithUvSpirv();
+        int maxFrames = envInt("PONTIF_VULKAN_MAX_FRAMES", 0);
+        try (WindowedVulkanContext window = new WindowedVulkanContext("Pontif — SDF", DEFAULT_WIDTH, DEFAULT_HEIGHT,
                 vertexSpirv, Fullscreen.ENTRY_POINT, fragmentSpirv, Fullscreen.ENTRY_POINT)) {
             window.run(maxFrames);
         }
