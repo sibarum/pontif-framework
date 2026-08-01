@@ -3,12 +3,16 @@ package sibarum.pontif.supirvast;
 import dev.supirvast.vastir.core.BinaryOp;
 import dev.supirvast.vastir.core.Expr;
 import dev.supirvast.vastir.core.LocalVar;
+import dev.supirvast.vastir.core.MathFn;
 import dev.supirvast.vastir.core.Statement;
 import dev.supirvast.vastir.core.UnaryOp;
+import dev.supirvast.vastir.type.Type;
 import sibarum.pontif.ir.IrExpr;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Lowers a Pontif {@link IrExpr} (the Int-only v1 subset) to a SuperVast {@code core} value expression, plus
@@ -86,19 +90,24 @@ public final class ExprLowering {
             case IrExpr.BinOp op -> lowerBinOp(op, scope);
             case IrExpr.LetIn let -> lowerLet(let, scope);
 
+            // --- shader vocabulary (float kernels only): vectors-as-records + pontif.math intrinsics ---
+            // A Vec2/Vec3/Vec4 record → a core vector; a .x/.y/.z/.w swizzle → a component extract; a
+            // pontif.math call (or a vecN constructor) → a core MathCall/VectorConstruct. These are the
+            // building blocks a fragment/vertex stage needs; they stay closed to non-vector records and
+            // non-intrinsic calls (a general user-function call is still a later slice).
+            case IrExpr.Record record -> lowerVectorRecord(record, scope);
+            case IrExpr.FieldAccess access -> lowerSwizzle(access, scope);
+            case IrExpr.Call call -> lowerIntrinsic(call, scope);
+
             // --- unsupported in v1: each fails closed with a source-located witness ---
             case IrExpr.Chr chr -> throw LoweringError.charLiteral(chr);
             case IrExpr.Str str -> throw LoweringError.stringLiteral(str);
             case IrExpr.SelfRef self -> throw LoweringError.selfRef(self);
-            case IrExpr.Record record -> throw LoweringError.record(record);
-            case IrExpr.FieldAccess access -> throw LoweringError.fieldAccess(access);
             case IrExpr.MethodCall call -> throw LoweringError.methodCall(call);
             case IrExpr.Lambda lambda -> throw LoweringError.lambda(lambda);
             case IrExpr.Apply apply -> throw LoweringError.apply(apply);
             case IrExpr.DispatchRef ref -> throw LoweringError.dispatchRef(ref);
             case IrExpr.Cast cast -> throw LoweringError.cast(cast);
-            case IrExpr.Call call -> throw LoweringError.unsupportedExpr(call, "Call '" + call.functionName() + "(...)'",
-                    "user-function calls are lowered in a later slice (monomorphization)");
             case IrExpr.Match match -> throw LoweringError.matchExpr(match,
                     "match lowering to structured if/else arrives in a later slice");
             case IrExpr.Iterate iterate -> throw LoweringError.iterate(iterate,
@@ -117,9 +126,26 @@ public final class ExprLowering {
     private Block lowerBinOp(IrExpr.BinOp op, Scope scope) {
         Block left = lower(op.left(), scope);
         Block right = lower(op.right(), scope);
+        Expr l = left.value();
+        Expr r = right.value();
+        // Scalar broadcast (core has no vector·scalar ops): in an arithmetic op mixing a vector and a
+        // scalar, splat the scalar to the vector's width so both sides are the same vector type — e.g.
+        // `p * 2` becomes a component-wise multiply. Comparisons/logic keep their scalar operands.
+        if (isArithmetic(op.op())) {
+            if (l.type() instanceof Type.Vector v && r.type() instanceof Type.Float) {
+                r = splat(r, v);
+            } else if (r.type() instanceof Type.Vector v && l.type() instanceof Type.Float) {
+                l = splat(l, v);
+            }
+        }
         List<Statement> stmts = new ArrayList<>(left.statements());
         stmts.addAll(right.statements());
-        return new Block(stmts, applyOp(op, left.value(), right.value()));
+        return new Block(stmts, applyOp(op, l, r));
+    }
+
+    private static boolean isArithmetic(IrExpr.Op op) {
+        return op == IrExpr.Op.ADD || op == IrExpr.Op.SUB || op == IrExpr.Op.MUL
+                || op == IrExpr.Op.DIV || op == IrExpr.Op.MOD;
     }
 
     /**
@@ -159,5 +185,167 @@ public final class ExprLowering {
         Block body = lower(let.body(), scope.with(let.name(), new Expr.Read(local)));
         stmts.addAll(body.statements());
         return new Block(stmts, body.value());
+    }
+
+    // --- shader vocabulary: vectors-as-records + pontif.math intrinsics -------------------------------
+
+    /** {@code pontif.math} intrinsic names → their {@code core} {@link MathFn}. */
+    private static final Map<String, MathFn> MATH = mathTable();
+
+    /** Intrinsics that reduce a vector to its scalar component type (result is {@code float}, not a vector). */
+    private static final Set<MathFn> REDUCING = Set.of(MathFn.LENGTH, MathFn.DOT, MathFn.DISTANCE);
+
+    /** {@code vecN} constructor names → their width. */
+    private static final Map<String, Integer> VEC_CONSTRUCTOR = Map.of("vec2", 2, "vec3", 3, "vec4", 4);
+
+    /** Swizzle component names → index (both {@code xyzw} position and {@code rgba} color spellings). */
+    private static final Map<String, Integer> COMPONENT = Map.of(
+            "x", 0, "y", 1, "z", 2, "w", 3, "r", 0, "g", 1, "b", 2, "a", 3);
+
+    /**
+     * A {@code Vec2}/{@code Vec3}/{@code Vec4} record literal → a {@code core} vector. The members lower to the
+     * vector's components in field order; the record's name must match its arity ({@code VecN}). Non-vector
+     * records (and vectors outside a float kernel) still fail closed.
+     */
+    private Block lowerVectorRecord(IrExpr.Record record, Scope scope) {
+        int n = record.members().size();
+        if (!isFloat() || n < 2 || n > 4 || !("Vec" + n).equals(record.typeName())) {
+            throw LoweringError.record(record);
+        }
+        List<Statement> stmts = new ArrayList<>();
+        List<Expr> components = new ArrayList<>();
+        for (IrExpr member : record.members().values()) {
+            Block b = lower(member, scope);
+            stmts.addAll(b.statements());
+            components.add(b.value());
+        }
+        return new Block(stmts, new Expr.VectorConstruct(vectorType(n), components));
+    }
+
+    /** A {@code v.x}/{@code .y}/{@code .z}/{@code .w} (or {@code .r/.g/.b/.a}) swizzle → a component extract. */
+    private Block lowerSwizzle(IrExpr.FieldAccess access, Scope scope) {
+        Block base = lower(access.base(), scope);
+        Integer index = COMPONENT.get(access.fieldName());
+        if (index == null || !(base.value().type() instanceof Type.Vector v) || index >= v.count()) {
+            throw LoweringError.fieldAccess(access);
+        }
+        return new Block(base.statements(), new Expr.VectorExtract(base.value(), index));
+    }
+
+    /**
+     * A {@code vecN(...)} constructor → a {@code core} vector, or a {@code pontif.math} call → a {@code core}
+     * {@link Expr.MathCall}. The result type is the vector arg's type for element-wise intrinsics (with scalar
+     * args broadcast to that width), or the scalar component type for reducing ones ({@code length}/{@code dot}/
+     * {@code distance}). Any other call still fails closed.
+     */
+    private Block lowerIntrinsic(IrExpr.Call call, Scope scope) {
+        String name = bare(call.functionName());
+        List<Statement> stmts = new ArrayList<>();
+        List<Expr> args = new ArrayList<>();
+        for (IrExpr arg : call.args()) {
+            Block b = lower(arg, scope);
+            stmts.addAll(b.statements());
+            args.add(b.value());
+        }
+
+        Integer width = VEC_CONSTRUCTOR.get(name);
+        if (width != null) {
+            if (args.size() != width) {
+                throw LoweringError.unsupportedExpr(call, "Call '" + name + "(...)'",
+                        name + " takes " + width + " components, got " + args.size());
+            }
+            return new Block(stmts, new Expr.VectorConstruct(vectorType(width), args));
+        }
+
+        MathFn fn = isFloat() ? MATH.get(name) : null;
+        if (fn == null) {
+            throw LoweringError.unsupportedExpr(call, "Call '" + name + "(...)'",
+                    "only pontif.math intrinsics and vecN constructors lower in a shader body; user-function "
+                            + "calls are a later slice");
+        }
+        Type result = intrinsicResultType(fn, args);
+        if (result instanceof Type.Vector v && !REDUCING.contains(fn)) {
+            for (int i = 0; i < args.size(); i++) {
+                if (args.get(i).type() instanceof Type.Float) {
+                    args.set(i, splat(args.get(i), v));   // broadcast e.g. mix(a, b, t)'s scalar t to the vector
+                }
+            }
+        }
+        return new Block(stmts, new Expr.MathCall(fn, result, args));
+    }
+
+    /** Element-wise intrinsics take the vector arg's type; reducing ones ({@code length}…) yield its component. */
+    private Type intrinsicResultType(MathFn fn, List<Expr> args) {
+        if (REDUCING.contains(fn)) {
+            for (Expr a : args) {
+                if (a.type() instanceof Type.Vector v) {
+                    return v.component();
+                }
+            }
+            return floatType();
+        }
+        for (Expr a : args) {
+            if (a.type() instanceof Type.Vector) {
+                return a.type();
+            }
+        }
+        return args.isEmpty() ? floatType() : args.get(0).type();
+    }
+
+    private Type.Vector vectorType(int width) {
+        return new Type.Vector(floatType(), width);
+    }
+
+    /** Repeats {@code scalar} across a vector of type {@code v} — the broadcast of a scalar to vector width. */
+    private static Expr splat(Expr scalar, Type.Vector v) {
+        List<Expr> components = new ArrayList<>();
+        for (int i = 0; i < v.count(); i++) {
+            components.add(scalar);
+        }
+        return new Expr.VectorConstruct(v, components);
+    }
+
+    /** Strips a module qualifier: {@code pontif.math/length} → {@code length}. */
+    private static String bare(String name) {
+        if (name == null) {
+            return "";
+        }
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
+    }
+
+    private static Map<String, MathFn> mathTable() {
+        Map<String, MathFn> m = new java.util.HashMap<>();
+        m.put("length", MathFn.LENGTH);
+        m.put("dot", MathFn.DOT);
+        m.put("distance", MathFn.DISTANCE);
+        m.put("normalize", MathFn.NORMALIZE);
+        m.put("cross", MathFn.CROSS);
+        m.put("reflect", MathFn.REFLECT);
+        m.put("pow", MathFn.POW);
+        m.put("sqrt", MathFn.SQRT);
+        m.put("abs", MathFn.ABS);
+        m.put("sign", MathFn.SIGN);
+        m.put("min", MathFn.MIN);
+        m.put("max", MathFn.MAX);
+        m.put("clamp", MathFn.CLAMP);
+        m.put("mix", MathFn.MIX);
+        m.put("step", MathFn.STEP);
+        m.put("smoothstep", MathFn.SMOOTHSTEP);
+        m.put("exp", MathFn.EXP);
+        m.put("log", MathFn.LOG);
+        m.put("sin", MathFn.SIN);
+        m.put("cos", MathFn.COS);
+        m.put("tan", MathFn.TAN);
+        m.put("asin", MathFn.ASIN);
+        m.put("acos", MathFn.ACOS);
+        m.put("atan", MathFn.ATAN);
+        m.put("atan2", MathFn.ATAN2);
+        m.put("radians", MathFn.RADIANS);
+        m.put("degrees", MathFn.DEGREES);
+        m.put("floor", MathFn.FLOOR);
+        m.put("ceil", MathFn.CEIL);
+        m.put("fract", MathFn.FRACT);
+        return Map.copyOf(m);
     }
 }
