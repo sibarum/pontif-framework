@@ -167,12 +167,19 @@ trust/fault-isolation choice — and the type system forces you to acknowledge i
     headless `conduct` **refuses them honestly** (fail-closed, pointing here) rather than silently
     degrading to `Eager`. Covered by `OrchestraTest` (metronome under `Eager`/`Fixed`; the `Vsync`
     refusal). `OrchestraBridge.beatMillis` reads the cadence variant.
-  - **Next — the generic multi-Player Conductor** driving *several* conduits **and** the graphics
-    render Player together (the original motivation) — unify the supirvast spike with the
-    pontif-runtime Conductor; the render Player (pontif-builtin-vulkan) seats on the runtime Conductor.
-    This is where `Vsync`/`Retained` become real (the swapchain/`glfwWaitEvents` source).
+  - **The generic multi-Player Conductor — DONE (substrate).** `runtime.module.Conductor` + `Player`
+    (ported from the supirvast spike, lifted into the runtime and keyed to `Cadence`) seat several
+    differently-cadenced Players on one main thread, deadline-merged, retiring independently. `conduct`
+    is re-expressed on it — a Tick *clock Player* seated at its cadence's period, no bespoke loop — so
+    the render Player can seat on the *same* scheduler. Covered by `ConductorTest` (eager, two-player
+    drain, fixed-period pacing) with `OrchestraTest` unchanged (identical `conduct` behavior).
+  - **Next — the render Player seats on it + the multi-Player *surface*.** pontif-builtin-vulkan
+    implements `Player` (wrapping `WindowedVulkanContext.tick`) and seats a render Player on a shared
+    runtime Conductor alongside a logic conduit — the original motivation. This is where `Vsync`
+    becomes real (the eager render paces the loop) and where the pre-`spawn` surface question is
+    decided (how a program says "render + logic together" before the `spawn` grammar of Slice 3).
   - **Then — non-blocking graphics cadence** (`present()` moves off the blocking `window.run()` onto
-    `tick()`/`drain()`, the Slice-1 supirvast shape, so it stops hoarding the thread).
+    the Conductor-driven `tick()`/`drain()`, so it stops hoarding the thread).
 - **Slice 3 (`spawn` proper):** the `spawn` term in the grammar (parser), its effectful-expression
   semantics + returned handle, and the **supervision boundary** (catch/retire/restart/escalate).
 - **Slice 4 (placement):** the `over X targeting Y` axis — thread / process (ElectroQ transport) /
