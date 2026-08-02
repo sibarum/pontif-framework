@@ -159,12 +159,20 @@ trust/fault-isolation choice — and the type system forces you to acknowledge i
 - **Slice 2a (done):** `pontif.orchestra` — the `conduct` native fires `Tick` events on a cadence
   into a conduit (a Player), whose `emit`s reach an Instrument (`StdOut`). Reuses the conduit-fold /
   emit-routing core untouched — the native supplies only the clock. Commit `pontif 6036903`.
-- **Slice 2b (next):**
-  - Cadence as a real trait (`Retained`/`Eager`/`Vsync`/`Fixed`), replacing the fixed period.
-  - The generic multi-Player Conductor driving *several* conduits **and** the graphics render Player
-    together (the original motivation) — unify the supirvast spike with the pontif-runtime Conductor;
-    the render Player (pontif-builtin-vulkan) seats on the runtime Conductor.
-  - Non-blocking graphics cadence.
+- **Slice 2b (in progress):**
+  - **Cadence as a real trait — DONE.** `trait Cadence` with `Fixed(dt)`/`Eager`/`Vsync`/`Retained`
+    variants lives in `pontif.orchestra`; `conduct(ticks, cadence:Cadence)` replaces the old fixed
+    `period:Int`. The headless conductor realizes `Fixed(dt)` (beats `dt` ms apart) and `Eager` (no
+    wait); `Vsync`/`Retained` pace to a display/event source only the windowed Conductor owns, so the
+    headless `conduct` **refuses them honestly** (fail-closed, pointing here) rather than silently
+    degrading to `Eager`. Covered by `OrchestraTest` (metronome under `Eager`/`Fixed`; the `Vsync`
+    refusal). `OrchestraBridge.beatMillis` reads the cadence variant.
+  - **Next — the generic multi-Player Conductor** driving *several* conduits **and** the graphics
+    render Player together (the original motivation) — unify the supirvast spike with the
+    pontif-runtime Conductor; the render Player (pontif-builtin-vulkan) seats on the runtime Conductor.
+    This is where `Vsync`/`Retained` become real (the swapchain/`glfwWaitEvents` source).
+  - **Then — non-blocking graphics cadence** (`present()` moves off the blocking `window.run()` onto
+    `tick()`/`drain()`, the Slice-1 supirvast shape, so it stops hoarding the thread).
 - **Slice 3 (`spawn` proper):** the `spawn` term in the grammar (parser), its effectful-expression
   semantics + returned handle, and the **supervision boundary** (catch/retire/restart/escalate).
 - **Slice 4 (placement):** the `over X targeting Y` axis — thread / process (ElectroQ transport) /

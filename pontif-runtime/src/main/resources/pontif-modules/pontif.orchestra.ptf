@@ -1,15 +1,36 @@
 requires pontif.events.{Event}
 
-exports @.{conduct, Tick}
+exports @.{conduct, Tick, Cadence, Fixed, Eager, Vsync, Retained}
 
 # A clock tick the Conductor fires into a conduit each cadence: `n` counts beats, `elapsed` is milliseconds
 # since the orchestra started. A program writes a `conduit c(e:Tick, s:S)` to be driven by it.
 struct Tick(n:Int, elapsed:Decimal)
 assign trait Tick:Event{}
 
-# conduct(ticks, period): the Conductor (first cut) — drive the program's Tick conduit for `ticks` beats at a
-# `period` (ms) cadence, on the main thread. Each beat fires a Tick event; the matching conduit folds it (a
-# Player) and its `emit`s reach their effect sinks (Instruments). Native; the placeholder body is never run.
-function conduct(ticks:Int, period:Int):_ -> {}
+# Cadence — the frame-advancement policy a Player is ticked on (docs/orchestration.md §Cadence). Frame
+# advancement is a parameterized algorithm, not one loop; the Conductor merges each Player's deadline.
+trait Cadence{}
+
+# Fixed(dt): a fixed logical increment every `dt` milliseconds — the virtual-timer clock (Unity's physics
+# cadence). The headless `conduct` paces beats `dt` ms apart.
+struct Fixed(dt:Int)
+# Eager: tick every scheduler pass, as fast as possible (uncapped) — no wait between beats.
+struct Eager()
+# Vsync: tick at display refresh, `dt` = real frame time. Meaningful only under a windowed Conductor that
+# owns a swapchain (orchestration slice 2b, bullet 2) — the headless `conduct` cannot pace to a display.
+struct Vsync()
+# Retained: tick only on input/events — zero frames when idle. Needs an event source to wait on (a window's
+# `glfwWaitEvents`); the windowed Conductor supplies it (orchestration slice 2b, bullet 2).
+struct Retained()
+assign trait Fixed:Cadence{}
+assign trait Eager:Cadence{}
+assign trait Vsync:Cadence{}
+assign trait Retained:Cadence{}
+
+# conduct(ticks, cadence): the Conductor (first cut) — drive the program's Tick conduit for `ticks` beats on
+# the given `cadence`, on the main thread. Each beat fires a Tick event; the matching conduit folds it (a
+# Player) and its `emit`s reach their effect sinks (Instruments). The headless conductor realizes `Fixed(dt)`
+# and `Eager`; `Vsync`/`Retained` need the windowed Conductor. Native; the placeholder body is never run.
+function conduct(ticks:Int, cadence:Cadence):_ -> {}
 
 0
