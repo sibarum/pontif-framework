@@ -1,6 +1,6 @@
 requires pontif.linalg.{Vec2}
 
-exports @.{vulkanWindow, renderSdf, Frame}
+exports @.{present, Pipeline, FullscreenPass, Frame, renderSdf, vulkanWindow}
 
 # The per-frame uniform block a shader may take as a second parameter — `time` (seconds) and `resolution`
 # (framebuffer size in pixels). The host pushes it every frame; `f.time` / `f.resolution` lower to
@@ -8,14 +8,23 @@ exports @.{vulkanWindow, renderSdf, Frame}
 # types it uses come from pontif.linalg.)
 struct Frame(time:Decimal, resolution:Vec2)
 
-# The window action (native; the placeholder body is never run): opens a window presenting a
-# fullscreen shader authored in SupirVast's core IR (compiled to SPIR-V), on the root thread, until
-# closed. Phase 0 spike: the shader is a fixed constant color.
-function vulkanWindow(title:String, width:Int, height:Int):_ -> {}
+# The declarative pipeline surface (ShaderLab-influenced). A Pipeline is a window `config`
+# ({title, width, height}) and its `passes`. A FullscreenPass carries a Pontif shader FUNCTION (passed as a
+# `$shade[…]` value) that shades every pixel by screen uv (and an optional Frame). Render state and multi-pass
+# compositing (RenderState, render targets) grow this surface later.
+struct FullscreenPass(fragment:_)
+struct Pipeline(config:_, passes:_)
 
-# renderSdf(shade): present a Vulkan window shading each pixel by a Pontif function of screen uv (and an
-# optional Frame). The function is reflected and its body lowered to a SPIR-V fragment through the core IR —
-# the shader is authored in Pontif, not GLSL. `shade` is passed as a function value: `$shade[Vec2, Frame]`.
+# present(pipeline): open a Vulkan window for the Pipeline and present its FullscreenPass. The shader is
+# reflected and lowered to a SPIR-V fragment through the core IR — authored in Pontif, not GLSL.
+function present(pipeline:Pipeline):_ -> {}
+
+# renderSdf(shade): the direct spike — present a single shader function fullscreen, without the Pipeline
+# wrapper. Kept for the simple case; `present` is the real surface.
 function renderSdf(shade:_):_ -> {}
+
+# The window action (native; the placeholder body is never run): opens a window presenting a fixed
+# constant-color fragment shader authored in SupirVast's core IR (the Phase 0 spike).
+function vulkanWindow(title:String, width:Int, height:Int):_ -> {}
 
 0

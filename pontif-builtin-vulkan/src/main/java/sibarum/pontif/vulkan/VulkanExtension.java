@@ -30,6 +30,7 @@ public final class VulkanExtension implements Extension {
     public Map<String, NativeCalls.NativeCall> calls() {
         return Map.of(
                 "vulkanWindow", VulkanBridge::openVulkanWindow,
-                "renderSdf", VulkanBridge::renderSdf);
+                "renderSdf", VulkanBridge::renderSdf,
+                "present", VulkanBridge::present);
     }
 }
