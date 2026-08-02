@@ -1,0 +1,15 @@
+requires pontif.events.{Event}
+
+exports @.{conduct, Tick}
+
+# A clock tick the Conductor fires into a conduit each cadence: `n` counts beats, `elapsed` is milliseconds
+# since the orchestra started. A program writes a `conduit c(e:Tick, s:S)` to be driven by it.
+struct Tick(n:Int, elapsed:Decimal)
+assign trait Tick:Event{}
+
+# conduct(ticks, period): the Conductor (first cut) — drive the program's Tick conduit for `ticks` beats at a
+# `period` (ms) cadence, on the main thread. Each beat fires a Tick event; the matching conduit folds it (a
+# Player) and its `emit`s reach their effect sinks (Instruments). Native; the placeholder body is never run.
+function conduct(ticks:Int, period:Int):_ -> {}
+
+0
