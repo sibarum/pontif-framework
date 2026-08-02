@@ -151,6 +151,101 @@ and hang, at the cost of the boundary (marshaling) and exactly the `Unreachable`
 honest-types rule already demands. Choosing a chair is simultaneously a performance choice and a
 trust/fault-isolation choice — and the type system forces you to acknowledge it.
 
+## The concurrency model — one pattern, four transports
+
+> Ratified 2026-08-02 (James + working session). The threading discipline the Orchestration API
+> commits to, and the property that makes it sound.
+
+### The theorem: only the queue needs thread-safety
+
+Pontif is unusually entitled to a lock-free concurrency model, and it falls straight out of the
+language's existing rules — no new machinery:
+
+- **Every struct is immutable; there is no mutability anywhere in the system.**
+- **No closure retains state past the stack frame that made it** — a lambda captures values, not a
+  mutable cell.
+- **Side-effects happen only when an event crosses a boundary, and an event carries only static
+  (immutable) data.**
+
+So the only thing two threads ever share is *the message queue itself*. Everything that flows through
+it is immutable — safe to read from any thread, no defensive copy, no lock. The one discipline that
+makes this **literally** true is **single-owner conduits**: each Player (conduit) is drained by
+exactly one thread, which folds its state serially. Then:
+
+- a conduit's **state** is thread-local — mutated over time, but only ever by its owning thread → no
+  lock;
+- the linked **registries** (`CompiledModule`, dispatch tables, native bindings) are read-only after
+  link → shared freely → no lock;
+- the **inbox** is the sole object two threads touch → the *only* place synchronization lives.
+
+**There are zero data locks in the system.** All concurrency is confined to bounded queues. This is
+the actor model (shared-nothing message passing), but earned by construction rather than imposed by
+convention — purity + message passing = shared-nothing, the same property that makes Erlang's
+transparent placement sound.
+
+The framework payoff this was always aiming at: **display logic is always single-threaded** (the main
+thread drains one serialized stream of immutable events and applies updates in order), while
+**application logic parallelizes freely** on daemon threads — and the two can never race, because the
+only thing they share is a queue. "No weird GUI bugs" becomes a property, not a code review.
+
+### The tier matrix
+
+The four placements are **not four runtimes**. The integration pattern is uniform — *an inbox of
+immutable messages* — and a Player's code is **transport-blind and identical** across all of them. What
+differs is exactly two columns: how a message reaches the inbox (**transport**), and how the Player
+stays alive (**liveness**). `spawn … over X` selects a row.
+
+| Tier | Transport | Liveness | Handle type |
+| --- | --- | --- | --- |
+| **main** | cooperative drain between render ticks | the one thread you never block and never spawn (singleton) | local |
+| **same-process thread** | in-process bounded queue | spawned daemon, supervised | local |
+| **separate process** | elektroq socket + a process spawner | OS-supervised | `[… \| Unreachable]` |
+| **cross-machine** | elektroq socket | OS-supervised | `[… \| Unreachable]` |
+
+- **main is special** because it is cooperatively multiplexed (never blocked — it drains its inbox
+  *between* render ticks) and there is exactly one of it. This is what the cut-2 `Conductor` already
+  is: the **main-thread lane's executor**. It does not go away — thread/process placement is added
+  *around* it.
+- **same-process threads are special** because they share a heap: the transport *may* skip the copy.
+  But the rule still admits only immutable messages, so nothing above the queue can tell — the
+  optimization is invisible, and moving the Player to a process later changes nothing but the row.
+- **separate process and cross-machine are the same design** — an elektroq socket — differing only in
+  where the socket points. Both hand back an `Unreachable`-typed handle, because a boundary you can't
+  reach in-memory is a boundary the *types* must admit can fail (never RPC's transparency lie).
+
+macOS wrinkle (noted, not yet paid): a window is happiest on a consistent thread and on macOS Cocoa
+*demands* the true main thread, so "spawn the GUI onto any pool thread" is a Windows-only convenience.
+The main lane exists precisely so the display Player can be pinned there when we cross that bridge.
+
+### The journal is the wire format
+
+Because every message is immutable static data, a **per-inbox journal** — an ordered list of those
+records — is byte-identical to what you would serialize to cross a process or a network. Journaling
+(for crash-restart) and the run-anywhere transport therefore **consume the same stream**; they differ
+only in where it is written (RAM vs socket). Build the in-memory journal now and most of the
+cross-process wire model comes with it — which is exactly how the thread-first plan avoids blocking the
+process-later future.
+
+### Supervision — the Smalltalk restart, stated honestly
+
+A conduit is a deterministic fold from `INIT` over its event stream, so its **state replays
+perfectly**: on crash, re-seed `INIT` and replay the journal to rebuild it. That half of the
+"detect-crash-and-restart-the-daemon" dream is real and free.
+
+The honest edge is **effects don't un-happen**. Naive replay re-fires `StdOut` / `present` / IO. So
+restart carries two rules, and the journal is built to serve them from day one:
+
+- **Commit-marker.** The journal records the last position whose effects were externally observed.
+  Restart replays *silently* up to the marker (rebuilding state without re-emitting), then resumes
+  live. Alternatively, effects are made idempotent — but the marker is the general answer.
+- **Poison-message / retry bound.** A restart re-delivers the event that crashed the Player; after *N*
+  failed re-deliveries the event is **dead-lettered**, so one bad message cannot crash-loop a daemon
+  forever. This is the retry logic driven by the in-memory journal.
+
+Supervision policy (retire / restart-from-`INIT`+replay / escalate to the root) stays as in *Crash
+safety* above; the journal + commit-marker + dead-letter are the mechanism that makes "restart the
+daemon" safe rather than a double-effect hazard.
+
 ## Status and roadmap
 
 - **Slice 1 (done, host-level spike):** `WindowedVulkanContext.tick()`/`drain()` make present a
@@ -173,17 +268,32 @@ trust/fault-isolation choice — and the type system forces you to acknowledge i
     is re-expressed on it — a Tick *clock Player* seated at its cadence's period, no bespoke loop — so
     the render Player can seat on the *same* scheduler. Covered by `ConductorTest` (eager, two-player
     drain, fixed-period pacing) with `OrchestraTest` unchanged (identical `conduct` behavior).
-  - **Next — the render Player seats on it + the multi-Player *surface*.** pontif-builtin-vulkan
-    implements `Player` (wrapping `WindowedVulkanContext.tick`) and seats a render Player on a shared
-    runtime Conductor alongside a logic conduit — the original motivation. This is where `Vsync`
-    becomes real (the eager render paces the loop) and where the pre-`spawn` surface question is
-    decided (how a program says "render + logic together" before the `spawn` grammar of Slice 3).
-  - **Then — non-blocking graphics cadence** (`present()` moves off the blocking `window.run()` onto
-    the Conductor-driven `tick()`/`drain()`, so it stops hoarding the thread).
-- **Slice 3 (`spawn` proper):** the `spawn` term in the grammar (parser), its effectful-expression
-  semantics + returned handle, and the **supervision boundary** (catch/retire/restart/escalate).
-- **Slice 4 (placement):** the `over X targeting Y` axis — thread / process (ElectroQ transport) /
-  host / GPU — with honest boundary types (`Unreachable`).
+  - **Direction change (2026-08-02).** The original 2b bullets 2–3 — seat the render Player on the
+    *main-thread* Conductor and make a **cooperative** non-blocking graphics cadence — are
+    **superseded** by *The concurrency model* above. Cooperative single-thread multiplexing exists only
+    to satisfy the one-main-thread constraint; putting app logic on its **own thread** (tier
+    "same-process thread") dissolves the non-blocking-present problem instead of engineering around it,
+    and it is the GUI-framework thesis (display single-threaded on main, logic parallel off it). The
+    cut-2 `Conductor` is retained as the **main-thread lane**; thread placement is added around it. So
+    2b's remaining work is folded into the tiered plan below, not a cooperative co-run.
+- **Next slice — tier-1 mailbox spike (host-level, the same-process-thread row).** Prove *only the
+  queue is shared* end-to-end, in the display-on-main / logic-off-main arrangement: main drains an
+  inbox and renders; one spawned app-logic Player folds and emits GUI-update messages into main's
+  inbox; input events flow back the other way. In-process, immutable messages both directions, one
+  bounded queue each. Standalone harness first (à la Slice 1), no Pontif grammar yet — it validates the
+  single-owner-conduit discipline and the mailbox boundary that every higher tier reuses.
+- **Then — the mailbox substrate + the in-memory journal.** Give each Player an inbox (an emit becomes
+  an enqueue to the target's mailbox; single-owner serial fold), and journal each inbox with a
+  **commit-marker** slot. This is the meaty runtime change (`fireEvent` stops folding synchronously),
+  and it is forward work: the journal *is* the wire format, so it doubles as the cross-process
+  serialization, and its shape matches elektroq's actor/inbox model.
+- **`spawn` proper (grammar):** the `spawn` term in the parser, its effectful-expression semantics +
+  returned handle, and the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate)
+  driven by the journal + dead-letter bound.
+- **Placement — `over X targeting Y`:** the tier matrix made real. `over thread` (in-process queue) →
+  `over process` (elektroq socket + a **process spawner**, which neither repo provides yet — new work)
+  → `over host` / GPU, with honest `[… | Unreachable]` boundary types. `over thread` and `over process`
+  share one integration pattern; only the transport row changes.
 
 Interpreter seams the Conductor builds on (verified): `IrInterpreter.fireEvent` (folds the matching
 conduit, state in `conduitState`, routes to actions + `NativeFunctions` sinks), `CompiledModule`'s
