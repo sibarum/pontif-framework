@@ -106,6 +106,30 @@ reachability:
   not when `main` returns. A root/`main` Player's retirement tears down the rest (supervision root —
   closing the window ends the program even if a background logger would otherwise run forever).
 
+### Results flow forward — there is no `await` (RULED 2026-08-02)
+
+There is **no thread synchronization at the language level — only orchestration.** A `spawn` is
+fire-and-forget: nothing blocks a thread waiting on a spawned result, and there is no future / join /
+`await` to read one back. A spawned routine's output returns the *only* way any effect returns — as an
+**emitted event** the substrate routes forward to a reacting `action`/conduit.
+
+This is not new: it is the **exact ruling already made for `… on Gpu`** (2026-07-05, `IrInterpreter`
+line ~110 — "consumed by a reacting `action`, forward only; no `await` reads it back"). So **`spawn`
+mirrors the GPU async model**, with a daemon thread as the "device":
+
+- the dispatch produces a `Pending`-shaped handle registered in `outstanding`, carrying a **woven
+  completion `emit`** (the event constructed from the computed value — the same `eventTemplate`/`argVar`
+  the GPU path weaves);
+- the routine runs on its thread; **drive-to-quiescence, on the main thread**, retrieves the result and
+  fires that completion `emit` → the reacting action folds it single-threaded. The program stays live
+  until every dispatch has drained (which is just the orchestra-drains lifetime above).
+
+The one wait that exists is *internal* — the quiescence loop retrieving a result off the daemon's
+result mailbox — exactly as the GPU loop awaits `Pending.values()`. That is the runtime draining the
+orchestra, never a user-facing `await`. Net: cross-thread work never touches the substrate on the
+worker thread (the completion `emit` fires on the main thread), so no interpreter-wide locking is
+needed, and the language surface has no synchronization primitive at all.
+
 ## Crash safety
 
 Purity quarantines *side-effects*, not *failure* — those are different. The honest model:
@@ -307,9 +331,15 @@ daemon" safe rather than a double-effect hazard.
   that wants per-Player state ownership, and it is a later refinement — *not* a blocker for spawning a
   routine onto a thread. So `fireEvent` stays synchronous on the main lane; only a conduit *placed*
   off-thread needs its own state cell, built when placement puts it there.
-- **`spawn` proper (grammar):** the `spawn` term in the parser, its effectful-expression semantics +
-  returned handle, and the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate)
-  driven by the journal + dead-letter bound.
+- **`spawn` proper — mirror the GPU async model (next).** A `spawn` of a routine reuses the
+  `Pending`/`outstanding`/drive-to-quiescence machinery `… on Gpu` already has (see *Results flow
+  forward* above): the "device" is a daemon thread, the dispatch registers a `Pending` whose result is
+  fetched off a result `Mailbox`, and a **woven completion `emit`** delivers it forward to a reacting
+  action on the main thread at quiescence. **No `await`** — the language gains no synchronization
+  primitive. The new work is the parser/lowering for the woven completion `emit` (mirroring how
+  `… on Gpu` weaves its emit) and the daemon-backed `Pending`; the drive-to-quiescence loop is reused
+  as-is. Then the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate) rides the
+  journal + dead-letter bound.
 - **Placement — `over X targeting Y`:** the tier matrix made real. `over thread` (in-process queue) →
   `over process` (elektroq socket + a **process spawner**, which neither repo provides yet — new work)
   → `over host` / GPU, with honest `[… | Unreachable]` boundary types. `over thread` and `over process`
