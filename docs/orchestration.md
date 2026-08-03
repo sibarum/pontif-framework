@@ -35,7 +35,7 @@ They **name seams that already exist** — this is a unification, not an inventi
 | --- | --- | --- |
 | **Player** | a **conduit** (scan over an event stream), ticked by a cadence | pure, shares nothing → **mobile** (place it anywhere) |
 | **Instrument** | an **effect sink** (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | impure, touches the world → **pinned** to its hardware |
-| **Conductor** | the missing coordination layer: a cooperative main-thread event loop | places Players, wires clocks, routes emits |
+| **Conductor** | a **worker** that runs Pontif code (a thread/process; one per worker — see *The conductor graph*) | owns conduits + an inbox, wires clocks, routes emits on the static graph |
 
 Consequences:
 
@@ -269,6 +269,73 @@ restart carries two rules, and the journal is built to serve them from day one:
 Supervision policy (retire / restart-from-`INIT`+replay / escalate to the root) stays as in *Crash
 safety* above; the journal + commit-marker + dead-letter are the mechanism that makes "restart the
 daemon" safe rather than a double-effect hazard.
+
+## The conductor graph — static topology, dynamic resources
+
+> Ratified 2026-08-02 (James, thinking aloud → agreed). The wiring model: what is fixed at compile
+> time, what is fluid at runtime, and why the split makes a whole class of failures impossible.
+
+### A conductor *is* the worker
+
+**"Conductor" is the name of the thing that runs Pontif code** — a thread, a process, the main thread
+itself. It is no longer a coordinator-of-others sitting apart; each conductor *is* one logical worker,
+and a running program is a **hive-mind of conductors** passing event messages between them. This
+retires the need to say "thread" or "process" for the general case — the placement axis (`over X`)
+just chooses *which conductor* (and where its hardware lives). The `Conductor` class already built is
+the per-worker executor: a run-loop that now also owns an inbox, its conduits, and the static routing
+table.
+
+### The graph is fixed at compile time
+
+- **Every conduit belongs to at most one conductor** — the one that *owns* that event type, as its
+  primary receiver (a public-API endpoint) or primary emitter (a status broadcaster). One owning fold
+  per type; **many static subscribers** for fan-out (the reacting actions/conduits elsewhere).
+- **The whole routing graph — who owns what, which conductor they sit on, every subscription — is
+  constructed at compile time.** Routing is therefore a resolved table, not a runtime lookup: the
+  compiler **specializes each emit-site** — a same-conductor emit lowers to a *direct synchronous fold*
+  (no mailbox hop), a cross-conductor emit to a *mailbox enqueue*. "Practically hardcoded"; the mailbox
+  cost is paid only where a thread boundary is actually crossed. An emitted type with zero subscribers
+  is a statically-known no-op.
+- **There are no runtime conductor spawns.** Every conductor is alive and listening before the first
+  line of user code runs. This designs out the actor model's nastiest failure mode by construction: a
+  message can never reach a conduit that is not yet online, because there is no moment at which a
+  conductor exists but is unwired. No initialization races — not "handled," *impossible*.
+
+### Resources are dynamic — decoupled from the worker's lifecycle
+
+The apparent counterexample — *opening a window at runtime* — is resolved by not conflating a
+**resource** with a **worker**. A window is not a conductor; it is an **Instrument** (a pinned
+effect-sink / resource) that a conductor *acquires* on an `OpenWindow` message and *releases* on close.
+The conductor is static and always-listening; it simply hasn't been told to open a window yet.
+
+Mechanically this stays inside "effects at boundaries, immutable data": a conduit's immutable state
+carries **resource handles** — opaque refs, data like a file descriptor — while the resource itself
+lives in the external world. Open/close are effects that thread a handle into / out of state. The
+display conductor is naturally the **main-thread conductor** (the one lane that may own a Cocoa
+window), so macOS correctness falls out for free.
+
+**The split generalizes**, which is the tell that it is right: a **remote network peer** is likewise a
+*connection resource* a conductor acquires — not a conductor spawned at runtime. Each program keeps its
+own static topology and they message-pass across the connection. So **static conductors + dynamic
+resources** covers dynamically-opened windows *and* dynamic P2P membership (elektroq's STUN/TURN
+future) with one rule.
+
+The only thing genuinely forbidden is a runtime-created **local worker** (dynamic worker topology /
+load-scaled pools — the deliberate trade against Erlang). Dynamic *compute* parallelism is a different
+axis: data-parallel fan-out (`… on Gpu`) runs *within* a conductor and is unaffected. Nothing you
+actually need is in the forbidden gap.
+
+### Two honest edges
+
+- **Backpressure cycles.** Bounded mailboxes + a cycle in the conductor graph can deadlock (A fills B's
+  inbox, B fills A's, both block in `send`). The no-`await` ruling already killed the reply-wait
+  deadlock; this is the only one left — and the **static graph is exactly the tool to detect cycles at
+  compile time**, turning a runtime hang into a compile-time warning.
+- **Stale resource handles.** Journal replay faithfully rebuilds a conduit's state, *including* a
+  window/connection handle — but the external resource behind it may be gone after a crash. So
+  supervision restart must **reconcile resources** (re-acquire / revalidate a replayed handle), because
+  effects don't un-happen *and* resources can vanish. Same family as the commit-marker edge, not a
+  threat to the model.
 
 ## Status and roadmap
 
