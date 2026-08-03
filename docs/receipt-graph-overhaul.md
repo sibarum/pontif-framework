@@ -255,12 +255,19 @@ drafter: the graph node keeps the declared return; per-region dispatched proofs
 map to their own branches. Folding granted returns onto the node itself is a
 Step-2 dossier concern.*
 
-**Finding 3 — stream-query desugaring emits an empty else-branch (MEDIUM).** A
-refined query `&s:[Int:@>1]` drafts an `$iter$` helper with the filter's
-keep-branch *and* an unconditional else-branch carrying **no initial receipt**
-(the implicit drop). An obligation over that branch would have no body equation
-to reason from. Same lambda-app blob (Finding 1 family) in the caller's receipt.
-Characterized, not yet judged.
+**Finding 3 — stream-query drop arm carries no receipt (judged: NOT a defect,
+2026-08-03).** A refined query `&s:[Int:@>1]` drafts an `$iter$` step with the
+filter's keep-branch *and* an unconditional drop-branch carrying no initial
+receipt. Investigated and judged **honest + sound**: (a) a filter's drop arm
+produces no output, so having no `r_0 == …` equation is the correct model; (b)
+`BuiltinIssuer.attemptAll` visits every branch, and a branch with no result-var
+definition leaves the obligation's `r_0` un-substituted, so `Discharge` fails
+**closed** (NOT DISCHARGED) — the empty branch can never be silently skipped into
+a false discharge; (c) the step carries a bare return today, so there is no
+obligation at all and the report honestly says "nothing to prove". No code
+change; locked by `streamQuery_dropArmHasNoReceipt_isHonestAndSound`. (The
+caller-side lambda-app blob noted originally was the Finding 1 family and is
+gone with that fix.)
 
 **Finding 4 — receipt output was nondeterministic on multi-field records
 (MEDIUM) — FIXED (2026-08-01).** The identical `swap` program printed
@@ -281,11 +288,11 @@ iteration is observable — never `Map.copyOf`/`HashMap`.*
 **Bearing on the overhaul.** Findings 1 and 2 were the priority: 1 blocked the
 whole ADT/recursion proof story the gradient (Step 3) and per-function dossier
 (Step 2) will build on; 2 is the receipt graph failing its core promise today.
-**Findings 1, 2, and 4 are now fixed** (ADT/structural recursion discharges;
-assign-proof obligations exposed; deterministic rendering). **Finding 3** (empty
-stream-query else-branch) remains, low-severity. The Step-1 suite is the guard
-that keeps them fixed; the drafter's proof surface is now sound enough to build
-the Step-2 per-function dossier on. (Probe `08-fold` hit a probe-syntax parse error, not a
+**All four Step-1 findings are resolved** — 1 (ADT/structural recursion
+discharges), 2 (assign-proof obligations exposed), 4 (deterministic rendering)
+fixed; 3 (stream drop-arm) judged by-design + sound. The Step-1 suite is the
+guard that keeps them fixed; the drafter's proof surface is now sound enough to
+build the Step-2 per-function dossier on. (Probe `08-fold` hit a probe-syntax parse error, not a
 receipt bug — the `fold` lambda spelling in the probe is wrong; re-confirm fold
 coverage once the syntax is corrected.)
 

@@ -147,16 +147,19 @@ class ReceiptGraphFeatureCoverageTest {
                 () -> "the false 'nothing to prove' must be gone:\n" + text);
     }
 
-    // --- Finding 3: stream-query desugaring emits an empty else-branch -----
+    // --- Finding 3 (by design): stream-query drop arm carries no receipt --
 
     @Test
-    void streamQuery_draftsIterHelper_withEmptyElseBranch_characterization() {
-        // FINDING 3 (lower severity). A refined stream query `&s:[Int:@>1]`
-        // desugars to an `$iter$` helper whose filter produces a guarded
-        // keep-branch AND an unconditional else-branch that carries NO initial
-        // receipt (the implicit drop). Plus the caller's receipt is another
-        // lambda-app blob (Finding 1 family). Characterized, not yet judged
-        // right/wrong — the empty branch is a smell an obligation would trip on.
+    void streamQuery_dropArmHasNoReceipt_isHonestAndSound() {
+        // FINDING 3 (judged: not a defect). A refined stream query `&s:[Int:@>1]`
+        // desugars to an `$iter$` step whose filter has a guarded keep-branch and
+        // an unconditional drop-branch carrying NO initial receipt — the honest
+        // model of "this frame produces no output". It is SOUND: `attemptAll`
+        // visits every branch, and a branch with no `r_0 == …` definition leaves
+        // the obligation's result var un-substituted, so Discharge fails closed
+        // (NOT DISCHARGED) rather than silently skipping it. The step also carries
+        // a bare (unrefined) return today, so there is no obligation at all — the
+        // report honestly says "nothing to prove". No code change; locked here.
         String text = report("""
                 module m
                 function bigs():Stream[Int] ->
@@ -168,5 +171,11 @@ class ReceiptGraphFeatureCoverageTest {
                 () -> "expected a drafted $iter$ helper for the stream query:\n" + text);
         assertTrue(text.contains("branch [$q0_0 > 1]:"),
                 () -> "expected the filter keep-branch guard:\n" + text);
+        // No false discharge: the step has no obligation, so nothing is claimed
+        // proven off the receiptless drop branch.
+        assertTrue(text.contains("bigs$iter$0  (no return refinement -- nothing to prove)"),
+                () -> "step should carry no obligation (fail-closed, honest):\n" + text);
+        assertFalse(text.contains("bigs$iter$0  :  "),
+                () -> "no obligation should be claimed on the iter step:\n" + text);
     }
 }
