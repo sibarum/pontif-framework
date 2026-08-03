@@ -181,6 +181,23 @@ existing graph as the backing store first; don't rewrite the drafter).
 Delivers move (4) with today's reasoning and gives (2)/(3) a home. No new
 proofs, so it's safe and testable against Step 1's goldens.
 
+**Step 2 — first slice LANDED (2026-08-03).** `ClassificationReport`
+(`pontif-runtime`) is the read-only per-function dossier: for every function it
+co-locates **halting** (`NoHalt`), **algebraic** (auto-discovered — see below),
+and **receipts** (return-obligation discharge via the issuer + `proof=` +
+`assign proof` binders). Read-only and unconditional — the decision-free half of
+the "discovery runs for all; gating stays opt-in" ruling; it changes no gate.
+`FunctionClassification` is the seam the unified `classify(fn)` grows from.
+**Algebraic is genuinely auto-discovered, not annotation-driven:** a new
+`AlgebraicCheck.isAlgebraic(fd, world, primitives)` per-function probe run to a
+**greatest fixpoint** (start with all functions, drop any whose body leaves the
+fragment given the survivors, cascade), with recursion excluded via a call-graph
+self-reachability check so the acyclicity rule holds (a recursive arithmetic body
+is *not* algebraic). Tests: `ClassificationReportTest`. Still to come: conservation
+summary (`DataConservative` etc.) as a fourth dimension; the effective-sort
+trajectory (Step 3); folding the pieces behind one `classify(fn)` object and
+onto the graph node itself.
+
 ### Step 3 — Gradient over a single self-recursive numeric parameter *(the new idea, smallest slice)*
 
 Narrowest viable case: one function, one recursive call, argument a linear step

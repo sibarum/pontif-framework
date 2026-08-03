@@ -61,6 +61,28 @@ public final class AlgebraicCheck {
         return acyclic(algebraic, functionsByName);
     }
 
+    /**
+     * Whether {@code fd}'s body lies in the algebraic fragment, treating
+     * {@code world} as the set of function names that count as algebraic-callable
+     * (plus {@code primitives}). This is the per-function probe behind automatic
+     * classification: unlike {@link #check}, it takes no "claimed" set and reports
+     * a boolean rather than a diagnostic, so a caller can run it to a greatest
+     * fixpoint (start with every function in {@code world}, drop any that fails,
+     * repeat) to DISCOVER the algebraic set without the user marking anything.
+     *
+     * <p>Scope: fragment-membership only. It does not itself enforce the
+     * acyclicity rule {@link #check} adds for a claimed set — a recursive
+     * arithmetic body reads as fragment-algebraic here. Callers that need the
+     * language's full "algebraic" verdict still run {@link #check} on the
+     * discovered set.
+     */
+    public static boolean isAlgebraic(
+            IrStmt.FunctionDecl fd, Set<String> world, Set<String> primitives) {
+        Set<String> params = new HashSet<>();
+        for (IrParam p : fd.params()) params.add(p.name());
+        return checkFragment(fd.body(), fd.name(), params, world, primitives).isEmpty();
+    }
+
     /** The algebraic operators — everything else on a {@link IrExpr.BinOp} is rejected. */
     private static boolean isAlgebraicOp(IrExpr.Op op) {
         return switch (op) {
