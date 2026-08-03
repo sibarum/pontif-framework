@@ -398,6 +398,14 @@ actually need is in the forbidden gap.
   that wants per-Player state ownership, and it is a later refinement — *not* a blocker for spawning a
   routine onto a thread. So `fireEvent` stays synchronous on the main lane; only a conduit *placed*
   off-thread needs its own state cell, built when placement puts it there.
+- **Conductor-graph runtime shape — DONE (host-level spike).** `ConductorGraphSpike` realizes the
+  hive-mind at the host level (à la Slice 1): two conductors on their own threads, each owning its
+  conduits + state, a **static routing table** (event type → owning conductor), and events flowing
+  forward across conductors. An `app` conductor folds `Command`→counter and **emits `Status`**, which
+  the router delivers *across* to the `display` conductor (a cross-conductor hop → enqueue → fold on
+  display's thread). All conductors start before any message flows (init race designed out); only the
+  mailboxes + the read-only table are shared. `ConductorGraphSpikeTest` asserts cross-conductor order
+  under load. This validates the routing/ownership shape the interpreter will take on next.
 - **`spawn` proper — mirror the GPU async model (next).** A `spawn` of a routine reuses the
   `Pending`/`outstanding`/drive-to-quiescence machinery `… on Gpu` already has (see *Results flow
   forward* above): the "device" is a daemon thread, the dispatch registers a `Pending` whose result is
