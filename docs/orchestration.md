@@ -285,11 +285,21 @@ daemon" safe rather than a double-effect hazard.
   apply backpressure under 100 presses without deadlock or reorder. No Pontif grammar yet; this is the
   boundary every higher tier reuses (swap a Mailbox for a socket and the two halves are two processes,
   code unchanged).
-- **Then — the mailbox substrate + the in-memory journal.** Give each Player an inbox (an emit becomes
-  an enqueue to the target's mailbox; single-owner serial fold), and journal each inbox with a
-  **commit-marker** slot. This is the meaty runtime change (`fireEvent` stops folding synchronously),
-  and it is forward work: the journal *is* the wire format, so it doubles as the cross-process
-  serialization, and its shape matches elektroq's actor/inbox model.
+- **In-memory journal — DONE (additive).** `runtime.module.EventJournal` taps the existing
+  observational `IrInterpreter.EventListener` seam, so it records the ordered stream of immutable events
+  a run fires **without touching the synchronous fold** — install it, run, read the stream back. That
+  stream is byte-for-byte the cross-process wire format (journal = transport). It carries the two things
+  supervision needs: a **commit-marker** (splitting the log into a silently-replayed committed prefix
+  and a live-replayed uncommitted tail) and a **dead-letter** list (the poison-message bound).
+  `EventJournalTest` covers the marker split, dead-lettering, and capture-in-order of a real conduit
+  program's emits. Thread-safe (`CopyOnWriteArrayList` + atomic marker) for when Players journal
+  concurrently; per-inbox partitioning waits for real mailboxes (below).
+- **Deferred (deliberately) — the async mailbox substrate.** Turning `fireEvent` from a synchronous
+  fold into an enqueue to a per-conduit inbox is a large rewrite of the working single-threaded core,
+  and it has **no consumer until a conduit is actually placed off-thread**. So it is folded into
+  *Placement* below rather than built speculatively: a conduit gets a real mailbox exactly when
+  `over thread`/`over process` puts it on another thread. The tier-1 spike already proved the boundary;
+  the main lane stays synchronous until then.
 - **`spawn` proper (grammar):** the `spawn` term in the parser, its effectful-expression semantics +
   returned handle, and the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate)
   driven by the journal + dead-letter bound.
