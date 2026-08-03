@@ -3,8 +3,10 @@ package sibarum.pontif.core.symbolic;
 import sibarum.pontif.core.types.Sort;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 public sealed interface SymExpr
         permits SymExpr.Var, SymExpr.Lit, SymExpr.Frac, SymExpr.Dec, SymExpr.Chr,
@@ -180,7 +182,14 @@ public sealed interface SymExpr
      */
     record Record(Map<String, SymExpr> members, String typeName) implements SymExpr {
         public Record {
-            members = Map.copyOf(members);
+            // TreeMap, not Map.copyOf: Map.copyOf randomizes iteration order
+            // per-JVM-run (salted), which made receipt-graph renderings — and
+            // anything else that walks members in order — nondeterministic
+            // across runs. Field-name keys are Comparable, so natural order is
+            // a stable canonical order for every downstream consumer (printer,
+            // Substitute, AlphaRename, Simplifier). Record equality is
+            // order-independent regardless, so this is purely a determinism fix.
+            members = Collections.unmodifiableMap(new TreeMap<>(members));
         }
     }
 

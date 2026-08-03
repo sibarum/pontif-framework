@@ -296,11 +296,201 @@ public final class Drafter {
             InferenceContext ctx, int[] callCounter, List<CallRef> calls, StepSink sink,
             List<InitialReceipt> fieldFacts)
             throws CompileException {
+        // Reduce administrative beta-redexes first. A single-file destructuring
+        // match arm (`[Cons(h,t)] -> 1 + len(t)`) is desugared by the parser to
+        // an immediately-applied lambda `(Lambda([h,t], body))(xs.head)(xs.tail)`
+        // — the exact `let h = xs.head in let t = xs.tail in body` the
+        // cross-module DestructureResolver produces, only spelled as a redex.
+        // Left un-reduced it (a) transcribes as an opaque lambda application the
+        // discharge engine can't see through, and (b) hoists the arm's calls with
+        // the DANGLING binders as args (`len(t)`, not `len(xs.tail)`). Reducing
+        // here — before hoistCalls — substitutes the projections into the body so
+        // both problems vanish and ADT/structural recursion discharges like the
+        // guard-only recursion (factorial) always has. Pure and behavior-
+        // preserving: the redex and its reduct are the same value.
+        body = betaReduce(body);
         IrExpr hoisted = hoistCalls(body, renameBindings, ctx, callCounter, calls, sink);
         if (fieldFacts != null) {
             gatherFieldFacts(hoisted, renameBindings, ctx, fieldFacts);
         }
         return Substitute.apply(IrCompiler.compileSymExpr(hoisted), renameBindings);
+    }
+
+    /**
+     * Reduces immediately-applied lambdas ({@code (Lambda(ps, body))(args)}) to
+     * their substituted body, recursing so curried and nested redexes collapse
+     * too. Only fires on an {@link IrExpr.Apply} whose function reduces to a
+     * {@link IrExpr.Lambda} of matching arity — a standalone (unapplied) lambda
+     * is left intact. These redexes are how destructuring binders are desugared
+     * on the single-file path; reducing them is semantics-preserving (the reduct
+     * is the same value) and lets the drafter transcribe the real body equation.
+     */
+    private static IrExpr betaReduce(IrExpr e) {
+        return switch (e) {
+            case IrExpr.Apply app -> {
+                IrExpr fn = betaReduce(app.fn());
+                List<IrExpr> args = new ArrayList<>(app.args().size());
+                for (IrExpr a : app.args()) args.add(betaReduce(a));
+                if (fn instanceof IrExpr.Lambda lam && lam.params().size() == args.size()) {
+                    Map<String, IrExpr> subst = new HashMap<>();
+                    for (int i = 0; i < args.size(); i++) {
+                        subst.put(lam.params().get(i).name(), args.get(i));
+                    }
+                    yield betaReduce(substVars(lam.body(), subst));
+                }
+                yield new IrExpr.Apply(fn, args, app.origin());
+            }
+            case IrExpr.Lambda lam -> new IrExpr.Lambda(
+                    lam.params(), lam.returnSort(), betaReduce(lam.body()), lam.origin());
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(), betaReduce(op.left()), betaReduce(op.right()), op.origin());
+            case IrExpr.LetIn l -> {
+                IrExpr value = betaReduce(l.value());
+                IrExpr reducedBody = betaReduce(l.body());
+                // Inline a projection let (`let t = xs.tail in …`). This is how a
+                // destructuring match arm's binders arrive on the single-file path:
+                // nested lets whose values are pure projections off the scrutinee.
+                // compileSymExpr would encode the let as App(Lam(t, body), value)
+                // and leave it un-reduced — the opaque wrapper the issuer chokes on
+                // — AND, worse, hoistCalls would bind the arm's calls to the DANGLING
+                // binder (len(t)) instead of the projection (len(xs.tail)). Inlining
+                // here, before hoisting, fixes both. Restricted to duplication-safe
+                // values (Var/field-access/literal) so a call-valued let keeps its
+                // single shared CallRef rather than being duplicated per use.
+                if (isInlineable(value)) {
+                    yield substVars(reducedBody, Map.of(l.name(), value));
+                }
+                yield new IrExpr.LetIn(l.name(), l.declaredSort(), value, reducedBody,
+                        l.origin(), l.claim());
+            }
+            case IrExpr.Call c -> {
+                List<IrExpr> args = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) args.add(betaReduce(a));
+                yield new IrExpr.Call(c.functionName(), args, c.origin());
+            }
+            case IrExpr.FieldAccess fa ->
+                    new IrExpr.FieldAccess(betaReduce(fa.base()), fa.fieldName(), fa.origin());
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> mem = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
+                    mem.put(en.getKey(), betaReduce(en.getValue()));
+                }
+                yield new IrExpr.Record(r.typeName(), mem, r.origin());
+            }
+            case IrExpr.Match mt -> {
+                List<IrExpr.MatchBranch> bs = new ArrayList<>(mt.branches().size());
+                for (IrExpr.MatchBranch b : mt.branches()) {
+                    bs.add(new IrExpr.MatchBranch(b.pattern(), betaReduce(b.result())));
+                }
+                yield new IrExpr.Match(betaReduce(mt.scrutinee()), bs, mt.origin());
+            }
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> args = new ArrayList<>(mc.args().size());
+                for (IrExpr a : mc.args()) args.add(betaReduce(a));
+                yield new IrExpr.MethodCall(betaReduce(mc.receiver()), mc.methodName(), args, mc.origin());
+            }
+            case IrExpr.Cast cast ->
+                    new IrExpr.Cast(cast.targetSort(), betaReduce(cast.value()), cast.origin());
+            case IrExpr.Emit em ->
+                    new IrExpr.Emit(betaReduce(em.event()), betaReduce(em.body()), em.origin());
+            // Leaves + forms carrying their own binders (Iterate) — no
+            // administrative redex to reduce.
+            default -> e;
+        };
+    }
+
+    /**
+     * Capture-avoiding substitution of {@code IrExpr.Var}s by the given map,
+     * used by {@link #betaReduce} to inline a reduced lambda's arguments. A
+     * binder (lambda param, {@code let} name) that shadows a substituted name
+     * removes it from scope for the binder's body.
+     */
+    private static IrExpr substVars(IrExpr e, Map<String, IrExpr> subst) {
+        return switch (e) {
+            case IrExpr.Var v -> subst.getOrDefault(v.name(), v);
+            case IrExpr.BinOp op -> new IrExpr.BinOp(
+                    op.op(), substVars(op.left(), subst), substVars(op.right(), subst), op.origin());
+            case IrExpr.Call c -> {
+                List<IrExpr> args = new ArrayList<>(c.args().size());
+                for (IrExpr a : c.args()) args.add(substVars(a, subst));
+                yield new IrExpr.Call(c.functionName(), args, c.origin());
+            }
+            case IrExpr.FieldAccess fa ->
+                    new IrExpr.FieldAccess(substVars(fa.base(), subst), fa.fieldName(), fa.origin());
+            case IrExpr.Record r -> {
+                Map<String, IrExpr> mem = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
+                    mem.put(en.getKey(), substVars(en.getValue(), subst));
+                }
+                yield new IrExpr.Record(r.typeName(), mem, r.origin());
+            }
+            case IrExpr.LetIn l -> {
+                IrExpr value = substVars(l.value(), subst);
+                Map<String, IrExpr> inner = withoutKey(subst, l.name());
+                yield new IrExpr.LetIn(l.name(), l.declaredSort(), value,
+                        substVars(l.body(), inner), l.origin(), l.claim());
+            }
+            case IrExpr.Lambda lam -> {
+                Map<String, IrExpr> inner = subst;
+                for (IrParam p : lam.params()) inner = withoutKey(inner, p.name());
+                yield new IrExpr.Lambda(lam.params(), lam.returnSort(), substVars(lam.body(), inner), lam.origin());
+            }
+            case IrExpr.Apply app -> {
+                List<IrExpr> args = new ArrayList<>(app.args().size());
+                for (IrExpr a : app.args()) args.add(substVars(a, subst));
+                yield new IrExpr.Apply(substVars(app.fn(), subst), args, app.origin());
+            }
+            case IrExpr.Match mt -> {
+                List<IrExpr.MatchBranch> bs = new ArrayList<>(mt.branches().size());
+                for (IrExpr.MatchBranch b : mt.branches()) {
+                    bs.add(new IrExpr.MatchBranch(b.pattern(), substVars(b.result(), subst)));
+                }
+                yield new IrExpr.Match(substVars(mt.scrutinee(), subst), bs, mt.origin());
+            }
+            case IrExpr.MethodCall mc -> {
+                List<IrExpr> args = new ArrayList<>(mc.args().size());
+                for (IrExpr a : mc.args()) args.add(substVars(a, subst));
+                yield new IrExpr.MethodCall(substVars(mc.receiver(), subst), mc.methodName(), args, mc.origin());
+            }
+            case IrExpr.Cast cast ->
+                    new IrExpr.Cast(cast.targetSort(), substVars(cast.value(), subst), cast.origin());
+            case IrExpr.Emit em ->
+                    new IrExpr.Emit(substVars(em.event(), subst), substVars(em.body(), subst), em.origin());
+            // Iterate carries its own element binder + arm structure; the
+            // destructure redexes we reduce never substitute into one (a fold
+            // body is hoisted whole), so leave it untouched. Other leaves have
+            // no variable to replace.
+            default -> e;
+        };
+    }
+
+    /**
+     * Whether a let value is safe to inline by substitution — i.e. duplicating
+     * it across the binder's uses changes nothing and introduces no call node.
+     * Projections (a field-access chain rooted at a var), plain vars, {@code @},
+     * and literals qualify; anything that could carry a call (or a match, lambda,
+     * iterate) does not, so those lets keep their single shared binding.
+     */
+    private static boolean isInlineable(IrExpr e) {
+        return switch (e) {
+            case IrExpr.Var v -> true;
+            case IrExpr.SelfRef s -> true;
+            case IrExpr.Lit l -> true;
+            case IrExpr.Dec d -> true;
+            case IrExpr.Chr c -> true;
+            case IrExpr.Str s -> true;
+            case IrExpr.Bool b -> true;
+            case IrExpr.FieldAccess fa -> isInlineable(fa.base());
+            default -> false;
+        };
+    }
+
+    /** A copy of {@code subst} with {@code key} removed (for binder shadowing). */
+    private static Map<String, IrExpr> withoutKey(Map<String, IrExpr> subst, String key) {
+        if (!subst.containsKey(key)) return subst;
+        Map<String, IrExpr> copy = new HashMap<>(subst);
+        copy.remove(key);
+        return copy;
     }
 
     /**
