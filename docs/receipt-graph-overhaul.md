@@ -208,6 +208,26 @@ direction. Assert the three canonical cases and the `f(n)`→wandering tie to
 `NoHalt` verbatim re-entry. Tiny, self-contained, reuses the numeric kernel,
 and demonstrates the unifying trichotomy end-to-end.
 
+**Step 3 — first slice LANDED (2026-08-03).** `GradientAnalysis`
+(`pontif-receipts`) reads the receipt-graph `Node`: a back-reference `CallRef`
+(target = enclosing function) carries the recursive argument, so the
+per-parameter **step** is extracted directly (an additive-linear form `a·p + b`;
+slice 1 requires `a = 1`). Combined with the parameter's declared bound
+direction it yields the trichotomy — **converging** (moves toward a bound =
+well-founded descent), **diverging** (grows unbounded in the travel direction),
+**wandering** (stationary / non-additive / inconsistent). Surfaced as a 4th
+dossier dimension in `ClassificationReport`; `GradientAnalysisTest`-style cases
+live in `ClassificationReportTest`. The correspondence is demonstrated:
+`countdown`/`factorial` (`n-1` on `[Int:@>=0]`) → converging (the arithmetic
+descent `NoHalt` explicitly punts to "receipt-graph territory"); `climb` (`n+1`)
+→ diverging *and* `NoHalt` independently proves non-halting; `stay`/`loop` (`n`)
+→ wandering *and* `NoHalt` proves non-halting — the gradient and the sound
+verdicts agree. **A gradient (direction read), not a proof** — sound
+termination/divergence stays with receipt-graph discharge + `NoHalt`. Follow-ups:
+non-additive shapes (geometric `f(n*2)`, resetting), multi-measure / lexicographic
+recursion, and reading the *effective-sort interval's* endpoint motion (not just
+the syntactic step) via `RealInterval`.
+
 ### Step 4 — Entrypoint-relative interprocedural effective sorts *(deferred, deep)*
 
 The big lift (§B). Gate behind Steps 1–3. Decide the context discipline

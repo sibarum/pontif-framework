@@ -1,7 +1,9 @@
 package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
+import sibarum.pontif.receipts.GradientAnalysis;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +54,58 @@ class ClassificationReportTest {
                 .map(ClassificationReport.FunctionClassification::name).toList();
         assertTrue(names.contains("inner") && names.contains("outer"),
                 () -> "both inner and outer should be algebraic:\n" + g.text());
+    }
+
+    @Test
+    void gradient_convergesWhenParamDescendsTowardBound() {
+        // countdown(n:[Int:@>=0]) -> countdown(n-1): n marches toward its lower
+        // bound 0 — a well-founded descent. The gradient reads CONVERGING (the
+        // arithmetic-descent termination signal NoHalt can't prove), and NoHalt
+        // makes no divergence claim.
+        var g = gen("""
+                module m
+                function countdown(n:[Int:@>=0]):Int -> match n
+                  [@==0] -> 0
+                  [@>0 ] -> countdown(n - 1)
+                countdown(5)
+                """, "countdown.ptf");
+        System.out.println(g.text());
+        var c = g.classifications().stream().filter(x -> x.name().equals("countdown")).findFirst().orElseThrow();
+        assertEquals(GradientAnalysis.Gradient.CONVERGING, c.gradient().gradient(),
+                () -> "n-1 toward lower bound 0 should be converging:\n" + g.text());
+    }
+
+    @Test
+    void gradient_divergesWhenParamGrowsUnbounded() {
+        // climb(n:Int) -> climb(n+1): n increases with no upper bound → the
+        // magnitude grows without limit. Gradient reads DIVERGING.
+        var g = gen("""
+                module m
+                function climb(n:Int):Int -> climb(n + 1)
+                climb(0)
+                """, "climb.ptf");
+        System.out.println(g.text());
+        var c = g.classifications().stream().filter(x -> x.name().equals("climb")).findFirst().orElseThrow();
+        assertEquals(GradientAnalysis.Gradient.DIVERGING, c.gradient().gradient(),
+                () -> "n+1 with no upper bound should be diverging:\n" + g.text());
+    }
+
+    @Test
+    void gradient_wandersOnVerbatimReentry() {
+        // stay(n) -> stay(n): the parameter never changes — stationary, no
+        // progress. Gradient reads WANDERING; separately NoHalt proves it
+        // non-halting (the two views agree the recursion makes no headway).
+        var g = gen("""
+                module m
+                function stay(n:Int):Int -> stay(n)
+                stay(1)
+                """, "stay.ptf");
+        System.out.println(g.text());
+        var c = g.classifications().stream().filter(x -> x.name().equals("stay")).findFirst().orElseThrow();
+        assertEquals(GradientAnalysis.Gradient.WANDERING, c.gradient().gradient(),
+                () -> "verbatim re-entry should wander:\n" + g.text());
+        assertTrue(c.divergence().isPresent(),
+                () -> "NoHalt should independently prove stay non-halting:\n" + g.text());
     }
 
     @Test

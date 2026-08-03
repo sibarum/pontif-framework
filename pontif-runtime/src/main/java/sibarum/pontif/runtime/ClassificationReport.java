@@ -14,6 +14,7 @@ import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.Drafter;
+import sibarum.pontif.receipts.GradientAnalysis;
 import sibarum.pontif.receipts.GraphReference;
 import sibarum.pontif.receipts.Node;
 import sibarum.pontif.receipts.ProofBinding;
@@ -67,7 +68,8 @@ public final class ClassificationReport {
             String name,
             boolean algebraic,
             Optional<String> divergence,   // NoHalt witness, if provably non-halting
-            String receipts) {}            // human-readable return-obligation status
+            String receipts,               // human-readable return-obligation status
+            GradientAnalysis.Result gradient) {}  // effective-sort trajectory under iteration
 
     /** Outcome of report generation: the dossiers + rendered text, or an error. */
     public sealed interface Result permits Result.Generated, Result.Failed {
@@ -99,13 +101,24 @@ public final class ClassificationReport {
             Set<String> algebraic = discoverAlgebraic(module);
             Map<String, String> receiptStatus = receiptStatusByFunction(module, graph);
 
+            // First receipt node per function name (a non-$iter$ root) — the
+            // graph the gradient reads its recursive step off.
+            Map<String, Node> nodeByName = new LinkedHashMap<>();
+            for (Node n : graph.roots()) nodeByName.putIfAbsent(n.functionName(), n);
+
             List<FunctionClassification> out = new ArrayList<>();
             for (String name : functionNamesInSourceOrder(module)) {
+                Node node = nodeByName.get(name);
+                GradientAnalysis.Result gradient = node != null
+                        ? GradientAnalysis.of(node)
+                        : new GradientAnalysis.Result(
+                                GradientAnalysis.Gradient.NON_RECURSIVE, "no receipt node");
                 out.add(new FunctionClassification(
                         name,
                         algebraic.contains(name),
                         Optional.ofNullable(divergences.get(name)),
-                        receiptStatus.getOrDefault(name, "no return obligation")));
+                        receiptStatus.getOrDefault(name, "no return obligation"),
+                        gradient));
             }
             return new Result.Generated(out, render(sourceName, out));
         } catch (CompileException ce) {
@@ -280,6 +293,12 @@ public final class ClassificationReport {
                     .orElse("no divergence proof (may or may not halt)")).append("\n");
             sb.append("  algebraic:  ").append(c.algebraic() ? "yes" : "no").append("\n");
             sb.append("  receipts:   ").append(c.receipts()).append("\n");
+            GradientAnalysis.Result g = c.gradient();
+            if (g.gradient() != GradientAnalysis.Gradient.NON_RECURSIVE) {
+                sb.append("  gradient:   ")
+                        .append(g.gradient().name().toLowerCase())
+                        .append(" -- ").append(g.detail()).append("\n");
+            }
         }
         return sb.toString();
     }
