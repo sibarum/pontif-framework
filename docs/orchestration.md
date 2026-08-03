@@ -276,12 +276,15 @@ daemon" safe rather than a double-effect hazard.
     and it is the GUI-framework thesis (display single-threaded on main, logic parallel off it). The
     cut-2 `Conductor` is retained as the **main-thread lane**; thread placement is added around it. So
     2b's remaining work is folded into the tiered plan below, not a cooperative co-run.
-- **Next slice — tier-1 mailbox spike (host-level, the same-process-thread row).** Prove *only the
-  queue is shared* end-to-end, in the display-on-main / logic-off-main arrangement: main drains an
-  inbox and renders; one spawned app-logic Player folds and emits GUI-update messages into main's
-  inbox; input events flow back the other way. In-process, immutable messages both directions, one
-  bounded queue each. Standalone harness first (à la Slice 1), no Pontif grammar yet — it validates the
-  single-owner-conduit discipline and the mailbox boundary that every higher tier reuses.
+- **Tier-1 mailbox spike — DONE (host-level, the same-process-thread row).** `runtime.module.Mailbox`
+  (the bounded, thread-safe inbox — the sole shared object) + `MailboxSpike` (the harness): display on
+  the calling thread, application logic on a spawned daemon, communicating *only* through two mailboxes
+  of immutable messages. A `Press` (input) flows display → logic, a `Render` (frame) flows back; the
+  counter state lives only on the logic thread, the frames only on the display thread — *nothing shared
+  but the queues*. `MailboxSpikeTest` asserts the round-trip in order and that capacity-4 mailboxes
+  apply backpressure under 100 presses without deadlock or reorder. No Pontif grammar yet; this is the
+  boundary every higher tier reuses (swap a Mailbox for a socket and the two halves are two processes,
+  code unchanged).
 - **Then — the mailbox substrate + the in-memory journal.** Give each Player an inbox (an emit becomes
   an enqueue to the target's mailbox; single-owner serial fold), and journal each inbox with a
   **commit-marker** slot. This is the meaty runtime change (`fireEvent` stops folding synchronously),
