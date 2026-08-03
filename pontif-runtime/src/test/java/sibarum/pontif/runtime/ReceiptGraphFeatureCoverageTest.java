@@ -112,17 +112,17 @@ class ReceiptGraphFeatureCoverageTest {
                 () -> "len's r_0 >= 0 should now discharge on both branches:\n" + text);
     }
 
-    // --- Finding 2: assign-proof-granted refinements are invisible ---------
+    // --- Finding 2 (FIXED): assign-proof-granted refinements are exposed ---
 
     @Test
-    void assignProofGrantedRefinement_invisibleToReceiptGraph_BUG() {
-        // FINDING 2. `assign proof isSparse(x):[… -> [Int:@>=-16]]` GRANTS a
-        // return refinement the return gate honors (AssignProofTest proves the
-        // program compiles on the strength of it). But the receipt drafter
-        // reads only the DECLARED base return `:[Int]`, so the graph shows
-        // `r_0: Int` with "no return refinement -- nothing to prove". The
-        // receipt view and the gate disagree: the granted obligation — and its
-        // proof-discharge — are entirely absent from the proof artifact.
+    void assignProofGrantedRefinement_exposedAndDischarged() {
+        // FINDING 2, FIXED. `assign proof isSparse(x):[… -> [Int:@>=-16]]` grants
+        // a return refinement that lives on the PROOF, not the function's
+        // declared base return — so the drafter's node still reads `r_0: Int`.
+        // The report now binds the assign proof (the same resolver the gate
+        // uses, ReturnProofBinding) and EXPOSES the granted obligation + its
+        // proof-discharge on the graph, instead of falsely printing "nothing to
+        // prove". Receipt view and gate now agree.
         String text = report("""
                 module m
                 function isSparse(x:Int):[Int] -> (x-3)*(x+5)
@@ -136,13 +136,15 @@ class ReceiptGraphFeatureCoverageTest {
                 ]
                 isSparse(5)
                 """, "isSparse.ptf");
-        // BUG: the granted [Int:@>=-16] never reaches the receipt graph.
-        assertTrue(text.contains("isSparse(x_0: Int) : r_0: Int"),
-                () -> "expected the DECLARED base return only (Finding 2):\n" + text);
-        assertTrue(text.contains("isSparse  (no return refinement -- nothing to prove)"),
-                () -> "BUG: assign-proof-granted [Int:@>=-16] is missing from the "
-                        + "receipt graph — when fixed, the obligation r_0 >= -16 "
-                        + "should appear discharged-via-proof:\n" + text);
+        // The declared base return is unchanged on the node…
+        assertTrue(text.contains("isSparse(x_0: Int) : r_0: Int"), () -> text);
+        // …but the granted obligation is now exposed and discharged via proof.
+        assertTrue(text.contains("isSparse  :  r_0 >= -16  (assign proof)"),
+                () -> "granted return should be exposed on the graph:\n" + text);
+        assertTrue(text.contains("discharged [via proof; notary: accepted]"),
+                () -> "granted obligation should discharge via the assign proof:\n" + text);
+        assertFalse(text.contains("isSparse  (no return refinement -- nothing to prove)"),
+                () -> "the false 'nothing to prove' must be gone:\n" + text);
     }
 
     // --- Finding 3: stream-query desugaring emits an empty else-branch -----

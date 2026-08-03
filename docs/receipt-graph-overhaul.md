@@ -235,17 +235,25 @@ for free (`DestructureResolver` emits the same projection lets). *The
 apparent "reversed arg order / curried lambda" in the old output was just the
 SymExpr printer rendering the let-as-`App(Lam)` encoding — not a semantic bug.*
 
-**Finding 2 — `assign proof f(x):[…]`-granted refinements are invisible to the
-receipt graph (HIGH).** `assign proof isSparse(x):[… -> [Int:@>=-16]]` grants a
-return refinement the return gate honors (`AssignProofTest` compiles the program
-on its strength), but the drafter reads only the **declared base return**
-(`:[Int]`), so the graph shows `r_0: Int` / "nothing to prove". The granted
-obligation *and its proof-discharge* are absent from the proof artifact — the
-receipt view and the gate disagree. This is the same "receipts say X, runtime
-does Y" class the old `proof = <tree>` form fixed
-(`importedProofTypes_reportAgreesWithRun`), reopened for the newer
-`assign proof` surface. Directly contradicts the overhaul goal "expose all
-proof-relevant detail via the receipt graph."
+**Finding 2 — `assign proof f(x):[…]`-granted refinements were invisible to the
+receipt graph (HIGH) — FIXED (2026-08-03).** `assign proof isSparse(x):[… ->
+[Int:@>=-16]]` grants a return refinement the return gate honors
+(`AssignProofTest` compiles the program on its strength), but the granted
+refinement lives on the *proof* (`IrStmt.ReturnProof`), not the function's
+declared base return — so the drafter's node reads `r_0: Int` and the report
+printed "nothing to prove", disagreeing with the gate. The gate already resolved
+these via `ReturnProofBinding.validate` but only for pass/fail; nothing exposed
+the granted obligation. **Fix:** `ReturnProofBinding.bind` returns each granted
+obligation with its node/branch and discharge outcome (the report/dossier view
+of what `validate` checks); `ReceiptGraphReport` renders them, so `isSparse` now
+shows `isSparse : r_0 >= -16 (assign proof) → discharged [via proof; notary:
+accepted]`. Same class as the old `proof = <tree>` "receipts say X, runtime does
+Y" gap (`importedProofTypes_reportAgreesWithRun`), now closed for the
+`assign proof` surface too — receipt view and gate agree. *Deliberately at the
+report/exposure layer (where `proof=` consumption already lives), not the
+drafter: the graph node keeps the declared return; per-region dispatched proofs
+map to their own branches. Folding granted returns onto the node itself is a
+Step-2 dossier concern.*
 
 **Finding 3 — stream-query desugaring emits an empty else-branch (MEDIUM).** A
 refined query `&s:[Int:@>1]` drafts an `$iter$` helper with the filter's
@@ -273,9 +281,11 @@ iteration is observable — never `Map.copyOf`/`HashMap`.*
 **Bearing on the overhaul.** Findings 1 and 2 were the priority: 1 blocked the
 whole ADT/recursion proof story the gradient (Step 3) and per-function dossier
 (Step 2) will build on; 2 is the receipt graph failing its core promise today.
-**Finding 1 is now fixed** (ADT/structural recursion discharges); **Finding 2
-remains open** and is the next fix before the restructure. Step 1's suite is the
-guard that keeps them fixed. (Probe `08-fold` hit a probe-syntax parse error, not a
+**Findings 1, 2, and 4 are now fixed** (ADT/structural recursion discharges;
+assign-proof obligations exposed; deterministic rendering). **Finding 3** (empty
+stream-query else-branch) remains, low-severity. The Step-1 suite is the guard
+that keeps them fixed; the drafter's proof surface is now sound enough to build
+the Step-2 per-function dossier on. (Probe `08-fold` hit a probe-syntax parse error, not a
 receipt bug — the `fold` lambda spelling in the probe is wrong; re-confirm fold
 coverage once the syntax is corrected.)
 

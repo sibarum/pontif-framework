@@ -80,6 +80,67 @@ public final class ReturnProofBinding {
         return Optional.empty();
     }
 
+    /**
+     * A bound {@code assign proof}: the graph location whose obligation it
+     * grants ({@code nodeIndex}/{@code branchIndex}), the granted obligation
+     * itself (in graph variables, e.g. {@code r_0 >= -16}), and whether the
+     * proof discharges it. Produced by {@link #bind} for the receipt-graph
+     * report / dossier so the granted refinement — invisible on the function's
+     * declared base return — is exposed on the graph the way the {@code proof =}
+     * form's refinements already are.
+     */
+    public record Bound(int nodeIndex, int branchIndex, SymExpr obligation, boolean discharged) {}
+
+    /**
+     * Resolves every {@code assign proof} to the branch it grants, its granted
+     * obligation, and whether it discharges — the report/dossier view of what
+     * {@link #validate} checks. Diagnostic and fail-open: a proof that can't be
+     * bound (unknown/overloaded target, region matching no branch, unliftable
+     * body) is simply omitted rather than raised, exactly as the report skips
+     * {@link ProofBinding} problems. A proof granting a base sort (no refinement)
+     * contributes nothing.
+     */
+    public static List<Bound> bind(List<IrStmt.ReturnProof> proofs, ReceiptGraph graph) {
+        Map<String, List<Integer>> nodeIdxByName = new HashMap<>();
+        for (int i = 0; i < graph.roots().size(); i++) {
+            nodeIdxByName.computeIfAbsent(graph.roots().get(i).functionName(),
+                    k -> new ArrayList<>()).add(i);
+        }
+        List<Bound> out = new ArrayList<>();
+        for (IrStmt.ReturnProof rp : proofs) {
+            List<Integer> idxs = nodeIdxByName.get(rp.functionName());
+            if (idxs == null || idxs.size() != 1) {
+                continue;  // v1: single-overload targets only (validate reports the rest)
+            }
+            int nodeIndex = idxs.get(0);
+            Node node = graph.roots().get(nodeIndex);
+            Map<String, SymExpr> rename = new HashMap<>();
+            for (IrParam p : rp.params()) {
+                rename.put(p.name(), SymExpr.var(p.name() + "_0"));
+            }
+            try {
+                List<SymExpr> region = regionConjuncts(rp.params());
+                SymExpr obligation = obligationOf(rp.grantedReturn(), node.resultVar().name(), rename);
+                if (obligation == null) {
+                    continue;  // granted a base sort — nothing to expose
+                }
+                Refinement refinement = rp.body() == null
+                        ? Refinement.leaf()
+                        : RefinementProof.fromCaseFunction(asMatch(rp.body()), rename);
+                int branchIdx = matchBranch(node, region);
+                if (branchIdx < 0) {
+                    continue;
+                }
+                boolean discharged = RefinementValidator.validate(
+                        node, node.branches().get(branchIdx), obligation, refinement).verified();
+                out.add(new Bound(nodeIndex, branchIdx, obligation, discharged));
+            } catch (CompileException ce) {
+                // Unliftable proof body/region — omit from the diagnostic view.
+            }
+        }
+        return out;
+    }
+
     private static Optional<String> bindOne(
             String fn, Node node, IrStmt.ReturnProof rp, Set<Integer> covered) {
         Map<String, SymExpr> rename = new HashMap<>();

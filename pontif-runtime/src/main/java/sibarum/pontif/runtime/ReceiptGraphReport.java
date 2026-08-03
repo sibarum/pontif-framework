@@ -3,6 +3,7 @@ package sibarum.pontif.runtime;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
+import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.AltParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.core.symbolic.SymExpr;
@@ -16,6 +17,7 @@ import sibarum.pontif.receipts.ProofBinding;
 import sibarum.pontif.receipts.ReceiptGraph;
 import sibarum.pontif.receipts.ReceiptGraphPrinter;
 import sibarum.pontif.receipts.Refinement;
+import sibarum.pontif.receipts.ReturnProofBinding;
 import sibarum.pontif.runtime.module.ModuleResolver;
 
 import java.io.IOException;
@@ -120,6 +122,18 @@ public final class ReceiptGraphReport {
         // problems are skipped here — the report is diagnostic, not a gate.
         Map<GraphReference, Refinement> proofs = ProofBinding.bind(module, graph).proofs();
 
+        // `assign proof f(...):[… -> [Sort]]` grants a return refinement that
+        // lives on the PROOF, not the function's declared (base) return — so the
+        // drafter's node carries no obligation for it and the loop below would
+        // print "nothing to prove", disagreeing with the gate that proved it.
+        // Bind them (same resolver the gate uses) and expose each granted
+        // obligation + its discharge on the graph, keyed by node/branch.
+        List<IrStmt.ReturnProof> returnProofs = new java.util.ArrayList<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.ReturnProof rp) returnProofs.add(rp);
+        }
+        List<ReturnProofBinding.Bound> bounds = ReturnProofBinding.bind(returnProofs, graph);
+
         // Obligations: every per-branch claim the issuer considered, with
         // outcome — including the ones it COULDN'T discharge, so a tightened
         // return refinement that fails is visible rather than silent.
@@ -131,21 +145,48 @@ public final class ReceiptGraphReport {
             final int ni = nodeIndex;
             List<BuiltinIssuer.Attempt> nodeAttempts =
                     attempts.stream().filter(a -> a.nodeIndex() == ni).toList();
+            List<ReturnProofBinding.Bound> nodeBounds =
+                    bounds.stream().filter(b -> b.nodeIndex() == ni).toList();
 
-            if (nodeAttempts.isEmpty()) {
+            if (nodeAttempts.isEmpty() && nodeBounds.isEmpty()) {
                 sb.append("  ").append(node.functionName())
                         .append("  (no return refinement -- nothing to prove)\n");
                 continue;
             }
 
-            sb.append("  ").append(node.functionName()).append("  :  ")
-                    .append(ReceiptGraphPrinter.renderSym(nodeAttempts.get(0).obligation()))
-                    .append("\n");
-            for (BuiltinIssuer.Attempt a : nodeAttempts) {
-                renderAttempt(sb, graph, node, a);
+            if (!nodeAttempts.isEmpty()) {
+                sb.append("  ").append(node.functionName()).append("  :  ")
+                        .append(ReceiptGraphPrinter.renderSym(nodeAttempts.get(0).obligation()))
+                        .append("\n");
+                for (BuiltinIssuer.Attempt a : nodeAttempts) {
+                    renderAttempt(sb, graph, node, a);
+                }
+            }
+            for (ReturnProofBinding.Bound b : nodeBounds) {
+                renderReturnProof(sb, node, b);
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Renders one {@code assign proof}-granted obligation: the granted claim
+     * (which the function's declared base return doesn't show), the branch it
+     * covers, and whether the proof discharges it — always {@code [via proof]},
+     * since the granted refinement is proof-supplied by construction.
+     */
+    private static void renderReturnProof(
+            StringBuilder sb, Node node, ReturnProofBinding.Bound b) {
+        sb.append("  ").append(node.functionName()).append("  :  ")
+                .append(ReceiptGraphPrinter.renderSym(b.obligation()))
+                .append("  (assign proof)\n");
+        sb.append("      branch ").append(b.branchIndex());
+        node.branches().get(b.branchIndex()).guard().ifPresent(g ->
+                sb.append(" [").append(ReceiptGraphPrinter.renderSym(g)).append("]"));
+        sb.append("\n        -> ").append(b.discharged()
+                        ? "discharged [via proof; notary: accepted]"
+                        : "NOT DISCHARGED (assign proof did not close the granted return)")
+                .append("\n");
     }
 
     /**
