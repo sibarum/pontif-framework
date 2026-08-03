@@ -294,12 +294,19 @@ daemon" safe rather than a double-effect hazard.
   `EventJournalTest` covers the marker split, dead-lettering, and capture-in-order of a real conduit
   program's emits. Thread-safe (`CopyOnWriteArrayList` + atomic marker) for when Players journal
   concurrently; per-inbox partitioning waits for real mailboxes (below).
-- **Deferred (deliberately) — the async mailbox substrate.** Turning `fireEvent` from a synchronous
-  fold into an enqueue to a per-conduit inbox is a large rewrite of the working single-threaded core,
-  and it has **no consumer until a conduit is actually placed off-thread**. So it is folded into
-  *Placement* below rather than built speculatively: a conduit gets a real mailbox exactly when
-  `over thread`/`over process` puts it on another thread. The tier-1 spike already proved the boundary;
-  the main lane stays synchronous until then.
+- **`Mailbox` is the agnostic boundary — DONE.** Backed by a `LinkedBlockingQueue` (the two-lock queue
+  — separate put/take locks), so the many producers and the single draining owner never contend on the
+  same lock. Bounded (backpressure) + blocking (parks the consumer); the JDK has no lock-free queue
+  that is *also* bounded-and-blocking, so this is the right backpressured pick without an external SPSC
+  dependency. The Mailbox knows nothing of tiers — same-process now, socket-fed later, no change above.
+- **How much interpreter work threaded `spawn` actually needs (narrower than first thought).** A *pure*
+  spawned routine — one that computes and returns through its mailbox without folding a shared conduit
+  — touches only local `Environment`s and the read-only linked registries, so with the concurrent
+  Mailbox it is **already thread-safe**; no interpreter-wide lock is required. The one thing that still
+  needs care is **cross-thread conduit folding** (two Players sharing the single `conduitState` map):
+  that wants per-Player state ownership, and it is a later refinement — *not* a blocker for spawning a
+  routine onto a thread. So `fireEvent` stays synchronous on the main lane; only a conduit *placed*
+  off-thread needs its own state cell, built when placement puts it there.
 - **`spawn` proper (grammar):** the `spawn` term in the parser, its effectful-expression semantics +
   returned handle, and the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate)
   driven by the journal + dead-letter bound.

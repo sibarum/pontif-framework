@@ -1,7 +1,7 @@
 package sibarum.pontif.runtime.module;
 
-import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 /**
  * A bounded, thread-safe <b>inbox</b> — the one and only object two Players share (docs/orchestration.md,
@@ -12,10 +12,17 @@ import java.util.concurrent.BlockingQueue;
  * the state needs no lock either. The bound gives natural <b>backpressure</b> — a full inbox blocks the sender
  * ({@link #send}) until the owner catches up, which is what stops a fast producer from swamping a slow consumer.
  *
- * <p>This is the same-process-thread row of the tier matrix: the message is handed over by reference (the heap
- * is shared, and the message is immutable so that is safe). The higher tiers reuse the exact same boundary with
- * a different transport underneath — a socket-fed inbox for a process, whose frames are this message serialized.
- * Nothing above the Mailbox can tell which tier it is on.
+ * <p><b>Decoupled ends.</b> Backed by a {@link LinkedBlockingQueue} — the two-lock queue, with <em>separate</em>
+ * put and take locks — so producers and the consumer never contend on the same lock: heavy traffic on the send
+ * side does not stall the drain side. A mailbox is many-producers / single-consumer (Players emit in, its owner
+ * drains), so the drain side sees no contention at all. (The JDK has no lock-free queue that is also bounded and
+ * blocking — that would need an external SPSC ring — so the two-lock queue is the right backpressured pick.)
+ *
+ * <p><b>Transport-agnostic.</b> The Mailbox knows nothing of tiers: it is just a concurrent queue of immutable
+ * messages. This is the same-process-thread row (the message is handed over by reference — the heap is shared,
+ * and the message is immutable so that is safe). Higher tiers reuse the exact same boundary with a different
+ * transport underneath — a socket-fed inbox for a process, whose frames are this message serialized. Nothing
+ * above the Mailbox can tell which tier it is on.
  */
 public final class Mailbox<M> {
 
@@ -26,7 +33,7 @@ public final class Mailbox<M> {
         if (capacity < 1) {
             throw new IllegalArgumentException("mailbox capacity must be >= 1, was " + capacity);
         }
-        this.queue = new ArrayBlockingQueue<>(capacity);
+        this.queue = new LinkedBlockingQueue<>(capacity);
     }
 
     /** Deliver {@code message} to the owner, blocking while the inbox is full (backpressure). */
