@@ -88,17 +88,30 @@ final class ChartBuilder {
      * half-typed expression never blanks the plot.
      */
     static boolean plotExprInto(PlotView view, Object exprsValue, NativeCalls.Context ctx) {
+        return plotExprInto(view, exprsValue, ctx, null);
+    }
+
+    /**
+     * Interactive-explore variant: when {@code viewRect} is non-null it is the camera's current
+     * visible world rect {@code [xmin, xmax, ymin, ymax]} (from {@link PlotView#visibleWorldRect}),
+     * and this samples/frames to THAT window instead of auto-framing — so the plot shows exactly what
+     * the user panned/zoomed to. Also republishes via {@link PlotView#updateSeries} (no camera
+     * re-frame), so the view does not snap back to an auto fit. {@code null} keeps the original
+     * auto-frame + auto-y + {@code showLinePlot} behaviour (initial draw and typed {@code SetPlot}).
+     */
+    static boolean plotExprInto(PlotView view, Object exprsValue, NativeCalls.Context ctx, float[] viewRect) {
         List<String> exprs = exprStrings(exprsValue);
-        // Pass 1: parse each expression and UNION their auto-frame windows. Every curve is then
-        // sampled over this SHARED x-domain — otherwise a large-range expression expands the plot
-        // while the others (sampled only over their own smaller windows) show as tiny stubs. asts is
-        // kept parallel to the expression list (null = blank/unparseable) so palette colours stay
-        // stable per row while a neighbour is mid-edit.
+        boolean explore = viewRect != null;
+        // Pass 1: parse each expression. When exploring, the x-window is the visible rect (no
+        // auto-frame); otherwise UNION each expr's auto-frame window so every curve shares one
+        // x-domain (else a large-range expr shrinks the others to stubs). asts stays parallel to the
+        // expression list (null = blank/unparseable) so palette colours stay stable per row mid-edit.
         List<RecordValue> asts = new ArrayList<>();
-        double xlo = Double.POSITIVE_INFINITY, xhi = Double.NEGATIVE_INFINITY;
+        double xlo = explore ? viewRect[0] : Double.POSITIVE_INFINITY;
+        double xhi = explore ? viewRect[1] : Double.NEGATIVE_INFINITY;
         for (String e : exprs) {
             RecordValue ast = (e == null || e.isBlank()) ? null : ExprParser.parse(e).orElse(null);
-            if (ast != null) {
+            if (ast != null && !explore) {
                 try {
                     double[] w = autoFrameJava(ast, ctx);
                     xlo = Math.min(xlo, w[0]);
@@ -109,12 +122,12 @@ final class ChartBuilder {
             }
             asts.add(ast);
         }
-        if (xlo > xhi) return false;   // nothing valid — keep the last good plot
+        if (xlo >= xhi) return false;   // nothing valid / degenerate window — keep the last good plot
 
-        // Pass 2: resample every curve across the shared [xlo, xhi], and gather EVERY curve's bounded
-        // values into one set for a SHARED robust y-range. All curves must clip + pole-aim to the same
-        // [ymin, ymax], else a curve blows up only to its own band — e.g. 1/x's asymptote stopping
-        // short of the frame edge while a taller neighbour sets the frame.
+        // Pass 2: resample every curve across [xlo, xhi]. When auto-framing, gather EVERY curve's
+        // bounded values for a SHARED robust y-range (so all curves clip + pole-aim to the same
+        // [ymin, ymax] and a pole reaches the frame edge). When exploring, the y-range is the visible
+        // rect's — the user's zoom owns the vertical extent, so no robust auto-y.
         List<java.util.List<ReliableSeries.ReliableSpan>> perCurve = new ArrayList<>();
         List<Double> allBounds = new ArrayList<>();
         for (RecordValue ast : asts) {
@@ -122,16 +135,18 @@ final class ChartBuilder {
             if (ast != null) {
                 try {
                     spans = resampleReliable(ast, xlo, xhi, ctx);
-                    allBounds.addAll(reliableBounds(spans));
+                    if (!explore) allBounds.addAll(reliableBounds(spans));
                 } catch (RuntimeException ex) {
                     spans = null;
                 }
             }
             perCurve.add(spans);
         }
-        double[] yr = allBounds.isEmpty() ? new double[]{-1, 1} : robustRange(allBounds);
+        double[] yr = explore ? new double[]{viewRect[2], viewRect[3]}
+                : allBounds.isEmpty() ? new double[]{-1, 1} : robustRange(allBounds);
+        if (!(yr[1] > yr[0])) return false;   // degenerate y-window (fully panned off) — keep last good
 
-        // Pass 3: build each curve clipped + pole-aimed to the SHARED y-range.
+        // Pass 3: build each curve clipped + pole-aimed to the y-range.
         List<Series> all = new ArrayList<>();
         for (int i = 0; i < perCurve.size(); i++) {
             java.util.List<ReliableSeries.ReliableSpan> spans = perCurve.get(i);
@@ -140,11 +155,13 @@ final class ChartBuilder {
         }
         if (all.isEmpty()) return false;
 
-        // Frame EXACTLY to the shared window × y-range (Axis.linear, no extra padding) so a pole
-        // branch — clipped to [ymin, ymax] — reaches the very top/bottom edge.
+        // Frame EXACTLY to the window × y-range (Axis.linear, no extra padding) so a pole branch —
+        // clipped to [ymin, ymax] — reaches the very top/bottom edge. Exploring republishes in place
+        // (updateSeries: keep the user's camera); otherwise showLinePlot re-frames to auto-fit.
         PlotFrame frame = new PlotFrame(0f, 0f, 10f, 5.5f,
                 Axis.linear(xlo, xhi), Axis.linear(yr[0], yr[1]));
-        view.showLinePlot(frame, all, PlotStyle.defaults());
+        if (explore) view.updateSeries(frame, all, PlotStyle.defaults());
+        else         view.showLinePlot(frame, all, PlotStyle.defaults());
         return true;
     }
 
