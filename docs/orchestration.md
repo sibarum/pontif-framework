@@ -27,13 +27,19 @@ placement sound (the reason Erlang's transparency works).
   `evalSafe`'s `[Decimal | Undefined]`); a spawn-to-GPU exposes marshaling at the ABI. Uniform
   surface, differentiated semantics in the types — never RPC's transparency lie.
 
+> **Refinement (2026-08-02).** The single primitive is realized as **two surfaces**: `spawn` **seats a
+> conductor** (a standing worker — entry-point-only manifest, static topology; see *Seating*), and `on X`
+> **places work** (a one-shot async computation, body-level — the `… on Gpu` / `… on Thread` case). Both
+> are "a routine over `X` targeting `Y`"; they differ only in whether the placed thing is a live worker or
+> a single computation, and `spawn` is no longer a body-level term.
+
 ## Three roles
 
 They **name seams that already exist** — this is a unification, not an invention.
 
 | Role | Is | Nature |
 | --- | --- | --- |
-| **Player** | a **conduit** (scan over an event stream), ticked by a cadence | pure, shares nothing → **mobile** (place it anywhere) |
+| **Player** | a **conduit** — an event handler over its conductor's (single-owner, mutable) state; ticked by a cadence (see *Authoring*) | single-owner, shares nothing → the conductor is **mobile** (place it anywhere) |
 | **Instrument** | an **effect sink** (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | impure, touches the world → **pinned** to its hardware |
 | **Conductor** | a **worker** that runs Pontif code (a thread/process; one per worker — see *The conductor graph*) | owns conduits + an inbox, wires clocks, routes emits on the static graph |
 
@@ -75,47 +81,123 @@ But strictness needs **one** master clock — two independent hardware clocks (a
 **Non-negotiable:** the graphics cadence must be **non-blocking** (zero-timeout acquire / MAILBOX,
 pace by deadline). A blocking FIFO-vsync present hoards the thread and starves every sibling.
 
-## `spawn` semantics
+## Authoring — three types, one member block (RULED 2026-08-02)
 
-`spawn` is a **body-level effectful term**, sibling to `let` and `emit`:
+`struct`, `trait`, and `conductor` are the **three kinds of authorable type**, and they share **one member
+syntax** — the trait member block that already exists:
 
-- `let x = v` — bind a value into scope, continue.
-- `emit E(…)` — send an event into the substrate (conduits/effects), continue.
-- `spawn P` — seat a Player onto the Conductor, continue; **returns a handle**.
+```
+trait Duck { quack:[Method():Audio],  eat:[Method(food:Food):Poop] }
+```
 
-There are no special "spawn rules" — it inherits `emit`'s, because activation is just execution
-reachability:
+A member's *kind* is read from its **type-constructor**, not a keyword. `Method` and `Dispatch` (an
+operator overload) already work this way; `Action` and `Conduit` join them. A body present (`name(…) ->
+…`, or the general `name:[…] -> …`) makes a member concrete/default; absent, abstract. `method` becomes
+pure **sugar** — `name(params):R -> body` ⟺ `name:[Method(params):R] -> body` — so the keyword retires and
+every type gets methods from the one mechanism (the tell of the right seam: one construct, every type
+benefits for free).
 
-- **Required scripts don't activate anything.** Only the entry-point executes; imports load
-  *definitions* (functions, structs, conduits, effects, spawnable routines) hermetically — no
-  top-level side effects. A `spawn` at a library's top level is unreachable → a compile warning.
-  This is what stops `requires pontif.vulkan` from silently opening a window.
-- **Two positions, one rule.** Entry-point top-level spawns = the *initial* orchestra ("multiple
-  mains", activated in source order → deterministic startup, bootstrap-before-render just by writing
-  it first). A `spawn` inside a conduit/function = a *dynamic* worker (Erlang-style supervision).
-  Both fire when reached.
-- **Conduit vs spawn.** A conduit is a registered reactive handler — active-on-event by mere import,
-  needing no spawn (one-conduit-per-event-type stops silent interception). `spawn`/`conduct` adds a
-  **clock**, driving a conduit as a *cadenced* Player. Passive handler = registered; active clocked
-  Player = spawned.
-- **The handle is the pipeline endpoint** (Erlang's Pid). `let w = spawn P over X targeting Y` binds
-  the thing you send directed messages to. `emit` is ambient (into the event stream); sending to a
-  handle is addressed (to one Player). Same substrate, ambient vs addressed. The `X` axis isn't a
-  separate concept — it's what a spawned handle *is*.
-- **Program lifetime changes.** A program ends when the **orchestra drains** (all Players retired),
-  not when `main` returns. A root/`main` Player's retirement tears down the rest (supervision root —
-  closing the window ends the program even if a background logger would otherwise run forever).
+- **struct** — concrete data (+ behaviour). Its *data* stays a positional declaration, because that is the
+  pattern-matching contract: fields are exposed in full, ordinality is only convenience, and there is no
+  constructor overloading — the field list **is** the public constructor. A `{ }` block adds methods only:
+  `struct Point(x:Int, y:Int) { length():Decimal -> sqrt(x*x + y*y) }`.
+- **trait** — an abstract contract (members abstract, or defaulted via a body). Unchanged.
+- **conductor** — a live worker, authored as a type; **seated**, not constructed, at the entry point.
+
+### Effectful members are transform-sorts, not annotated methods
+
+An `Action`/`Conduit` is **not** "a `Method` plus an emit list." Per *Logic in the sorts* (README): a
+member's sort can *be* a transform-chain, and an effectful member's behaviour lives **there** — the sort is
+the thing itself, the way `[@==5]` is a value, except with side-effects. An **Action** is a transform-chain
+whose terminus is **write-only** (an `emit`) rather than a returned value — "a transform chain without the
+output type":
+
+```
+onKey:[KeyPress -> match @ { [ctrl 's'] -> emit SaveRequested()  [char] -> emit Insert(@.ch) }]
+```
+
+`@` is the event in flight; the stages emit; nothing is returned. A **Conduit** is the same with a value
+terminus (the state) alongside its effects. These compose exactly like the README's **shells**:
+author-owned when written in a conductor, **trait-owned** when a conductor *satisfies* an event-interface
+trait — so the sort carries the consumed/emitted interface, the routing graph becomes **type-checkable**
+(single-owner, no-consumer, cross-conductor cycles — from the types alone), and conductors become
+**interface-typed, swappable components** on the same narrowing/satisfaction machinery traits already use.
+
+### A conductor has mutable, single-owner state
+
+Everything in the language is immutable **except a conductor's own state** — and that is the one place
+mutation is provably safe. A conductor is single-owner (one thread drains it), so its fields are
+thread-confined: never shared, so never raced. This is the seam conductors exist to smooth — purity
+everywhere the compiler can guarantee it, mutation confined to exactly where it cannot hurt.
+
+So a conduit is a **handler over conductor fields**, not a self-contained fold. Several handlers share the
+conductor's state directly, which is what makes multi-input conductors read naturally (the GUI toy's
+mouse + keyboard + dialog all mutating one `doc`) instead of the fold-threading workaround that existed
+only because there was nowhere else to put shared state:
+
+```
+conductor Editor {
+  doc: Doc = Doc.blank                # mutable, but single-owner → safe
+  onKey:[KeyPress  -> … this.doc = … ]
+  onClick:[Click   -> … this.doc = … ]
+  onSaved:[Saved   -> … this.doc = … ]
+}
+```
+
+Supervision survives: replay re-runs the event sequence through the handlers to rebuild `doc`, which is
+deterministic as long as nothing ambient leaks in (the determinism rule). Conductor **methods** are private
+helpers — they group logic and touch the state but aren't exported to dispatch. A **handle** (`let h =
+spawn Editor`) is the only conductor value that escapes; the worker itself never becomes a passable value.
+
+> **Implemented vs ratified.** The conduit that ships today is the earlier **fold** form (`conduit N(e:E,
+> s:S):{R, S} from INIT -> …`, docs/reactive-gui.md) with per-conduit immutable state; the roadmap below
+> tracks the migration to this handler-over-mutable-state form. The runtime bricks already built (routing
+> table, single-owner check, journal) key off event *types* and conduits, not the threading shape — so the
+> shift is a surface change, not a teardown.
+
+## Seating — the entry-point manifest (RULED 2026-08-02)
+
+Conductors are **static** (see *The conductor graph*), so there is no runtime conductor spawn, and `spawn`
+is **not** a body-level term. It is an **entry-point-only** statement — the manifest of which conductors
+this program runs. Libraries *define*; only the entry point *activates*. This is the privilege `main`
+already has (a required module's `main` is inert — `ModuleLinker.combine` takes `main` from the entry
+module alone; `RequiredModuleMainInertTest` pins it), generalized to every worker:
+
+- **Libraries define, the app activates.** `requires audioLib` loads its conductor *definitions*
+  hermetically — no window opens, no thread starts. Only a top-level `spawn` (or `main`) in the entry
+  module brings a conductor to life; a `spawn` written anywhere else is a compile error. This is what
+  stops `requires pontif.vulkan` from silently opening a window.
+- **`main` is the pinned root; `spawn` seats the siblings.** `main ( body )` / `main Conductor(…)` is the
+  one conductor pinned to the main thread, whose retirement drains the orchestra. `spawn Conductor
+  [over X]` seats another worker; **`over X` (thread / process / host) rides the seat** — the *app*
+  chooses where each conductor runs, not the conductor's author. Source order = deterministic startup.
+- **The handle is the endpoint** (Erlang's Pid). `let audio = spawn audioLib.player` binds the thing you
+  address directed messages to; `emit` is ambient (into the graph), a handle-send is addressed (one
+  conductor) — same substrate.
+- **The whole runtime is the manifest.** Reading the entry point top-to-bottom lists every live worker in
+  boot order. No dependency can stand up a thread you didn't name — the runtime is a pure function of what
+  you seat, so a change to what runs is always traceable to a conductor add/update/remove, never to merely
+  pulling in a library. A conductor's statically-declared **sub-conductors** ride along as its subtree
+  (inspectable, still traceable — the supervision tree).
+- **Program lifetime.** A program ends when the orchestra **drains** (every conductor retired), not when
+  `main`'s body returns; the root's retirement tears the rest down (closing the window ends the program).
+
+Async *compute* offload is a **different axis** and stays body-level: `expr on Thread` / `… on Gpu`
+dispatches a one-shot computation whose result returns forward as an event (below). That is expression
+**placement**, not `spawn` — `spawn` seats conductors; `on X` places work.
 
 ### Results flow forward — there is no `await` (RULED 2026-08-02)
 
-There is **no thread synchronization at the language level — only orchestration.** A `spawn` is
-fire-and-forget: nothing blocks a thread waiting on a spawned result, and there is no future / join /
-`await` to read one back. A spawned routine's output returns the *only* way any effect returns — as an
-**emitted event** the substrate routes forward to a reacting `action`/conduit.
+There is **no thread synchronization at the language level — only orchestration.** Async work is
+fire-and-forget: nothing blocks a thread waiting on a result, and there is no future / join / `await` to
+read one back. An offloaded computation's output returns the *only* way any effect returns — as an
+**emitted event** the substrate routes forward to a reacting handler. (Cross-conductor messaging is the
+same shape: a handler `emit`s, the routing table delivers to the owning conductor's inbox, it folds on its
+own thread — never a caller blocking on a reply.)
 
 This is not new: it is the **exact ruling already made for `… on Gpu`** (2026-07-05, `IrInterpreter`
-line ~110 — "consumed by a reacting `action`, forward only; no `await` reads it back"). So **`spawn`
-mirrors the GPU async model**, with a daemon thread as the "device":
+line ~110 — "consumed by a reacting `action`, forward only; no `await` reads it back"). So **async offload
+(`… on Gpu`, `… on Thread`) mirrors the GPU model**, with a daemon thread as the "device":
 
 - the dispatch produces a `Pending`-shaped handle registered in `outstanding`, carrying a **woven
   completion `emit`** (the event constructed from the computed value — the same `eventTemplate`/`argVar`
@@ -424,19 +506,41 @@ actually need is in the forbidden gap.
   gates at the fire site — the table resolves only the candidate *set*, which depends solely on the
   type); full 1118-test suite green, plus `RoutingTableTest` (single owner + both trait subscribers +
   cache identity). This is the object emit-site specialization and cross-conductor cycle detection read.
-- **`spawn` proper — mirror the GPU async model (next).** A `spawn` of a routine reuses the
-  `Pending`/`outstanding`/drive-to-quiescence machinery `… on Gpu` already has (see *Results flow
-  forward* above): the "device" is a daemon thread, the dispatch registers a `Pending` whose result is
-  fetched off a result `Mailbox`, and a **woven completion `emit`** delivers it forward to a reacting
-  action on the main thread at quiescence. **No `await`** — the language gains no synchronization
-  primitive. The new work is the parser/lowering for the woven completion `emit` (mirroring how
-  `… on Gpu` weaves its emit) and the daemon-backed `Pending`; the drive-to-quiescence loop is reused
-  as-is. Then the **supervision boundary** (catch/retire/restart-from-`INIT`+replay/escalate) rides the
-  journal + dead-letter bound.
+### Ratified authoring model — not yet built (see *Authoring* / *Seating* above)
+
+- **Member unification (`conductor`/`conduit`/`action`/`method` → member types).** Make `conductor` a
+  member-block type alongside `struct`/`trait`; add `Action` and `Conduit` as member type-constructors
+  next to `Method`/`Dispatch`; make `method` sugar for `name:[Method(…)] -> body`. Parser + IR: the new
+  member kinds are Method-shaped, so they ride `TraitDefaultExpansion` and the existing resolution
+  pipeline. Additive to `struct` (a `{ }` method block; data declaration untouched).
+- **Effectful members as transform-sorts + the `emits`/consumes interface in the type** — the headline:
+  an `Action`/`Conduit` sort *is* its behaviour (Logic-in-the-sorts shell, write-only terminus for
+  `Action`), so a conductor's type carries its event interface and the routing graph (single-owner,
+  no-consumer, cross-conductor cycles) is **type-checked**, and conductors can **satisfy** an
+  event-interface trait (swappable workers) on the existing narrowing machinery.
+- **Mutable single-owner conductor state; conduits become handlers.** Migrate the conduit from the fold
+  form (`(e,s):{R,S} from INIT`) to a **handler over conductor fields** (`(e) -> … this.field = …`).
+  Runtime bricks (routing table, single-owner check, journal) survive — they key off event types, not
+  the threading shape. Replay rebuilds state by re-running the event sequence (deterministic).
+- **Seating grammar.** Top-level `spawn Conductor [over X]` (entry-point only, honored via the same
+  `ModuleLinker.combine` entry-selection that makes a required `main` inert) + `main ( body )` / `main
+  Conductor(…)` as the pinned root. `over X` rides the seat. Compiler-assisted completeness: an unseated
+  required sub-conductor is a compile error naming it.
+
+### Runtime, still to build
+
+- **Async offload — `on X`, mirroring the GPU model.** `expr on Thread` (and `… on Gpu`) reuses
+  `Pending`/`outstanding`/drive-to-quiescence: the "device" is a daemon thread, the dispatch registers a
+  `Pending` whose result is fetched off a result `Mailbox`, and a **woven completion `emit`** delivers it
+  forward to a reacting handler at quiescence. **No `await`.** New work: the parser/lowering for the woven
+  completion `emit` + the daemon-backed `Pending`; the quiescence loop is reused as-is. (This is *not*
+  `spawn` — `spawn` seats conductors; `on X` offloads a computation.)
 - **Placement — `over X targeting Y`:** the tier matrix made real. `over thread` (in-process queue) →
   `over process` (elektroq socket + a **process spawner**, which neither repo provides yet — new work)
   → `over host` / GPU, with honest `[… | Unreachable]` boundary types. `over thread` and `over process`
   share one integration pattern; only the transport row changes.
+- **Supervision boundary.** catch/retire/restart-from-`INIT`+replay/escalate, riding the journal +
+  commit-marker + dead-letter, with resource reconciliation on restart (§Two honest edges).
 
 Interpreter seams the Conductor builds on (verified): `IrInterpreter.fireEvent` (folds the matching
 conduit, state in `conduitState`, routes to actions + `NativeFunctions` sinks), `CompiledModule`'s

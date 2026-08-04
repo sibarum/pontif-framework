@@ -112,6 +112,14 @@ observability regimes, the scheduler join, concurrent `main(a, b)` — is **its 
 pass (the real slice 2)**. Today's placeholder is the interpreter's inert
 `IrInterpreter.DriveResult` (returned by a for-effect drive; see slice 1d).
 
+> **SUPERSEDED in part (2026-08-02, `docs/orchestration.md` §"Results flow forward").** The
+> Orchestration API later ruled **no user-facing `await`/`join` at all** — not even "await *that
+> it completes*." Completion is the runtime **draining the orchestra to quiescence** (internal,
+> the same loop `… on Gpu` uses), and a routine's outcome returns *only* as a forward-routed
+> event, never through a handle the emitter reads. The `main`/`emit` completion **handle** here is
+> retained only as an *addressable identity* (the Pid you send directed messages to), not a
+> liveness token to synchronize on. The "scheduler join" idea in this paragraph is off the table.
+
 ## Design invariants (hold across all slices — they protect the thread story)
 
 1. A conduit is the **sole owner and mutator** of its state `S`.
