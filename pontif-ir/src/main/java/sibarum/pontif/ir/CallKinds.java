@@ -37,9 +37,17 @@ public final class CallKinds {
     private static final Set<String> FUNCTION_BUILTINS = Set.of(IrSort.CallSig.METHOD);
     private static final Set<String> DISPATCH_BUILTINS =
             Set.of(IrSort.CallSig.DISPATCH, "DispatchBase", "AlgebraicDispatch");
+    private static final Set<String> ACTION_BUILTINS = Set.of(IrSort.CallSig.ACTION);
+    private static final Set<String> CONDUIT_BUILTINS = Set.of(IrSort.CallSig.CONDUIT);
 
-    /** The two call kinds a {@link IrSort.CallSig} head type can carry. */
-    public enum Kind { FUNCTION, DISPATCH }
+    /**
+     * The call kinds a {@link IrSort.CallSig} head type can carry. {@code FUNCTION} and
+     * {@code DISPATCH} are the value-returning contracts (a lambda's, a metareference's);
+     * {@code ACTION} and {@code CONDUIT} are the effectful members (an event reaction with a
+     * write-only terminus, and one with a value terminus alongside its effects) — the
+     * sort-carried siblings of the {@code action}/{@code conduit} keyword declarations.
+     */
+    public enum Kind { FUNCTION, DISPATCH, ACTION, CONDUIT }
 
     private CallKinds() {}
 
@@ -52,6 +60,8 @@ public final class CallKinds {
         if (typeName == null) return null;
         if (FUNCTION_BUILTINS.contains(typeName)) return Kind.FUNCTION;
         if (DISPATCH_BUILTINS.contains(typeName)) return Kind.DISPATCH;
+        if (ACTION_BUILTINS.contains(typeName)) return Kind.ACTION;
+        if (CONDUIT_BUILTINS.contains(typeName)) return Kind.CONDUIT;
         return null;
     }
 
@@ -63,5 +73,15 @@ public final class CallKinds {
     /** Whether {@code typeName} names a builtin dispatch-style head type. */
     public static boolean isDispatchBuiltin(String typeName) {
         return builtin(typeName) == Kind.DISPATCH;
+    }
+
+    /** Whether {@code typeName} names a builtin effect-reaction ({@code Action}) head type. */
+    public static boolean isActionBuiltin(String typeName) {
+        return builtin(typeName) == Kind.ACTION;
+    }
+
+    /** Whether {@code typeName} names a builtin {@code Conduit} head type. */
+    public static boolean isConduitBuiltin(String typeName) {
+        return builtin(typeName) == Kind.CONDUIT;
     }
 }

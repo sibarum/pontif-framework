@@ -40,6 +40,14 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         return new CallSig(CallSig.DISPATCH, keySorts, List.of(), returnSort, Origin.NONE);
     }
 
+    static CallSig action(List<IrSort> paramSorts) {
+        return new CallSig(CallSig.ACTION, paramSorts, List.of(), named("_"), Origin.NONE);
+    }
+
+    static CallSig conduit(List<IrSort> paramSorts, IrSort returnSort) {
+        return new CallSig(CallSig.CONDUIT, paramSorts, List.of(), returnSort, Origin.NONE);
+    }
+
     static Trait trait(String name, Map<String, IrSort.CallSig> methods) {
         return new Trait(name, methods, Map.of(), Origin.NONE);
     }
@@ -164,6 +172,19 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
         public static final String METHOD = "Method";
         /** The builtin dispatch-style head type ({@code Dispatch}) — a metareference's contract. */
         public static final String DISPATCH = "Dispatch";
+        /**
+         * The builtin effect-reaction head type ({@code Action}) — an event handler whose
+         * terminus is write-only ({@code emit}), no returned value. A member's sort being an
+         * {@code Action(...)} is what declares it an effect reaction inside a member block,
+         * the sort-carried sibling of the top-level {@code action} keyword.
+         */
+        public static final String ACTION = "Action";
+        /**
+         * The builtin conduit head type ({@code Conduit}) — an event handler with a value
+         * terminus (its state) alongside its effects. The sort-carried sibling of the
+         * top-level {@code conduit} keyword.
+         */
+        public static final String CONDUIT = "Conduit";
 
         public CallSig {
             if (typeName == null || typeName.isEmpty()) {

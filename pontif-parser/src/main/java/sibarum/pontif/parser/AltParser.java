@@ -2941,12 +2941,17 @@ public final class AltParser {
             }
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
-            // A member is a METHOD if its sort is a function-style call signature
-            // ([Method(...):Ret]); otherwise it is a typed data ATTRIBUTE — a value
-            // sort the satisfier must supply (a field or a computed producer). Both
-            // live in `Type{…}`. Decided by call-kind capability, not by name.
+            // A member's KIND is read from its sort's call-kind capability, not a keyword:
+            //   - a call signature ([Method(...):Ret], and the effectful [Action(...)] /
+            //     [Conduit(...):S] siblings) is a CALLABLE member, kept in `methods` keyed
+            //     by name — its typeName() (Method / Action / Conduit) preserves which kind
+            //     it is for downstream routing;
+            //   - anything else is a typed data ATTRIBUTE — a value sort the satisfier must
+            //     supply (a field or a computed producer).
+            // Both live in `Type{…}`. Crucially an Action/Conduit sort must be caught HERE,
+            // before the attribute fallthrough, or it would be silently misread as data.
             if (memberSort instanceof IrSort.CallSig fn
-                    && CallKinds.builtin(fn.typeName()) == CallKinds.Kind.FUNCTION) {
+                    && isCallableMemberKind(CallKinds.builtin(fn.typeName()))) {
                 methods.put(memberName.text(), fn);
             } else {
                 attributes.put(memberName.text(), memberSort);
@@ -2958,6 +2963,20 @@ public final class AltParser {
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
                 null, List.of(), methodDefaults, returnShells, argShells, headTok.spanTo(close));
+    }
+
+    /**
+     * Whether a member sort's call-kind makes it a <em>callable</em> member (kept in the
+     * trait's {@code methods} map) rather than a data attribute. A {@code Method} contract
+     * and its effectful {@code Action} / {@code Conduit} siblings all qualify — the sort
+     * carries which kind it is (its {@code typeName()}), so routing stays available
+     * downstream without a data-model split at this slice. A {@code null} kind (not a
+     * recognized call-signature head) is not callable — it falls through to an attribute.
+     */
+    private static boolean isCallableMemberKind(CallKinds.Kind kind) {
+        return kind == CallKinds.Kind.FUNCTION
+                || kind == CallKinds.Kind.ACTION
+                || kind == CallKinds.Kind.CONDUIT;
     }
 
     /**
