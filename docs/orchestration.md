@@ -144,8 +144,10 @@ conductor Editor {
 }
 ```
 
-Supervision survives: replay re-runs the event sequence through the handlers to rebuild `doc`, which is
-deterministic as long as nothing ambient leaks in (the determinism rule). Conductor **methods** are private
+Mutable state stays *deterministically replayable*: re-running the event sequence through the handlers
+rebuilds `doc`, deterministic as long as nothing ambient leaks in (the determinism rule) — which is what
+keeps the journal usable for *deliberate* recovery, not that the runtime auto-restarts (see *Failure* —
+it doesn't). Conductor **methods** are private
 helpers — they group logic and touch the state but aren't exported to dispatch. A **handle** (`let h =
 spawn Editor`) is the only conductor value that escapes; the worker itself never becomes a passable value.
 
@@ -178,7 +180,7 @@ module alone; `RequiredModuleMainInertTest` pins it), generalized to every worke
   boot order. No dependency can stand up a thread you didn't name — the runtime is a pure function of what
   you seat, so a change to what runs is always traceable to a conductor add/update/remove, never to merely
   pulling in a library. A conductor's statically-declared **sub-conductors** ride along as its subtree
-  (inspectable, still traceable — the supervision tree).
+  (inspectable, still traceable — the teardown / isolation tree).
 - **Program lifetime.** A program ends when the orchestra **drains** (every conductor retired), not when
   `main`'s body returns; the root's retirement tears the rest down (closing the window ends the program).
 
@@ -228,11 +230,12 @@ Purity quarantines *side-effects*, not *failure* — those are different. The ho
 - **One property closes both failure modes.** A total Player provably returns, so it can't hang —
   which means cooperative scheduling is **starvation-free** among total Players *for free*. The same
   property that makes the program crash-free makes the Conductor safe.
-- **Supervision is the boundary for the non-total / opt-in cases** ("let it crash"): the Conductor
-  runs each Player's tick inside a fault boundary, and on a throw applies a policy — retire, restart
-  from `init`, or escalate to the supervisor (the root ends the program). A crashing Player is
-  contained; siblings and the Conductor live. **This is not yet implemented** — slice 2a's `conduct`
-  has no `try` around `fireEvent`, so a throwing conduit currently crashes the loop.
+- **A crash is a stop, not a supervised restart** (see *Failure* below — Pontif's deliberate deviation
+  from Erlang). Totality makes crashes exceptional, so the non-total / opt-in cases (`[!!]`, a resource
+  limit, an external fault) **crash clean and halt** — the runtime does *not* catch a handler throw to
+  retire or restart it, because a crash can land mid-effect and no journal makes that safe to replay.
+  Fault *isolation* is the placement axis's job (an own-process conductor's crash is OS-contained);
+  *restart* is an external supervisor's, never the language's.
 
 Residual boundaries — where the guarantee ends, stated honestly:
 
@@ -246,16 +249,17 @@ Residual boundaries — where the guarantee ends, stated honestly:
    runtime. Today Pontif's TCB is the whole stack (elaborator, interpreter, GraalVM, JVM); the long
    game is shrinking it toward a small verifiable kernel (Coq's move).
 4. **External faults** (power, cosmic rays, physical destruction) are not the language's to prevent —
-   they are the **distribution/supervision axis's** job (Erlang/OTP: telecom uptime against hardware
-   failure via supervision + replication across nodes). So placement earns the *outer* guarantee as
-   totality earns the *inner* one, and "it can't crash" is defensible spoken precisely: **no internal
-   error source, modulo a small trusted core, with external faults answered by replication.**
+   they are the **distribution/placement axis's** job, answered by **external** supervision + replication
+   across nodes (the operator's, not the runtime's — see *Failure*). So placement earns the *outer*
+   guarantee as totality earns the *inner* one, and "it can't crash" is defensible spoken precisely:
+   **no internal error source, modulo a small trusted core, with external faults answered by replication.**
 
-**Placement is also the fault-isolation axis.** Same-thread Player = fast, throws catchable by
-supervision, but a hang is shared-fate. Own-thread/process/host Player = the OS isolates *both* crash
-and hang, at the cost of the boundary (marshaling) and exactly the `Unreachable`-typed handle the
-honest-types rule already demands. Choosing a chair is simultaneously a performance choice and a
-trust/fault-isolation choice — and the type system forces you to acknowledge it.
+**Placement is also the fault-isolation axis.** Same-thread conductor = fast, but a crash *or* hang is
+**shared-fate** — it takes the whole process down. Own-process/host conductor = the OS isolates *both*
+crash and hang, at the cost of the boundary (marshaling) and exactly the `Unreachable`-typed handle the
+honest-types rule already demands — and it is the boundary an external supervisor restarts *across*.
+Choosing a chair is simultaneously a performance choice and a trust/fault-isolation choice — and the
+type system forces you to acknowledge it.
 
 ## The concurrency model — one pattern, four transports
 
@@ -304,9 +308,9 @@ stays alive (**liveness**). `spawn … over X` selects a row.
 | Tier | Transport | Liveness | Handle type |
 | --- | --- | --- | --- |
 | **main** | cooperative drain between render ticks | the one thread you never block and never spawn (singleton) | local |
-| **same-process thread** | in-process bounded queue | spawned daemon, supervised | local |
-| **separate process** | elektroq socket + a process spawner | OS-supervised | `[… \| Unreachable]` |
-| **cross-machine** | elektroq socket | OS-supervised | `[… \| Unreachable]` |
+| **same-process thread** | in-process bounded queue | spawned daemon; a crash is **shared-fate** (takes the process) | local |
+| **separate process** | elektroq socket + a process spawner | OS-isolated crash boundary; **external** restart | `[… \| Unreachable]` |
+| **cross-machine** | elektroq socket | OS-isolated; **external** restart | `[… \| Unreachable]` |
 
 - **main is special** because it is cooperatively multiplexed (never blocked — it drains its inbox
   *between* render ticks) and there is exactly one of it. This is what the cut-2 `Conductor` already
@@ -327,30 +331,44 @@ The main lane exists precisely so the display Player can be pinned there when we
 
 Because every message is immutable static data, a **per-inbox journal** — an ordered list of those
 records — is byte-identical to what you would serialize to cross a process or a network. Journaling
-(for crash-restart) and the run-anywhere transport therefore **consume the same stream**; they differ
+(for audit + *deliberate* external recovery — never an auto-restart, see *Failure*) and the run-anywhere
+transport therefore **consume the same stream**; they differ
 only in where it is written (RAM vs socket). Build the in-memory journal now and most of the
 cross-process wire model comes with it — which is exactly how the thread-first plan avoids blocking the
 process-later future.
 
-### Supervision — the Smalltalk restart, stated honestly
+### Failure — crash clean, restart is external (RULED 2026-08-02)
 
-A conduit is a deterministic fold from `INIT` over its event stream, so its **state replays
-perfectly**: on crash, re-seed `INIT` and replay the journal to rebuild it. That half of the
-"detect-crash-and-restart-the-daemon" dream is real and free.
+Pontif **deviates from Erlang here**: the platform does **not** guarantee uptime and does **not**
+auto-restart. Totality earns the austerity — handlers are *proven* not to crash, so a crash is
+genuinely exceptional (a `[!!]` you opted into, a resource limit, an external fault, a real bug), not
+the routine event Erlang's supervision papers over. When one happens the runtime **crashes clean and
+stops**; it does not catch, retire, or restart a handler.
 
-The honest edge is **effects don't un-happen**. Naive replay re-fires `StdOut` / `present` / IO. So
-restart carries two rules, and the journal is built to serve them from day one:
+The reason is the no-lie law taken to its conclusion. Effects don't un-happen, and a crash can land
+*mid-effect* — a half-written file, a partial transaction, a sent-but-unacked message — a state **no
+journal can undo**. An auto-rebooting runtime that "recovered" by replaying past such a crash would be
+**lying about recoverability**, and could *compound* the corruption. So the language refuses to pretend:
+it records faithfully and stops honestly.
 
-- **Commit-marker.** The journal records the last position whose effects were externally observed.
-  Restart replays *silently* up to the marker (rebuilding state without re-emitting), then resumes
-  live. Alternatively, effects are made idempotent — but the marker is the general answer.
-- **Poison-message / retry bound.** A restart re-delivers the event that crashed the Player; after *N*
-  failed re-deliveries the event is **dead-lettered**, so one bad message cannot crash-loop a daemon
-  forever. This is the retry logic driven by the in-memory journal.
+**Isolation stays; restart leaves.** Erlang fused the two; Pontif separates them, keeping the half a
+language can do soundly:
 
-Supervision policy (retire / restart-from-`INIT`+replay / escalate to the root) stays as in *Crash
-safety* above; the journal + commit-marker + dead-letter are the mechanism that makes "restart the
-daemon" safe rather than a double-effect hazard.
+- **Isolation is the placement axis.** `over process` / `over host` gives a conductor a real OS crash
+  boundary — its crash is contained, siblings live. That, the language guarantees.
+- **Restart is the operator's.** systemd, a process manager, k8s, a supervising process, replication
+  across nodes — whoever holds the domain knowledge of *whether* a restart is safe. The language hands
+  them a clean crash and the journal; it imposes no policy.
+
+So the **journal is not an auto-heal.** It is three things: the wire format (§"The journal is the wire
+format"), an audit / inspection log, and *raw material an external tool can use for a deliberate,
+risk-owned recovery*. The **commit-marker** is a technique for that deliberate recovery (replay the
+committed prefix silently, resume from the tail) — never a runtime guarantee and never corruption-proof:
+past a mid-effect crash it can still land in corruption, which is exactly why the runtime won't do it
+for you.
+
+Orderly **shutdown** is untouched and is *not* crash-recovery: the root/`main` conductor's retirement
+tears down the rest (closing the window ends the program). That is lifecycle, not resurrection.
 
 ## The conductor graph — static topology, dynamic resources
 
@@ -407,17 +425,26 @@ load-scaled pools — the deliberate trade against Erlang). Dynamic *compute* pa
 axis: data-parallel fan-out (`… on Gpu`) runs *within* a conductor and is unaffected. Nothing you
 actually need is in the forbidden gap.
 
-### Two honest edges
+### Honest edges
 
+- **Dead letters — the config gap.** An emitted event whose type falls outside the union of the
+  *seated* conductors' consumes-interfaces has nowhere to go. It is **not** an intentional no-op (that
+  is an event a seated conductor *does* receive and chooses not to act on — the muted instrument), and
+  **not** a crash (no invariant is broken). It is *unhandled by this configuration* — a silent failure
+  worth surfacing. Because seating is static, the common case is a **compile warning** ("`emit SaveAs`
+  but no seated conductor consumes it"); the runtime **dead letter** is the safety net for coverage
+  that isn't locally provable (chiefly cross-process, where the remote handler's presence isn't a local
+  static fact). A dead letter is re-emitted as `DeadLetter(event, reason)` routed to a dead-letter
+  conductor — a built-in default prints to `StdOut`, an app seats its own to override. It must be the
+  **terminus**: an unhandled `DeadLetter` hits a last-resort stderr and stops, never loops.
 - **Backpressure cycles.** Bounded mailboxes + a cycle in the conductor graph can deadlock (A fills B's
   inbox, B fills A's, both block in `send`). The no-`await` ruling already killed the reply-wait
   deadlock; this is the only one left — and the **static graph is exactly the tool to detect cycles at
   compile time**, turning a runtime hang into a compile-time warning.
-- **Stale resource handles.** Journal replay faithfully rebuilds a conduit's state, *including* a
-  window/connection handle — but the external resource behind it may be gone after a crash. So
-  supervision restart must **reconcile resources** (re-acquire / revalidate a replayed handle), because
-  effects don't un-happen *and* resources can vanish. Same family as the commit-marker edge, not a
-  threat to the model.
+- **Stale resource handles.** A journal replay faithfully rebuilds a conductor's state, *including* a
+  window/connection handle — but the external resource behind it may be gone. So any **deliberate
+  external recovery** (never an automatic one — see *Failure*) must **reconcile resources** (re-acquire
+  / revalidate a replayed handle), because effects don't un-happen *and* resources can vanish.
 
 ## Status and roadmap
 
@@ -461,9 +488,10 @@ actually need is in the forbidden gap.
 - **In-memory journal — DONE (additive).** `runtime.module.EventJournal` taps the existing
   observational `IrInterpreter.EventListener` seam, so it records the ordered stream of immutable events
   a run fires **without touching the synchronous fold** — install it, run, read the stream back. That
-  stream is byte-for-byte the cross-process wire format (journal = transport). It carries the two things
-  supervision needs: a **commit-marker** (splitting the log into a silently-replayed committed prefix
-  and a live-replayed uncommitted tail) and a **dead-letter** list (the poison-message bound).
+  stream is byte-for-byte the cross-process wire format (journal = transport). It carries a
+  **commit-marker** (for *deliberate* external recovery — replay the committed prefix, resume from the
+  tail; not an auto-restart, see *Failure*) and a **dead-letter** list (repurposed for the config-gap
+  capture, §Honest edges — *not* poison-message retry; a handler crash is a full crash).
   `EventJournalTest` covers the marker split, dead-lettering, and capture-in-order of a real conduit
   program's emits. Thread-safe (`CopyOnWriteArrayList` + atomic marker) for when Players journal
   concurrently; per-inbox partitioning waits for real mailboxes (below).
@@ -539,8 +567,12 @@ actually need is in the forbidden gap.
   `over process` (elektroq socket + a **process spawner**, which neither repo provides yet — new work)
   → `over host` / GPU, with honest `[… | Unreachable]` boundary types. `over thread` and `over process`
   share one integration pattern; only the transport row changes.
-- **Supervision boundary.** catch/retire/restart-from-`INIT`+replay/escalate, riding the journal +
-  commit-marker + dead-letter, with resource reconciliation on restart (§Two honest edges).
+- **Failure + dead letters (revised — no auto-restart, see *Failure*).** A handler crash / MIA
+  addressed conductor is a **full crash + halt**; there is *no* catch/retire/restart-from-`INIT`
+  supervision boundary to build (Pontif's deviation from Erlang). What *is* to build: the **dead-letter**
+  path for the config gap — the compile warning ("`emit X`, no seated consumer") plus the runtime
+  `DeadLetter(event, reason)` → default-StdOut conductor (overridable). Restart/uptime is external tooling
+  over the placement boundary, fed by the journal for *deliberate* recovery.
 
 Interpreter seams the Conductor builds on (verified): `IrInterpreter.fireEvent` (folds the matching
 conduit, state in `conduitState`, routes to actions + `NativeFunctions` sinks), `CompiledModule`'s
