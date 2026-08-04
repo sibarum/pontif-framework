@@ -187,6 +187,27 @@ class ConduitTest {
     }
 
     @Test
+    void conduit_ancestrallyOverlappingTypes_isRejectedBeforeAnyEventFlows() {
+        // The conductor-graph single-owner rule (docs/orchestration.md): a conduit on a trait AND a
+        // conduit on a type that is-a that trait both match an emit of the type — a routing conflict the
+        // runtime would otherwise find only on such an emit. It is now proven single-owner up front, at
+        // module load (before top-level lets and main), rather than latently.
+        Output o = run("""
+                requires pontif.events.{Event}
+                trait CounterEvent{}
+                assign trait CounterEvent:Event{}
+                struct Increment(by:Int)
+                assign trait Increment:CounterEvent{}
+                struct Count(n:Int)
+                conduit onAny(e:CounterEvent, s:Count):Count from Count(0) -> Count(s.n + 1)
+                conduit onInc(e:Increment, s:Count):Count from Count(0) -> Count(s.n + e.by)
+                main ( 0 )""");
+        assertTrue(o.result().isError(), "a conduit on a type and its ancestor trait must be a compile error");
+        assertTrue(o.result().text().contains("overlap") && o.result().text().contains("single owning conduit"),
+                () -> "expected a single-owner overlap diagnostic; got " + o.result().text());
+    }
+
+    @Test
     void emit_withNoConduit_reachesActionsDirectly() {
         // Regression: the no-conduit path is unchanged — an emitted event with no matching conduit
         // is dispatched straight to its actions (and native sink), exactly as before.

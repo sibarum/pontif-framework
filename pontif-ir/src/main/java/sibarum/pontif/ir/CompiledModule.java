@@ -210,6 +210,34 @@ public record CompiledModule(
     }
 
     /**
+     * The static-graph single-owner rule (docs/orchestration.md, §"The conductor graph"): every event type
+     * has at most ONE owning conduit. Two conduits whose keys stand in an ancestry relation — one is-a the
+     * other's trait — both match an emit of the more-specific type, a routing conflict {@link #conduitsMatching}
+     * would otherwise surface only when such an event is fired ({@code IrInterpreter.fireEvent}'s multi-conduit
+     * guard). This proves the graph single-owner up front, before any event flows, and throws
+     * {@link IllegalStateException} (the interpreter reports it as a load-time error) naming the two conduits.
+     * The residual "diamond" case (a concrete type satisfying two unrelated conduit-key traits) stays the
+     * runtime backstop. Idempotent and cheap — called once at {@code eval} start.
+     */
+    public void validateSingleOwnerConduits() {
+        sibarum.pontif.core.symbolic.TraitRegistry traits = dispatch.traitRegistry();
+        List<String> keys = new java.util.ArrayList<>(conduitsByType.keySet());
+        for (int i = 0; i < keys.size(); i++) {
+            for (int j = i + 1; j < keys.size(); j++) {
+                String k1 = keys.get(i);
+                String k2 = keys.get(j);
+                if (traits.satisfiesBareBoth(k1, k2) || traits.satisfiesBareBoth(k2, k1)) {
+                    throw new IllegalStateException(
+                            "conduits for event types '" + k1 + "' and '" + k2 + "' overlap — one is-a "
+                                    + "the other, so an emit of the more-specific type matches both, but "
+                                    + "every event type must have a single owning conduit (the conductor "
+                                    + "graph). Merge them, or re-key one onto a disjoint type.");
+                }
+            }
+        }
+    }
+
+    /**
      * A compiled Conduit (docs/reactive-gui.md): the stateful fold applied to every emitted
      * event of {@code eventTypeBareName} (and its subtypes) between {@code emit} and the
      * actions. {@code fold} is a 2-param function {@code (e:E, s:S) -> {R, S'}} — the event

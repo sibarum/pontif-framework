@@ -406,6 +406,16 @@ actually need is in the forbidden gap.
   display's thread). All conductors start before any message flows (init race designed out); only the
   mailboxes + the read-only table are shared. `ConductorGraphSpikeTest` asserts cross-conductor order
   under load. This validates the routing/ownership shape the interpreter will take on next.
+- **Single-owner rule enforced before execution — DONE (first real compiler brick).** The static-graph
+  invariant "every event type has at most one owning conduit" is now checked eagerly:
+  `CompiledModule.validateSingleOwnerConduits` runs at the top of `eval`, before any top-level `let` or
+  `main`, and rejects two conduits whose event types are in an ancestry relation (one is-a the other's
+  trait) — a routing conflict the runtime previously discovered only when such an event was fired.
+  Needed a bare-on-both-sides trait check (`TraitRegistry.satisfiesBareBoth`) because conduit keys are
+  bare while satisfier registrations are qualified. `fireEvent`'s multi-conduit guard stays as the
+  backstop for the residual "diamond" case (a concrete type satisfying two unrelated conduit-key
+  traits). `ConduitTest` covers it; the full 1118-test suite is green. (Ran at load rather than link
+  because the trait registry isn't fully populated at the point in `IrCompiler` where conduits compile.)
 - **`spawn` proper — mirror the GPU async model (next).** A `spawn` of a routine reuses the
   `Pending`/`outstanding`/drive-to-quiescence machinery `… on Gpu` already has (see *Results flow
   forward* above): the "device" is a daemon thread, the dispatch registers a `Pending` whose result is

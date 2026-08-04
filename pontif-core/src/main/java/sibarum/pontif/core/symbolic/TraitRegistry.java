@@ -28,6 +28,26 @@ public final class TraitRegistry {
     private final Map<String, String> baseTrait = new HashMap<>();
 
     /**
+     * Bare-on-<em>both</em>-sides satisfaction: does some registered type whose bare name is {@code bareType}
+     * directly satisfy some trait whose bare name is {@code bareTrait}? Unlike {@link #satisfiesBareTrait}
+     * (which bares the trait but matches the type exactly, since its callers hold a fully-qualified emitted
+     * type), this bares the type too — for callers holding two <b>bare</b> keys, e.g. the conductor-graph
+     * single-owner check comparing two bare-keyed conduit event types for ancestry overlap.
+     */
+    public boolean satisfiesBareBoth(String bareTrait, String bareType) {
+        if (bareTrait == null || bareType == null) return false;
+        String wantTrait = bare(bareTrait);
+        String wantType = bare(bareType);
+        for (Map.Entry<String, Set<String>> e : satisfiers.entrySet()) {
+            if (!bare(e.getKey()).equals(wantTrait)) continue;
+            for (String type : e.getValue()) {
+                if (bare(type).equals(wantType)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Declares that {@code traitName} is a known trait, even before any
      * concrete type satisfies it. Required for {@code function f(d:Trait)}
      * to type-check before any {@code assign trait T:Trait} block is seen.

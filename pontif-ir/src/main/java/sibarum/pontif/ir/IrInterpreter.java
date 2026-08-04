@@ -90,6 +90,10 @@ public final class IrInterpreter {
     }
 
     public Object eval(CompiledModule module) {
+        // Prove the conductor graph is single-owner before any event flows (docs/orchestration.md): two
+        // conduits whose event types are in an ancestry relation would both match one emit — caught here,
+        // at load, rather than latently when such an event is first fired.
+        module.validateSingleOwnerConduits();
         // The Inquisition: every top-level let is force-evaluated before
         // main, declaration order — its claims (binding claims, construction
         // checks) are notarized whether or not anything references it. Pure
@@ -349,6 +353,9 @@ public final class IrInterpreter {
         // actions — the emitted type's own conduit plus any keyed by a trait it satisfies.
         List<CompiledModule.CompiledConduit> conduits = module.conduitsMatching(typeName);
         if (conduits.size() > 1) {
+            // Backstop: the ancestry conflict (a conduit's key is-a another's) is now caught at link
+            // (IrCompiler, the static-graph single-owner rule). This still fires only for the residual
+            // "diamond" case — a concrete type satisfying two otherwise-unrelated conduit-key traits.
             throw new RuntimeCheckException(
                     "multiple conduits match event type '" + typeName + "' — a single event "
                             + "matching several conduits (the ordered pipeline) is not yet "
