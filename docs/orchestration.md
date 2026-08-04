@@ -416,6 +416,14 @@ actually need is in the forbidden gap.
   backstop for the residual "diamond" case (a concrete type satisfying two unrelated conduit-key
   traits). `ConduitTest` covers it; the full 1118-test suite is green. (Ran at load rather than link
   because the trait registry isn't fully populated at the point in `IrCompiler` where conduits compile.)
+- **Routing reified as a resolved table — DONE (the subscriber side).** `RoutingTable` (pontif-ir)
+  holds, per emitted event type, its **owning conduit(s)** and its **subscriber actions** (the fan-out),
+  resolved *once* and cached — "routing is a resolved table, not a runtime lookup." The interpreter owns
+  one per run; `fireEvent`/`dispatchToActions` now read `routeFor(type)` instead of re-scanning every
+  conduit/action bucket per emit. Behavior-preserving (the per-instance `matchSort` refinement still
+  gates at the fire site — the table resolves only the candidate *set*, which depends solely on the
+  type); full 1118-test suite green, plus `RoutingTableTest` (single owner + both trait subscribers +
+  cache identity). This is the object emit-site specialization and cross-conductor cycle detection read.
 - **`spawn` proper — mirror the GPU async model (next).** A `spawn` of a routine reuses the
   `Pending`/`outstanding`/drive-to-quiescence machinery `… on Gpu` already has (see *Results flow
   forward* above): the "device" is a daemon thread, the dispatch registers a `Pending` whose result is

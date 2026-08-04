@@ -84,6 +84,21 @@ public final class IrInterpreter {
      */
     private final List<Pending> outstanding = new ArrayList<>();
 
+    /**
+     * The resolved routing table (docs/orchestration.md, §"The conductor graph") — per emitted type, its owning
+     * conduit(s) + subscriber actions, resolved once and cached instead of re-scanned every {@code emit}. Lazily
+     * built per module via {@link #routing}; one interpreter typically evaluates one module.
+     */
+    private RoutingTable routing;
+
+    /** The routing table for {@code module}, rebuilding it if a different module is seen. */
+    private RoutingTable routing(CompiledModule module) {
+        if (routing == null || routing.module() != module) {
+            routing = new RoutingTable(module);
+        }
+        return routing;
+    }
+
     public IrInterpreter(Simplifier simplifier) {
         this.simplifier = simplifier;
         this.eventListener = globalListener;
@@ -351,7 +366,7 @@ public final class IrInterpreter {
         // The conduit leg (docs/reactive-gui.md) sits BETWEEN emit and the actions: a stateful
         // fold over the temporal stream of the type's events. Trait-aware match, exactly like
         // actions — the emitted type's own conduit plus any keyed by a trait it satisfies.
-        List<CompiledModule.CompiledConduit> conduits = module.conduitsMatching(typeName);
+        List<CompiledModule.CompiledConduit> conduits = routing(module).routeFor(typeName).conduits();
         if (conduits.size() > 1) {
             // Backstop: the ancestry conflict (a conduit's key is-a another's) is now caught at link
             // (IrCompiler, the static-graph single-owner rule). This still fires only for the residual
@@ -439,7 +454,7 @@ public final class IrInterpreter {
         // Trait-aware routing (docs/reactive-gui.md §1): the emitted type's own bucket plus every
         // trait bucket it is-a member of, most-specific first. The per-action matchSort test below
         // still gates refinements, so a supertype Action only fires on instances it truly matches.
-        List<CompiledModule.CompiledAction> actions = module.actionsMatching(typeName);
+        List<CompiledModule.CompiledAction> actions = routing(module).routeFor(typeName).subscribers();
         for (CompiledModule.CompiledAction action : actions) {
             if (Refinements.satisfies(sym, action.matchSort(), checker(module))
                     instanceof ProofResult.Passed) {
