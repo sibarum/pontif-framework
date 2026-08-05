@@ -53,6 +53,18 @@ public final class IrInterpreter {
 
         /** A registered {@code action} (named {@code reactionName}) matched and is about to run. */
         default void onActionFired(String reactionName, RecordValue event) {}
+
+        /**
+         * A fired {@code event} engaged <b>nothing</b> in its pipeline — no middleware conduit folded
+         * it, no consumer {@code action} responded, and no native sink claimed its type — so it was a
+         * runtime no-op (docs/orchestration.md, §"Honest edges → Dead letters"). (In the role model:
+         * the <em>Action</em> is the consumer; the conduit is middleware a conductor orchestrates; the
+         * sink is an Instrument — a dead letter is when none of the three engaged.) Fires once per such
+         * emit, every time (an unhandled emit in a loop dead-letters on each iteration). Purely
+         * observational — the {@link IrInterpreter} already logs it; this hook lets a journal/debug port
+         * record the dead letter too.
+         */
+        default void onDeadLetter(RecordValue event, Origin origin) {}
     }
 
     private static volatile EventListener globalListener;
@@ -383,8 +395,29 @@ public final class IrInterpreter {
             if (dispatched != null) dispatchToActions(dispatched, module, origin);  // null = dropped
             return;
         }
-        // No conduit: the emitted event reaches the actions directly (the unchanged path).
-        dispatchToActions(rec, module, origin);
+        // No conduit (no middleware engaged): the event reaches the consumer actions directly. If
+        // none responds and no native sink claims it, the event engaged nothing — a DEAD LETTER
+        // (docs/orchestration.md, §"Honest edges"). Not an error and not silently dropped: emit stays
+        // a no-op by design (a consumer MAY subscribe), but the runtime logs the miss so it is
+        // observable rather than invisible. Logged every time — an unhandled emit in a loop logs each.
+        if (!dispatchToActions(rec, module, origin)) {
+            deadLetter(rec, origin);
+        }
+    }
+
+    /**
+     * Records a <b>dead letter</b> — a fired event that engaged nothing (no middleware conduit, no
+     * consumer action, no sink). Writes a runtime log line every time (the emit still no-ops; this is
+     * pure observability), and notifies the {@link EventListener} so a journal/debug port can capture
+     * it too. This is the minimal runtime signal; routing dead letters to an overridable dead-letter
+     * conductor (the full docs/orchestration.md §Failure design) is a later refinement.
+     */
+    private void deadLetter(RecordValue rec, Origin origin) {
+        System.err.println("[pontif] dead letter: emit " + rec.typeName()
+                + " reached no consumer" + (origin == null ? "" : " (" + origin + ")"));
+        if (eventListener != null) {
+            eventListener.onDeadLetter(rec, origin);
+        }
     }
 
     /**
@@ -446,11 +479,15 @@ public final class IrInterpreter {
      * {@code action} whose match-filter {@code rec} satisfies (declaration order; each a
      * 1-param function run for effect), then the native {@link NativeFunctions} sink if any.
      * Called with either a conduit's output {@code R} or, when no conduit matches, the raw
-     * emitted event.
+     * emitted event. Returns whether it was <b>handled</b> — a consumer {@code action} responded
+     * or a native sink claimed the type — so {@link #fireEvent} can dead-letter the event when
+     * nothing did (an action bucket that exists but whose refinement rejects this instance counts
+     * as unhandled: this instance genuinely reached no consumer).
      */
-    private void dispatchToActions(RecordValue rec, CompiledModule module, Origin origin) {
+    private boolean dispatchToActions(RecordValue rec, CompiledModule module, Origin origin) {
         String typeName = rec.typeName();
         SymExpr sym = toSymExpr(rec);
+        boolean handled = false;
         // Trait-aware routing (docs/reactive-gui.md §1): the emitted type's own bucket plus every
         // trait bucket it is-a member of, most-specific first. The per-action matchSort test below
         // still gates refinements, so a supertype Action only fires on instances it truly matches.
@@ -465,12 +502,15 @@ public final class IrInterpreter {
                 Environment reactionEnv = Environment.empty()
                         .extend(fn.params().get(0).name(), rec);
                 eval(fn.body(), reactionEnv, module);
+                handled = true;
             }
         }
         NativeFunctions.Effect sink = NativeFunctions.get(typeName);
         if (sink != null) {
             sink.apply(rec, origin);
+            handled = true;
         }
+        return handled;
     }
 
     /** The author-visible name of a conduit, recovered from its {@code #conduit#N#name} key. */
