@@ -131,6 +131,7 @@ public final class ModuleSymbolTable {
                     // handlers/state are inert until the seating slice.
                     case IrStmt.ConductorDecl cd ->
                             types.computeIfAbsent(cd.name(), k -> new LinkedHashSet<>()).add(module);
+                    case IrStmt.Spawn sp -> { }  // a seating directive declares no importable name
                     case IrStmt.NoOp n -> { }
                 }
             }

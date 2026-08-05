@@ -67,7 +67,12 @@ public final class ModuleResolver {
             throws CompileException {
         boolean hasRequires = entry.statements().stream()
                 .anyMatch(s -> s instanceof IrStmt.Requires);
-        if (!hasRequires) return entry;                             // bare single-file path
+        // A `spawn` also needs the link path — seating (docs/orchestration.md, §Seating) injects the
+        // seated conductor's reactions and validates the conductor exists there, both skipped by the
+        // bare pass-through.
+        boolean hasSpawn = entry.statements().stream()
+                .anyMatch(s -> s instanceof IrStmt.Spawn);
+        if (!hasRequires && !hasSpawn) return entry;                // bare single-file path
         if (resolveDir == null) return ModuleLinker.combineSingle(entry);  // builtins-only fallback
 
         Set<String> builtins = BuiltinModules.all().keySet();

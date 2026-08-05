@@ -56,7 +56,14 @@ public final class ModuleLinker {
     public static IrModule combineSingle(IrModule parsed) throws CompileException {
         boolean hasRequires = parsed.statements().stream()
                 .anyMatch(s -> s instanceof IrStmt.Requires);
-        return hasRequires ? combine(Map.of(parsed.name(), parsed), parsed.name()) : parsed;
+        // A `spawn` also forces the link path: seating must inject the seated conductor's
+        // reactions and route them through NameResolver (docs/orchestration.md, §Seating), which
+        // the bare pass-through path skips.
+        boolean hasSpawn = parsed.statements().stream()
+                .anyMatch(s -> s instanceof IrStmt.Spawn);
+        return (hasRequires || hasSpawn)
+                ? combine(Map.of(parsed.name(), parsed), parsed.name())
+                : parsed;
     }
 
     /**
@@ -80,6 +87,12 @@ public final class ModuleLinker {
         // only those, so a program that imports none is unaffected (no shadowing
         // or ambiguity from unused builtins).
         Map<String, IrModule> all = withRequiredBuiltins(modules);
+        // Seating (docs/orchestration.md, §Seating): a `spawn C` in the ENTRY module activates
+        // conductor C — its body-bearing handler reactions are injected into the entry module's
+        // statements here, BEFORE resolution, so they flow through NameResolver like any other
+        // reaction. A spawn in a required module is inert (this only reads the entry module's
+        // spawns) — libraries define conductors, the entry point activates them.
+        all = seatConductors(all, entryModule);
 
         ModuleSymbolTable table = ModuleSymbolTable.build(all);
         // Coherence + import validation run on the pre-FQN-rewrite modules
@@ -119,6 +132,50 @@ public final class ModuleLinker {
         // to re-thread the table. Runs last, after struct literals are Records and
         // destructures are resolved, so operand sorts are known for routing.
         return MethodOperatorResolver.resolvePerModule(shaped, table);
+    }
+
+    /**
+     * Seating (docs/orchestration.md, §Seating). Activates the conductors named by {@code spawn}
+     * statements in the ENTRY module: their concrete handler reactions (the {@code #action#}-keyed
+     * {@link IrStmt.FunctionDecl}s the conductor carries) are appended to the entry module's
+     * statements, so downstream resolution + compilation register them as live reactions. A
+     * conductor may be <em>declared</em> in any module (a library), but only an entry-module
+     * {@code spawn} brings it to life — so {@code requires}-ing a library never stands up its
+     * conductors. Returns {@code all} unchanged when the entry module seats nothing.
+     *
+     * @throws CompileException if a {@code spawn} names a conductor no module declares
+     */
+    private static Map<String, IrModule> seatConductors(
+            Map<String, IrModule> all, String entryModule) throws CompileException {
+        IrModule entry = all.get(entryModule);
+        boolean seatsAnything = entry.statements().stream().anyMatch(s -> s instanceof IrStmt.Spawn);
+        if (!seatsAnything) return all;
+
+        // Registry of every declared conductor across all modules (libraries may define them).
+        Map<String, IrStmt.ConductorDecl> conductors = new LinkedHashMap<>();
+        for (IrModule m : all.values()) {
+            for (IrStmt s : m.statements()) {
+                if (s instanceof IrStmt.ConductorDecl cd) conductors.put(cd.name(), cd);
+            }
+        }
+        List<IrStmt> injected = new ArrayList<>();
+        for (IrStmt s : entry.statements()) {
+            if (s instanceof IrStmt.Spawn sp) {
+                IrStmt.ConductorDecl cd = conductors.get(sp.conductorName());
+                if (cd == null) {
+                    throw new CompileException(
+                            "`spawn " + sp.conductorName() + "`: no conductor named '"
+                                    + sp.conductorName() + "' is declared", sp.origin());
+                }
+                injected.addAll(cd.reactions());
+            }
+        }
+        if (injected.isEmpty()) return all;   // seated conductors, but none had a concrete handler
+        List<IrStmt> newStmts = new ArrayList<>(entry.statements());
+        newStmts.addAll(injected);
+        Map<String, IrModule> out = new LinkedHashMap<>(all);
+        out.put(entryModule, new IrModule(entry.name(), newStmts, entry.main()));
+        return out;
     }
 
     /**

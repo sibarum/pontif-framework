@@ -80,7 +80,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type", "type",
-            "match", "proof", "main", "emit", "action", "conduit", "conductor",
+            "match", "proof", "main", "emit", "action", "conduit", "conductor", "spawn",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -584,7 +584,7 @@ public final class AltParser {
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
                 "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
-                "action", "conduit", "conductor").contains(t.text());
+                "action", "conduit", "conductor", "spawn").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -652,6 +652,7 @@ public final class AltParser {
             case "action"   -> parseAction();
             case "conduit"  -> parseConduit();
             case "conductor" -> parseConductor();
+            case "spawn"    -> parseSpawn();
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
@@ -2855,15 +2856,25 @@ public final class AltParser {
         expect(AltToken.Kind.LBRACE);
         List<IrStmt.ConductorDecl.StateField> state = new ArrayList<>();
         Map<String, IrSort.CallSig> handlers = new LinkedHashMap<>();
+        List<IrStmt.FunctionDecl> reactions = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
         boolean first = true;
         while (peek().kind() != AltToken.Kind.RBRACE) {
             if (!first) expect(AltToken.Kind.COMMA);
             AltToken memberName = expect(AltToken.Kind.IDENT);
-            if (state.stream().anyMatch(f -> f.name().equals(memberName.text()))
-                    || handlers.containsKey(memberName.text())) {
+            if (!seen.add(memberName.text())) {
                 throw new ParseException(
                         "Duplicate member '" + memberName.text() + "' in conductor body",
                         memberName.origin());
+            }
+            if (peek().kind() == AltToken.Kind.LPAREN) {
+                // CONCRETE handler in method-body form: `onTick(e:E) -> body` — a body-bearing event
+                // reaction. Lowered exactly like the top-level `action` keyword to a #action#-keyed
+                // FunctionDecl (event param, return `_`, body), but held on the conductor: inert
+                // until the conductor is seated (`spawn`), when the linker injects it into routing.
+                reactions.add(parseConductorReaction(memberName));
+                first = false;
+                continue;
             }
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
@@ -2874,18 +2885,59 @@ public final class AltParser {
                 state.add(new IrStmt.ConductorDecl.StateField(memberName.text(), memberSort, init));
             } else if (memberSort instanceof IrSort.CallSig cs
                     && isCallableMemberKind(CallKinds.builtin(cs.typeName()))) {
-                // Handler: an Action/Conduit (or Method) call-signature contract.
+                // ABSTRACT handler: an Action/Conduit (or Method) call-signature contract, no body.
                 handlers.put(memberName.text(), cs);
             } else {
                 throw new ParseException(
-                        "a conductor member is either a state field (`" + memberName.text()
-                                + ":Sort = init`) or a handler (`" + memberName.text()
-                                + ":[Action(...)]` / `[Conduit(...)]`)", memberName.origin());
+                        "a conductor member is a state field (`" + memberName.text()
+                                + ":Sort = init`), a handler contract (`" + memberName.text()
+                                + ":[Action(...)]` / `[Conduit(...)]`), or a handler body (`"
+                                + memberName.text() + "(e:E) -> …`)", memberName.origin());
             }
             first = false;
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
-        return new IrStmt.ConductorDecl(name, state, handlers, start.spanTo(close));
+        return new IrStmt.ConductorDecl(name, state, handlers, reactions, start.spanTo(close));
+    }
+
+    /**
+     * Parses a conductor's concrete handler in method-body form {@code name(e:E) -> body} and
+     * lowers it to a {@code #action#}-keyed reaction {@link IrStmt.FunctionDecl}, mirroring
+     * {@link #parseAction}. Exactly one event parameter; the body is scoped with it.
+     */
+    private IrStmt.FunctionDecl parseConductorReaction(AltToken nameTok) throws ParseException {
+        expect(AltToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
+        expect(AltToken.Kind.RPAREN);
+        List<ParamDestructure> destrs = drainParamDestructures();
+        if (!drainParamConversions().isEmpty()) {
+            throw new ParseException("a conductor handler's event parameter cannot be a conversion",
+                    nameTok.origin());
+        }
+        if (params.size() != 1) {
+            throw new ParseException("a conductor handler reacts to exactly one event — declare a "
+                    + "single parameter; got " + params.size(), nameTok.origin());
+        }
+        expect(AltToken.Kind.ARROW);
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        bindParamDestructures(destrs);
+        try {
+            IrExpr body = wrapParamDestructures(parseExpr(), destrs);
+            String key = "#action#" + (actionSeq++) + "#" + nameTok.text();
+            return new IrStmt.FunctionDecl(key, params, IrSort.named("_"), body, nameTok.origin());
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+    }
+
+    /** Parses a seating statement {@code spawn ConductorName} (docs/orchestration.md, §Seating). */
+    private IrStmt parseSpawn() throws ParseException {
+        AltToken start = expectKeyword("spawn");
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        return new IrStmt.Spawn(nameTok.text(), start.spanTo(nameTok));
     }
 
     /**

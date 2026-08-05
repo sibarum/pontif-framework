@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.ConductorDecl, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.ConductorDecl, IrStmt.Spawn, IrStmt.NoOp {
 
     Origin origin();
 
@@ -171,18 +171,26 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
      * execution) until the seating slice wires it to the runtime {@code Conductor}/{@code Player}
      * and gives its state and handlers meaning. It is authored but not yet seated.
      *
-     * @param state   the mutable single-owner state fields, in declaration order
-     * @param handlers the event handlers by name — {@code Action}/{@code Conduit} call-signature
-     *                 contracts (their {@link IrSort.CallSig#typeName()} carries which kind)
+     * @param state     the mutable single-owner state fields, in declaration order
+     * @param handlers  the ABSTRACT event handlers by name — {@code Action}/{@code Conduit}
+     *                  call-signature contracts with no body (their {@link IrSort.CallSig#typeName()}
+     *                  carries which kind)
+     * @param reactions the CONCRETE (body-bearing) handlers, each already lowered to a
+     *                  {@code #action#}-keyed reaction {@link FunctionDecl} (event param, return
+     *                  {@code _}, body). Inert until the conductor is seated (a {@link Spawn}), when
+     *                  the linker injects them into the active routing — an unseated conductor's
+     *                  reactions never fire (libraries define, the entry point activates).
      */
     record ConductorDecl(String name, List<StateField> state,
-                         Map<String, IrSort.CallSig> handlers, Origin origin) implements IrStmt {
+                         Map<String, IrSort.CallSig> handlers,
+                         List<FunctionDecl> reactions, Origin origin) implements IrStmt {
         public ConductorDecl {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Conductor name must be non-empty");
             }
             state = List.copyOf(state);
             handlers = Map.copyOf(handlers);
+            reactions = List.copyOf(reactions);
         }
 
         /** One mutable single-owner state field of a conductor: {@code name:sort = init}. */
@@ -194,6 +202,23 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
                 if (sort == null || init == null) {
                     throw new IllegalArgumentException("Conductor state field needs a sort and an initializer");
                 }
+            }
+        }
+    }
+
+    /**
+     * A seating statement — {@code spawn ConductorName} (docs/orchestration.md, §Seating). It
+     * <b>activates</b> a declared conductor: the linker injects that conductor's body-bearing
+     * handler reactions into the program's active routing so emitted events reach them. Seating is
+     * <b>entry-point-only</b> — only a {@code spawn} in the entry module takes effect (honored via
+     * the same entry-module selection that makes a required module's {@code main} inert), so
+     * {@code requires}-ing a library never silently stands up its conductors. (Cut A: no
+     * {@code over X} placement yet — every seat is the local/main lane.)
+     */
+    record Spawn(String conductorName, Origin origin) implements IrStmt {
+        public Spawn {
+            if (conductorName == null || conductorName.isEmpty()) {
+                throw new IllegalArgumentException("Spawn conductor name must be non-empty");
             }
         }
     }

@@ -244,7 +244,8 @@ public final class IrCompiler {
                 case IrStmt.Requires r -> { /* import decl; consumed by the module loader/linker + name resolver, not the per-module compile */ }
                 case IrStmt.Exports e -> { /* export decl; consumed by the linker's visibility check */ }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
-                case IrStmt.ConductorDecl cd -> { /* authored but not seated (docs/orchestration.md, cut 1); inert until the seating slice wires its state + handlers to the runtime */ }
+                case IrStmt.ConductorDecl cd -> { /* the declaration itself is inert; a seated conductor's reactions are injected as #action# FunctionDecls by the linker (docs/orchestration.md, §Seating), compiled through the FunctionDecl arm above */ }
+                case IrStmt.Spawn sp -> { /* seating is resolved at link time (reactions already injected); nothing to compile here */ }
                 case IrStmt.Coercion c -> throw new IllegalStateException(
                         "Coercion must be lowered to a FunctionDecl before the compile loop");
             }
