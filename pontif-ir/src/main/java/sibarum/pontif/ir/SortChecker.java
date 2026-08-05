@@ -1583,7 +1583,10 @@ public final class SortChecker {
                 // The name might be a top-level function/method, OR a locally
                 // bound callable (let-bound lambda, function param of Function
                 // sort). Either is legal. Only reject when neither is true.
-                if (!functionReturns.containsKey(c.functionName())
+                // A reserved synthetic call (`#…#`, e.g. #assign-self#) is a lowered
+                // construct the interpreter handles — non-lexable, so never a user function.
+                if (!c.functionName().startsWith("#")
+                        && !functionReturns.containsKey(c.functionName())
                         && !typeEnv.containsKey(c.functionName())) {
                     throw new CompileException(
                             "Unknown function '" + c.functionName() + "' — no "

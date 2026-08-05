@@ -56,7 +56,8 @@ public final class CallNameCheck {
         switch (expr) {
             case IrExpr.Call c -> {
                 String member = QualifiedName.memberOf(c.functionName());
-                if (!MethodOperatorResolver.isOperatorSymbol(member)
+                if (!c.functionName().startsWith("#")   // reserved synthetic call (e.g. #assign-self#), interpreter-handled
+                        && !MethodOperatorResolver.isOperatorSymbol(member)
                         && !known.contains(c.functionName())
                         && !scope.contains(c.functionName())) {
                     throw new CompileException(

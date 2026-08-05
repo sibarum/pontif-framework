@@ -397,6 +397,30 @@ public final class AltParser {
     }
 
     /**
+     * Conductor state assignment {@code this.field = value  cont} (docs/orchestration.md) —
+     * statement-shaped like {@code emit}/{@code let}: the write runs for effect, then the
+     * continuation is the value. To avoid a new {@code IrExpr} node (and the sealed-switch sweep
+     * that follows one), it desugars to the reserved call {@code #assign-self#(field, value)} —
+     * which the interpreter recognizes and applies to the firing conductor's state cell — sequenced
+     * before the continuation via a discard {@code let}. Precondition: {@link #inConductorHandler}.
+     */
+    private IrExpr parseSelfAssignment() throws ParseException {
+        AltToken self = expect(AltToken.Kind.IDENT);          // `this`
+        expect(AltToken.Kind.DOT);
+        AltToken field = expect(AltToken.Kind.IDENT);
+        expect(AltToken.Kind.EQUALS);
+        IrExpr value = parseExpr();
+        IrExpr cont = parseExpr();
+        IrExpr write = new IrExpr.Call("#assign-self#",
+                List.of(new IrExpr.Str(field.text(), field.origin()), value), self.origin());
+        return new IrExpr.LetIn("#assigned#" + (assignSeq++), IrSort.named("_"), write, cont,
+                self.origin());
+    }
+
+    /** Monotonic counter making each self-assignment's discard binding name unique. */
+    private int assignSeq = 0;
+
+    /**
      * Materializes one concrete {@link IrStmt.FunctionDecl} per explicit
      * type-application (docs/stream-war.md §8b). A generic function's param and return
      * sorts are substituted with the supplied type args; the body and the declared
@@ -1064,6 +1088,14 @@ public final class AltParser {
 
     /** Monotonic counter making each lowered conduit's synthetic keys unique. */
     private int conduitSeq = 0;
+
+    /**
+     * True only while parsing a conductor handler body — enables {@code this.field = expr}
+     * assignment to the conductor's mutable single-owner state. Mutation is a conductor-only
+     * capability (docs/orchestration.md); everywhere else the language is immutable, so the
+     * assignment form is not even recognized outside this context.
+     */
+    private boolean inConductorHandler = false;
 
     /**
      * The stateful-fold declaration (docs/reactive-gui.md, the Conduit leg):
@@ -2872,7 +2904,7 @@ public final class AltParser {
                 // reaction. Lowered exactly like the top-level `action` keyword to a #action#-keyed
                 // FunctionDecl (event param, return `_`, body), but held on the conductor: inert
                 // until the conductor is seated (`spawn`), when the linker injects it into routing.
-                reactions.add(parseConductorReaction(memberName));
+                reactions.add(parseConductorReaction(name, memberName));
                 first = false;
                 continue;
             }
@@ -2897,7 +2929,19 @@ public final class AltParser {
             first = false;
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
-        return new IrStmt.ConductorDecl(name, state, handlers, reactions, start.spanTo(close));
+        // Inject `this` — the conductor's state as a record sort — as a second parameter of every
+        // handler reaction, so `this` and `this.field` are in scope for the static checker (bound
+        // param) and field access type-checks against the real state fields. The event stays the
+        // FIRST param (routing keys on it); `this` is bound to the live state cell at fire time.
+        Map<String, IrSort> stateMembers = new LinkedHashMap<>();
+        for (IrStmt.ConductorDecl.StateField f : state) stateMembers.put(f.name(), f.sort());
+        IrSort stateSort = IrSort.structural(name + "$state", stateMembers);
+        List<IrStmt.FunctionDecl> typedReactions = new ArrayList<>(reactions.size());
+        for (IrStmt.FunctionDecl r : reactions) {
+            List<IrParam> params = List.of(r.params().get(0), new IrParam("this", stateSort));
+            typedReactions.add(new IrStmt.FunctionDecl(r.name(), params, r.returnSort(), r.body(), r.origin()));
+        }
+        return new IrStmt.ConductorDecl(name, state, handlers, typedReactions, start.spanTo(close));
     }
 
     /**
@@ -2905,7 +2949,8 @@ public final class AltParser {
      * lowers it to a {@code #action#}-keyed reaction {@link IrStmt.FunctionDecl}, mirroring
      * {@link #parseAction}. Exactly one event parameter; the body is scoped with it.
      */
-    private IrStmt.FunctionDecl parseConductorReaction(AltToken nameTok) throws ParseException {
+    private IrStmt.FunctionDecl parseConductorReaction(String conductorName, AltToken nameTok)
+            throws ParseException {
         expect(AltToken.Kind.LPAREN);
         List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
         expect(AltToken.Kind.RPAREN);
@@ -2923,11 +2968,17 @@ public final class AltParser {
         currentScope.clear();
         for (IrParam p : params) currentScope.put(p.name(), p.sort());
         bindParamDestructures(destrs);
+        boolean savedInConductor = inConductorHandler;
+        inConductorHandler = true;   // enables `this.field = …` assignment in this body only
         try {
             IrExpr body = wrapParamDestructures(parseExpr(), destrs);
-            String key = "#action#" + (actionSeq++) + "#" + nameTok.text();
+            // A CONDUCTOR reaction — key encodes the owning conductor so the interpreter can bind
+            // its state cell as `this` while the reaction fires. `#caction#` deliberately does NOT
+            // contain the substring `#action#`, so the plain-action routing check skips it.
+            String key = "#caction#" + conductorName + "#" + (actionSeq++) + "#" + nameTok.text();
             return new IrStmt.FunctionDecl(key, params, IrSort.named("_"), body, nameTok.origin());
         } finally {
+            inConductorHandler = savedInConductor;
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
@@ -5975,6 +6026,15 @@ public final class AltParser {
                 }
                 if (t.text().equals("emit")) {
                     yield parseEmitStatement();
+                }
+                // Conductor state mutation `this.field = value  cont` — recognized ONLY inside a
+                // conductor handler body. The single `=` (EQUALS, not `==`/EQ) after `this.field`
+                // is the discriminator: `this.count + 1` and `this.count == x` are ordinary reads.
+                if (inConductorHandler && t.text().equals("this")
+                        && peek(1).kind() == AltToken.Kind.DOT
+                        && peek(2).kind() == AltToken.Kind.IDENT
+                        && peek(3).kind() == AltToken.Kind.EQUALS) {
+                    yield parseSelfAssignment();
                 }
                 if (t.text().equals("iter")) {
                     yield parseIter();

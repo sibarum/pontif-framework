@@ -88,6 +88,31 @@ public final class IrInterpreter {
     private final Map<String, Object> conduitState = new java.util.HashMap<>();
 
     /**
+     * The mutable single-owner state cell of each conductor (docs/orchestration.md), keyed by
+     * conductor name; the value is a {@link RecordValue} of its state fields. Seeded lazily from the
+     * conductor's compiled state-seed the first time one of its handlers fires. A handler reads it
+     * via {@code this.field} and mutates it via {@code this.field = …} (replacing the cell with an
+     * updated record — the value stays immutable; only the cell binding moves), always while
+     * {@link #currentConductor} names it. Not shared across runs, like {@link #conduitState}.
+     */
+    private final Map<String, RecordValue> conductorState = new java.util.HashMap<>();
+
+    /**
+     * The conductor whose handler is currently firing, or {@code null} outside a conductor reaction.
+     * Set by {@link #dispatchToActions} around a {@code #caction#} reaction so {@code this.field}
+     * reads/writes resolve to that conductor's {@link #conductorState} cell.
+     */
+    private String currentConductor;
+
+    /**
+     * The runtime value bound to {@code this} inside a conductor handler — a sentinel, not a real
+     * record, so a field read/write on it is routed to the live {@link #conductorState} cell of
+     * {@link #currentConductor} (giving correct read-after-write within one handler) rather than to
+     * a stale snapshot.
+     */
+    private static final Object CONDUCTOR_SELF = new Object();
+
+    /**
      * Async work dispatched but not yet delivered — the {@link Pending} handles a {@code … on Gpu}
      * iteration produces (docs/gpu-kernels.md, slice 2). The program stays live until every one
      * resolves; {@link #eval(CompiledModule)} drains them after {@code main} (drive-to-quiescence),
@@ -292,6 +317,12 @@ public final class IrInterpreter {
             }
             case IrExpr.FieldAccess fa -> {
                 Object baseValue = eval(fa.base(), env, module);
+                // `this.field` inside a conductor handler — read the live state cell of the firing
+                // conductor (docs/orchestration.md). Live, not a snapshot, so a read after a
+                // `this.field = …` in the same handler sees the new value.
+                if (baseValue == CONDUCTOR_SELF) {
+                    yield conductorStateCell(fa.origin()).get(fa.fieldName(), fa.origin());
+                }
                 // Decimal anatomy projection — total; unscaled is the
                 // canonical scale-0 Decimal (never an Int: one-way wall).
                 if (baseValue instanceof BigDecimal dec) {
@@ -501,7 +532,21 @@ public final class IrInterpreter {
                 }
                 Environment reactionEnv = Environment.empty()
                         .extend(fn.params().get(0).name(), rec);
-                eval(fn.body(), reactionEnv, module);
+                if (action.conductorName() == null) {
+                    eval(fn.body(), reactionEnv, module);
+                } else {
+                    // A conductor handler: seed its state cell once, bind `this` to the self
+                    // sentinel (so this.field reads/writes hit the live cell), and record which
+                    // conductor is firing for the duration (docs/orchestration.md).
+                    seedConductorState(action.conductorName(), module, origin);
+                    String savedConductor = currentConductor;
+                    currentConductor = action.conductorName();
+                    try {
+                        eval(fn.body(), reactionEnv.extend("this", CONDUCTOR_SELF), module);
+                    } finally {
+                        currentConductor = savedConductor;
+                    }
+                }
                 handled = true;
             }
         }
@@ -767,6 +812,40 @@ public final class IrInterpreter {
      * is the one universal omission value (docs/stream-war.md §3), so any value
      * carrying that nominal omits at a stream channel.
      */
+    /**
+     * The live state cell of the currently-firing conductor ({@link #currentConductor}), seeding it
+     * lazily from the conductor's compiled state-seed on first access. Throws if reached outside a
+     * conductor handler (a {@code this.field} access with no firing conductor) — a guard against a
+     * mis-lowered reference, not a user-facing path.
+     */
+    private RecordValue conductorStateCell(Origin origin) {
+        if (currentConductor == null) {
+            throw new RuntimeCheckException(
+                    "`this` state access outside a conductor handler", origin);
+        }
+        return conductorState.get(currentConductor);
+    }
+
+    /**
+     * Seeds a conductor's state cell on first sight by evaluating its compiled state-seed (the
+     * record of its fields at their initializers), then leaves it — subsequent fires reuse the
+     * threaded cell. No-op once seeded.
+     */
+    private void seedConductorState(String conductorName, CompiledModule module, Origin origin) {
+        if (conductorState.containsKey(conductorName)) return;
+        CompiledModule.CompiledConductor cc = module.conductors().get(conductorName);
+        if (cc == null) {
+            throw new RuntimeCheckException(
+                    "no compiled state for conductor '" + conductorName + "'", origin);
+        }
+        Object seeded = eval(cc.stateInit().body(), Environment.empty(), module);
+        if (!(seeded instanceof RecordValue rec)) {
+            throw new RuntimeCheckException(
+                    "conductor '" + conductorName + "' state seed must be a record", origin);
+        }
+        conductorState.put(conductorName, rec);
+    }
+
     private static boolean isNothing(Object v) {
         if (!(v instanceof RecordValue rv) || rv.typeName() == null) return false;
         String n = rv.typeName();
@@ -1498,6 +1577,24 @@ public final class IrInterpreter {
     }
 
     private Object evalCall(IrExpr.Call call, Environment env, CompiledModule module) {
+        // Conductor state assignment `this.field = value` (docs/orchestration.md) — the parser's
+        // desugaring of the statement, reserved and non-lexable so it can never collide with a user
+        // function. args = [Str(field), valueExpr]; replace that field in the firing conductor's
+        // live cell with the evaluated value (the record stays immutable — the cell binding moves).
+        if ("#assign-self#".equals(call.functionName())) {
+            String field = ((IrExpr.Str) call.args().get(0)).value();
+            Object value = eval(call.args().get(1), env, module);
+            RecordValue cell = conductorStateCell(call.origin());
+            Map<String, Object> next = new LinkedHashMap<>(cell.members());
+            if (!next.containsKey(field)) {
+                throw new RuntimeCheckException(
+                        "conductor '" + currentConductor + "' has no state field '" + field + "'",
+                        call.origin());
+            }
+            next.put(field, value);
+            conductorState.put(currentConductor, new RecordValue(next));
+            return new RecordValue("Nothing", Map.of());   // write-only; the desugaring discards it
+        }
         // Lexical scope wins: if the name is locally bound (let / param), invoke
         // the bound value as a closure rather than dispatching by name.
         if (env.contains(call.functionName())) {

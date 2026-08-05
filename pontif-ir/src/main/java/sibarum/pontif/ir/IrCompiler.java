@@ -139,6 +139,9 @@ public final class IrCompiler {
         // mirroring #action#) is compiled as an ordinary function AND recorded here; a list per
         // type since several views may key one T differently. Slice B: recorded, drives nothing.
         Map<String, List<CompiledModule.CompiledIndex>> indexesByType = new LinkedHashMap<>();
+        // Compiled conductors (docs/orchestration.md) — name → its state-seed function, so the
+        // interpreter can seed each conductor's mutable single-owner state cell on first fire.
+        Map<String, CompiledModule.CompiledConductor> conductors = new LinkedHashMap<>();
 
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
@@ -163,6 +166,20 @@ public final class IrCompiler {
                                 .computeIfAbsent(key, k -> new ArrayList<>())
                                 .add(new CompiledModule.CompiledAction(
                                         compiledSorts.get(eventSort), cf));
+                    }
+                    // A CONDUCTOR reaction (`…#caction#<Conductor>#SEQ#handler`) — registered like an
+                    // action, but carrying its owning conductor so the interpreter binds that
+                    // conductor's state cell as `this` while the reaction fires (docs/orchestration.md).
+                    // `#caction#` does not contain the substring `#action#`, so the branch above skips it.
+                    if (fd.name().contains("#caction#")) {
+                        IrSort eventSort = fd.params().get(0).sort();
+                        String base = Coercions.baseName(eventSort);
+                        int slash = base == null ? -1 : base.lastIndexOf('/');
+                        String key = slash < 0 ? base : base.substring(slash + 1);
+                        actionsByType
+                                .computeIfAbsent(key, k -> new ArrayList<>())
+                                .add(new CompiledModule.CompiledAction(
+                                        compiledSorts.get(eventSort), cf, conductorOfReactionKey(fd.name())));
                     }
                     // A conduit's init leg (`#conduit-init#SEQ#NAME`) — a 0-arg seed function.
                     // Checked FIRST: "#conduit-init#" does not contain the substring "#conduit#"
@@ -244,7 +261,26 @@ public final class IrCompiler {
                 case IrStmt.Requires r -> { /* import decl; consumed by the module loader/linker + name resolver, not the per-module compile */ }
                 case IrStmt.Exports e -> { /* export decl; consumed by the linker's visibility check */ }
                 case IrStmt.NoOp np -> { /* parser placeholder; no compilation */ }
-                case IrStmt.ConductorDecl cd -> { /* the declaration itself is inert; a seated conductor's reactions are injected as #action# FunctionDecls by the linker (docs/orchestration.md, §Seating), compiled through the FunctionDecl arm above */ }
+                case IrStmt.ConductorDecl cd -> {
+                    // The declaration's handlers are injected+compiled as #caction# reactions by the
+                    // linker/FunctionDecl arm. Here we compile only the STATE SEED: a 0-arg function
+                    // whose body is the record of the state fields at their initializers, so the
+                    // interpreter can seed the conductor's mutable cell (docs/orchestration.md).
+                    Map<String, IrExpr> initMembers = new LinkedHashMap<>();
+                    for (IrStmt.ConductorDecl.StateField f : cd.state()) {
+                        registerSort(f.sort(), compiledSorts);
+                        registerSortsInExpr(f.init(), compiledSorts);
+                        initMembers.put(f.name(), f.init());
+                    }
+                    IrSort seedReturn = IrSort.named("_");
+                    registerSort(seedReturn, compiledSorts);   // else compileFunctionDecl gets a null return Sort
+                    IrStmt.FunctionDecl seed = new IrStmt.FunctionDecl(
+                            "#conductor-state#" + cd.name(), List.of(), seedReturn,
+                            new IrExpr.Record(null, initMembers, cd.origin()), cd.origin());
+                    CompiledModule.CompiledFunction seedFn =
+                            compileFunctionDecl(seed, dispatch, functions, compiledSorts);
+                    conductors.put(cd.name(), new CompiledModule.CompiledConductor(cd.name(), seedFn));
+                }
                 case IrStmt.Spawn sp -> { /* seating is resolved at link time (reactions already injected); nothing to compile here */ }
                 case IrStmt.Coercion c -> throw new IllegalStateException(
                         "Coercion must be lowered to a FunctionDecl before the compile loop");
@@ -279,7 +315,19 @@ public final class IrCompiler {
         return new CompiledModule(
                 resolved.name(), dispatch, functions, resolved.main(), compiledSorts,
                 structRegistry, topLevelLets, actionsByType, algebraicFunctions, effectiveSorts,
-                conduitsByType, indexesByType);
+                conduitsByType, indexesByType, conductors);
+    }
+
+    /**
+     * The owning conductor's name from a conductor-reaction key {@code …#caction#<Conductor>#SEQ#handler}
+     * (the parser's encoding). The linker may module-qualify the key ({@code mod/#caction#…}); the
+     * conductor name is the segment immediately after the {@code #caction#} marker.
+     */
+    private static String conductorOfReactionKey(String key) {
+        String marker = "#caction#";
+        int start = key.indexOf(marker) + marker.length();
+        int end = key.indexOf('#', start);
+        return end < 0 ? key.substring(start) : key.substring(start, end);
     }
 
     /** The local head-constructor name of a {@code proof} tree ({@code Algebraic}), or null. */

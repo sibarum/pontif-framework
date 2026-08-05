@@ -21,10 +21,12 @@ public record CompiledModule(
         java.util.Set<String> algebraicFunctions,
         Map<Origin.Span, IrSort> effectiveSorts,
         Map<String, CompiledConduit> conduitsByType,
-        Map<String, List<CompiledIndex>> indexesByType) {
+        Map<String, List<CompiledIndex>> indexesByType,
+        Map<String, CompiledConductor> conductors) {
 
     public CompiledModule {
         functions = Map.copyOf(functions);
+        conductors = Map.copyOf(conductors);
         // Names of functions carrying an `assign proof f:Algebraic` claim (docs/algebra).
         // The interpreter tags a metareference `$f[…]` as the concrete nominal
         // `AlgebraicDispatch` (else `DispatchBase`) from this set, so its `.ast` attribute
@@ -73,7 +75,7 @@ public record CompiledModule(
             java.util.Set<String> algebraicFunctions, Map<Origin.Span, IrSort> effectiveSorts,
             Map<String, CompiledConduit> conduitsByType) {
         this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
-                actionsByType, algebraicFunctions, effectiveSorts, conduitsByType, Map.of());
+                actionsByType, algebraicFunctions, effectiveSorts, conduitsByType, Map.of(), Map.of());
     }
 
     /** Back-compat: a module with no conduits (the pre-conduit shape). */
@@ -157,7 +159,23 @@ public record CompiledModule(
      * satisfy for the {@code reaction} (a 1-param function, the event ⇒ for-effect body)
      * to fire. The reaction's value is discarded.
      */
-    public record CompiledAction(Sort matchSort, CompiledFunction reaction) {}
+    public record CompiledAction(Sort matchSort, CompiledFunction reaction, String conductorName) {
+        /** A plain (non-conductor) action — no owning conductor, so no state context. */
+        public CompiledAction(Sort matchSort, CompiledFunction reaction) {
+            this(matchSort, reaction, null);
+        }
+    }
+
+    /**
+     * A compiled conductor (docs/orchestration.md, §Authoring) — carried so the interpreter can
+     * seed its mutable single-owner state. {@code stateInit} is a 0-arg function whose body is the
+     * record of the conductor's state fields at their initializers ({@code {count = 0, …}}); the
+     * interpreter evaluates it once to seed the conductor's state cell, then its handlers read
+     * ({@code this.field}) and mutate ({@code this.field = …}) that cell. Empty state → an empty
+     * record. Present for every declared conductor; a cell is only seeded when a seated conductor's
+     * handler actually fires.
+     */
+    public record CompiledConductor(String name, CompiledFunction stateInit) {}
 
     /**
      * A standing index declaration (docs/stream-queries.md §3, docs/keyed.md) — Slice B. A
