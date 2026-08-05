@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.List;
 import java.util.Map;
 
-public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.NoOp {
+public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.ConductorDecl, IrStmt.NoOp {
 
     Origin origin();
 
@@ -154,6 +154,46 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             }
             if (sort == null) {
                 throw new IllegalArgumentException("Type alias sort must be non-null");
+            }
+        }
+    }
+
+    /**
+     * A conductor declaration — the third authorable type (docs/orchestration.md, §Authoring),
+     * alongside {@code struct} and {@code trait}. A conductor is a live worker authored as a
+     * type: it owns <b>mutable, single-owner state</b> (the one place mutation is provably safe,
+     * because one thread drains it) and a set of <b>event handlers</b> (its {@code Action} /
+     * {@code Conduit} members — the sort-carried effectful members from the member-unification
+     * slice). Surface form: {@code conductor Name { field:Sort = init  handler:[Action(e:E):_] … }}.
+     *
+     * <p><b>Cut 1 (this record) is parse + represent only</b> — a conductor is inert in the compile
+     * / execute pipeline (like {@link Exports}: carried for tooling, contributes nothing to
+     * execution) until the seating slice wires it to the runtime {@code Conductor}/{@code Player}
+     * and gives its state and handlers meaning. It is authored but not yet seated.
+     *
+     * @param state   the mutable single-owner state fields, in declaration order
+     * @param handlers the event handlers by name — {@code Action}/{@code Conduit} call-signature
+     *                 contracts (their {@link IrSort.CallSig#typeName()} carries which kind)
+     */
+    record ConductorDecl(String name, List<StateField> state,
+                         Map<String, IrSort.CallSig> handlers, Origin origin) implements IrStmt {
+        public ConductorDecl {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("Conductor name must be non-empty");
+            }
+            state = List.copyOf(state);
+            handlers = Map.copyOf(handlers);
+        }
+
+        /** One mutable single-owner state field of a conductor: {@code name:sort = init}. */
+        public record StateField(String name, IrSort sort, IrExpr init) {
+            public StateField {
+                if (name == null || name.isEmpty()) {
+                    throw new IllegalArgumentException("Conductor state field name must be non-empty");
+                }
+                if (sort == null || init == null) {
+                    throw new IllegalArgumentException("Conductor state field needs a sort and an initializer");
+                }
             }
         }
     }

@@ -66,6 +66,15 @@ public final class IrPrinter {
             }
             case IrStmt.Exports e ->
                     line(sb, d, "exports " + (e.self() ? "@ " : "") + String.join(", ", e.names()) + at(e.origin()));
+            case IrStmt.ConductorDecl cd -> {
+                line(sb, d, "conductor " + cd.name() + at(cd.origin()));
+                for (IrStmt.ConductorDecl.StateField f : cd.state()) {
+                    line(sb, d + 1, "state " + f.name() + " : " + sort(f.sort()));
+                }
+                for (Map.Entry<String, IrSort.CallSig> h : cd.handlers().entrySet()) {
+                    line(sb, d + 1, "handler " + h.getKey() + " : " + sort(h.getValue()));
+                }
+            }
             case IrStmt.NoOp n -> line(sb, d, "noop " + n.label() + at(n.origin()));
         }
     }

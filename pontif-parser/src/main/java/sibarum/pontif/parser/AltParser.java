@@ -80,7 +80,7 @@ public final class AltParser {
             "module", "requires", "exports",
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type", "type",
-            "match", "proof", "main", "emit", "action", "conduit",
+            "match", "proof", "main", "emit", "action", "conduit", "conductor",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -584,7 +584,7 @@ public final class AltParser {
         if (t.kind() != AltToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
                 "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
-                "action", "conduit").contains(t.text());
+                "action", "conduit", "conductor").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -651,10 +651,11 @@ public final class AltParser {
             case "proof"    -> parseProof();
             case "action"   -> parseAction();
             case "conduit"  -> parseConduit();
+            case "conductor" -> parseConductor();
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
-                            + "struct / let / cast / trait / assign / proof / action / conduit); executable logic must "
+                            + "struct / let / cast / trait / assign / proof / action / conduit / conductor); executable logic must "
                             + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
@@ -2829,6 +2830,62 @@ public final class AltParser {
             declaredFunctionReturns.put(name + "." + e.getKey(), e.getValue());
         }
         return new IrStmt.TypeAlias(name, named, named.origin());
+    }
+
+    /**
+     * Parses a conductor declaration (docs/orchestration.md, §Authoring) — the third authorable
+     * type: {@code conductor Name { field:Sort = init, handler:[Action(e:E):_], … }}. Two member
+     * kinds, comma-separated like every other member block:
+     * <ul>
+     *   <li><b>state field</b> — {@code name:Sort = initExpr}: the conductor's mutable, single-owner
+     *       state (the one place mutation is safe — one thread drains it). The trailing {@code = init}
+     *       is what distinguishes it from a handler.</li>
+     *   <li><b>handler</b> — {@code name:[Action(e:E):_]} / {@code name:[Conduit(e:E,s:S):S]}: an
+     *       effectful member, recognized by call-kind exactly as in a trait's member block
+     *       ({@link #isCallableMemberKind}).</li>
+     * </ul>
+     * Cut 1 is parse + represent: it lowers to an inert {@link IrStmt.ConductorDecl}; seating and
+     * runtime wiring come later. Methods and the transform-chain handler surface are not yet parsed
+     * here.
+     */
+    private IrStmt parseConductor() throws ParseException {
+        AltToken start = expectKeyword("conductor");
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        String name = nameTok.text();
+        expect(AltToken.Kind.LBRACE);
+        List<IrStmt.ConductorDecl.StateField> state = new ArrayList<>();
+        Map<String, IrSort.CallSig> handlers = new LinkedHashMap<>();
+        boolean first = true;
+        while (peek().kind() != AltToken.Kind.RBRACE) {
+            if (!first) expect(AltToken.Kind.COMMA);
+            AltToken memberName = expect(AltToken.Kind.IDENT);
+            if (state.stream().anyMatch(f -> f.name().equals(memberName.text()))
+                    || handlers.containsKey(memberName.text())) {
+                throw new ParseException(
+                        "Duplicate member '" + memberName.text() + "' in conductor body",
+                        memberName.origin());
+            }
+            expect(AltToken.Kind.COLON);
+            IrSort memberSort = parseSort();
+            if (peek().kind() == AltToken.Kind.EQUALS) {
+                // State field: `name:Sort = init` — the mutable single-owner state.
+                consume();
+                IrExpr init = parseExpr();
+                state.add(new IrStmt.ConductorDecl.StateField(memberName.text(), memberSort, init));
+            } else if (memberSort instanceof IrSort.CallSig cs
+                    && isCallableMemberKind(CallKinds.builtin(cs.typeName()))) {
+                // Handler: an Action/Conduit (or Method) call-signature contract.
+                handlers.put(memberName.text(), cs);
+            } else {
+                throw new ParseException(
+                        "a conductor member is either a state field (`" + memberName.text()
+                                + ":Sort = init`) or a handler (`" + memberName.text()
+                                + ":[Action(...)]` / `[Conduit(...)]`)", memberName.origin());
+            }
+            first = false;
+        }
+        AltToken close = expect(AltToken.Kind.RBRACE);
+        return new IrStmt.ConductorDecl(name, state, handlers, start.spanTo(close));
     }
 
     /**

@@ -65,8 +65,21 @@ public final class IrSourcePrinter {
             case IrStmt.Proof p -> "proof " + p.functionName() + " = " + expr(p.proofTree());
             case IrStmt.ReturnProof rp -> "assign proof " + rp.functionName()
                     + "(" + params(rp.params()) + "):" + sortRef(rp.grantedReturn());
+            case IrStmt.ConductorDecl cd -> conductorDecl(cd);
             case IrStmt.NoOp n -> "# " + n.label();
         };
+    }
+
+    /** Re-emits a conductor declaration in surface form (docs/orchestration.md, §Authoring). */
+    private static String conductorDecl(IrStmt.ConductorDecl cd) {
+        java.util.List<String> members = new java.util.ArrayList<>();
+        for (IrStmt.ConductorDecl.StateField f : cd.state()) {
+            members.add(f.name() + ":" + sortRef(f.sort()) + " = " + expr(f.init()));
+        }
+        for (Map.Entry<String, IrSort.CallSig> h : cd.handlers().entrySet()) {
+            members.add(h.getKey() + ":" + sortRef(h.getValue()));
+        }
+        return "conductor " + cd.name() + " {" + String.join(", ", members) + "}";
     }
 
     /** A type declaration: a struct, a trait, or a plain alias, by the alias's sort. */

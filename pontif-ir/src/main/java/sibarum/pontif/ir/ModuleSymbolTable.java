@@ -126,6 +126,11 @@ public final class ModuleSymbolTable {
                     // keyed on its target sort); its orphan/coherence rules are
                     // CoercionCheck's job, not the symbol table's.
                     case IrStmt.Coercion c -> { }
+                    // A conductor declares a named authorable type (docs/orchestration.md, §Authoring);
+                    // register the name like a type alias so it is visible for resolution/import. Its
+                    // handlers/state are inert until the seating slice.
+                    case IrStmt.ConductorDecl cd ->
+                            types.computeIfAbsent(cd.name(), k -> new LinkedHashSet<>()).add(module);
                     case IrStmt.NoOp n -> { }
                 }
             }
