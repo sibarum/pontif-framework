@@ -54,16 +54,46 @@ public final class ModuleLinker {
      * disagree about whether a file went through linking.
      */
     public static IrModule combineSingle(IrModule parsed) throws CompileException {
-        boolean hasRequires = parsed.statements().stream()
-                .anyMatch(s -> s instanceof IrStmt.Requires);
-        // A `spawn` also forces the link path: seating must inject the seated conductor's
-        // reactions and route them through NameResolver (docs/orchestration.md, §Seating), which
-        // the bare pass-through path skips.
-        boolean hasSpawn = parsed.statements().stream()
-                .anyMatch(s -> s instanceof IrStmt.Spawn);
-        return (hasRequires || hasSpawn)
+        return needsLinking(parsed)
                 ? combine(Map.of(parsed.name(), parsed), parsed.name())
                 : parsed;
+    }
+
+    /**
+     * Whether a module must go through the link pipeline rather than the bare single-file
+     * pass-through. This is the <b>single source of truth</b> for that decision — every gate
+     * ({@link #combineSingle} here, {@code ModuleResolver.resolveAndCombine}) calls it, so they
+     * can never disagree about whether a program is linked (the drift that let a {@code spawn}-only
+     * program skip seating). Backed by {@link #triggersLink}, an exhaustive switch over the sealed
+     * {@link IrStmt}: adding a new statement kind will not compile until it is classified, so a
+     * future construct that needs linking can never silently be forgotten here.
+     */
+    public static boolean needsLinking(IrModule module) {
+        return module.statements().stream().anyMatch(ModuleLinker::triggersLink);
+    }
+
+    /**
+     * Does this statement force the link pipeline? Exhaustive by design (no {@code default}) — the
+     * compiler forces every {@link IrStmt} kind to be classified. Two kinds trigger linking today:
+     * {@code requires} (pulls in another module) and {@code spawn} (seating injects the conductor's
+     * reactions and validates it exists — docs/orchestration.md, §Seating). A bare
+     * {@link IrStmt.ConductorDecl} does NOT: a conductor is inert until an entry-point {@code spawn}
+     * seats it, so merely declaring one keeps the bare path.
+     */
+    private static boolean triggersLink(IrStmt s) {
+        return switch (s) {
+            case IrStmt.Requires r -> true;
+            case IrStmt.Spawn sp -> true;
+            case IrStmt.FunctionDecl f -> false;
+            case IrStmt.TypeAlias t -> false;
+            case IrStmt.TraitImpl ti -> false;
+            case IrStmt.Coercion c -> false;
+            case IrStmt.Proof p -> false;
+            case IrStmt.ReturnProof rp -> false;
+            case IrStmt.Exports e -> false;
+            case IrStmt.ConductorDecl cd -> false;
+            case IrStmt.NoOp n -> false;
+        };
     }
 
     /**

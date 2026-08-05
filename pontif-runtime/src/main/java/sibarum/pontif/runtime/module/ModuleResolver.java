@@ -65,14 +65,10 @@ public final class ModuleResolver {
      */
     public static IrModule resolveAndCombine(IrModule entry, Path resolveDir)
             throws CompileException {
-        boolean hasRequires = entry.statements().stream()
-                .anyMatch(s -> s instanceof IrStmt.Requires);
-        // A `spawn` also needs the link path — seating (docs/orchestration.md, §Seating) injects the
-        // seated conductor's reactions and validates the conductor exists there, both skipped by the
-        // bare pass-through.
-        boolean hasSpawn = entry.statements().stream()
-                .anyMatch(s -> s instanceof IrStmt.Spawn);
-        if (!hasRequires && !hasSpawn) return entry;                // bare single-file path
+        // The link-vs-bare decision is ModuleLinker.needsLinking's to make — the single source of
+        // truth both this gate and combineSingle share, so they cannot drift (the bug where a
+        // spawn-only program skipped seating because this gate still only checked `requires`).
+        if (!ModuleLinker.needsLinking(entry)) return entry;        // bare single-file path
         if (resolveDir == null) return ModuleLinker.combineSingle(entry);  // builtins-only fallback
 
         Set<String> builtins = BuiltinModules.all().keySet();
