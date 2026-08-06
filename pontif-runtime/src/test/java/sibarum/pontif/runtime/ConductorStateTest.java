@@ -92,6 +92,29 @@ class ConductorStateTest {
     }
 
     @Test
+    void severalHandlersShareOneStateField_theMotivatingCase() {
+        // The reason conductor state is mutable at all (docs/orchestration.md §Authoring): DISTINCT event
+        // types, handled by SEPARATE handlers, all folding into ONE shared field — the GUI toy's
+        // mouse+keyboard+dialog-into-one-`doc`. Here `Up` and `Down` handlers mutate the same `count`,
+        // so the sequence Up, Up, Down reads 1, 2, 1 — proof the field is shared, not per-handler.
+        String out = runOut("""
+                requires pontif.events.{Event, StdOut}
+                struct Up(n:Int)
+                struct Down(n:Int)
+                assign trait Up:Event{}
+                assign trait Down:Event{}
+                conductor Tally {
+                  count:Int = 0,
+                  onUp(e:Up) -> this.count = this.count + 1  emit StdOut("" + this.count + " ")  e,
+                  onDown(e:Down) -> this.count = this.count - 1  emit StdOut("" + this.count + " ")  e
+                }
+                spawn Tally
+                main ( emit Up(1)  emit Up(1)  emit Down(1)  0 )
+                """);
+        assertEquals("1 2 1", out.trim(), "both handlers mutate the one shared state field");
+    }
+
+    @Test
     void mutationOutsideAConductor_isNotRecognized() {
         // `this.x = …` is a conductor-only capability; in a plain function body it is not the
         // assignment form (the language is immutable there), so the program fails to compile.

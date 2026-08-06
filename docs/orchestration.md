@@ -151,11 +151,14 @@ it doesn't). Conductor **methods** are private
 helpers — they group logic and touch the state but aren't exported to dispatch. A **handle** (`let h =
 spawn Editor`) is the only conductor value that escapes; the worker itself never becomes a passable value.
 
-> **Implemented vs ratified.** The conduit that ships today is the earlier **fold** form (`conduit N(e:E,
-> s:S):{R, S} from INIT -> …`, docs/reactive-gui.md) with per-conduit immutable state; the roadmap below
-> tracks the migration to this handler-over-mutable-state form. The runtime bricks already built (routing
-> table, single-owner check, journal) key off event *types* and conduits, not the threading shape — so the
-> shift is a surface change, not a teardown.
+> **Implemented (2026-08-02) vs ratified.** The conductor authoring model above is **built and
+> end-to-end tested**: `conductor Name { field:T = init, handler(e:E) -> … this.field = … }` parses,
+> seats via entry-point `spawn`, and runs with mutable single-owner state (several handlers sharing one
+> field — `ConductorStateTest`). **Two ratified pieces are not yet wired** (roadmap gaps 1–2): the
+> `emits`/consumes **interface is extracted but unused** (`EmitInterface`), so the type-checked routing it
+> feeds doesn't exist; and the shipped **dead letter fires on the wrong trigger** (§Honest edges). The
+> standalone `conduit` keyword still uses the older **fold** form (`conduit N(e,s):{R,S} from INIT`,
+> docs/reactive-gui.md) and coexists with the conductor handler form.
 
 ## Seating — the entry-point manifest (RULED 2026-08-02)
 
@@ -437,6 +440,10 @@ actually need is in the forbidden gap.
   static fact). A dead letter is re-emitted as `DeadLetter(event, reason)` routed to a dead-letter
   conductor — a built-in default prints to `StdOut`, an app seats its own to override. It must be the
   **terminus**: an unhandled `DeadLetter` hits a last-resort stderr and stops, never loops.
+  > ⚠️ **Shipped impl diverges (roadmap gap 2, `61d614a`).** Today's dead letter fires on "engaged
+  > nothing (no conduit/action/sink)" — i.e. the intentional no-op *this rule excludes* — and just logs
+  > to stderr; the config-gap trigger above needs the (currently-unwired) `emits`/consumes interface.
+  > Reconcile before relying on it.
 - **Backpressure cycles.** Bounded mailboxes + a cycle in the conductor graph can deadlock (A fills B's
   inbox, B fills A's, both block in `send`). The no-`await` ruling already killed the reply-wait
   deadlock; this is the only one left — and the **static graph is exactly the tool to detect cycles at
@@ -534,26 +541,43 @@ actually need is in the forbidden gap.
   gates at the fire site — the table resolves only the candidate *set*, which depends solely on the
   type); full 1118-test suite green, plus `RoutingTableTest` (single owner + both trait subscribers +
   cache identity). This is the object emit-site specialization and cross-conductor cycle detection read.
-### Ratified authoring model — not yet built (see *Authoring* / *Seating* above)
+### Authoring model — LANDED, with tracked gaps (2026-08-02)
 
-- **Member unification (`conductor`/`conduit`/`action`/`method` → member types).** Make `conductor` a
-  member-block type alongside `struct`/`trait`; add `Action` and `Conduit` as member type-constructors
-  next to `Method`/`Dispatch`; make `method` sugar for `name:[Method(…)] -> body`. Parser + IR: the new
-  member kinds are Method-shaped, so they ride `TraitDefaultExpansion` and the existing resolution
-  pipeline. Additive to `struct` (a `{ }` method block; data declaration untouched).
-- **Effectful members as transform-sorts + the `emits`/consumes interface in the type** — the headline:
-  an `Action`/`Conduit` sort *is* its behaviour (Logic-in-the-sorts shell, write-only terminus for
-  `Action`), so a conductor's type carries its event interface and the routing graph (single-owner,
-  no-consumer, cross-conductor cycles) is **type-checked**, and conductors can **satisfy** an
-  event-interface trait (swappable workers) on the existing narrowing machinery.
-- **Mutable single-owner conductor state; conduits become handlers.** Migrate the conduit from the fold
-  form (`(e,s):{R,S} from INIT`) to a **handler over conductor fields** (`(e) -> … this.field = …`).
-  Runtime bricks (routing table, single-owner check, journal) survive — they key off event types, not
-  the threading shape. Replay rebuilds state by re-running the event sequence (deterministic).
-- **Seating grammar.** Top-level `spawn Conductor [over X]` (entry-point only, honored via the same
-  `ModuleLinker.combine` entry-selection that makes a required `main` inert) + `main ( body )` / `main
-  Conductor(…)` as the pinned root. `over X` rides the seat. Compiler-assisted completeness: an unseated
-  required sub-conductor is a compile error naming it.
+Built and end-to-end tested by a parallel work-stream (commits below). The parse/represent + seating +
+mutable-state substrate runs real programs through the interpreter.
+
+- **Member type-constructors — DONE (`f26cc45`).** `IrSort.CallSig` gains `Action`/`Conduit` head types;
+  `CallKinds.Kind` is `{FUNCTION, DISPATCH, ACTION, CONDUIT}`; the trait/struct member block classifies
+  them via `isCallableMemberKind`. `method(…)->` ≡ `name:[Method(…)]->`. (`MemberUnificationTest`.)
+- **Conductor authorable type — DONE (`d0eb2c8`).** `IrStmt.ConductorDecl` + `conductor Name { field:T
+  = init, handler(e:E) -> … }` (comma-separated members). (`ConductorDeclTest`.)
+- **Seating — DONE (`2dc4514`).** A top-level `spawn Name` in the **entry module only** appends that
+  conductor's handlers to the run; unknown spawn = compile error; a required module's spawn is inert.
+  (`ConductorSeatingTest`.)
+- **Mutable single-owner state — DONE (`02b9822`).** `this.field` read + `this.field = v` mutate over a
+  per-conductor cell, gated to conductor handlers; several handlers share one field.
+  (`ConductorStateTest`, incl. the multi-handler motivating case.)
+
+**Tracked gaps / divergences** (2026-08-02 review — reconcile before calling the model *complete*):
+
+1. **The `emits`/consumes interface is extracted but unused** (`f05f65f`, `EmitInterface`). Zero
+   consumers — so the type-checked routing, no-consumer diagnostic, and cross-conductor cycle detection it
+   was built to feed **do not exist yet**. The built-but-unwired half; wiring it is what unblocks gap 2.
+2. **The dead letter is the *opposite* of the ruling** (`61d614a`). It fires on "engaged nothing (no
+   conduit/action/sink)" — the intentional *muted instrument* the ruling explicitly excludes — not on the
+   config gap (a type outside the seated consumes-interface). See §Honest edges. **Decision needed:** align
+   to the ruling (no-consumer stays silent; reserve the dead letter for the config gap, which needs gap 1)
+   or keep the stderr line as an interim dev-diagnostic.
+3. **`conductor` does not reuse the trait/struct member block.** `parseConductor` reimplements member
+   iteration + kind-dispatch — the copy-pasted-traversal DRY line; a new member kind must be added twice.
+4. **Abstract handler contracts are dead.** `ConductorDecl.handlers` (the `name:[Action(…)]` map) is only
+   printed — never checked against the concrete reactions, never routed. Wire "a conductor satisfies its
+   declared handler interface", or drop it.
+5. **`Action` write-only terminus is unenforced** (nominal return `_`; a value-producing body is silently
+   discarded), and a concrete **`Conduit`-with-value-terminus** handler isn't realized inside a conductor
+   (only Action-shaped handlers run; `Conduit` survives only as a parse-level contract string).
+6. **A non-entry `spawn` is silently ignored, not a compile error** (the doc's Seating section says error;
+   the impl no-ops it like an inert `main` — pick one rule for consistency).
 
 ### Runtime, still to build
 
