@@ -568,8 +568,13 @@ mutable-state substrate runs real programs through the interpreter.
    config gap (a type outside the seated consumes-interface). See §Honest edges. **Decision needed:** align
    to the ruling (no-consumer stays silent; reserve the dead letter for the config gap, which needs gap 1)
    or keep the stderr line as an interim dev-diagnostic.
-3. **`conductor` does not reuse the trait/struct member block.** `parseConductor` reimplements member
-   iteration + kind-dispatch — the copy-pasted-traversal DRY line; a new member kind must be added twice.
+3. **`conductor` member block vs the trait/struct one — NOT a real DRY problem (resolved 2026-08-05).**
+   The *domain* logic (member-kind recognition) is already shared: both blocks classify a callable member
+   via `isCallableMemberKind(CallKinds.builtin(…))`, so a new callable kind is added **once** and both pick
+   it up. What repeats is only thin loop boilerplate (brace / comma-sep / name / duplicate-set), and the
+   member *kinds* legitimately differ (traits: operators, associated types, defaults, shells, attributes;
+   conductors: state fields, reaction bodies). A shared `parseMemberBlock` skeleton is an *optional* future
+   tidy — **deferred as premature** (the blocks may diverge further; skeleton churn isn't justified yet).
 4. **Abstract handler contracts are dead.** `ConductorDecl.handlers` (the `name:[Action(…)]` map) is only
    printed — never checked against the concrete reactions, never routed. Wire "a conductor satisfies its
    declared handler interface", or drop it.
@@ -578,6 +583,15 @@ mutable-state substrate runs real programs through the interpreter.
    (only Action-shaped handlers run; `Conduit` survives only as a parse-level contract string).
 6. **A non-entry `spawn` is silently ignored, not a compile error** (the doc's Seating section says error;
    the impl no-ops it like an inert `main` — pick one rule for consistency).
+7. **Brittle `#caction#` / `#action#` substring contract.** Conductor-reaction routing relies on the
+   invariant that the `#caction#`-prefixed key must not *contain* the substring `#action#`, spread across
+   `AltParser` (`:2977`), `IrCompiler` (`:173`), and `IrInterpreter`. It holds today, but a typed
+   discriminator would be sturdier than a cross-file substring convention.
+
+Coverage note: the untested surfaces track the feature gaps — no end-to-end for a `Conduit`-value-terminus
+handler (gap 5), for an abstract handler contract validated against its reaction (gap 4), or for
+`EmitInterface` driving anything (gap 1); and `DeadLetterTest` currently pins the *divergent* semantics
+(gap 2). Closing a gap should bring its test with it.
 
 ### Runtime, still to build
 
