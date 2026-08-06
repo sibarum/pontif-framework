@@ -66,7 +66,8 @@ public final class IrSourcePrinter {
             case IrStmt.ReturnProof rp -> "assign proof " + rp.functionName()
                     + "(" + params(rp.params()) + "):" + sortRef(rp.grantedReturn());
             case IrStmt.ConductorDecl cd -> conductorDecl(cd);
-            case IrStmt.Spawn sp -> "spawn " + sp.conductorName();
+            case IrStmt.Spawn sp -> "spawn " + sp.conductorName()
+                    + (sp.placement() == IrStmt.Spawn.Placement.THREAD ? " over thread" : "");
             case IrStmt.NoOp n -> "# " + n.label();
         };
     }

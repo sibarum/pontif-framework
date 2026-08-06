@@ -58,6 +58,24 @@ class ConductorSeatingTest {
     }
 
     @Test
+    void seatWithOverThreadPlacement_parsesLinksAndRuns() {
+        // `spawn Meter over thread` is the same-process-thread tier (docs/orchestration.md §Seating).
+        // The placement parses, links, and runs through the whole pipeline; its runtime effect is
+        // currently identical to the main lane (own-thread execution is the next cut) — this guards that
+        // the new surface flows end-to-end and stays green while threading is built behind it.
+        Output o = run("""
+                requires pontif.events.{Event, StdOut}
+                struct Tick(n:Int)
+                assign trait Tick:Event{}
+                conductor Meter { onTick(e:Tick) -> emit StdOut("tick ")  e }
+                spawn Meter over thread
+                main ( emit Tick(1)  0 )
+                """);
+        assertTrue(o.out().contains("tick "), "an `over thread`-seated conductor's handler fires");
+        assertFalse(o.err().contains("dead letter"), "a handled event is not a dead letter");
+    }
+
+    @Test
     void unseatedConductor_handlerIsInert_eventDeadLetters() {
         // Same conductor, but NO `spawn Meter` — the handler must NOT fire, and the event, reaching
         // no consumer, dead-letters (the slice-3 runtime signal). This is what makes activation real.

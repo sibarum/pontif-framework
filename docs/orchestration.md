@@ -592,10 +592,10 @@ mutable-state substrate runs real programs through the interpreter.
    `AltParser` (`:2977`), `IrCompiler` (`:173`), and `IrInterpreter`. It holds today, but a typed
    discriminator would be sturdier than a cross-file substring convention.
 
-Coverage note: the untested surfaces track the feature gaps — no end-to-end for a `Conduit`-value-terminus
-handler (gap 5), for an abstract handler contract validated against its reaction (gap 4), or for
-`EmitInterface` driving anything (gap 1); and `DeadLetterTest` currently pins the *divergent* semantics
-(gap 2). Closing a gap should bring its test with it.
+Coverage note: the untested surfaces track the still-open feature gaps — no end-to-end for a
+`Conduit`-value-terminus handler (gap 5), for an abstract handler contract validated against its reaction
+(gap 4), or for `EmitInterface` driving anything (gap 1). Closing a gap should bring its test with it.
+(Gap 2's `DeadLetterTest` now pins the *correct* config-gap semantics.)
 
 ### Runtime, still to build
 
@@ -605,10 +605,23 @@ handler (gap 5), for an abstract handler contract validated against its reaction
   forward to a reacting handler at quiescence. **No `await`.** New work: the parser/lowering for the woven
   completion `emit` + the daemon-backed `Pending`; the quiescence loop is reused as-is. (This is *not*
   `spawn` — `spawn` seats conductors; `on X` offloads a computation.)
-- **Placement — `over X targeting Y`:** the tier matrix made real. `over thread` (in-process queue) →
-  `over process` (elektroq socket + a **process spawner**, which neither repo provides yet — new work)
-  → `over host` / GPU, with honest `[… | Unreachable]` boundary types. `over thread` and `over process`
-  share one integration pattern; only the transport row changes.
+- **Concurrent runtime — `over thread` (the same-process-thread tier), in cuts.** Additive: a bare
+  `spawn C` seats on the MAIN_LANE (synchronous — today's behavior, 1134 tests untouched); `spawn C over
+  thread` runs on its own thread.
+  - **Cut 1 — DONE (parse + represent).** `spawn C over thread` parses (`over` a contextual keyword);
+    `IrStmt.Spawn` carries a `Placement` (`MAIN_LANE`/`THREAD`); printers round-trip it; unbuilt tiers
+    (process/host) fail closed. Runtime effect currently identical to the main lane (`ConductorDeclTest`
+    parse tests + `ConductorSeatingTest` end-to-end guard).
+  - **Cut 2 — thread-safety prep.** Make the shared interpreter state a second thread touches safe:
+    `conductorState` → concurrent (per-conductor keys), the `RoutingTable` cache → concurrent,
+    `currentConductor` → thread-local. Behavior-preserving.
+  - **Cut 3 — threaded execution.** A `THREAD` conductor runs on its own daemon + `Mailbox`; a cross-lane
+    `emit` enqueues into its inbox (else folds inline); drive-to-quiescence drains + joins the threads.
+    This is where `EmitInterface` cross-conductor cycle detection (gap 1) gets a real consumer.
+- **Placement — the rest of `over X targeting Y`:** `over process` (elektroq socket + a **process
+  spawner**, which neither repo provides yet — new work) → `over host` / GPU, with honest
+  `[… | Unreachable]` boundary types. `over thread` and `over process` share one integration pattern;
+  only the transport row changes.
 - **Failure + dead letters (revised — no auto-restart, see *Failure*).** A handler crash / MIA
   addressed conductor is a **full crash + halt**; there is *no* catch/retire/restart-from-`INIT`
   supervision boundary to build (Pontif's deviation from Erlang). What *is* to build: the **dead-letter**

@@ -76,7 +76,8 @@ public final class IrPrinter {
                 }
                 for (IrStmt.FunctionDecl r : cd.reactions()) printStmt(sb, r, d + 1);
             }
-            case IrStmt.Spawn sp -> line(sb, d, "spawn " + sp.conductorName() + at(sp.origin()));
+            case IrStmt.Spawn sp -> line(sb, d, "spawn " + sp.conductorName()
+                    + (sp.placement() == IrStmt.Spawn.Placement.THREAD ? " over thread" : "") + at(sp.origin()));
             case IrStmt.NoOp n -> line(sb, d, "noop " + n.label() + at(n.origin()));
         }
     }

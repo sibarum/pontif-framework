@@ -83,4 +83,28 @@ class ConductorDeclTest {
         assertTrue(ex.getMessage().toLowerCase().contains("state field")
                 || ex.getMessage().toLowerCase().contains("handler"));
     }
+
+    // --- seating placement: `spawn C [over TIER]` (docs/orchestration.md, §Seating — the tier matrix) ---
+
+    private static IrStmt.Spawn parseSpawn(String src) throws ParseException {
+        IrModule m = AltParser.parseModule(src, "t");
+        return assertInstanceOf(IrStmt.Spawn.class, m.statements().get(m.statements().size() - 1));
+    }
+
+    @Test
+    void bareSpawn_seatsOnTheMainLane() throws Exception {
+        assertEquals(IrStmt.Spawn.Placement.MAIN_LANE, parseSpawn("spawn Meter").placement());
+    }
+
+    @Test
+    void spawnOverThread_seatsOnItsOwnThread() throws Exception {
+        assertEquals(IrStmt.Spawn.Placement.THREAD, parseSpawn("spawn Meter over thread").placement());
+    }
+
+    @Test
+    void spawnOverUnbuiltTier_isRejected() {
+        // process / host aren't built yet — fail closed with a diagnostic, don't silently accept.
+        ParseException ex = assertThrows(ParseException.class, () -> parseSpawn("spawn Meter over process"));
+        assertTrue(ex.getMessage().contains("process") && ex.getMessage().contains("not yet"));
+    }
 }

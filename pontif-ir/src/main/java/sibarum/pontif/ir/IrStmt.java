@@ -212,15 +212,26 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
      * handler reactions into the program's active routing so emitted events reach them. Seating is
      * <b>entry-point-only</b> — only a {@code spawn} in the entry module takes effect (honored via
      * the same entry-module selection that makes a required module's {@code main} inert), so
-     * {@code requires}-ing a library never silently stands up its conductors. (Cut A: no
-     * {@code over X} placement yet — every seat is the local/main lane.)
+     * {@code requires}-ing a library never silently stands up its conductors.
+     *
+     * <p><b>Placement</b> (docs/orchestration.md, §Seating — the tier matrix): a bare {@code spawn C}
+     * seats on the {@link Placement#MAIN_LANE} (cooperative, synchronous — the same thread as
+     * {@code main}); {@code spawn C over thread} seats on its own {@link Placement#THREAD} (the
+     * same-process-thread tier). Placement rides the seat, not the conductor's definition — the *app*
+     * chooses where each worker runs.
      */
-    record Spawn(String conductorName, Origin origin) implements IrStmt {
+    record Spawn(String conductorName, Placement placement, Origin origin) implements IrStmt {
         public Spawn {
             if (conductorName == null || conductorName.isEmpty()) {
                 throw new IllegalArgumentException("Spawn conductor name must be non-empty");
             }
+            if (placement == null) {
+                throw new IllegalArgumentException("Spawn placement must be non-null");
+            }
         }
+
+        /** Which tier a seated conductor runs on (the `over X` axis). More tiers (process, host) later. */
+        public enum Placement { MAIN_LANE, THREAD }
     }
 
     /**

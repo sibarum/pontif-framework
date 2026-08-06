@@ -2984,11 +2984,29 @@ public final class AltParser {
         }
     }
 
-    /** Parses a seating statement {@code spawn ConductorName} (docs/orchestration.md, §Seating). */
+    /**
+     * Parses a seating statement {@code spawn ConductorName [over TIER]} (docs/orchestration.md, §Seating).
+     * A bare seat is the {@code MAIN_LANE} (cooperative, synchronous); {@code over thread} is the
+     * same-process-thread tier. {@code over} is a CONTEXTUAL keyword (an IDENT), like {@code from}, so it
+     * never collides with a user name. Tiers beyond {@code thread} (process / host) are rejected until built.
+     */
     private IrStmt parseSpawn() throws ParseException {
         AltToken start = expectKeyword("spawn");
         AltToken nameTok = expect(AltToken.Kind.IDENT);
-        return new IrStmt.Spawn(nameTok.text(), start.spanTo(nameTok));
+        AltToken end = nameTok;
+        IrStmt.Spawn.Placement placement = IrStmt.Spawn.Placement.MAIN_LANE;
+        if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("over")) {
+            consume();  // `over`
+            AltToken tier = expect(AltToken.Kind.IDENT);
+            placement = switch (tier.text()) {
+                case "thread" -> IrStmt.Spawn.Placement.THREAD;
+                default -> throw new ParseException(
+                        "unknown placement '" + tier.text() + "' — `spawn C over thread` is the only tier "
+                                + "built so far (process / host are not yet supported)", tier.origin());
+            };
+            end = tier;
+        }
+        return new IrStmt.Spawn(nameTok.text(), placement, start.spanTo(end));
     }
 
     /**
