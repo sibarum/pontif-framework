@@ -70,7 +70,8 @@ final class SceneBuilder {
         // WRITE the depth buffer. An ALPHA layer has depth writes disabled in SceneRenderer, which
         // leaves the surface rendering in submission order — far triangles bleed through near ones.
         SceneStates.publish(view,
-                SceneSnapshot.of(new TriangleLayer(mesh.verts(), mesh.cols()).withBlend(BlendMode.OPAQUE)));
+                SceneSnapshot.of(new TriangleLayer(mesh.verts(), mesh.cols())
+                        .withNormals(mesh.normals()).withBlend(BlendMode.OPAQUE)));
         SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
                 new Vec3((float) xlo, (float) mesh.zmin(), (float) ylo),
                 new Vec3((float) xhi, (float) mesh.zmax(), (float) yhi)));
@@ -80,7 +81,7 @@ final class SceneBuilder {
 
     /** A triangulated height grid: interleaved xyz {@code verts}, per-vertex RGB {@code cols}, and
      *  the height extent {@code [zmin, zmax]} (world Y). */
-    private record SurfaceMesh(float[] verts, float[] cols, double zmin, double zmax) {}
+    private record SurfaceMesh(float[] verts, float[] cols, float[] normals, double zmin, double zmax) {}
 
     /**
      * Meshes a row-major height grid {@code zs} (length {@code N*N}) over {@code [xlo,xhi]x[ylo,yhi]}
@@ -98,22 +99,26 @@ final class SceneBuilder {
         double zspan = zmax - zmin == 0 ? 1 : zmax - zmin;
         double sx = (xhi - xlo) / (n - 1), sy = (yhi - ylo) / (n - 1);
 
+        float[] gn = gridNormals(zs, n, sx, sy);   // smooth per-grid-vertex normals (world x,up,z)
+
         int cells = (n - 1) * (n - 1);
         float[] verts = new float[cells * 2 * 9];   // 2 triangles/cell * 3 vertices * 3 floats
         float[] cols = new float[verts.length];
+        float[] norms = new float[verts.length];
         int[] o = {0};
         for (int r = 0; r < n - 1; r++) {
             for (int c = 0; c < n - 1; c++) {
                 int i00 = r * n + c, i01 = i00 + 1, i10 = i00 + n, i11 = i10 + 1;
-                emitSurfaceVerts(verts, cols, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, colormap, i00, i10, i11);
-                emitSurfaceVerts(verts, cols, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, colormap, i00, i11, i01);
+                emitSurfaceVerts(verts, cols, norms, gn, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, colormap, i00, i10, i11);
+                emitSurfaceVerts(verts, cols, norms, gn, o, n, xlo, ylo, sx, sy, zs, zmin, zspan, colormap, i00, i11, i01);
             }
         }
-        return new SurfaceMesh(verts, cols, zmin, zmax);
+        return new SurfaceMesh(verts, cols, norms, zmin, zmax);
     }
 
-    /** Appends the given grid vertices (by index) as world (x, height, y) positions + colormap colour. */
-    private static void emitSurfaceVerts(float[] verts, float[] cols, int[] o, int n,
+    /** Appends the given grid vertices (by index) as world (x, height, y) positions + colormap colour
+     *  + the (precomputed) per-grid-vertex normal. */
+    private static void emitSurfaceVerts(float[] verts, float[] cols, float[] norms, float[] gn, int[] o, int n,
             double xlo, double ylo, double sx, double sy, double[] zs, double zmin, double zspan,
             String colormap, int... indices) {
         for (int idx : indices) {
@@ -125,8 +130,37 @@ final class SceneBuilder {
             cols[o[0]] = rgb[0];
             cols[o[0] + 1] = rgb[1];
             cols[o[0] + 2] = rgb[2];
+            norms[o[0]]     = gn[idx * 3];
+            norms[o[0] + 1] = gn[idx * 3 + 1];
+            norms[o[0] + 2] = gn[idx * 3 + 2];
             o[0] += 3;
         }
+    }
+
+    /**
+     * Smooth per-grid-vertex normals for the height field y = h(x, z), one xyz per grid point (row
+     * major, same indexing as the mesh). The surface is {@code F = h(x,z) - y = 0}, so the up-facing
+     * unit normal is {@code normalize(-∂h/∂x, 1, -∂h/∂z)}; the partials are central differences in
+     * WORLD units ({@code sx} the x step between columns, {@code sy} the z step between rows), one-
+     * sided at the grid edges. Smooth (per-vertex, shared across adjacent cells) rather than faceted.
+     */
+    private static float[] gridNormals(double[] zs, int n, double sx, double sy) {
+        float[] gn = new float[n * n * 3];
+        for (int r = 0; r < n; r++) {
+            for (int c = 0; c < n; c++) {
+                int cl = Math.max(0, c - 1), cr = Math.min(n - 1, c + 1);
+                int rd = Math.max(0, r - 1), ru = Math.min(n - 1, r + 1);
+                double dhdx = (zs[r * n + cr] - zs[r * n + cl]) / ((cr - cl) * sx);
+                double dhdz = (zs[ru * n + c] - zs[rd * n + c]) / ((ru - rd) * sy);
+                double nx = -dhdx, ny = 1.0, nz = -dhdz;
+                double len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+                int o = (r * n + c) * 3;
+                gn[o]     = (float) (nx / len);
+                gn[o + 1] = (float) (ny / len);
+                gn[o + 2] = (float) (nz / len);
+            }
+        }
+        return gn;
     }
 
     // --- Composed scenes: many layers, one window (docs/plotting.md) --------------------------
@@ -285,7 +319,7 @@ final class SceneBuilder {
         b.add(xlo, mesh.zmin(), ylo);
         b.add(xhi, mesh.zmax(), yhi);
         double opacity = rv.members().containsKey("opacity") ? memberD(rv, "opacity") : 1.0;
-        TriangleLayer tri = new TriangleLayer(mesh.verts(), mesh.cols());
+        TriangleLayer tri = new TriangleLayer(mesh.verts(), mesh.cols()).withNormals(mesh.normals());
         // Solid (opacity>=1) writes depth (OPAQUE → true occlusion); faded is translucent so
         // layers behind show through (the "stack on top" case), reading depth but not writing it.
         return opacity >= 1.0
@@ -549,7 +583,8 @@ final class SceneBuilder {
     private static Layer scaleLayer(Layer l, Transform t, float textScale) {
         if (t == Transform.IDENTITY) return l;
         return switch (l) {
-            case TriangleLayer tr -> new TriangleLayer(scaleXYZ(tr.vertices(), t), tr.colors(), tr.blend(), tr.opacity());
+            case TriangleLayer tr -> new TriangleLayer(scaleXYZ(tr.vertices(), t), tr.colors(),
+                    tr.normals() == null ? null : scaleNormals(tr.normals(), t), tr.blend(), tr.opacity());
             case PointLayer p -> {
                 // World-sized points scale their diameter with the box transform (like text);
                 // screen-pixel points keep their fixed size.
@@ -577,6 +612,23 @@ final class SceneBuilder {
         float[] o = new float[a.length];
         for (int i = 0; i + 2 < a.length; i += 3) {
             o[i] = t.ax(a[i]); o[i + 1] = t.ay(a[i + 1]); o[i + 2] = t.az(a[i + 2]);
+        }
+        return o;
+    }
+
+    /**
+     * Transform per-vertex normals under the (per-axis, non-uniform) box scale. Positions scale by
+     * {@code (sx, sy, sz)}, so directions must scale by the INVERSE-TRANSPOSE — for a pure diagonal
+     * scale that is {@code (1/sx, 1/sy, 1/sz)} — then renormalize. Without this a non-uniform box
+     * would tilt the shading off the geometry (a flat step could look lit and vice versa).
+     */
+    private static float[] scaleNormals(float[] a, Transform t) {
+        float[] o = new float[a.length];
+        for (int i = 0; i + 2 < a.length; i += 3) {
+            float nx = a[i] / t.sx(), ny = a[i + 1] / t.sy(), nz = a[i + 2] / t.sz();
+            float len = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
+            if (len < 1e-20f) len = 1f;
+            o[i] = nx / len; o[i + 1] = ny / len; o[i + 2] = nz / len;
         }
         return o;
     }

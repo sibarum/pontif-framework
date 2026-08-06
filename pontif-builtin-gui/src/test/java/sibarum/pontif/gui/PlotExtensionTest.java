@@ -327,6 +327,41 @@ class PlotExtensionTest {
     }
 
     @Test
+    void surface_carriesSmoothNormals_soItIsShaded() {
+        // A surface mesh now carries per-vertex normals → the renderer Lambert-shades it (3D form
+        // reads, not a flat colormap wash). A FLAT height field has every normal pointing straight up
+        // (0, 1, 0); the count matches the vertices (one normal per vertex, smooth).
+        Extensions.install(new PlotExtension());
+        Object[] cap = new Object[1];
+        NativeCalls.NativeCall stub = (a, c) -> {
+            cap[0] = a.size() > 1 ? a.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{HeightMap3D, surface, scene}
+                        struct Flat()
+                        assign trait Flat:HeightMap3D {
+                          at(x:Decimal, y:Decimal):Decimal -> 2.0
+                          domain():[{Decimal,Decimal,Decimal,Decimal}] -> {-3.0, 3.0, -3.0, 3.0}
+                        }
+                        scene({title = "flat"}, { surface(Flat()) })""", "flat.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "surface scene should run; got " + r.text());
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(cap[0]);
+        var tri = assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(0));
+        assertTrue(tri.lit(), "a surface carries normals (⇒ shaded)");
+        assertEquals(tri.vertices().length, tri.normals().length, "one normal per vertex");
+        assertEquals(0f, tri.normals()[0], 1e-5, "flat surface normal x");
+        assertEquals(1f, tri.normals()[1], 1e-5, "flat surface normal y (up)");
+        assertEquals(0f, tri.normals()[2], 1e-5, "flat surface normal z");
+    }
+
+    @Test
     void scene_superimposes2dCurveOnA3dSurface_inOneViewport() {
         // The superimposition step: a 2D curve and a 3D surface composite into ONE scene (one orbit
         // viewport). The curve becomes a LineLayer on the z = 0 plane; the surface a TriangleLayer
