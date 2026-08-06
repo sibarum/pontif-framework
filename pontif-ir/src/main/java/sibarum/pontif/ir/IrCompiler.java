@@ -143,6 +143,16 @@ public final class IrCompiler {
         // interpreter can seed each conductor's mutable single-owner state cell on first fire.
         Map<String, CompiledModule.CompiledConductor> conductors = new LinkedHashMap<>();
 
+        // Seating placement rides the `spawn`, not the `conductor` declaration (docs/orchestration.md,
+        // §Seating). The whole program is one combined module here, so a conductor's decl and its spawn
+        // are both in this statement list; pre-scan the spawns so the ConductorDecl arm can stamp each
+        // CompiledConductor with the tier it was seated on (default MAIN_LANE — an unseated decl never
+        // runs, so the default is harmless). A conductor seated more than once is rejected upstream.
+        Map<String, IrStmt.Spawn.Placement> seatedPlacements = new LinkedHashMap<>();
+        for (IrStmt stmt : resolved.statements()) {
+            if (stmt instanceof IrStmt.Spawn sp) seatedPlacements.put(sp.conductorName(), sp.placement());
+        }
+
         for (IrStmt stmt : resolved.statements()) {
             switch (stmt) {
                 case IrStmt.FunctionDecl fd -> {
@@ -279,7 +289,8 @@ public final class IrCompiler {
                             new IrExpr.Record(null, initMembers, cd.origin()), cd.origin());
                     CompiledModule.CompiledFunction seedFn =
                             compileFunctionDecl(seed, dispatch, functions, compiledSorts);
-                    conductors.put(cd.name(), new CompiledModule.CompiledConductor(cd.name(), seedFn));
+                    conductors.put(cd.name(), new CompiledModule.CompiledConductor(cd.name(), seedFn,
+                            seatedPlacements.getOrDefault(cd.name(), IrStmt.Spawn.Placement.MAIN_LANE)));
                 }
                 case IrStmt.Spawn sp -> { /* seating is resolved at link time (reactions already injected); nothing to compile here */ }
                 case IrStmt.Coercion c -> throw new IllegalStateException(

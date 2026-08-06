@@ -618,9 +618,20 @@ Coverage note: the untested surfaces track the still-open feature gaps — no en
     `volatile` so a second thread sees a published table, not a stale `null`), `currentConductor` →
     `ThreadLocal` (the firing conductor belongs to the folding thread, so per-thread save/restore can't
     clobber). Full suite green (1135).
-  - **Cut 3 — threaded execution.** A `THREAD` conductor runs on its own daemon + `Mailbox`; a cross-lane
-    `emit` enqueues into its inbox (else folds inline); drive-to-quiescence drains + joins the threads.
-    This is where `EmitInterface` cross-conductor cycle detection (gap 1) gets a real consumer.
+  - **Cut 3 — threaded execution, in sub-cuts** (the risky one — it rewires `fireEvent`/`dispatchToActions`
+    and the quiescence loop, and 1136 tests lean on synchronous ordering, so it lands green between steps).
+    The `ConductorGraphSpike` is the working blueprint: per-conductor daemon + inbox, static owner table,
+    forward-only cross-conductor enqueue.
+    - **Cut 3a — DONE (placement survives compilation).** The seat's tier now rides onto the compiled
+      module: `CompiledConductor` carries a `Placement`, `CompiledModule.threadedConductors()` names the
+      `over thread` seats. Behavior-preserving — everything still folds inline; the interpreter can now
+      *see* which conductors are THREAD-tier. (`ConductorSeatingTest` asserts `over thread` ⇒ `{Meter}`,
+      bare spawn ⇒ empty.)
+    - **Cut 3b — threaded execution.** For each THREAD conductor, stand up a daemon + `Mailbox` before
+      `main` runs (init race designed out, per the spike); a cross-lane dispatch to that conductor's
+      handler enqueues into its inbox (else folds inline); drive-to-quiescence drains + joins the threads.
+    - **Cut 3c — gap-1 consumer.** Build the cross-conductor emit graph via `EmitInterface` and detect
+      cycles — the first real consumer of that static edge set.
 - **Placement — the rest of `over X targeting Y`:** `over process` (elektroq socket + a **process
   spawner**, which neither repo provides yet — new work) → `over host` / GPU, with honest
   `[… | Unreachable]` boundary types. `over thread` and `over process` share one integration pattern;

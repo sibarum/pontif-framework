@@ -76,6 +76,35 @@ class ConductorSeatingTest {
     }
 
     @Test
+    void overThreadSeat_recordsThreadTier_bareSeatDoesNot() {
+        // Cut 3a: the seating placement survives compilation onto the CompiledModule, so the interpreter
+        // can later decide inline-vs-daemon. `spawn Meter over thread` lands Meter in threadedConductors();
+        // a bare `spawn Meter` leaves it empty (MAIN_LANE — the synchronous default). Behavior is unchanged
+        // — this only asserts the tier is now *visible*, the foundation the threaded execution reads.
+        String threaded = """
+                requires pontif.events.{Event, StdOut}
+                struct Tick(n:Int)
+                assign trait Tick:Event{}
+                conductor Meter { onTick(e:Tick) -> emit StdOut("tick ")  e }
+                spawn Meter over thread
+                main ( emit Tick(1)  0 )
+                """;
+        String bare = threaded.replace("spawn Meter over thread", "spawn Meter");
+
+        var threadedResult = compiler.compileAlt(threaded, "seating.ptf");
+        var bareResult = compiler.compileAlt(bare, "seating.ptf");
+        assertTrue(threadedResult instanceof PontifCompiler.CompileResult.Compiled, "threaded seat compiles");
+        assertTrue(bareResult instanceof PontifCompiler.CompileResult.Compiled, "bare seat compiles");
+
+        var threadedMod = ((PontifCompiler.CompileResult.Compiled) threadedResult).program().module();
+        var bareMod = ((PontifCompiler.CompileResult.Compiled) bareResult).program().module();
+        assertEquals(java.util.Set.of("Meter"), threadedMod.threadedConductors(),
+                "`over thread` seats Meter on the THREAD tier");
+        assertTrue(bareMod.threadedConductors().isEmpty(),
+                "a bare spawn stays on the MAIN_LANE — no threaded conductors");
+    }
+
+    @Test
     void unseatedConductor_handlerIsInert_eventDeadLetters() {
         // Same conductor, but NO `spawn Meter` — the handler must NOT fire, and the event, reaching
         // no consumer, dead-letters (the slice-3 runtime signal). This is what makes activation real.

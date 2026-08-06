@@ -174,8 +174,16 @@ public record CompiledModule(
      * ({@code this.field}) and mutate ({@code this.field = …}) that cell. Empty state → an empty
      * record. Present for every declared conductor; a cell is only seeded when a seated conductor's
      * handler actually fires.
+     *
+     * <p>{@code placement} is the tier the conductor was <b>seated</b> on (docs/orchestration.md, §Seating —
+     * the tier matrix): {@link IrStmt.Spawn.Placement#MAIN_LANE} for a bare {@code spawn C} (or a declared
+     * conductor that is never spawned — the harmless default, since an unseated conductor never runs), and
+     * {@link IrStmt.Spawn.Placement#THREAD} for {@code spawn C over thread}. Placement rides the seat, not the
+     * declaration, but the whole program links into one combined module, so the compiler sees a conductor's
+     * decl and its spawn together and records the effective tier here — the interpreter reads it to decide
+     * whether a handler folds inline (main lane) or on the conductor's own daemon (concurrent-runtime cut 3).
      */
-    public record CompiledConductor(String name, CompiledFunction stateInit) {}
+    public record CompiledConductor(String name, CompiledFunction stateInit, IrStmt.Spawn.Placement placement) {}
 
     /**
      * A standing index declaration (docs/stream-queries.md §3, docs/keyed.md) — Slice B. A
@@ -223,6 +231,20 @@ public record CompiledModule(
             String key = e.getKey();
             if (key.equals(typeName) || key.equals(bare)) continue;   // exact buckets already added
             if (tr.satisfiesBareTrait(key, typeName)) out.add(e.getValue());
+        }
+        return out;
+    }
+
+    /**
+     * The names of the conductors seated on their own thread ({@link IrStmt.Spawn.Placement#THREAD} —
+     * {@code spawn C over thread}), the ones the interpreter runs on a daemon + {@link Mailbox} rather than
+     * folding inline on the main lane (concurrent-runtime cut 3). Empty for a program that seats everything on
+     * the main lane — today's behavior — so the threaded path is entered only when a program opts in.
+     */
+    public java.util.Set<String> threadedConductors() {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (CompiledConductor c : conductors.values()) {
+            if (c.placement() == IrStmt.Spawn.Placement.THREAD) out.add(c.name());
         }
         return out;
     }
