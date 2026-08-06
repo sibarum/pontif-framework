@@ -84,8 +84,13 @@ public final class IrInterpreter {
      * events: {@link #fireEvent} threads {@code S} across emits here, seeding it lazily from
      * the conduit's {@code init} the first time the type is emitted. Not shared across runs —
      * one interpreter per program, like {@link #outstanding}.
+     *
+     * <p>Concurrent (concurrent-runtime cut 3): with THREAD-tier conductors, distinct event types fold on
+     * distinct lanes' threads at once. A conduit is single-owner per type (the static single-owner rule), so
+     * a given key is only ever folded on one lane — but distinct keys are written concurrently, so the map
+     * itself must tolerate concurrent structural modification. Same single-owner argument as {@link #conductorState}.
      */
-    private final Map<String, Object> conduitState = new java.util.HashMap<>();
+    private final Map<String, Object> conduitState = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * The mutable single-owner state cell of each conductor (docs/orchestration.md), keyed by
@@ -151,6 +156,147 @@ public final class IrInterpreter {
         return routing;
     }
 
+    // ── Concurrent runtime, cut 3b: lanes ──────────────────────────────────────────────────────────
+    //
+    // The `over thread` tier (docs/orchestration.md, "one pattern, four transports"). A THREAD-seated
+    // conductor runs on its own daemon with an inbox; the main thread is itself just a lane with an inbox
+    // (ratified: main is "just another thread with a mailbox"), drained cooperatively at drive-to-quiescence.
+    // An `emit` routes the (immutable) event to its owning lane's inbox; if the current thread already owns
+    // that lane, it folds inline. Only the inbox is shared — the model's one and only synchronization point.
+    //
+    // Everything here is inert unless a program seats a THREAD conductor: {@link #threadLanes} stays empty,
+    // {@link #fireEvent} takes its original synchronous path byte-for-byte, and the 1136 main-lane tests are
+    // untouched.
+
+    /** A unit of deferred work on a lane: fire this (immutable) event when the owning thread drains it. */
+    private record LaneTask(RecordValue event, Origin origin) {}
+
+    /** Poison pill: enqueued at teardown so a blocked daemon returns from {@link #drainLane}. */
+    private static final LaneTask POISON = new LaneTask(null, null);
+
+    /** One lane: an inbox and the thread that drains it. {@code thread} is null for the main lane (the main thread). */
+    private static final class Lane {
+        final String name;
+        final java.util.concurrent.BlockingQueue<LaneTask> inbox = new java.util.concurrent.LinkedBlockingQueue<>();
+        Thread thread;   // the owning daemon; null ⇒ the main lane, owned by mainThread
+        Lane(String name) { this.name = name; }
+    }
+
+    /** THREAD-tier conductors by name → their lane. Empty ⇒ no threading; the whole lane path is skipped. */
+    private volatile Map<String, Lane> threadLanes = Map.of();
+    /** The main thread's lane — its inbox holds events routed back to a main-lane consumer from a daemon. */
+    private volatile Lane mainLane;
+    /** The thread that owns {@link #mainLane} (the one that called {@code eval(CompiledModule)}). */
+    private volatile Thread mainThread;
+    /** Events enqueued to any lane but not yet fully processed. Reaches 0 exactly at quiescence. */
+    private final java.util.concurrent.atomic.AtomicLong inFlight = new java.util.concurrent.atomic.AtomicLong();
+    /** First uncaught handler failure on any lane; a crash is a full halt (docs/orchestration.md, Failure). */
+    private volatile RuntimeException laneFailure;
+
+    /** The lane that owns an emitted {@code typeName}: a THREAD conductor that consumes it, else the main lane. */
+    private Lane ownerLane(String typeName, CompiledModule module) {
+        for (CompiledModule.CompiledAction a : routing(module).routeFor(typeName).subscribers()) {
+            if (a.conductorName() != null) {
+                Lane l = threadLanes.get(a.conductorName());
+                if (l != null) return l;   // a THREAD-seated conductor consumes this type — it owns the event
+            }
+        }
+        return mainLane;
+    }
+
+    /** The thread that owns {@code lane} — its daemon, or the main thread for the main lane. */
+    private Thread ownerThread(Lane lane) {
+        return lane.thread != null ? lane.thread : mainThread;
+    }
+
+    /** A daemon's run loop: drain the inbox, fire each event on THIS thread (single-owner), until poisoned. */
+    private void drainLane(Lane lane, CompiledModule module) {
+        while (true) {
+            LaneTask t;
+            try {
+                t = lane.inbox.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (t == POISON) return;
+            try {
+                fireEvent(t.event(), module, t.origin());
+            } catch (RuntimeException ex) {
+                if (laneFailure == null) laneFailure = ex;   // first crash wins; a crash halts the program
+            } finally {
+                inFlight.decrementAndGet();
+            }
+        }
+    }
+
+    /** Stand up a lane per THREAD conductor (+ the main lane) and start the daemons, before any event flows. */
+    private void startLanes(CompiledModule module) {
+        java.util.Set<String> threaded = module.threadedConductors();
+        if (threaded.isEmpty()) return;   // no `over thread` seats — stay fully synchronous
+        routing(module);                  // publish the routing table before any daemon reads it
+        mainThread = Thread.currentThread();
+        mainLane = new Lane("main");
+        Map<String, Lane> lanes = new java.util.LinkedHashMap<>();
+        for (String c : threaded) lanes.put(c, new Lane(c));
+        threadLanes = lanes;
+        // All lanes listening BEFORE the first message flows — the init race is designed out (the spike's rule).
+        for (Lane l : lanes.values()) {
+            l.thread = new Thread(() -> drainLane(l, module), "pontif-conductor-" + l.name);
+            l.thread.setDaemon(true);
+            l.thread.start();
+        }
+    }
+
+    /**
+     * Drive the lanes to quiescence on the main thread: cooperatively drain the main lane's inbox and wait
+     * until no event is in flight on any lane, then poison and join the daemons. A handler crash on any lane
+     * aborts the drive and is rethrown here (a crash halts the whole program).
+     */
+    private void driveLanesToQuiescence(CompiledModule module) {
+        if (threadLanes.isEmpty()) return;
+        try {
+            while (laneFailure == null) {
+                LaneTask t;
+                try {
+                    t = mainLane.inbox.poll(1, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                if (t != null) {
+                    try {
+                        fireEvent(t.event(), module, t.origin());
+                    } catch (RuntimeException ex) {
+                        if (laneFailure == null) laneFailure = ex;
+                    } finally {
+                        inFlight.decrementAndGet();
+                    }
+                    continue;
+                }
+                if (inFlight.get() == 0) break;   // inbox empty AND nothing in flight anywhere ⇒ quiescent
+            }
+        } finally {
+            for (Lane l : threadLanes.values()) l.inbox.add(POISON);
+            for (Lane l : threadLanes.values()) joinLane(l);
+            threadLanes = Map.of();   // torn down; a re-eval rebuilds
+        }
+        if (laneFailure != null) {
+            RuntimeException e = laneFailure;
+            laneFailure = null;
+            throw e;
+        }
+    }
+
+    private void joinLane(Lane lane) {
+        try {
+            lane.thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted joining lane " + lane.name, e);
+        }
+    }
+
     public IrInterpreter(Simplifier simplifier) {
         this.simplifier = simplifier;
         this.eventListener = globalListener;
@@ -161,6 +307,10 @@ public final class IrInterpreter {
         // conduits whose event types are in an ancestry relation would both match one emit — caught here,
         // at load, rather than latently when such an event is first fired.
         module.validateSingleOwnerConduits();
+        // Concurrent runtime (cut 3b): stand up a daemon + inbox for every THREAD-seated conductor before any
+        // event flows, so a cross-lane emit during a top-level let or main() already has a live inbox to reach
+        // (the init race is designed out). No-op unless the program seats an `over thread` conductor.
+        startLanes(module);
         // The Inquisition: every top-level let is force-evaluated before
         // main, declaration order — its claims (binding claims, construction
         // checks) are notarized whether or not anything references it. Pure
@@ -210,6 +360,10 @@ public final class IrInterpreter {
             }
         }
         outstanding.clear();
+        // Concurrent runtime (cut 3b): main() has returned and the GPU pending are drained; now drain the
+        // conductor lanes to quiescence on this (main) thread and join the daemons. A handler crash on any
+        // lane surfaces here as a thrown RuntimeException (a crash is a full halt). No-op without THREAD seats.
+        driveLanesToQuiescence(module);
         return mainValue instanceof Pending ? DRIVE_RAN : mainValue;
     }
 
@@ -418,6 +572,19 @@ public final class IrInterpreter {
      */
     public void fireEvent(RecordValue rec, CompiledModule module, Origin origin) {
         String typeName = rec.typeName();
+        // Concurrent runtime (cut 3b): route the event to its owning lane. If a different thread owns it, hand
+        // the immutable event to that lane's inbox and return — the owner fires it on its own thread, folding
+        // its single-owner state without a lock. If THIS thread already owns the lane (or nothing is threaded),
+        // fall through and fire inline, exactly as the synchronous runtime always has. threadLanes empty ⇒ the
+        // whole check is one volatile read and a branch — the original path is preserved byte-for-byte.
+        if (!threadLanes.isEmpty()) {
+            Lane owner = ownerLane(typeName, module);
+            if (Thread.currentThread() != ownerThread(owner)) {
+                inFlight.incrementAndGet();
+                owner.inbox.add(new LaneTask(rec, origin));   // unbounded in 3b — bounded backpressure is a refinement
+                return;
+            }
+        }
         if (eventListener != null) {
             eventListener.onEmit(rec, emitSeq.incrementAndGet(), origin);
         }

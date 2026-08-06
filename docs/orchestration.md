@@ -627,9 +627,17 @@ Coverage note: the untested surfaces track the still-open feature gaps — no en
       `over thread` seats. Behavior-preserving — everything still folds inline; the interpreter can now
       *see* which conductors are THREAD-tier. (`ConductorSeatingTest` asserts `over thread` ⇒ `{Meter}`,
       bare spawn ⇒ empty.)
-    - **Cut 3b — threaded execution.** For each THREAD conductor, stand up a daemon + `Mailbox` before
-      `main` runs (init race designed out, per the spike); a cross-lane dispatch to that conductor's
-      handler enqueues into its inbox (else folds inline); drive-to-quiescence drains + joins the threads.
+    - **Cut 3b — DONE (threaded execution).** Every lane — each THREAD conductor *and* the main thread
+      (ratified: main is "just another thread with a mailbox") — has an inbox; lanes start before any event
+      flows (init race designed out). `fireEvent` routes an event to its owning lane: off-thread ⇒ hand the
+      immutable event to that lane's inbox and return; own-thread (or nothing seated) ⇒ fold inline, the
+      original synchronous path byte-for-byte. The main thread drives to quiescence — cooperatively drains its
+      inbox until an `inFlight` counter hits zero — then poisons + joins the daemons; a handler crash on any
+      lane is rethrown there (a crash halts the program). `conduitState` joined `conductorState`/routing as
+      concurrent (distinct types fold on distinct lanes at once). Backpressure is left unbounded for now (a
+      bounded-inbox refinement). Tests: multi-emit quiescence + a two-`over thread` pipeline that hops
+      daemon→daemon→main. Full suite green (runtime 1138). *Deferred:* THREAD conductor + `on Gpu` in one
+      program (the `outstanding` list is not yet concurrent); bounded-inbox backpressure.
     - **Cut 3c — gap-1 consumer.** Build the cross-conductor emit graph via `EmitInterface` and detect
       cycles — the first real consumer of that static edge set.
 - **Placement — the rest of `over X targeting Y`:** `over process` (elektroq socket + a **process

@@ -105,6 +105,46 @@ class ConductorSeatingTest {
     }
 
     @Test
+    void overThread_everyEmitIsHandled_drivenToQuiescence() {
+        // Cut 3b: three emits to an `over thread` conductor are each enqueued to its daemon's inbox; the
+        // handler's output (a main-lane StdOut) rides back to the main lane, which drains to quiescence and
+        // joins the daemon. All three must land — proving the cross-lane round-trip and termination detection.
+        Output o = run("""
+                requires pontif.events.{Event, StdOut}
+                struct Tick(n:Int)
+                assign trait Tick:Event{}
+                conductor Meter { onTick(e:Tick) -> emit StdOut("tick ")  e }
+                spawn Meter over thread
+                main ( emit Tick(1)  emit Tick(2)  emit Tick(3)  0 )
+                """);
+        int ticks = o.out().split("tick ", -1).length - 1;
+        assertEquals(3, ticks, "every emit to the threaded conductor is handled before quiescence");
+    }
+
+    @Test
+    void overThread_twoConductorPipeline_hopsDaemonToDaemonToMain() {
+        // The spike's shape (ConductorGraphSpike), now in the language: `app` (own thread) folds a Command and
+        // emits a Status; `display` (own thread) folds the Status and emits a main-lane StdOut. So the event
+        // hops daemon(app) → daemon(display) → main — every lane boundary is a real inbox handoff, and the
+        // whole graph drives to quiescence and joins. If threading or termination were wrong this would hang or
+        // drop the line.
+        Output o = run("""
+                requires pontif.events.{Event, StdOut}
+                struct Command(id:Int)
+                struct Status(text:Str)
+                assign trait Command:Event{}
+                assign trait Status:Event{}
+                conductor App { onCommand(c:Command) -> emit Status("done ")  c }
+                conductor Display { onStatus(s:Status) -> emit StdOut(s.text)  s }
+                spawn App over thread
+                spawn Display over thread
+                main ( emit Command(1)  0 )
+                """);
+        assertTrue(o.out().contains("done "), "the event hopped app → display → main and rendered");
+        assertFalse(o.err().contains("dead letter"), "every hop reached its consumer");
+    }
+
+    @Test
     void unseatedConductor_handlerIsInert_eventDeadLetters() {
         // Same conductor, but NO `spawn Meter` — the handler must NOT fire, and the event, reaching
         // no consumer, dead-letters (the slice-3 runtime signal). This is what makes activation real.
