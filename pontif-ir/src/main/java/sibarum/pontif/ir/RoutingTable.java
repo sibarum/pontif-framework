@@ -1,8 +1,8 @@
 package sibarum.pontif.ir;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The <b>resolved routing table</b> for a run (docs/orchestration.md, §"The conductor graph" — "routing is a
@@ -27,7 +27,10 @@ public final class RoutingTable {
                         List<CompiledModule.CompiledAction> subscribers) {}
 
     private final CompiledModule module;
-    private final Map<String, Route> resolved = new HashMap<>();
+    // Concurrent so a THREAD-tier conductor (concurrent-runtime cut 2) can resolve routes from its own
+    // thread while the main lane does the same: each Route is a pure function of the (immutable, linked)
+    // module, so a benign duplicate compute under race is harmless and the cache stays a plain map lookup.
+    private final Map<String, Route> resolved = new ConcurrentHashMap<>();
 
     public RoutingTable(CompiledModule module) {
         this.module = module;
@@ -40,11 +43,7 @@ public final class RoutingTable {
 
     /** The resolved route for an emitted {@code typeName}, computed once then cached. */
     public Route routeFor(String typeName) {
-        Route route = resolved.get(typeName);
-        if (route == null) {
-            route = new Route(module.conduitsMatching(typeName), module.actionsMatching(typeName));
-            resolved.put(typeName, route);
-        }
-        return route;
+        return resolved.computeIfAbsent(typeName,
+                t -> new Route(module.conduitsMatching(t), module.actionsMatching(t)));
     }
 }

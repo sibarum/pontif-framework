@@ -612,9 +612,12 @@ Coverage note: the untested surfaces track the still-open feature gaps — no en
     `IrStmt.Spawn` carries a `Placement` (`MAIN_LANE`/`THREAD`); printers round-trip it; unbuilt tiers
     (process/host) fail closed. Runtime effect currently identical to the main lane (`ConductorDeclTest`
     parse tests + `ConductorSeatingTest` end-to-end guard).
-  - **Cut 2 — thread-safety prep.** Make the shared interpreter state a second thread touches safe:
-    `conductorState` → concurrent (per-conductor keys), the `RoutingTable` cache → concurrent,
-    `currentConductor` → thread-local. Behavior-preserving.
+  - **Cut 2 — DONE (thread-safety prep).** The shared interpreter state a second thread touches is now
+    safe, behavior-preserving: `conductorState` → `ConcurrentHashMap` (single-owner per-conductor keys),
+    the `RoutingTable` cache → `ConcurrentHashMap` via `computeIfAbsent` (the table reference itself
+    `volatile` so a second thread sees a published table, not a stale `null`), `currentConductor` →
+    `ThreadLocal` (the firing conductor belongs to the folding thread, so per-thread save/restore can't
+    clobber). Full suite green (1135).
   - **Cut 3 — threaded execution.** A `THREAD` conductor runs on its own daemon + `Mailbox`; a cross-lane
     `emit` enqueues into its inbox (else folds inline); drive-to-quiescence drains + joins the threads.
     This is where `EmitInterface` cross-conductor cycle detection (gap 1) gets a real consumer.

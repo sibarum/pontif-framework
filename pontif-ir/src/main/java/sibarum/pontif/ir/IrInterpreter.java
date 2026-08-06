@@ -94,15 +94,26 @@ public final class IrInterpreter {
      * via {@code this.field} and mutates it via {@code this.field = …} (replacing the cell with an
      * updated record — the value stays immutable; only the cell binding moves), always while
      * {@link #currentConductor} names it. Not shared across runs, like {@link #conduitState}.
+     *
+     * <p>Concurrent (concurrent-runtime cut 2): each conductor is a <b>single-owner</b> cell — one thread
+     * ever mutates a given key — so a {@link java.util.concurrent.ConcurrentHashMap} needs no per-key
+     * atomicity, only safe cross-thread visibility of the map's entries when a THREAD-tier conductor
+     * seats alongside the main lane.
      */
-    private final Map<String, RecordValue> conductorState = new java.util.HashMap<>();
+    private final Map<String, RecordValue> conductorState = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * The conductor whose handler is currently firing, or {@code null} outside a conductor reaction.
      * Set by {@link #dispatchToActions} around a {@code #caction#} reaction so {@code this.field}
      * reads/writes resolve to that conductor's {@link #conductorState} cell.
+     *
+     * <p>Thread-local (concurrent-runtime cut 2): "the currently-firing conductor" is a property of the
+     * thread doing the firing, not of the interpreter. Once a THREAD-tier conductor folds on its own
+     * daemon, the main lane and that daemon each have their own firing conductor concurrently; a plain
+     * field would let one thread's save/restore clobber the other's. Defaults to {@code null} per thread,
+     * matching "outside a conductor reaction".
      */
-    private String currentConductor;
+    private final ThreadLocal<String> currentConductor = new ThreadLocal<>();
 
     /**
      * The runtime value bound to {@code this} inside a conductor handler — a sentinel, not a real
@@ -125,8 +136,12 @@ public final class IrInterpreter {
      * The resolved routing table (docs/orchestration.md, §"The conductor graph") — per emitted type, its owning
      * conduit(s) + subscriber actions, resolved once and cached instead of re-scanned every {@code emit}. Lazily
      * built per module via {@link #routing}; one interpreter typically evaluates one module.
+     *
+     * <p>Volatile (concurrent-runtime cut 2): its internal cache is now a {@code ConcurrentHashMap}, but
+     * that only helps if a second thread also sees the table <em>reference</em> safely published rather
+     * than a stale {@code null}. The main lane builds it before any THREAD-tier conductor drains.
      */
-    private RoutingTable routing;
+    private volatile RoutingTable routing;
 
     /** The routing table for {@code module}, rebuilding it if a different module is seen. */
     private RoutingTable routing(CompiledModule module) {
@@ -554,12 +569,12 @@ public final class IrInterpreter {
                     // sentinel (so this.field reads/writes hit the live cell), and record which
                     // conductor is firing for the duration (docs/orchestration.md).
                     seedConductorState(action.conductorName(), module, origin);
-                    String savedConductor = currentConductor;
-                    currentConductor = action.conductorName();
+                    String savedConductor = currentConductor.get();
+                    currentConductor.set(action.conductorName());
                     try {
                         eval(fn.body(), reactionEnv.extend("this", CONDUCTOR_SELF), module);
                     } finally {
-                        currentConductor = savedConductor;
+                        currentConductor.set(savedConductor);
                     }
                 }
             }
@@ -831,11 +846,12 @@ public final class IrInterpreter {
      * mis-lowered reference, not a user-facing path.
      */
     private RecordValue conductorStateCell(Origin origin) {
-        if (currentConductor == null) {
+        String firing = currentConductor.get();
+        if (firing == null) {
             throw new RuntimeCheckException(
                     "`this` state access outside a conductor handler", origin);
         }
-        return conductorState.get(currentConductor);
+        return conductorState.get(firing);
     }
 
     /**
@@ -1596,15 +1612,16 @@ public final class IrInterpreter {
         if ("#assign-self#".equals(call.functionName())) {
             String field = ((IrExpr.Str) call.args().get(0)).value();
             Object value = eval(call.args().get(1), env, module);
+            String firing = currentConductor.get();
             RecordValue cell = conductorStateCell(call.origin());
             Map<String, Object> next = new LinkedHashMap<>(cell.members());
             if (!next.containsKey(field)) {
                 throw new RuntimeCheckException(
-                        "conductor '" + currentConductor + "' has no state field '" + field + "'",
+                        "conductor '" + firing + "' has no state field '" + field + "'",
                         call.origin());
             }
             next.put(field, value);
-            conductorState.put(currentConductor, new RecordValue(next));
+            conductorState.put(firing, new RecordValue(next));
             return new RecordValue("Nothing", Map.of());   // write-only; the desugaring discards it
         }
         // Lexical scope wins: if the name is locally bound (let / param), invoke
