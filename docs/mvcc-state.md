@@ -121,18 +121,23 @@ transaction over an immutable versioned store **never conflicts with anything an
 sees one coherent world. Its writes commit at a new version on completion. Single-owner writes mean that
 commit never conflicts — **no aborts, no retries** for the single-conductor case.
 
-**Contract (DERIVED):** writes are asynchronous (a message the owner applies later); reads are
-snapshot-consistent but *as-of the pin*. Therefore **there is no read-your-writes across conductors** — if
-B sends a write to A and then reads A, B sees A as-of B's pin, not B's not-yet-applied message. This is not
-a bug to fix; it is the honest, composable semantics, and it must be documented as the contract.
+**Contract (RULED).** "Read your writes across conductors" is not a wart to document — it is **not even a
+coherent notion**, because *there is no cross-conductor write.* A conductor influences another **only by
+`emit`ting an event** the other's own handler folds; it can never write another's cell. So the only thing
+you can do to another conductor is emit to it, and the only thing you can read of it is a snapshot as-of
+your pin. A conductor reading its **own** state is the sole synchronous case: it reads *and* writes its own
+cell **synchronously**, so read-after-write *within* a handler sees the latest value (the live head, not
+the pinned snapshot). Stated once: **only the owner reads-and-writes its own state synchronously; everyone
+else only emits, and only snapshot-reads.**
 
 ---
 
 ## 4. Writes: single-owner commits (DERIVED)
 
-A write is a conductor replacing its own cell, which commits a new version. Because each cell has one
-writer, the commit is unconditional — append `(V+1, newValue)`, publish. No lock; the clock's atomic bump
-is the linearization point.
+A write is a conductor replacing **its own** cell, which commits a new version. There is no other kind of
+write (§3): a conductor never writes another's cell — it emits. Because each cell has exactly one writer,
+the commit is unconditional — append `(V+1, newValue)`, publish. No lock; the clock's atomic bump is the
+linearization point.
 
 **Deliberately deferred: multi-conductor atomic writes.** "Change A *and* B atomically" is a genuine
 multi-row transaction — it reintroduces conflict detection, a serialization point, and abort/retry, losing
@@ -206,8 +211,14 @@ become first-class, and only the genuinely non-terminating shape is refused. `Co
 its graph and its DFS; it changes its *verdict function* — reject a cycle only when no edge on it is
 delayed — and it grows the runtime rule that a back-edge is enqueued, not inlined.
 
-Until this lands, cut-3c's blanket rejection stands as the safe, conservative floor (it never admits a
-hang); the upgrade *relaxes* it without ever admitting an instantaneous loop.
+Cut-3c's blanket rejection is **interim, not a floor to keep** (RULED — write no code destined to be
+phased out). It is *correct for the current runtime*, where every cycle is instantaneous — a self- or
+cross-emit that closes a loop folds inline (cut 3b), so it genuinely hangs — and it rejects exactly the
+programs that would. It is **replaced, verdict-only** (the graph and DFS are reused, not thrown away) in
+lockstep with the runtime that makes well-clocked loops real (slice 3): the moment a back-edge can cross a
+mailbox, the verdict becomes "reject only *instantaneous* cycles" and the blanket form is **deleted, not
+retained as a fallback.** So nothing durable is written to be discarded — ~10 lines of verdict change
+hands exactly when the feature that makes them wrong arrives, and never lingers as a parallel safety net.
 
 ---
 
@@ -325,9 +336,13 @@ Slice to de-risk; each cut lands green, additive, and behavior-preserving until 
 (exactly the cut-2/3 discipline).
 
 1. **Versioned cell + snapshot read (in-process).** Turn each `conductorState` entry into a version chain;
-   add the `AtomicLong` clock; a handler pins `V₀` at fire; add a snapshot-read path. No new surface yet —
-   prove existing single-threaded and lane tests are byte-for-byte unchanged. This is a few hundred lines
-   and de-risks everything.
+   add the `AtomicLong` clock; a handler pins `V₀` at fire; commit appends `(V+1, newValue)` and bumps the
+   clock. **Own-state reads stay the live head** (§3 — read-after-write within a handler is unchanged), so
+   there is *no observable change*: the chain is built, but its only reader so far is the head, which equals
+   today's `conductorState.get`. The as-of-`V₀` snapshot-read path exists but has **no cross-conductor
+   consumer yet** (that is slice 2), so it is exercised only by a direct unit test (commit a few versions,
+   read as-of an old one, prove isolation). Prove the whole existing suite byte-for-byte unchanged. A few
+   hundred lines; de-risks everything.
 2. **Cross-conductor read queries (§3).** Expose pure snapshot queries; the read contract; tests for
    read-skew consistency (a reader sees one coherent version while another conductor commits).
 3. **Well-clocked cycles (§5–6).** Enqueue cyclic back-edges; upgrade `ConductorCycleCheck`'s verdict from
