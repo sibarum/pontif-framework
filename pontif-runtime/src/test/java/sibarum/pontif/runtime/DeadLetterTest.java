@@ -13,15 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Dead letters — the runtime observability signal for an {@code emit} that engaged nothing
- * (docs/orchestration.md, §"Honest edges"). An emit stays a no-op by design (a consumer MAY
- * subscribe; if none does, the emit costs nothing), but when a fired event reaches no <b>consumer
- * action</b>, no middleware <b>conduit</b>, and no native <b>sink</b>, the runtime logs it to stderr
- * — every time it fires — so the miss is observable rather than invisible. Not a compile-time check
- * and not an error: emit is never rejected.
+ * Dead letters — the runtime observability signal for the CONFIG GAP (docs/orchestration.md, §"Honest
+ * edges"): an {@code emit} whose <b>type has no registered consumer at all</b> — no conduit, no action
+ * bucket, no native sink. The runtime, as configured, has nothing that handles the type, so the fire is
+ * logged to stderr (every time) rather than vanishing silently. Not a compile-time check and not an
+ * error: emit is never rejected.
  *
- * <p>Role model (as ruled): the <em>Action</em> is the consumer, the <em>conduit</em> is middleware
- * a conductor orchestrates, and the native sink is an Instrument. A dead letter is when none engages.
+ * <p>Crucially it is NOT a dead letter when a consumer IS registered but declines this instance — an
+ * action whose refinement rejects the value (the intentional "muted instrument"). That is a deliberate
+ * no-op and stays silent; the dead letter fires only on the absence of any handler for the type.
  */
 class DeadLetterTest {
 
@@ -97,8 +97,10 @@ class DeadLetterTest {
     }
 
     @Test
-    void actionExistsButRefinementRejectsThisInstance_isADeadLetter() {
-        // A Ping action exists, but only for n > 10; Ping(1) reaches no consumer → dead letter.
+    void actionExistsButRefinementRejectsThisInstance_isNotADeadLetter() {
+        // A Ping action IS registered (only for n > 10). Ping(1) doesn't match its refinement, but the
+        // type IS configured to be handled — this is the intentional MUTED INSTRUMENT, not a config gap.
+        // Per the ruling (docs/orchestration.md §"Honest edges"), it stays silent: no dead letter.
         Output o = run("""
                 requires pontif.events.{Event, StdOut}
                 struct Ping(n:Int)
@@ -107,6 +109,7 @@ class DeadLetterTest {
                 main ( emit Ping(1)  0 )
                 """);
         assertFalse(o.out().contains("big"), "the refined action must not fire for n=1");
-        assertEquals(1, deadLetters(o.err()), "an instance no action accepts is a dead letter");
+        assertEquals(0, deadLetters(o.err()),
+                "a registered-but-refinement-rejected instance is the muted instrument, not a dead letter");
     }
 }

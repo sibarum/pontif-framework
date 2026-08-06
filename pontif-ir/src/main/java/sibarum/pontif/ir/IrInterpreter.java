@@ -426,22 +426,38 @@ public final class IrInterpreter {
             if (dispatched != null) dispatchToActions(dispatched, module, origin);  // null = dropped
             return;
         }
-        // No conduit (no middleware engaged): the event reaches the consumer actions directly. If
-        // none responds and no native sink claims it, the event engaged nothing — a DEAD LETTER
-        // (docs/orchestration.md, §"Honest edges"). Not an error and not silently dropped: emit stays
-        // a no-op by design (a consumer MAY subscribe), but the runtime logs the miss so it is
-        // observable rather than invisible. Logged every time — an unhandled emit in a loop logs each.
-        if (!dispatchToActions(rec, module, origin)) {
+        // No conduit: the event reaches its consumer actions (+ native sink) directly.
+        dispatchToActions(rec, module, origin);
+        // Dead letter = the CONFIG GAP (docs/orchestration.md, §"Honest edges"): the emitted TYPE has no
+        // registered consumer AT ALL — no conduit (none on this branch), no action bucket, no sink. That
+        // "nothing is configured to handle this type" miss is worth surfacing. It is NOT a dead letter
+        // when a consumer IS registered but its refinement rejects THIS instance (the intentional muted
+        // instrument) — that stays silent, per the ruling. Logged every fire of an uncovered type.
+        if (!hasCoverage(typeName, module)) {
             deadLetter(rec, origin);
         }
     }
 
     /**
-     * Records a <b>dead letter</b> — a fired event that engaged nothing (no middleware conduit, no
-     * consumer action, no sink). Writes a runtime log line every time (the emit still no-ops; this is
-     * pure observability), and notifies the {@link EventListener} so a journal/debug port can capture
-     * it too. This is the minimal runtime signal; routing dead letters to an overridable dead-letter
-     * conductor (the full docs/orchestration.md §Failure design) is a later refinement.
+     * Whether the emitted {@code typeName} has ANY registered consumer — a subscriber action bucket
+     * (trait-aware) or a native sink. Conduits are handled before the dead-letter path, so they are not
+     * re-checked here. The CONFIG-GAP predicate: the dead letter fires only when this is false, so a
+     * registered handler whose refinement rejects the current instance (the muted instrument) is covered
+     * and stays silent (docs/orchestration.md, §"Honest edges").
+     */
+    private boolean hasCoverage(String typeName, CompiledModule module) {
+        return !routing(module).routeFor(typeName).subscribers().isEmpty()
+                || NativeFunctions.get(typeName) != null;
+    }
+
+    /**
+     * Records a <b>dead letter</b> — a fired event whose <b>type has no registered consumer at all</b>
+     * (no conduit, no action bucket, no sink): the runtime, as configured, has nothing that handles this
+     * type — a config gap, not the intentional muted-instrument no-op (a registered handler that merely
+     * rejects the instance stays silent — see {@link #hasCoverage}). Writes a runtime log line every time
+     * (the emit still no-ops; this is pure observability) and notifies the {@link EventListener}. This is
+     * the minimal runtime signal; the full design (compile warning for the static case + an overridable
+     * dead-letter conductor, docs/orchestration.md §"Honest edges") is a later refinement.
      */
     private void deadLetter(RecordValue rec, Origin origin) {
         System.err.println("[pontif] dead letter: emit " + rec.typeName()
@@ -515,10 +531,9 @@ public final class IrInterpreter {
      * nothing did (an action bucket that exists but whose refinement rejects this instance counts
      * as unhandled: this instance genuinely reached no consumer).
      */
-    private boolean dispatchToActions(RecordValue rec, CompiledModule module, Origin origin) {
+    private void dispatchToActions(RecordValue rec, CompiledModule module, Origin origin) {
         String typeName = rec.typeName();
         SymExpr sym = toSymExpr(rec);
-        boolean handled = false;
         // Trait-aware routing (docs/reactive-gui.md §1): the emitted type's own bucket plus every
         // trait bucket it is-a member of, most-specific first. The per-action matchSort test below
         // still gates refinements, so a supertype Action only fires on instances it truly matches.
@@ -547,15 +562,12 @@ public final class IrInterpreter {
                         currentConductor = savedConductor;
                     }
                 }
-                handled = true;
             }
         }
         NativeFunctions.Effect sink = NativeFunctions.get(typeName);
         if (sink != null) {
             sink.apply(rec, origin);
-            handled = true;
         }
-        return handled;
     }
 
     /** The author-visible name of a conduit, recovered from its {@code #conduit#N#name} key. */

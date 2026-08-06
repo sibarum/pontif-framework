@@ -440,10 +440,12 @@ actually need is in the forbidden gap.
   static fact). A dead letter is re-emitted as `DeadLetter(event, reason)` routed to a dead-letter
   conductor — a built-in default prints to `StdOut`, an app seats its own to override. It must be the
   **terminus**: an unhandled `DeadLetter` hits a last-resort stderr and stops, never loops.
-  > ⚠️ **Shipped impl diverges (roadmap gap 2, `61d614a`).** Today's dead letter fires on "engaged
-  > nothing (no conduit/action/sink)" — i.e. the intentional no-op *this rule excludes* — and just logs
-  > to stderr; the config-gap trigger above needs the (currently-unwired) `emits`/consumes interface.
-  > Reconcile before relying on it.
+  > **Impl status (2026-08-05).** The runtime now fires the dead letter on the config gap —
+  > `IrInterpreter.hasCoverage`: no conduit, no action bucket, no sink for the type — and stays silent for
+  > the muted instrument (a registered handler that rejects the instance). It logs to stderr; the
+  > overridable `DeadLetter`-conductor form and the compile-time warning are the remaining refinements,
+  > and the cross-conductor "union of seated consumes-interfaces" coverage rides on `EmitInterface`
+  > (roadmap gap 1).
 - **Backpressure cycles.** Bounded mailboxes + a cycle in the conductor graph can deadlock (A fills B's
   inbox, B fills A's, both block in `send`). The no-`await` ruling already killed the reply-wait
   deadlock; this is the only one left — and the **static graph is exactly the tool to detect cycles at
@@ -563,11 +565,13 @@ mutable-state substrate runs real programs through the interpreter.
 1. **The `emits`/consumes interface is extracted but unused** (`f05f65f`, `EmitInterface`). Zero
    consumers — so the type-checked routing, no-consumer diagnostic, and cross-conductor cycle detection it
    was built to feed **do not exist yet**. The built-but-unwired half; wiring it is what unblocks gap 2.
-2. **The dead letter is the *opposite* of the ruling** (`61d614a`). It fires on "engaged nothing (no
-   conduit/action/sink)" — the intentional *muted instrument* the ruling explicitly excludes — not on the
-   config gap (a type outside the seated consumes-interface). See §Honest edges. **Decision needed:** align
-   to the ruling (no-consumer stays silent; reserve the dead letter for the config gap, which needs gap 1)
-   or keep the stderr line as an interim dev-diagnostic.
+2. **The dead letter — FIXED (2026-08-05), aligned to the ruling.** It now fires on the **config gap**
+   (`IrInterpreter.hasCoverage`: the emitted type has *no registered consumer at all* — no conduit, no
+   action bucket, no sink) and stays **silent** for the muted instrument (a registered handler whose
+   refinement rejects *this* instance). `DeadLetterTest`'s refinement-miss case now asserts *no* dead
+   letter. For the single-conductor runtime "no routing coverage" *is* the seated consumes-interface; the
+   cross-conductor form (coverage = union of seated conductors' interfaces) + the compile-time
+   no-consumer warning still ride on gap 1's `EmitInterface` wiring.
 3. **`conductor` member block vs the trait/struct one — NOT a real DRY problem (resolved 2026-08-05).**
    The *domain* logic (member-kind recognition) is already shared: both blocks classify a callable member
    via `isCallableMemberKind(CallKinds.builtin(…))`, so a new callable kind is added **once** and both pick
