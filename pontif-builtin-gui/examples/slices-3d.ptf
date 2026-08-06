@@ -1,0 +1,25 @@
+# 2D slices placed in a 3D scene — spatial z-position (`at`) + z-index compositing (`onTop`).
+# A surface z = sin(x)·cos(y), with three 2D curves placed at DIFFERENT world-Z planes (z = -3, 0, 3)
+# to read as slices through the volume. Each is `onTop` so it renders over the surface instead of
+# being buried in / occluded by it (the z-index promotes it out of the depth sort). Orbit to see the
+# slices standing at their depths; the surface still depth-culls against itself and the axis box.
+requires pontif.algebra.{AlgExpr, Param, Sin, Cos, Mul}
+requires pontif.math.{cos}
+requires pontif.plot.{Curve2D, curve, color, at, onTop, surfaceExpr, scene}
+
+# The 3D plot.
+let g:AlgExpr = Mul(Sin(Param("x")), Cos(Param("y")))
+
+# The 2D plot: y = cos(x), over [-6, 6]. Reused at three depths.
+struct Wave()
+assign trait Wave:Curve2D {
+  at(x:Decimal):Decimal -> cos(x)
+  domain():[{Decimal,Decimal}] -> {0.0 - 6.0, 6.0}
+}
+
+scene({title = "z = sin(x)·cos(y)  with  y = cos(x) slices at z = -3, 0, 3"}, {
+  surfaceExpr(g),
+  onTop(color(at(curve(Wave()), 0.0 - 3.0), {1.0, 0.40, 0.25})),   # red slice, front
+  onTop(color(at(curve(Wave()), 0.0),        {1.0, 0.90, 0.20})),   # yellow slice, middle
+  onTop(color(at(curve(Wave()), 3.0),        {0.35, 1.0, 0.55}))    # green slice, back
+})

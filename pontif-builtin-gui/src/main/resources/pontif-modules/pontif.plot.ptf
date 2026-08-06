@@ -11,7 +11,8 @@ exports @.{Curve2D, Cloud3D, HeightMap3D, plotLine, plotCloud, plotSurface,
            zeros, optima, asymptotes, intersections,
            ChartView, chartView, exportSvg, exportMathSvg, plotInput,
            markup, exportMarkupSvg, markupInput,
-           usesVar, varCount, surfaceExpr, plotSurfaceExpr}
+           usesVar, varCount, surfaceExpr, plotSurfaceExpr,
+           at, Layered, zIndex, onTop, behind}
 
 # A 2D curve shape: y at each x, over a domain. Assign it to your type and
 # implement the projection in the method bodies; plotLine does the rest.
@@ -206,7 +207,32 @@ function fade(v:Volume, opacity:Decimal):Volume ->
 function normals(v:Volume, stride:Int):Volume ->
   Volume(v.vs, v.xlo, v.xhi, v.ylo, v.yhi, v.zlo, v.zhi, v.opacity, true, stride)
 
-# Native: opens ONE window compositing all the given layers (3D depth occlusion).
+# --- z-index: force a layer on top of / behind the depth-sorted scene -------------
+# Every scene layer is DEPTH-CULLED by default (true 3D occlusion). A `Layered` wraps any layer with a
+# z-index — 0 is the default (depth-tested), a POSITIVE index forces it ON TOP (drawn last, ignoring
+# depth) and a NEGATIVE one BEHIND (painted over by the depth-tested geometry). Layers of equal z-index
+# keep their compose order. Used for a reference line/annotation that must stay visible, or a backdrop.
+
+# The shared shape of a composable scene layer — the marker trait `scene` accepts and `onTop`/`behind`/
+# `zIndex` wrap. Every layer struct below assigns it, so a modifier takes one static sort `[SceneLayer]`.
+trait SceneLayer{}
+assign trait Surface:SceneLayer{}
+assign trait Cloud:SceneLayer{}
+assign trait Volume:SceneLayer{}
+assign trait Curve:SceneLayer{}
+assign trait Text3D:SceneLayer{}
+
+struct Layered(inner:_, zIndex:Int)
+
+# Wrap a layer with an explicit z-index (0 = default depth-tested; >0 on top; <0 behind).
+function zIndex(layer:[SceneLayer], n:Int):Layered -> Layered(layer, n)
+# Force a layer to render ON TOP of the scene, never occluded (z-index +1).
+function onTop(layer:[SceneLayer]):Layered -> Layered(layer, 1)
+# Force a layer to render BEHIND the scene, painted over by depth-tested geometry (z-index -1).
+function behind(layer:[SceneLayer]):Layered -> Layered(layer, 0 - 1)
+
+# Native: opens ONE window compositing all the given layers (3D depth occlusion by default; a
+# `Layered`-wrapped layer is promoted/demoted out of the depth sort — see `zIndex`/`onTop`/`behind`).
 function renderScene(cfg:_, layers:_):Stream[String] -> {}
 
 # Compose layers into one orbitable window: scene({title="…"}, {surface(a), cloud(b)}).
@@ -215,8 +241,11 @@ function scene(cfg:_, layers:_):Stream[String] -> renderScene(cfg, layers)
 # A sampled 2D curve as a composable chart layer (65 points over its domain).
 # `colored` gates the {r,g,b} line colour (each channel in [0,1]): false ⇒ the
 # colour is auto-assigned from a palette by curve order; set an explicit colour
-# with `color`.
-struct Curve(xs:_, ys:_, r:Decimal, g:Decimal, b:Decimal, colored:Bool)
+# with `color`. `z` is the world-Z PLANE the curve sits on when composed into a
+# 3D `scene` (default 0 — the x/y plane; set it with `at` to place a slice, or to
+# stack several 2D slices of one 3D plot at different depths). In a flat 2D `chart`
+# `z` is ignored.
+struct Curve(xs:_, ys:_, r:Decimal, g:Decimal, b:Decimal, colored:Bool, z:Decimal)
 
 # Sample a curve into a Curve layer — the plotLine sampling, as a layer value.
 # Leaves the colour auto (palette by order); override it with `color`.
@@ -225,7 +254,7 @@ function curve(c:[Curve2D]):Curve -> (
   let step = (hi - lo) / 64.0
   let xs = &sampleIndices:[ (i:Int) -> lo + i * step ]
   let ys = &sampleIndices:[ (i:Int) -> sampleAt(c, lo + i * step) ]
-  Curve(xs, ys, 0.0, 0.0, 0.0, false)
+  Curve(xs, ys, 0.0, 0.0, 0.0, false, 0.0)
 )
 
 # Sample a curve at a chosen resolution: curve(f, 200) takes n points over the
@@ -238,16 +267,21 @@ function curve(c:[Curve2D], n:[Int:@ >= 2]):Curve -> (
   let idx = indexRange(0, n - 1)._0
   let xs = &idx:[ (i:Int) -> lo + i * step ]
   let ys = &idx:[ (i:Int) -> sampleAt(c, lo + i * step) ]
-  Curve(xs, ys, 0.0, 0.0, 0.0, false)
+  Curve(xs, ys, 0.0, 0.0, 0.0, false, 0.0)
 )
 
 # Give a curve an explicit line colour: color(curve(f), {1.0, 0.0, 0.0}) — an
 # {r,g,b} aggregate, each channel in [0,1]. Without it, curves auto-colour from a
-# palette by their order in the chart.
+# palette by their order in the chart. Preserves the curve's z-plane.
 function color(c:Curve, rgb:[{Decimal, Decimal, Decimal}]):Curve -> (
   let [{r, g, b}] = rgb
-  Curve(c.xs, c.ys, r, g, b, true)
+  Curve(c.xs, c.ys, r, g, b, true, c.z)
 )
+
+# Place a 2D curve on the world-Z plane `z` when composed into a 3D `scene` (default 0 = the x/y
+# plane). Several `at`-placed slices of one function stack at different depths: `scene({…}, {
+# at(curve(f), 0.0 - 2.0), at(curve(f), 0.0), at(curve(f), 2.0) })`.
+function at(c:Curve, z:Decimal):Curve -> Curve(c.xs, c.ys, c.r, c.g, c.b, c.colored, z)
 
 # Native: one line-chart window with all the given curves overlaid (auto axes,
 # gridlines, and tick labels; each curve gets its own colour).

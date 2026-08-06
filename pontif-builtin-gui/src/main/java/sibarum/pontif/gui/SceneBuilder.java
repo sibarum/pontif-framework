@@ -165,9 +165,10 @@ final class SceneBuilder {
 
     // --- Composed scenes: many layers, one window (docs/plotting.md) --------------------------
 
-    /** The layers of a composed scene, the world-space bounds to frame the camera to, and (when the
-     *  scene has a surface) the colorbar key for the first surface's colormap + height range. */
-    record SceneBuild(List<Layer> layers, Vec3 min, Vec3 max, Bar bar) {}
+    /** The layers of a composed scene, the world-space bounds to frame the camera to, the (when the
+     *  scene has a surface) colorbar key for the first surface's colormap + height range, and the
+     *  per-layer z-index parallel to {@code layers} (0 = default depth-tested; see {@code Layered}). */
+    record SceneBuild(List<Layer> layers, Vec3 min, Vec3 max, Bar bar, List<Integer> zIndices) {}
 
     /** A colorbar key: the colormap name and the value range {@code [lo, hi]} it spans. */
     record Bar(String colormap, double lo, double hi) {}
@@ -205,52 +206,64 @@ final class SceneBuilder {
      */
     static SceneBuild buildSceneLayers(Object layersValue) {
         List<Layer> geometry = new ArrayList<>();
+        List<Integer> geomZ = new ArrayList<>();          // z-index parallel to `geometry`
         List<RecordValue> texts = new ArrayList<>();
+        List<Integer> textZ = new ArrayList<>();
         Bounds b = new Bounds();
         Bar bar = null;
         if (layersValue instanceof RecordValue tuple) {
             for (Object member : tuple.members().values()) {
-                if (!(member instanceof RecordValue rv)) continue;
+                if (!(member instanceof RecordValue outer)) continue;
+                // A `Layered` wrapper carries a z-index around any layer — unwrap to the real record
+                // and remember the index; a bare layer is z-index 0 (default depth-tested).
+                int z = 0;
+                RecordValue rv = outer;
+                if ("Layered".equals(bareType(outer.typeName()))) {
+                    z = outer.members().get("zIndex") instanceof Long l ? l.intValue() : 0;
+                    if (!(outer.members().get("inner") instanceof RecordValue inner)) continue;
+                    rv = inner;
+                }
                 switch (bareType(rv.typeName())) {
                     case "Surface" -> {
                         Layer l = surfaceLayer(rv, b);
                         if (l != null) {
-                            geometry.add(l);
+                            addGeom(geometry, geomZ, l, z);
                             if (bar == null) bar = surfaceBar(rv);   // colorbar keys off the first surface
                             if (rv.members().get("wire") instanceof Boolean w && w) {
-                                Layer wf = wireframeLayer(rv);
-                                if (wf != null) geometry.add(wf);
+                                addGeom(geometry, geomZ, wireframeLayer(rv), z);
                             }
                         }
                     }
-                    case "Cloud" -> geometry.add(cloudLayer(rv, b));
-                    case "Curve" -> {
-                        Layer l = curveLayer3d(rv, b);   // a 2D curve superimposed on the z = 0 plane
-                        if (l != null) geometry.add(l);
-                    }
+                    case "Cloud" -> addGeom(geometry, geomZ, cloudLayer(rv, b), z);
+                    case "Curve" -> addGeom(geometry, geomZ, curveLayer3d(rv, b), z);
                     case "Volume" -> {
                         Layer l = volumeLayer(rv, b);
                         if (l != null) {
-                            geometry.add(l);
+                            addGeom(geometry, geomZ, l, z);
                             if (rv.members().get("normals") instanceof Boolean nrm && nrm) {
-                                Layer g = gradientGlyphLayer(rv);   // overlay gradient-direction glyphs
-                                if (g != null) geometry.add(g);
+                                addGeom(geometry, geomZ, gradientGlyphLayer(rv), z);  // gradient glyphs
                             }
                         }
                     }
-                    case "Raymarch" -> {
-                        Layer l = raymarchLayer(rv, b);
-                        if (l != null) geometry.add(l);
-                    }
-                    case "Text3D" -> { texts.add(rv); addText3dBounds(rv, b); }
+                    case "Raymarch" -> addGeom(geometry, geomZ, raymarchLayer(rv, b), z);
+                    case "Text3D" -> { texts.add(rv); textZ.add(z); addText3dBounds(rv, b); }
                     default -> { /* skip unknown layer kinds rather than fail the whole scene */ }
                 }
             }
         }
         List<Layer> layers = new ArrayList<>(geometry);
+        List<Integer> zIndices = new ArrayList<>(geomZ);
         float textHeight = 0.06f * b.span();   // legible relative to the scene, not a fixed world size
-        for (RecordValue rv : texts) layers.add(text3dLayer(rv, textHeight));
-        return new SceneBuild(layers, b.min(), b.max(), bar);
+        for (int i = 0; i < texts.size(); i++) {
+            layers.add(text3dLayer(texts.get(i), textHeight));
+            zIndices.add(textZ.get(i));
+        }
+        return new SceneBuild(layers, b.min(), b.max(), bar, zIndices);
+    }
+
+    /** Append a (possibly null) layer with its z-index, keeping the two parallel lists aligned. */
+    private static void addGeom(List<Layer> geometry, List<Integer> geomZ, Layer l, int z) {
+        if (l != null) { geometry.add(l); geomZ.add(z); }
     }
 
     /**
@@ -266,15 +279,16 @@ final class SceneBuilder {
         double[] ys = doubles(rv.members().get("ys"));
         int n = Math.min(xs.length, ys.length);
         if (n < 2) return null;
+        float zp = (float) memberD(rv, "z");   // the world-Z plane this 2D slice sits on (default 0)
         int segs = n - 1;
         float[] ep = new float[segs * 6];
         for (int i = 0; i < segs; i++) {
             int o = i * 6;
-            ep[o]     = (float) xs[i];     ep[o + 1] = (float) ys[i];     ep[o + 2] = 0f;
-            ep[o + 3] = (float) xs[i + 1]; ep[o + 4] = (float) ys[i + 1]; ep[o + 5] = 0f;
-            b.add(xs[i], ys[i], 0.0);
+            ep[o]     = (float) xs[i];     ep[o + 1] = (float) ys[i];     ep[o + 2] = zp;
+            ep[o + 3] = (float) xs[i + 1]; ep[o + 4] = (float) ys[i + 1]; ep[o + 5] = zp;
+            b.add(xs[i], ys[i], zp);
         }
-        b.add(xs[n - 1], ys[n - 1], 0.0);
+        b.add(xs[n - 1], ys[n - 1], zp);
         Color c = rv.members().get("colored") instanceof Boolean col && col
                 ? new Color(clamp01(memberD(rv, "r")), clamp01(memberD(rv, "g")), clamp01(memberD(rv, "b")), 1f)
                 : SERIES_PALETTE[0];
@@ -536,7 +550,12 @@ final class SceneBuilder {
      */
     static Component sceneComponent(SceneBuild build, boolean axes, boolean grid, boolean equalAspect) {
         List<Layer> raw = new ArrayList<>(build.layers());
-        if (axes) raw.addAll(axisBoxLayers(build.min(), build.max(), grid));
+        List<Integer> rawZ = new ArrayList<>(build.zIndices());
+        if (axes) {
+            List<Layer> ax = axisBoxLayers(build.min(), build.max(), grid);
+            raw.addAll(ax);
+            for (int i = 0; i < ax.size(); i++) rawZ.add(0);   // the axis box is default depth-tested
+        }
 
         Transform t = equalAspect ? Transform.IDENTITY : boxTransform(build.min(), build.max());
         float textScale = t.gmean();
@@ -545,7 +564,7 @@ final class SceneBuilder {
 
         Component.SceneView view =                       // null width/height → fills the window
                 plotSceneView();
-        SceneStates.publish(view, new SceneSnapshot(shown));
+        SceneStates.publish(view, new SceneSnapshot(shown, rawZ));
         SceneStates.setCamera(view, CameraRig.fitToBounds(CameraSpec.defaultPerspective(),
                 t.apply(build.min()), t.apply(build.max())));
         SceneStates.setInteraction(view, InteractionSpec.defaults());  // ORBIT_3D

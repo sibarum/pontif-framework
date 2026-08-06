@@ -362,6 +362,74 @@ class PlotExtensionTest {
     }
 
     @Test
+    void curve_at_placesTheSliceOnAConfigurableZPlane() {
+        // `at(curve, z)` sets the world-Z plane the 2D slice sits on (default 0), so several slices of
+        // one 3D plot can stack at different depths. Here the curve is placed at z = 2 → every polyline
+        // vertex has z = 2.
+        Extensions.install(new PlotExtension());
+        Object[] cap = new Object[1];
+        NativeCalls.NativeCall stub = (a, c) -> {
+            cap[0] = a.size() > 1 ? a.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.plot.{Curve2D, curve, at, scene}
+                        struct Diagonal()
+                        assign trait Diagonal:Curve2D {
+                          at(x:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal}] -> {-3.0, 3.0}
+                        }
+                        scene({title = "slice"}, { at(curve(Diagonal()), 2.0) })""", "slice.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "curve-at scene should run; got " + r.text());
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(cap[0]);
+        var line = assertInstanceOf(LineLayer.class, build.layers().get(0));
+        assertEquals(2.0f, line.endpoints()[2], 1e-6, "first vertex z = the placement plane");
+        assertEquals(2.0f, line.endpoints()[5], 1e-6, "second vertex z = the placement plane");
+    }
+
+    @Test
+    void zIndex_promotesALayerOutOfTheDepthSort() {
+        // onTop/behind/zIndex wrap a layer to force it on top of or behind the depth-culled scene. The
+        // z-index rides parallel to the layers into the SceneSnapshot; here the surface is promoted (+1)
+        // and the curve stays default (0).
+        Extensions.install(new PlotExtension());
+        Object[] cap = new Object[1];
+        NativeCalls.NativeCall stub = (a, c) -> {
+            cap[0] = a.size() > 1 ? a.get(1) : null;
+            return new IrInterpreter.DriveResult();
+        };
+        NativeCalls.register("renderScene", stub);
+        NativeCalls.register("pontif.plot/renderScene", stub);
+
+        PontifRunner.RunResult r = new PontifRunner().run(
+                new PontifCompiler().compileAlt("""
+                        requires pontif.algebra.{AlgExpr, Param, Add, Mul}
+                        requires pontif.plot.{Curve2D, curve, surfaceExpr, onTop, scene}
+                        struct Diagonal()
+                        assign trait Diagonal:Curve2D {
+                          at(x:Decimal):Decimal -> x
+                          domain():[{Decimal,Decimal}] -> {-3.0, 3.0}
+                        }
+                        let g:AlgExpr = Add(Mul(Param("x"), Param("x")), Mul(Param("y"), Param("y")))
+                        scene({title = "z"}, { curve(Diagonal()), onTop(surfaceExpr(g)) })""", "z.ptf"),
+                PontifRunner.Engine.INTERPRETER);
+
+        assertFalse(r.isError(), () -> "z-index scene should run; got " + r.text());
+        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(cap[0]);
+        assertEquals(2, build.layers().size(), "curve + surface");
+        assertInstanceOf(LineLayer.class, build.layers().get(0));
+        assertInstanceOf(sibarum.dasum.gui.vis.scene.TriangleLayer.class, build.layers().get(1));
+        assertEquals(0, build.zIndices().get(0).intValue(), "the curve keeps the default z-index");
+        assertEquals(1, build.zIndices().get(1).intValue(), "onTop promotes the surface to +1");
+    }
+
+    @Test
     void scene_superimposes2dCurveOnA3dSurface_inOneViewport() {
         // The superimposition step: a 2D curve and a 3D surface composite into ONE scene (one orbit
         // viewport). The curve becomes a LineLayer on the z = 0 plane; the surface a TriangleLayer
