@@ -562,9 +562,11 @@ mutable-state substrate runs real programs through the interpreter.
 
 **Tracked gaps / divergences** (2026-08-02 review — reconcile before calling the model *complete*):
 
-1. **The `emits`/consumes interface is extracted but unused** (`f05f65f`, `EmitInterface`). Zero
-   consumers — so the type-checked routing, no-consumer diagnostic, and cross-conductor cycle detection it
-   was built to feed **do not exist yet**. The built-but-unwired half; wiring it is what unblocks gap 2.
+1. **The `emits`/consumes interface — FIRST CONSUMER WIRED (2026-08-06, concurrent-runtime cut 3c).**
+   `ConductorCycleCheck` now reads `EmitInterface` to build the cross-conductor emit graph and reject a
+   seated-conductor cycle at compile time (a lower-bound, fail-open detector — see the cut-3c roadmap bullet).
+   Still to wire on the same extracted interface: **type-checked routing** and the **cross-conductor
+   no-consumer diagnostic** (the compile warning for `emit X` with no seated consumer — gap 2's static half).
 2. **The dead letter — FIXED (2026-08-05), aligned to the ruling.** It now fires on the **config gap**
    (`IrInterpreter.hasCoverage`: the emitted type has *no registered consumer at all* — no conduit, no
    action bucket, no sink) and stays **silent** for the muted instrument (a registered handler whose
@@ -638,8 +640,15 @@ Coverage note: the untested surfaces track the still-open feature gaps — no en
       bounded-inbox refinement). Tests: multi-emit quiescence + a two-`over thread` pipeline that hops
       daemon→daemon→main. Full suite green (runtime 1138). *Deferred:* THREAD conductor + `on Gpu` in one
       program (the `outstanding` list is not yet concurrent); bounded-inbox backpressure.
-    - **Cut 3c — gap-1 consumer.** Build the cross-conductor emit graph via `EmitInterface` and detect
-      cycles — the first real consumer of that static edge set.
+    - **Cut 3c — DONE (gap-1 consumer: cross-conductor cycle detection).** `ConductorCycleCheck` builds the
+      directed emit graph over the *seated* conductors — a node per `spawn`, an edge `A → B` when a handler of
+      A may `emit` a type a handler of B consumes (emits side via `EmitInterface`, consumes side via each
+      reaction's first-parameter sort) — and rejects a cycle at compile time (`CompileException` naming the
+      loop). A cycle is exactly the shape cut 3b's drive-to-quiescence can't terminate, so proving the hive
+      acyclic is fail-closed safety. Lower-bound/fail-open by design: an opaque (non-statically-pinnable)
+      `emit` or a trait-routed subscription draws no edge, so the check may *miss* a cycle but never invents
+      one (no legitimate program is rejected). Tests: a two-conductor ping-pong loop and a self-emitting
+      conductor both fail to compile; the `App → Display` DAG still compiles. Full suite green (runtime 1140).
 - **Placement — the rest of `over X targeting Y`:** `over process` (elektroq socket + a **process
   spawner**, which neither repo provides yet — new work) → `over host` / GPU, with honest
   `[… | Unreachable]` boundary types. `over thread` and `over process` share one integration pattern;

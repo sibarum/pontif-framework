@@ -45,6 +45,11 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
+        // Concurrent runtime (cut 3c): prove the seated conductors form no emit cycle before compiling them —
+        // a feedback loop across the hive is exactly what cut 3b's drive-to-quiescence cannot terminate. The
+        // first consumer of EmitInterface's statically-extracted emits set (docs/orchestration.md, gap 1).
+        ConductorCycleCheck.check(resolved);
+
         // Resolve instance-method calls (recv.m(args) → Call("Type.m", [recv,…]))
         // AND route binary operators to their dispatch overload by operand sort,
         // in ONE bottom-up walk. Method resolution and operator routing are

@@ -174,6 +174,61 @@ class ConductorSeatingTest {
     }
 
     @Test
+    void crossConductorEmitCycle_isACompileError() {
+        // Cut 3c (gap 1): A consumes Pong and emits Ping; B consumes Ping and emits Pong — a feedback loop
+        // A → B → A. Drive-to-quiescence could never terminate on that, so the emit graph is proven acyclic at
+        // compile time (the first consumer of EmitInterface). Rejected before it can hang the runtime.
+        RunResult r;
+        PrintStream oo = System.out, oe = System.err;
+        try {
+            System.setOut(new PrintStream(new ByteArrayOutputStream()));
+            System.setErr(new PrintStream(new ByteArrayOutputStream()));
+            r = runner.run(compiler.compileAlt("""
+                    requires pontif.events.{Event}
+                    struct Ping(n:Int)
+                    struct Pong(n:Int)
+                    assign trait Ping:Event{}
+                    assign trait Pong:Event{}
+                    conductor A { onPong(p:Pong) -> emit Ping(1)  p }
+                    conductor B { onPing(p:Ping) -> emit Pong(1)  p }
+                    spawn A
+                    spawn B
+                    main ( emit Ping(1)  0 )
+                    """, "cycle.ptf"), Engine.INTERPRETER);
+        } finally {
+            System.setOut(oo);
+            System.setErr(oe);
+        }
+        assertTrue(r.isError(), "a cross-conductor emit cycle must fail to compile");
+        assertTrue(r.text().toLowerCase().contains("cycle"), "the error names the cycle: " + r.text());
+    }
+
+    @Test
+    void selfEmittingConductor_isACompileError() {
+        // A degenerate cycle: a conductor that emits the very type it consumes (A → A). Same hazard, same
+        // fail-closed reject — the self-loop is caught by the DFS just like the two-node loop.
+        RunResult r;
+        PrintStream oo = System.out, oe = System.err;
+        try {
+            System.setOut(new PrintStream(new ByteArrayOutputStream()));
+            System.setErr(new PrintStream(new ByteArrayOutputStream()));
+            r = runner.run(compiler.compileAlt("""
+                    requires pontif.events.{Event}
+                    struct Tick(n:Int)
+                    assign trait Tick:Event{}
+                    conductor Loop { onTick(e:Tick) -> emit Tick(1)  e }
+                    spawn Loop
+                    main ( emit Tick(1)  0 )
+                    """, "selfloop.ptf"), Engine.INTERPRETER);
+        } finally {
+            System.setOut(oo);
+            System.setErr(oe);
+        }
+        assertTrue(r.isError(), "a self-emitting conductor is a cycle and must fail to compile");
+        assertTrue(r.text().toLowerCase().contains("cycle"), "the error names the cycle: " + r.text());
+    }
+
+    @Test
     void spawnOfUnknownConductor_isACompileError() {
         RunResult r;
         PrintStream oo = System.out, oe = System.err;
