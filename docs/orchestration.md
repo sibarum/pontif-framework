@@ -160,6 +160,61 @@ spawn Editor`) is the only conductor value that escapes; the worker itself never
 > standalone `conduit` keyword still uses the older **fold** form (`conduit N(e,s):{R,S} from INIT`,
 > docs/reactive-gui.md) and coexists with the conductor handler form.
 
+### The block grammar — a `let`-led preamble, and the return type is the effect contract (RULED 2026-08-06)
+
+One rule governs every member body (and every function body): a block is a sequence of lines; a line is
+**preamble** iff it starts with a whitelist keyword — `let` or `emit`; the **first non-whitelisted line is
+the terminal expression**, and it must be last. First token decides, no lookahead, no "parens under these
+conditions" gotcha.
+
+The whole imperative surface collapses to **two leaders**, `let` and `emit`:
+
+```
+let x = expr             # bind a fresh name
+let this.field = expr    # bind the field's NEXT VERSION (an MVCC commit, not a mutation — see below)
+let expr                 # evaluate for effect, discard any value ("let it happen")
+emit Event(args)         # emit
+```
+
+- **`let this.field = …` is not a mutation.** Under the MVCC store (`docs/mvcc-state.md`) each assignment
+  binds the field's *next immutable version*, so `let` is literally the right word — "let `this.field`
+  henceforth be …". Successive `let this.x =` within a handler rebind the working value (read-after-write
+  holds via the live head); the global version advances **once** at the handler-transaction's commit, not
+  per assignment.
+- **`let expr` (no `=`) is the effect/discard form** — `let emitAllMyTriggers()`. It reads as "let it
+  happen," is `let`-led so it is unambiguously preamble, and it subsumes value-discard (any returned value
+  is dropped). No separate `call` keyword: `let` is already a whitelist leader, so a bare invocation just
+  gets `let` in front and the language keeps its everything-is-an-expression uniformity (no statement/
+  expression split). (`call` may return later as pure sugar for `let expr` if effect-heavy code proves
+  noisy — needless now.)
+
+**The return type is the effect contract** — it alone decides whether a terminal expression follows, and it
+is what makes `Action` / `Conduit` / function fall out of one grammar (closing the gap-1/§gaps "Action
+write-only terminus" hole by construction):
+
+| Return | Meaning | Body |
+| --- | --- | --- |
+| `:T` | returns a `T` | preamble + a terminal expression of type `T` |
+| `:_` | returns a value, type inferred/unconstrained | preamble + a terminal expression |
+| `[]` **or no qualifier** | **unit** — effect-only | preamble only; **no** terminal expression |
+
+So an **Action** is the bracketless/unit case (all-preamble, effect-only); a **Conduit** carries a
+`:{E, S}` value terminus; an ordinary function carries `:T`/`:_`. `_` means "a value, don't pin the type,"
+**not** "no value."
+
+**There is no declarable bottom.** You can never *declare* a never-returning function — that is a compile
+error — so bracketless/`[]` unambiguously means unit (returns control, carries no value); there is no
+"never returns" meaning competing for the spelling, because it is illegal to write. Keep the two guarantees
+separate: forbidding the *declaration* is decidable and free; guaranteeing a body actually *halts* is the
+halting problem and stays a **totality** concern (prove where possible, plus the generator/unfold driver's
+runtime step-cap-fail-loud backstop). A fatal `abort`/`panic`/`exit` is a **runtime failure/effect**, never
+a `:[]` return — so the no-bottom rule has no exceptions.
+
+> **Status.** RULED in design conversation (James, 2026-08-06); **not yet implemented.** This is the target
+> block grammar; today's landed bodies use the space-separated form (`this.count = … emit … e`) and the
+> explicit event return. Migrating to `let`-led preamble + optional return type is a parser + checker slice
+> (the interpreter change is trivial — a unit body yields `Nothing`).
+
 ## Seating — the entry-point manifest (RULED 2026-08-02)
 
 Conductors are **static** (see *The conductor graph*), so there is no runtime conductor spawn, and `spawn`
