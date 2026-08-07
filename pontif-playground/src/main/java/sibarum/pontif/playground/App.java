@@ -132,7 +132,8 @@ public final class App {
     private static final Color DEFN_HIGHLIGHT     = new Color(0.40f, 0.62f, 1.00f, 0.45f);
     private static final Color DEFN_REF_HIGHLIGHT = new Color(0.85f, 0.75f, 0.30f, 0.30f);
 
-    /** ASCII divider between the two report sections — the mono atlas is ASCII-only. */
+    /** ASCII divider between the two report sections (could now use box-drawing — the
+     *  mono atlas is JetBrains Mono, which carries the full Box Drawing block). */
     private static final String REPORT_DIVIDER = "=".repeat(72);
 
     private static final float WHEEL_PIXELS_PER_STEP = 40f;
@@ -1219,7 +1220,14 @@ public final class App {
             // editor or any of the read-only inspector panes). Guarded on focus so
             // it only fires where there's something to search; FindBar.open is itself
             // a no-op otherwise.
-            if (ctrl && key == 'F' && !FindBar.isOpen()) {
+            if (ctrl && key == 'F') {
+                // Already open (focus may have moved to the editor): snap back
+                // to the query field with its contents selected, so a type or
+                // paste replaces the query.
+                if (FindBar.isOpen()) {
+                    FindBar.focusAndSelectQuery();
+                    return;
+                }
                 Component f = FocusState.focused();
                 if (f instanceof Component.Text t && t.selectable()) {
                     FindBar.open();
