@@ -335,7 +335,16 @@ native `Query`.
 Slice to de-risk; each cut lands green, additive, and behavior-preserving until a program opts in
 (exactly the cut-2/3 discipline).
 
-1. **Versioned cell + snapshot read (in-process).** Turn each `conductorState` entry into a version chain;
+1. **Versioned cell + snapshot read (in-process). — DONE (2026-08-07).** `IrInterpreter` now carries a
+   global `versionClock` (`AtomicLong`), a per-conductor committed `VersionChain` (newest-first immutable
+   `(version, value)` nodes, `volatile` head), and a `pinnedVersion` thread-local set at each handler fire.
+   The transaction unit is one handler firing: it pins the clock, and on completion commits **one** new
+   version iff the working head moved (reference compare — an assign makes a fresh `RecordValue`, so a
+   read-only handler churns nothing). Seed is version 0. Own-state reads still hit the live working head, so
+   the whole suite is byte-for-byte unchanged (1142, +2 new). `stateAsOf(conductor, v)` / `currentVersion()`
+   are the read surface (public; slice 2's cross-conductor reads call the former), exercised now by
+   `MvccVersionedStateTest` (one-version-per-transaction + snapshot isolation + read-only-commits-nothing).
+   *Original plan below, for reference:*
    add the `AtomicLong` clock; a handler pins `V₀` at fire; commit appends `(V+1, newValue)` and bumps the
    clock. **Own-state reads stay the live head** (§3 — read-after-write within a handler is unchanged), so
    there is *no observable change*: the chain is built, but its only reader so far is the head, which equals

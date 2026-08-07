@@ -107,6 +107,61 @@ public final class IrInterpreter {
      */
     private final Map<String, RecordValue> conductorState = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // ── MVCC versioned state, slice 1 (docs/mvcc-state.md) ──────────────────────────────────────────
+    //
+    // The runtime is a transactional store: each conductor's state is a version chain of immutable
+    // snapshots, and the transaction unit is ONE handler firing. This slice lays the substrate — a global
+    // logical clock, a committed version chain per conductor, and a per-thread version pin — WITHOUT
+    // exposing it: own-state reads still hit the live working head ({@link #conductorState}), so behavior is
+    // byte-for-byte unchanged. Cross-conductor as-of reads are the next slice; the {@link #stateAsOf} path
+    // exists here only for a direct test. Because values are immutable and structurally shared, retaining a
+    // chain of versions is nearly free (this is why Pontif is entitled to MVCC — see the doc's thesis).
+
+    /** The global logical clock: monotone version, bumped once per committing handler-transaction. */
+    private final java.util.concurrent.atomic.AtomicLong versionClock = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * The committed version chain of each conductor — the as-of-readable history, distinct from the live
+     * working head in {@link #conductorState}. Seeded at version 0 (a conductor's init is its state for all
+     * time until it first commits); a handler-transaction that changes the state appends one new version at
+     * commit. Per-conductor single-owner writes, so the map is concurrent but each chain is touched by one
+     * thread. Not shared across runs.
+     */
+    private final Map<String, VersionChain> committed = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The version a firing handler is pinned to — the clock value at fire, i.e. the transaction's read
+     * snapshot (its cross-conductor reads see the world as-of this, never a peer's in-progress state). Set
+     * around a reaction like {@link #currentConductor}; slice 1 records it, slice 2 reads from it.
+     */
+    private final ThreadLocal<Long> pinnedVersion = new ThreadLocal<>();
+
+    /**
+     * A conductor's committed history: a newest-first immutable linked chain of {@code (version, value)}
+     * snapshots. {@code head} is {@code volatile} so a commit on the owning thread publishes safely to any
+     * lane that later reads a snapshot. Structural sharing across {@link RecordValue}s keeps old versions
+     * cheap. {@link #asOf} is the snapshot read; {@link #latest} is the newest committed value.
+     */
+    private static final class VersionChain {
+        private record Node(long version, RecordValue value, Node prev) {}
+        private volatile Node head;
+
+        VersionChain(long version, RecordValue seed) { head = new Node(version, seed, null); }
+
+        /** Append a new committed version (owning thread only). */
+        void commit(long version, RecordValue value) { head = new Node(version, value, head); }
+
+        /** The newest committed value. */
+        RecordValue latest() { return head.value(); }
+
+        /** The value as-of {@code v}: the newest snapshot with version ≤ {@code v} (the seed, at worst). */
+        RecordValue asOf(long v) {
+            Node n = head;
+            while (n != null && n.version() > v) n = n.prev();
+            return n == null ? null : n.value();
+        }
+    }
+
     /**
      * The conductor whose handler is currently firing, or {@code null} outside a conductor reaction.
      * Set by {@link #dispatchToActions} around a {@code #caction#} reaction so {@code this.field}
@@ -735,13 +790,24 @@ public final class IrInterpreter {
                     // A conductor handler: seed its state cell once, bind `this` to the self
                     // sentinel (so this.field reads/writes hit the live cell), and record which
                     // conductor is firing for the duration (docs/orchestration.md).
-                    seedConductorState(action.conductorName(), module, origin);
+                    String conductor = action.conductorName();
+                    seedConductorState(conductor, module, origin);
                     String savedConductor = currentConductor.get();
-                    currentConductor.set(action.conductorName());
+                    Long savedPin = pinnedVersion.get();
+                    currentConductor.set(conductor);
+                    // MVCC (slice 1): pin the transaction's read snapshot to the clock at fire — cross-conductor
+                    // reads (slice 2) resolve as-of this, never a peer's in-progress state.
+                    pinnedVersion.set(versionClock.get());
                     try {
                         eval(fn.body(), reactionEnv.extend("this", CONDUCTOR_SELF), module);
+                        // Commit the transaction: if the handler changed the working head, append ONE new
+                        // committed version (per-transaction, not per-assignment — so a peer never observes a
+                        // half-updated conductor). No change ⇒ no version churn (reference compare: an assign
+                        // makes a fresh RecordValue; an untouched cell is the same object we last committed).
+                        commitConductorState(conductor);
                     } finally {
                         currentConductor.set(savedConductor);
+                        pinnedVersion.set(savedPin);
                     }
                 }
             }
@@ -1039,6 +1105,40 @@ public final class IrInterpreter {
                     "conductor '" + conductorName + "' state seed must be a record", origin);
         }
         conductorState.put(conductorName, rec);
+        // MVCC (slice 1): the init IS this conductor's state as-of version 0 — visible to any snapshot
+        // read until the conductor first commits. Same RecordValue object as the working head, so an
+        // untouched handler compares equal (by reference) and commits nothing.
+        committed.put(conductorName, new VersionChain(0L, rec));
+    }
+
+    /**
+     * Commits a conductor's transaction (MVCC, slice 1): if its working head ({@link #conductorState})
+     * has moved off the last committed value, bump the clock and append the new version to its
+     * {@link #committed} chain. Reference compare — an assignment produces a fresh {@link RecordValue},
+     * an untouched cell is the very object last committed — so a read-only handler adds no version.
+     * Single-owner: only this conductor's thread commits its chain.
+     */
+    private void commitConductorState(String conductorName) {
+        VersionChain chain = committed.get(conductorName);
+        RecordValue working = conductorState.get(conductorName);
+        if (chain != null && working != chain.latest()) {
+            chain.commit(versionClock.incrementAndGet(), working);
+        }
+    }
+
+    /**
+     * A conductor's state as-of {@code version} — the newest committed snapshot with version ≤ it (the
+     * seed at worst). The read path MVCC's cross-conductor snapshot reads will use (slice 2); exposed now
+     * for the substrate test. {@code null} if the conductor was never seeded.
+     */
+    public RecordValue stateAsOf(String conductorName, long version) {
+        VersionChain chain = committed.get(conductorName);
+        return chain == null ? null : chain.asOf(version);
+    }
+
+    /** The current logical clock — the version a handler firing now would pin. */
+    public long currentVersion() {
+        return versionClock.get();
     }
 
     private static boolean isNothing(Object v) {
