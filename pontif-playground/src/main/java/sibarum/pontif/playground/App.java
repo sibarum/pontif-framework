@@ -1317,9 +1317,10 @@ public final class App {
             Component layoutRoot = LatestLayout.root();
             if (lr == null || layoutRoot == null) return;
 
-            // When an overlay is active, hit-test against its tree exclusively
-            // (modal behavior); when none, the main UI.
-            Component hitRoot = OverlayStack.activeInputRoot(layoutRoot);
+            // A modal overlay captures hit-testing exclusively; a non-modal one
+            // (the Find bar) only where the pointer is over it, so hover on the
+            // editor beneath keeps working while the bar floats above.
+            Component hitRoot = OverlayStack.inputRootAt(layoutRoot, lr, (float) sx, (float) sy);
             Component hit = HitTest.test(hitRoot, lr, (float) sx, (float) sy);
             HoverState.update(hit);
             // Ctrl-hover: underline the editor identifier under the mouse and show
@@ -1344,24 +1345,33 @@ public final class App {
                     return;
                 }
                 // Overlay capture: route the press through the topmost overlay's
-                // component tree. Click-outside on a modal dismisses it.
+                // component tree. A press OUTSIDE the topmost overlay dismisses a
+                // modal one; for a non-modal overlay (the Find bar) it instead
+                // falls through to the main UI below, so the user can click and
+                // select in the editor while the bar stays open.
                 if (OverlayStack.isActive()) {
                     LayoutResult lr = LatestLayout.result();
-                    if (OverlayStack.isOutsideTopmost(lr,
-                            (float) InputState.mouseX(), (float) InputState.mouseY())) {
-                        if (OverlayStack.anyModal()) OverlayStack.pop();
-                        pressTarget = null;
+                    boolean outside = OverlayStack.isOutsideTopmost(lr,
+                            (float) InputState.mouseX(), (float) InputState.mouseY());
+                    if (outside) {
+                        if (OverlayStack.anyModal()) {
+                            OverlayStack.pop();
+                            pressTarget = null;
+                            return;
+                        }
+                        // Non-modal, pressed outside: fall through to the normal
+                        // dispatch path below against the main UI.
+                    } else {
+                        Component overlayRoot = OverlayStack.activeInputRoot(null);
+                        Component hit = (lr != null && overlayRoot != null)
+                            ? HitTest.test(overlayRoot, lr,
+                                (float) InputState.mouseX(), (float) InputState.mouseY())
+                            : null;
+                        pressTarget = hit;
+                        if (hit != null) FocusState.set(hit);
+                        TextInputController.onMouseDown(hit, InputState.mouseX(), InputState.mouseY(), shift);
                         return;
                     }
-                    Component overlayRoot = OverlayStack.activeInputRoot(null);
-                    Component hit = (lr != null && overlayRoot != null)
-                        ? HitTest.test(overlayRoot, lr,
-                            (float) InputState.mouseX(), (float) InputState.mouseY())
-                        : null;
-                    pressTarget = hit;
-                    if (hit != null) FocusState.set(hit);
-                    TextInputController.onMouseDown(hit, InputState.mouseX(), InputState.mouseY(), shift);
-                    return;
                 }
                 // Tab cells aren't components (TabsController synthesizes their
                 // geometry at render time) — same treatment as scrollbar thumbs.
@@ -1390,7 +1400,8 @@ public final class App {
                 ScrollbarController.onMouseUp();
 
                 LayoutResult lr2 = LatestLayout.result();
-                Component dispatchRoot = OverlayStack.activeInputRoot(LatestLayout.root());
+                Component dispatchRoot = OverlayStack.inputRootAt(LatestLayout.root(), lr2,
+                    (float) InputState.mouseX(), (float) InputState.mouseY());
                 Component released = (lr2 != null && dispatchRoot != null)
                     ? HitTest.test(dispatchRoot, lr2, (float) InputState.mouseX(), (float) InputState.mouseY())
                     : null;
@@ -1431,7 +1442,8 @@ public final class App {
 
         GlfwCallbacks.setScrollListener((win, xOff, yOff) -> {
             LayoutResult lr = LatestLayout.result();
-            Component layoutRoot = OverlayStack.activeInputRoot(LatestLayout.root());
+            Component layoutRoot = OverlayStack.inputRootAt(LatestLayout.root(), lr,
+                (float) InputState.mouseX(), (float) InputState.mouseY());
             if (lr == null || layoutRoot == null) return;
 
             boolean shift = Glfw.glfwGetKey(window.handle(), Glfw.GLFW_KEY_LEFT_SHIFT)  == Glfw.GLFW_PRESS
