@@ -1,0 +1,42 @@
+requires pontif.core.{Stream}
+
+# Struct-inherited trait impls.
+#
+# A trait impl assigned to a BASE struct is inherited by every sub-struct, the same way a
+# `Sub` value already widens to `Base`. You write the `walk` behaviour ONCE per abstract
+# base (`Leaf`, `BiOp`) and every concrete leaf/node picks it up through its `:Base` edge —
+# no per-leaf impl, no free-function dispatch.
+
+trait Expr {
+  walk():[Method():Stream[Expr]]
+}
+
+# Two abstract bases carve the AST in half: atoms and binary operators.
+struct Leaf()
+struct BiOp(left:Expr, right:Expr)
+
+# Concrete leaves — each is-a Leaf, so each inherits Leaf.walk.
+struct Residue:Leaf(exp:Int, sign:Bool)
+struct NonzeroInteger:Leaf(value:[Int:@!=0])
+
+# Concrete nodes — each is-a BiOp, so each inherits BiOp.walk.
+struct Exp:BiOp(left:Expr, right:Expr)
+struct Log:BiOp(left:Expr, right:Expr)
+
+# The behaviour is written once per base. `walk` is defined for Leaf and BiOp only…
+assign trait Leaf:Expr {
+  walk():Stream[Expr] -> {this}
+}
+assign trait BiOp:Expr {
+  walk():Stream[Expr] -> this.left.walk() + {this} + this.right.walk()
+}
+
+# …yet it resolves on the concrete subtypes, through every receiver view:
+let two   = NonzeroInteger(2)
+let omega = Residue(-1, false)
+
+let tree:Exp = Exp(two, Log(omega, two))   # Exp inherits BiOp.walk; Log inherits it too
+
+# Concrete receiver (Exp), base-typed receiver (BiOp), and trait-typed receiver (Expr)
+# all dispatch to the inherited impl. In-order flatten: left subtree, this, right subtree.
+tree.walk()

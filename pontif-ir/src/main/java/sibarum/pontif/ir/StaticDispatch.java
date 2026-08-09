@@ -145,6 +145,16 @@ public final class StaticDispatch {
         return classify(overloads, argNarrowings, registry, java.util.Map.of());
     }
 
+    /** As {@link #classify(List, List, java.util.Map, java.util.Map, java.util.Map)} with no
+     *  struct-ancestry view (struct inheritance not consulted). */
+    public static Verdict classify(
+            List<IrStmt.FunctionDecl> overloads,
+            List<IrSort> argNarrowings,
+            java.util.Map<String, Sort> registry,
+            java.util.Map<String, java.util.Set<String>> traitImpls) {
+        return classify(overloads, argNarrowings, registry, traitImpls, java.util.Map.of());
+    }
+
     /**
      * The call-level three-way verdict (see {@link Verdict}). Reuses the same
      * per-overload {@link #matchStatus} {@link #resolve} uses, then combines:
@@ -167,7 +177,8 @@ public final class StaticDispatch {
             List<IrStmt.FunctionDecl> overloads,
             List<IrSort> argNarrowings,
             java.util.Map<String, Sort> registry,
-            java.util.Map<String, java.util.Set<String>> traitImpls) {
+            java.util.Map<String, java.util.Set<String>> traitImpls,
+            java.util.Map<String, java.util.Set<String>> structAncestors) {
         boolean anyArityMatch = false;
         boolean anyMatch = false;
         boolean anyUndecided = false;
@@ -176,7 +187,7 @@ public final class StaticDispatch {
                 continue;  // arity mismatch — not a refinement failure; abstain below
             }
             anyArityMatch = true;
-            switch (gateFit(ov, argNarrowings, registry, traitImpls)) {
+            switch (gateFit(ov, argNarrowings, registry, traitImpls, structAncestors)) {
                 case MATCHES -> anyMatch = true;
                 case UNDECIDED -> anyUndecided = true;
                 case EXCLUDED -> { /* arg provably disjoint from this overload */ }
@@ -203,7 +214,8 @@ public final class StaticDispatch {
 
     private static OverloadFit gateFit(IrStmt.FunctionDecl ov, List<IrSort> args,
                                        java.util.Map<String, Sort> registry,
-                                       java.util.Map<String, java.util.Set<String>> traitImpls) {
+                                       java.util.Map<String, java.util.Set<String>> traitImpls,
+                                       java.util.Map<String, java.util.Set<String>> structAncestors) {
         Simplifier simp = new Simplifier(List.of()).withRegistry(registry);
         Sort[] argSorts = new Sort[args.size()];
         Map<String, SymExpr> siblingValues = new HashMap<>();
@@ -233,8 +245,15 @@ public final class StaticDispatch {
                 if (pr instanceof ProofResult.Passed) {
                     continue;
                 }
+                // Struct inheritance: a `Sub` arg is-a an unrefined `Base` param. Refinements is a
+                // refinement engine and can't see the nominal base chain (imply is Failed here), so
+                // consult the ancestry view. A widen to the bare base is total (no predicate to satisfy),
+                // so this is a genuine MATCHES, not merely not-disjoint — mirrors Assignability's widen.
+                if (isStructBaseWiden(argSort, paramSort, structAncestors)) {
+                    continue;
+                }
                 allPassed = false;
-                if (provablyDisjoint(argSort, paramSort, simp, traitImpls)) {
+                if (provablyDisjoint(argSort, paramSort, simp, traitImpls, structAncestors)) {
                     return OverloadFit.EXCLUDED;  // arg ∩ this param = ∅ → can't route here
                 }
             } catch (CompileException ce) {
@@ -264,7 +283,8 @@ public final class StaticDispatch {
      * and is correctly excluded — a genuine misroute the gate should catch.
      */
     private static boolean provablyDisjoint(Sort arg, Sort param, Simplifier simp,
-                                            java.util.Map<String, java.util.Set<String>> traitImpls) {
+                                            java.util.Map<String, java.util.Set<String>> traitImpls,
+                                            java.util.Map<String, java.util.Set<String>> structAncestors) {
         if (isIntRefined(arg) && isIntRefined(param)) {
             SymExpr self = SymExpr.var("·self");  // synthetic binder, won't collide
             return Interval.of(self, List.of(
@@ -276,7 +296,35 @@ public final class StaticDispatch {
         if (traitImpls.getOrDefault(arg.name(), java.util.Set.of()).contains(param.name())) {
             return false;
         }
+        // The arg's struct is-a the param's struct through the inheritance chain (`Sub:Base`) → not
+        // disjoint, for the same reason: Refinements can't see the nominal base chain. (A refined base
+        // param stays UNDECIDED rather than excluded — the predicate may or may not hold, so abstain.)
+        if (isStructBaseWiden(arg, param, structAncestors)) {
+            return false;
+        }
         return Refinements.imply(arg, param, simp) instanceof ProofResult.Failed;
+    }
+
+    /**
+     * Whether {@code arg}'s struct is-a {@code param}'s struct through the inheritance chain and the
+     * {@code param} carries no refinement predicate — an unconditional widen (`Exp is-a BiOp`), the call
+     * gate's counterpart of {@link sibarum.pontif.types.Assignability}'s nominal-base widen. Compared by
+     * <em>bare</em> name (the ancestry view is bare-keyed). A refined param is excluded here so its
+     * predicate obligation is not silently dropped — that case falls through to the abstain path.
+     */
+    private static boolean isStructBaseWiden(Sort arg, Sort param,
+            java.util.Map<String, java.util.Set<String>> structAncestors) {
+        if (arg == null || param == null || param.isRefined()) return false;
+        String argBare = bareName(arg.name());
+        String paramBare = bareName(param.name());
+        if (argBare == null || paramBare == null) return false;
+        return structAncestors.getOrDefault(argBare, java.util.Set.of()).contains(paramBare);
+    }
+
+    private static String bareName(String name) {
+        if (name == null) return null;
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
     }
 
     private static boolean isIntRefined(Sort s) {

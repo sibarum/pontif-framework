@@ -269,6 +269,11 @@ public final class IrCompiler {
                     if (ta.sort() instanceof IrSort.Trait t) {
                         dispatch.traitRegistry().declareTrait(t.name(), t.baseTrait());
                     }
+                    // Record the struct is-a base so a trait impl assigned to the base is inherited by
+                    // this struct (the runtime fallback walks the chain to the ancestor that declares it).
+                    if (ta.sort() instanceof IrSort.Structural s && s.baseSort() != null) {
+                        dispatch.traitRegistry().declareStruct(s.name(), Coercions.baseName(s.baseSort()));
+                    }
                 }
                 case IrStmt.Proof p -> {
                     // proof metadata; not compiled/evaluated — but an `f:Algebraic` claim

@@ -282,4 +282,38 @@ public record InferenceContext(
         }
         return reg;
     }
+
+    /**
+     * The struct-inheritance ancestry view for {@link StaticDispatch}: each struct's <em>bare</em>
+     * name → the set of its (transitive, proper) base-struct bare names ({@code Exp → {BiOp}}). A trait
+     * impl assigned to a base struct is inherited by every descendant, so the call gate must not read a
+     * descendant arg as provably disjoint from a base-struct parameter — it consults this view exactly
+     * as it consults the trait-satisfaction view. Bare-keyed so it matches regardless of the link stage's
+     * qualification. Cycle-guarded.
+     */
+    public Map<String, Set<String>> structAncestors() {
+        Map<String, Set<String>> out = new java.util.HashMap<>();
+        for (Map.Entry<String, IrSort.Structural> e : structDefs.entrySet()) {
+            Set<String> ancestors = new LinkedHashSet<>();
+            Set<String> guard = new java.util.HashSet<>();
+            IrSort.Structural s = e.getValue();
+            while (s != null && s.baseSort() != null) {
+                String base = Coercions.baseName(s.baseSort());
+                if (base == null || !guard.add(base)) break;
+                String bareBase = bareName(base);
+                ancestors.add(bareBase);
+                IrSort.Structural next = structDefs.get(base);
+                if (next == null) next = structDefs.get(bareBase);
+                s = next;
+            }
+            out.put(bareName(e.getKey()), ancestors);
+        }
+        return out;
+    }
+
+    private static String bareName(String name) {
+        if (name == null) return null;
+        int slash = name.lastIndexOf('/');
+        return slash < 0 ? name : name.substring(slash + 1);
+    }
 }

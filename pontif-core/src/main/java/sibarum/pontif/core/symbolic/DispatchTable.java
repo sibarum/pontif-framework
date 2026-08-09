@@ -76,6 +76,11 @@ public final class DispatchTable {
             // registered traits get strict satisfaction-checking, overriding
             // Refinements.satisfies's default permissive Passed.
             call = enforceTraitParams(call, c, arguments, simplifier);
+            // Struct-inheritance param matching: a `Sub` value satisfies an (unrefined) `Base`
+            // struct parameter (`Exp is-a BiOp`). Refinements can't see the nominal base chain,
+            // so a widen would otherwise be a StaticallyFailed — the runtime counterpart of the
+            // call gate's struct-base widen (StaticDispatch#isStructBaseWiden).
+            call = enforceStructBaseParams(call, c, arguments);
             if (call.canExecute()) {
                 matching.add(new MatchingCandidate(c, call));
             }
@@ -184,6 +189,53 @@ public final class DispatchTable {
     }
 
     /**
+     * Upgrades a struct-base widen to {@code StaticallyPassed}: a {@link SymExpr.Record} argument
+     * whose concrete type is-a the parameter's (unrefined) struct type through the inheritance chain
+     * ({@code Exp is-a BiOp}) satisfies that parameter. {@link Refinements#satisfies} is a refinement
+     * engine and can't see the nominal base chain, so it reports such a widen as {@code Failed}; this
+     * restores it, mirroring {@link #enforceTraitParams} for traits and the call gate's
+     * {@code StaticDispatch#isStructBaseWiden}. A refined parameter is left untouched (its predicate
+     * obligation must still be checked); a same-type argument already passed and is unaffected.
+     */
+    private CompiledCall enforceStructBaseParams(
+            CompiledCall call, FunctionDecl decl, List<SymExpr> arguments) {
+        List<CompiledCall.ParameterOutcome> updated = new ArrayList<>(call.outcomes().size());
+        boolean changed = false;
+        for (CompiledCall.ParameterOutcome outcome : call.outcomes()) {
+            int i = outcome.parameterIndex();
+            sibarum.pontif.core.types.Sort paramSort = decl.parameters().get(i).sort();
+            SymExpr arg = arguments.get(i);
+            boolean widens = !paramSort.isRefined()
+                    && !isTraitNameSort(paramSort)
+                    && arg instanceof SymExpr.Record r
+                    && r.typeName() != null
+                    && structDescendantOf(r.typeName(), paramSort.name());
+            if (widens && !(outcome instanceof CompiledCall.ParameterOutcome.StaticallyPassed)) {
+                updated.add(new CompiledCall.ParameterOutcome.StaticallyPassed(i));
+                changed = true;
+            } else {
+                updated.add(outcome);
+            }
+        }
+        return changed ? new CompiledCall(decl, arguments, updated) : call;
+    }
+
+    /** Whether {@code type}'s struct-inheritance chain reaches {@code ancestorStruct} as a PROPER base
+     *  (self excluded — a same-type mismatch must not be masked). Bare-tolerant, since the two names may
+     *  be qualified at different link stages. */
+    private boolean structDescendantOf(String type, String ancestorStruct) {
+        String wantBare = QualifiedName.memberOf(ancestorStruct);
+        List<String> ancestry = traitRegistry.structAncestry(type);
+        for (int i = 1; i < ancestry.size(); i++) {  // skip index 0 (the type itself)
+            String anc = ancestry.get(i);
+            if (anc.equals(ancestorStruct) || QualifiedName.memberOf(anc).equals(wantBare)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * True iff {@code sort} is a bare-named sort whose name is registered
      * as a trait (has at least one satisfier). False for refined,
      * structural, function, or unrecognized bare-named sorts.
@@ -233,12 +285,19 @@ public final class DispatchTable {
         String concreteType = r.typeName();  // already an FQN when linked (module/Type)
         if (concreteType == null) return null;
         if (!traitRegistry.satisfies(traitName, concreteType)) return null;
-        String redirected = concreteType + "." + methodName;  // module/Type.method
-        DispatchResult result = resolveDirect(redirected, arguments, simplifier);
-        // Suppress NoMatch fallback (let the caller report the original
-        // trait-lookup error); a real Resolved or Ambiguous result wins.
-        if (result instanceof DispatchResult.NoMatch) return null;
-        return result;
+        // Walk the concrete type's struct-inheritance chain (nearest-first, self included) to the
+        // ancestor that actually declares the method: an impl assigned to a base struct
+        // (`assign trait Base:Trait`) is keyed `Base.method`, not `Sub.method`, so a `Sub` value
+        // must redirect past its own name up to `Base`. The chain is linear, so the first hit is the
+        // most-specific impl. A single-element chain (no base) reproduces the old direct redirect.
+        for (String type : traitRegistry.structAncestry(concreteType)) {
+            String redirected = type + "." + methodName;  // module/Type.method
+            DispatchResult result = resolveDirect(redirected, arguments, simplifier);
+            // Suppress NoMatch (let the caller report the original trait-lookup error); a real
+            // Resolved or Ambiguous result wins.
+            if (!(result instanceof DispatchResult.NoMatch)) return result;
+        }
+        return null;
     }
 
     private static boolean isStrictlyMoreSpecific(FunctionDecl a, FunctionDecl b, Simplifier simp) {

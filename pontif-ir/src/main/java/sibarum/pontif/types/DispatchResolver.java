@@ -1,7 +1,9 @@
 package sibarum.pontif.types;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import sibarum.pontif.ir.InferenceContext;
 import sibarum.pontif.ir.IrSort;
@@ -59,17 +61,46 @@ final class DispatchResolver {
         if (typeName == null) {
             return new DispatchResult.Residual(List.of());
         }
-        String key = typeName + "." + query.selector();
-        // Tolerate the linker's module qualification: a bare receiver nominal (e.g. a
-        // metareference's builtin `AlgebraicDispatch`) routes to a `mod/Type.method` key when
-        // the impl lives in a required module. Mirrors the attribute-producer lookup.
-        String resolvedKey = ctx.methodKeys().contains(key) ? key
-                : ctx.methodKeys().stream()
-                        .filter(k -> k.endsWith("/" + key)).findFirst().orElse(null);
-        if (resolvedKey != null) {
-            return new DispatchResult.Ambiguous(ctx.overloads().getOrDefault(resolvedKey, List.of()));
+        // Walk the receiver's struct-inheritance chain (nearest-first, self included): a method
+        // assigned to an ancestor struct (`assign trait Base:Trait`) is keyed `Base.method`, and a
+        // `Sub:Base` receiver inherits it. This is the compile-time mirror of the runtime trait
+        // fallback (DispatchTable#resolveTraitFallback) and Assignability's nominal-base widen — the
+        // three engines now consult the same base chain. The chain is linear, so the first hit is the
+        // most-specific impl; a struct with no base reproduces the old single-key lookup.
+        Set<String> seen = new HashSet<>();
+        String cur = typeName;
+        while (cur != null && seen.add(cur)) {
+            String resolvedKey = resolveMethodKey(cur, query.selector(), ctx);
+            if (resolvedKey != null) {
+                return new DispatchResult.Ambiguous(ctx.overloads().getOrDefault(resolvedKey, List.of()));
+            }
+            cur = structBaseName(cur, ctx);
         }
         return new DispatchResult.Residual(List.of());
+    }
+
+    /**
+     * Resolves the routable method key for {@code typeName.selector}, tolerating the linker's module
+     * qualification: a bare receiver nominal (e.g. a metareference's builtin {@code AlgebraicDispatch})
+     * routes to a {@code mod/Type.method} key when the impl lives in a required module. Mirrors the
+     * attribute-producer lookup. Returns the resolved key or null.
+     */
+    private static String resolveMethodKey(String typeName, String selector, InferenceContext ctx) {
+        String key = typeName + "." + selector;
+        if (ctx.methodKeys().contains(key)) return key;
+        return ctx.methodKeys().stream()
+                .filter(k -> k.endsWith("/" + key)).findFirst().orElse(null);
+    }
+
+    /** The is-a base struct name of {@code typeName} (or null) — bare-tolerant, since {@code structDefs}
+     *  may be keyed bare while the receiver nominal is qualified across link stages. */
+    private static String structBaseName(String typeName, InferenceContext ctx) {
+        IrSort.Structural s = ctx.structDefs().get(typeName);
+        if (s == null) {
+            int slash = typeName.lastIndexOf('/');
+            if (slash >= 0) s = ctx.structDefs().get(typeName.substring(slash + 1));
+        }
+        return s == null || s.baseSort() == null ? null : baseName(s.baseSort());
     }
 
     /**
@@ -113,7 +144,8 @@ final class DispatchResolver {
         if (res instanceof StaticDispatch.Result.Resolved r) {
             return new DispatchResult.Resolved(r.decl());
         }
-        return switch (StaticDispatch.classify(overloads, argSorts, registry, ctx.traitImpls())) {
+        return switch (StaticDispatch.classify(
+                overloads, argSorts, registry, ctx.traitImpls(), ctx.structAncestors())) {
             case FAILED -> new DispatchResult.Unsatisfiable(
                     "no target satisfies '" + query.selector() + "' at the given argument sorts");
             case PASSED -> new DispatchResult.Ambiguous(overloads);

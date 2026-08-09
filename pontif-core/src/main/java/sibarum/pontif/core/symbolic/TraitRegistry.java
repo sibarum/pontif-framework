@@ -1,7 +1,9 @@
 package sibarum.pontif.core.symbolic;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,6 +28,11 @@ public final class TraitRegistry {
     // receiver resolves a T value. Consulted query-time (#satisfies), so it is
     // independent of register/declare ordering.
     private final Map<String, String> baseTrait = new HashMap<>();
+    // Struct-inheritance chain: each struct's is-a base (`struct Sub : Base` → Sub↦Base). A trait
+    // impl assigned to Base (`assign trait Base:Trait`) covers every Sub:Base — the same way Assignability
+    // widens a Sub value to Base — so #satisfies walks this chain, mirroring #isAncestorTrait for traits.
+    // Consulted query-time, so it is independent of register/declare ordering.
+    private final Map<String, String> structBase = new HashMap<>();
 
     /**
      * Bare-on-<em>both</em>-sides satisfaction: does some registered type whose bare name is {@code bareType}
@@ -79,6 +86,53 @@ public final class TraitRegistry {
     }
 
     /**
+     * Records {@code structName}'s is-a base struct ({@code struct Sub : Base} ⟹
+     * {@code declareStruct("Sub", "Base")}), so a trait impl assigned to {@code Base} is
+     * inherited by {@code Sub} through {@link #satisfies} / {@link #structAncestry}. A
+     * null/empty base records no inheritance. Idempotent.
+     */
+    public TraitRegistry declareStruct(String structName, String base) {
+        if (structName == null || structName.isEmpty()) {
+            throw new IllegalArgumentException("structName must be non-empty");
+        }
+        if (base != null && !base.isEmpty()) {
+            structBase.put(structName, base);
+        }
+        return this;
+    }
+
+    /**
+     * The struct-inheritance chain of {@code typeName}, nearest-first and INCLUDING
+     * {@code typeName} itself ({@code Exp → BiOp}). The chain is linear (a struct has at most
+     * one base), so "nearest ancestor that has an impl" is unambiguous — no diamond. Cycle-guarded
+     * (an ill-founded base loop stops). Used by the runtime trait fallback to walk from the concrete
+     * type up to the ancestor that actually declares the assigned method.
+     */
+    public List<String> structAncestry(String typeName) {
+        List<String> chain = new ArrayList<>();
+        if (typeName == null) return chain;
+        Set<String> seen = new HashSet<>();
+        String cur = typeName;
+        while (cur != null && seen.add(cur)) {
+            chain.add(cur);
+            cur = structBaseOf(cur);
+        }
+        return chain;
+    }
+
+    /** {@code type}'s recorded base struct — exact key first, then bare-tolerant (the recorded key may
+     *  be bare while the query is qualified, or vice-versa, across link stages). */
+    private String structBaseOf(String type) {
+        String direct = structBase.get(type);
+        if (direct != null) return direct;
+        String bareType = bare(type);
+        for (Map.Entry<String, String> e : structBase.entrySet()) {
+            if (bare(e.getKey()).equals(bareType)) return e.getValue();
+        }
+        return null;
+    }
+
+    /**
      * Registers that {@code typeName} satisfies {@code traitName}.
      * Implicitly declares the trait too. Idempotent.
      */
@@ -101,6 +155,25 @@ public final class TraitRegistry {
      */
     public boolean satisfies(String traitName, String typeName) {
         if (traitName == null || typeName == null) return false;
+        // Direct (self) satisfaction — exact, unchanged behavior.
+        if (satisfiesDirectly(traitName, typeName)) return true;
+        // Struct inheritance: an impl assigned to an ANCESTOR struct covers this type. The self
+        // entry (index 0) was tried exactly above; ancestors are matched bare-tolerantly since the
+        // recorded base name and the registered satisfier may be qualified at different link stages.
+        List<String> ancestry = structAncestry(typeName);
+        for (int i = 1; i < ancestry.size(); i++) {
+            String ancestor = ancestry.get(i);
+            if (satisfiesDirectly(traitName, ancestor) || satisfiesBareBoth(traitName, ancestor)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Self-only satisfaction: does {@code typeName} itself (no struct-base walk) satisfy
+     *  {@code traitName}, directly or via a sub-trait's base chain? The original {@link #satisfies}
+     *  body, kept exact so the direct case introduces no bare-matching drift. */
+    private boolean satisfiesDirectly(String traitName, String typeName) {
         Set<String> set = satisfiers.get(traitName);
         if (set != null && set.contains(typeName)) return true;
         // Transitive (WAR(stream)): typeName may satisfy a SUB-trait whose base-chain
