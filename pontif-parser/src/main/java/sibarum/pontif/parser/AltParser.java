@@ -4761,10 +4761,41 @@ public final class AltParser {
         }
     }
 
+    /** Monotonic counter making each discard-`let`'s synthetic binding name unique. */
+    private int discardSeq = 0;
+
+    /**
+     * The discard form {@code let EXPR  CONT} (docs/orchestration.md, the `let`-led preamble):
+     * {@code let} with no {@code = } evaluates EXPR for effect and drops its value, then the
+     * continuation is the block's value — statement-shaped exactly like {@code emit}. It subsumes
+     * the retired {@code call} keyword ("let it happen"). A binding head is an {@code IDENT}
+     * immediately followed by {@code =}, {@code :}, or the {@code .{} } dict-decomposition; anything
+     * else after {@code let} is a discard. (The explicit throwaway {@code let _ = EXPR} is just a
+     * binding whose name is {@code _} — it flows through the named path, no special-casing.)
+     *
+     * <p>Whether the discarded EXPR is actually effectful is not a parse-time question — the effect
+     * gate (a post-link {@code EmitInterface} closure) rejects a discard of a provably effect-free
+     * expression later, pointing the author at {@code let x = …} or {@code let _ = …}.
+     */
+    private boolean isLetBindingHead() {
+        if (peek().kind() != AltToken.Kind.IDENT) return false;
+        AltToken.Kind next = peek(1).kind();
+        return next == AltToken.Kind.EQUALS
+                || next == AltToken.Kind.COLON
+                || (next == AltToken.Kind.DOT && peek(2).kind() == AltToken.Kind.LBRACE);
+    }
+
     private IrExpr parseLetExpr() throws ParseException {
         AltToken start = expectKeyword("let");
         if (peek().kind() == AltToken.Kind.LBRACKET) {
             return parseDestructuringLetExpr(start);
+        }
+        if (!isLetBindingHead()) {
+            // Discard form `let EXPR  CONT` — evaluate for effect, drop the value.
+            IrExpr discarded = parseExpr();
+            IrExpr cont = parseExpr();
+            return new IrExpr.LetIn("#discard#" + (discardSeq++), IrSort.named("_"),
+                    discarded, cont, start.origin());
         }
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         String name = nameTok.text();

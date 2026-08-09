@@ -268,4 +268,43 @@ class AltParserLetTest {
         assertInstanceOf(IrExpr.Lit.class, fd.body());
         assertEquals(42L, ((IrExpr.Lit) fd.body()).value());
     }
+
+    // --- The discard form `let EXPR  CONT` (the `let`-led preamble) ----------
+
+    /** A body-level {@code let} with no {@code =} evaluates EXPR for effect and drops its value. */
+    @Test
+    void letDiscard_bareCall_lowersToDiscardLetIn() throws Exception {
+        // `notify(1)` is discarded; `42` is the block's value.
+        IrModule m = AltParser.parseModule("main ( let notify(1)  42 )", "t");
+        IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
+        assertTrue(let.name().startsWith("#discard#"),
+                "discard binds a synthetic name, got: " + let.name());
+        assertInstanceOf(IrExpr.Call.class, let.value());
+        assertEquals("notify", ((IrExpr.Call) let.value()).functionName());
+        assertEquals(42L, ((IrExpr.Lit) let.body()).value());
+    }
+
+    /** A method-call discard: {@code let obj.step(1)} — the head IDENT is not a binding head. */
+    @Test
+    void letDiscard_methodCall_isDiscardNotBinding() throws Exception {
+        IrModule m = AltParser.parseModule("main ( let obj.step(1)  0 )", "t");
+        IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
+        assertTrue(let.name().startsWith("#discard#"));
+    }
+
+    /** The explicit throwaway {@code let _ = EXPR} is a normal binding to {@code _}, not a discard. */
+    @Test
+    void letUnderscore_isBindingNotDiscard() throws Exception {
+        IrModule m = AltParser.parseModule("main ( let _ = notify(1)  42 )", "t");
+        IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
+        assertEquals("_", let.name());
+    }
+
+    /** A named binding is untouched by the discard branch. */
+    @Test
+    void letNamed_stillBinds() throws Exception {
+        IrModule m = AltParser.parseModule("main ( let x = notify(1)  x )", "t");
+        IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
+        assertEquals("x", let.name());
+    }
 }
