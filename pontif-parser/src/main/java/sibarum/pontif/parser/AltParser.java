@@ -2939,11 +2939,7 @@ public final class AltParser {
         List<IrStmt.FunctionDecl> typedReactions = new ArrayList<>(reactions.size());
         for (IrStmt.FunctionDecl r : reactions) {
             List<IrParam> params = List.of(r.params().get(0), new IrParam("this", stateSort));
-            // A `:[this._type]` handler declared its return as Self — resolve the `$self` marker to the
-            // conductor's concrete state sort (known only here), so the terminal `this` type-checks and
-            // the handler carries an honest `Self -> Self` contract (docs/orchestration.md, cut 2).
-            IrSort ret = isSelfTypeMarker(r.returnSort()) ? stateSort : r.returnSort();
-            typedReactions.add(new IrStmt.FunctionDecl(r.name(), params, ret, r.body(), r.origin()));
+            typedReactions.add(new IrStmt.FunctionDecl(r.name(), params, r.returnSort(), r.body(), r.origin()));
         }
         return new IrStmt.ConductorDecl(name, state, handlers, typedReactions, start.spanTo(close));
     }
@@ -2967,16 +2963,6 @@ public final class AltParser {
             throw new ParseException("a conductor handler reacts to exactly one event — declare a "
                     + "single parameter; got " + params.size(), nameTok.origin());
         }
-        // The optional return contract (docs/orchestration.md, cut 2): a bare handler is an Action
-        // (unit — return sort left as `_` here; the effect-only enforcement is cut 3); `:[this._type]`
-        // makes it a state transition returning Self (marker resolved to the state sort in
-        // parseConductor); `:_` / `:Sort` is an ordinary value return. Sits between `)` and `->`, like
-        // a function's return clause.
-        IrSort returnSort = IrSort.named("_");
-        if (peek().kind() == AltToken.Kind.COLON) {
-            consume();
-            returnSort = tryConsumeSelfTypeSort() ? SELF_TYPE_MARKER : parseSort();
-        }
         expect(AltToken.Kind.ARROW);
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
@@ -2990,42 +2976,12 @@ public final class AltParser {
             // its state cell as `this` while the reaction fires. `#caction#` deliberately does NOT
             // contain the substring `#action#`, so the plain-action routing check skips it.
             String key = "#caction#" + conductorName + "#" + (actionSeq++) + "#" + nameTok.text();
-            return new IrStmt.FunctionDecl(key, params, returnSort, body, nameTok.origin());
+            return new IrStmt.FunctionDecl(key, params, IrSort.named("_"), body, nameTok.origin());
         } finally {
             inConductorHandler = savedInConductor;
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
-    }
-
-    /**
-     * The reserved sort marker a {@code :[this._type]} return clause lowers to (docs/orchestration.md,
-     * cut 2). It never escapes the parser: {@link #parseConductor} substitutes it with the conductor's
-     * concrete state sort. The {@code $}-name is non-lexable, so it cannot collide with a user sort.
-     */
-    private static final IrSort SELF_TYPE_MARKER = IrSort.named("$self");
-
-    /** True iff {@code sort} is the {@code :[this._type]} Self marker. */
-    private static boolean isSelfTypeMarker(IrSort sort) {
-        return sort instanceof IrSort.Named n && "$self".equals(n.name());
-    }
-
-    /**
-     * If the tokens at {@code peek()} spell the Self-type sort {@code [this._type]}, consume all five
-     * and return {@code true}; otherwise consume nothing and return {@code false}. {@code _type} is the
-     * universal forced member giving a value's concrete sort; in sort position {@code [this._type]} reads
-     * as "the sort of {@code this}" = Self (docs/orchestration.md, the forced-member convention).
-     */
-    private boolean tryConsumeSelfTypeSort() {
-        if (peek().kind() == AltToken.Kind.LBRACKET
-                && peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("this")
-                && peek(2).kind() == AltToken.Kind.DOT
-                && peek(3).kind() == AltToken.Kind.IDENT && peek(3).text().equals("_type")
-                && peek(4).kind() == AltToken.Kind.RBRACKET) {
-            consume(); consume(); consume(); consume(); consume();
-            return true;
-        }
-        return false;
     }
 
     /**
