@@ -50,6 +50,11 @@ public final class IrCompiler {
         // first consumer of EmitInterface's statically-extracted emits set (docs/orchestration.md, gap 1).
         ConductorCycleCheck.check(resolved);
 
+        // The effect gate (the `let`-led preamble, cut 1b): a `let EXPR` discard of a provably effect-free
+        // expression is meaningless — reject it, pointing at `let x = …` / `let _ = …`. The second consumer
+        // of EmitInterface (docs/orchestration.md).
+        EffectGate.check(resolved);
+
         // Resolve instance-method calls (recv.m(args) → Call("Type.m", [recv,…]))
         // AND route binary operators to their dispatch overload by operand sort,
         // in ONE bottom-up walk. Method resolution and operator routing are

@@ -852,6 +852,32 @@ class AltParserIntegrationTest {
                 () -> "Unexpected message: " + ex.getMessage());
     }
 
+    // --- the `let EXPR` discard form + effect gate (end-to-end) -------------
+
+    @Test
+    void discard_ofEffectfulCall_runsAndReturnsContinuation() throws Exception {
+        // `ping` emits, so discarding it is legitimate; the block's value is the continuation, 99.
+        assertEquals(99L, run("struct Beep(n:Int)\n"
+                + "function ping(n:Int):Int -> emit Beep(1)  n\n"
+                + "main ( let ping(1)  99 )"));
+    }
+
+    @Test
+    void discard_sequencedDiscards_runInOrderThenTerminal() throws Exception {
+        // The examples/discard-form.ptf shape: two discards driving effects, then the terminal value.
+        assertEquals(3L, run("struct Logged(n:Int)\n"
+                + "function announce(n:Int):Int -> emit Logged(n)  n\n"
+                + "main ( let announce(1)  let announce(2)  announce(3) )"));
+    }
+
+    @Test
+    void discard_ofPureExpr_isRejectedByTheEffectGate() {
+        CompileException ex = assertThrows(CompileException.class,
+                () -> run("main ( let 1 + 2  99 )"));
+        assertTrue(ex.getMessage().contains("has no effect"),
+                () -> "expected the effect-gate message, got: " + ex.getMessage());
+    }
+
     @Test
     void function_qualified_name_mangles_to_dispatch_identifier() throws Exception {
         // function Point.manhattan(p:Int):Int -> p

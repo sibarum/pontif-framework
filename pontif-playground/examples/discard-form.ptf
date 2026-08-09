@@ -1,0 +1,23 @@
+module examples.discard_form
+
+# The `let EXPR` discard form (docs/orchestration.md, the `let`-led preamble).
+#
+# `let` with no `=` runs EXPR for its effect and drops the value; the following
+# line is the block's value. It is statement-shaped exactly like `emit`, and it
+# replaces the old `call` keyword — "let it happen".
+#
+# The effect gate (cut 1b) rejects `let EXPR` when EXPR is *provably*
+# effect-free: `let 1 + 2` is a compile error — discarding a value that can have
+# no effect is meaningless. The compiler points you at `let x = …` (to bind it)
+# or `let _ = …` (to discard it on purpose). So every discard below drives a
+# real effect (an `emit`), which is exactly what the discard form is for.
+
+struct Logged(n:Int)
+
+function announce(n:Int):Int -> emit Logged(n)  n
+
+main (
+  let announce(1)     # discard — fires Logged(1), value dropped
+  let announce(2)     # discard — fires Logged(2), value dropped
+  announce(3)         # the terminal expression — the block's value, 3
+)
