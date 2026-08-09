@@ -107,4 +107,31 @@ class ConductorDeclTest {
         ParseException ex = assertThrows(ParseException.class, () -> parseSpawn("spawn Meter over process"));
         assertTrue(ex.getMessage().contains("process") && ex.getMessage().contains("not yet"));
     }
+
+    // --- the return contract on a method-body handler (cut 2) ---------------
+
+    /** A bare handler is an Action — return sort left as `_` (the unit/effect-only enforcement is cut 3). */
+    @Test
+    void bareHandler_carriesUnitPlaceholderReturn() throws Exception {
+        IrStmt.ConductorDecl cd = parseConductor("conductor Meter { onTick(e:Tick) -> e }");
+        assertEquals("_", ((IrSort.Named) cd.reactions().get(0).returnSort()).name());
+    }
+
+    /** A `:[this._type]` handler returns Self — the marker resolves to the conductor's state sort. */
+    @Test
+    void selfReturningHandler_resolvesToStateSort() throws Exception {
+        IrStmt.ConductorDecl cd = parseConductor(
+                "conductor Counter { count:Int = 0, bump(e:Tick):[this._type] -> this }");
+        IrSort ret = cd.reactions().get(0).returnSort();
+        IrSort.Structural st = assertInstanceOf(IrSort.Structural.class, ret);
+        assertEquals("Counter$state", st.name());
+        assertTrue(st.members().containsKey("count"), "Self carries the conductor's state fields");
+    }
+
+    /** An ordinary value return is carried through unchanged. */
+    @Test
+    void valueReturningHandler_carriesDeclaredSort() throws Exception {
+        IrStmt.ConductorDecl cd = parseConductor("conductor Meter { reading(e:Tick):Int -> 5 }");
+        assertEquals("Int", ((IrSort.Named) cd.reactions().get(0).returnSort()).name());
+    }
 }

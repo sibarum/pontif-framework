@@ -115,6 +115,26 @@ class ConductorStateTest {
     }
 
     @Test
+    void selfReturningHandler_carriesStateSortAndRuns() {
+        // A `:[this._type]` handler declares an honest Self -> Self contract (docs/orchestration.md,
+        // cut 2): the terminal `this` type-checks against the conductor's state sort, and the handler
+        // still mutates+persists state across events (the returned self is not yet the commit channel —
+        // that is a runtime cut; state commits via the assignment path meanwhile).
+        String out = runOut("""
+                requires pontif.events.{Event, StdOut}
+                struct Tick(n:Int)
+                assign trait Tick:Event{}
+                conductor Counter {
+                  count:Int = 0,
+                  bump(e:Tick):[this._type] -> this.count = this.count + 1  emit StdOut("" + this.count + " ")  this
+                }
+                spawn Counter
+                main ( emit Tick(1)  emit Tick(1)  0 )
+                """);
+        assertEquals("1 2", out.trim(), "the Self-returning handler type-checks and threads state");
+    }
+
+    @Test
     void mutationOutsideAConductor_isNotRecognized() {
         // `this.x = …` is a conductor-only capability; in a plain function body it is not the
         // assignment form (the language is immutable there), so the program fails to compile.
