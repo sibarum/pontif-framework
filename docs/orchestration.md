@@ -42,7 +42,7 @@ an invention.
 | --- | --- | --- |
 | **Conductor** | the **worker** that conducts the orchestration — runs Pontif code, owns its (single-owner, MVCC) state and an inbox, wires clocks, routes emits on the static graph | pure |
 | **Event** | the **message** — an immutable value on the wire; its type (with any `[@…]` refinement) is the *shape-and-filter contract* that gates which messages reach a receiver | immutable data |
-| **Action** | a message **receiver** — an internal reaction (a conductor handler). Reads `this`, produces output with `emit`. **Bracketless** when it is pure effect (no state change); **`:[this._type]`** when it is a state transition (returns its next self) | pure |
+| **Action** | a message **receiver** — an internal reaction (a conductor handler). **Bracketless / effect-only**: reads `this` and its `Mutable[T]` cells (`.current`), produces output with `emit`, and stages state with `setNext`. It returns no value | pure |
 | **Instrument** | a message **sink** — the boundary where a message *leaves the pure world* and becomes real I/O (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | **the impure edge** |
 
 The line that carries the whole model: **an Action is a pure receiver; an Instrument is the one
@@ -76,33 +76,25 @@ Consequences that survive the rename:
   Conductor emits notes (Events) and the Instrument sounds them (side-effect). That split **is** the
   purity win — computation stays relocatable because it isn't glued to I/O.
 
-### `this._type` and the forced-member convention (RULED 2026-08-08)
+### `_type` and the forced-member convention (RULED 2026-08-08)
 
-A state-changing handler returns its next self, and its return type is spelled **`[this._type]`** — "the
-sort of `this`," i.e. Self. This rests on a small language-wide addition and a naming rule:
+> This is a general reflection primitive, kept for when it's needed (`this._type.traits`, `._type.name`,
+> `._type.super`). It is **no longer the state-transition mechanism** — state is the explicit `Mutable[T]`
+> type (see *Isolated mutability is explicit*), not a handler returning `[this._type]`.
 
 - **`_type` is a universal forced member.** Every value has `._type` — its **concrete sort, as a
   first-class value** (Pontif's sorts are already values — `[@==5]` is one — so a concrete sort being one
-  is no new category). It is static where the concrete type is known (`this._type` in a conductor *is* the
-  conductor's sort, i.e. Self) and genuinely reflective where it isn't (a `[A | B]` value's runtime variant).
-  In a sort position, `[this._type]` reads as that sort — so `bump(e): [this._type]` returns Self, and the
-  general `f(x): [x._type]` is a dependently-typed return.
+  is no new category). It is static where the concrete type is known and genuinely reflective where it
+  isn't (a `[A | B]` value's runtime variant). In a sort position, `[x._type]` reads as that sort, so the
+  general `f(x): [x._type]` is a dependently-typed return; `_type` will grow sub-projections (`.name`,
+  `.traits`, `.super`).
 - **Leading `_` is the forced-member namespace.** Compiler-provided ("forced") members are prefixed with an
   underscore; user-declared members must not lead with `_`. This is not new — tuple accessors `._0` / `._1`
   are pre-existing forced members already following it. `_type` is the first *universal* forced member
   (present on every object, not just tuples); future ones (`_hash`, `_id`, …) live in the same namespace.
-- **Why the prefix matters here:** the reserved thing is the *underscore namespace*, not the word `type`. So
-  a user keeps the full right to a `type:` data field — the intrinsic is `_type` — and the two can never
+- **Why the prefix matters:** the reserved thing is the *underscore namespace*, not the word `type`. So a
+  user keeps the full right to a `type:` data field — the intrinsic is `_type` — and the two can never
   collide. Cleaner than reserving an English word, and it reads unmistakably as compiler-provided.
-
-Canonical state-transition handler:
-
-```
-bump(e: Press): [this._type] -> let this.count = this.count + 1   this
-```
-
-`@` stays the refinement/match subject; `this` stays the object; `this._type` is its sort; the trailing
-`this` is the committed next MVCC version.
 
 ## Cadence — a trait
 
@@ -173,46 +165,59 @@ trait — so the sort carries the consumed/emitted interface, the routing graph 
 > **Reconciled with the settled rulings (2026-08-08).** Two things in this (provisional, Fork-B) surface are
 > superseded: (1) `@` is the **refinement/match subject** (the value under `[@…]` or `match @`), *not* an alias
 > for the receiving object — the object is `this`, and the event is its named parameter (`e`). (2) The
-> "**Conduit** = same with a value terminus (the state)" clause is **gone** — a state-changing handler is an
-> **Action that returns `[this._type]`** (its next self; the MVCC commit *is* the return), while a pure-effect
-> handler stays bracketless. See *The coordinated glossary* and *The return type is the effect contract*.
+> "**Conduit** = same with a value terminus (the state)" clause is **gone** — every handler is a
+> bracketless, effect-only **Action**; state change is an explicit `this.field.setNext(…)` call on a
+> `Mutable[T]` cell, not a returned value. See *Isolated mutability is explicit* and *The coordinated glossary*.
 
-### A conductor has mutable, single-owner state
+### Isolated mutability is explicit — the `Mutable[T]` type (RULED 2026-08-09)
 
-Everything in the language is immutable **except a conductor's own state** — and that is the one place
-mutation is provably safe. A conductor is single-owner (one thread drains it), so its fields are
-thread-confined: never shared, so never raced. This is the seam conductors exist to smooth — purity
-everywhere the compiler can guarantee it, mutation confined to exactly where it cannot hurt.
-
-So a conduit is a **handler over conductor fields**, not a self-contained fold. Several handlers share the
-conductor's state directly, which is what makes multi-input conductors read naturally (the GUI toy's
-mouse + keyboard + dialog all mutating one `doc`) instead of the fold-threading workaround that existed
-only because there was nowhere else to put shared state:
+Everything in the language is immutable, **including conductor fields** — with one exception that is
+*named in the type*, never inferred from position: a field of type **`Mutable[T]`**. This replaces the
+earlier model, where `this.field = …` inside a conductor body silently meant "commit an MVCC version"
+while `let a = b` meant "bind a transient local" everywhere else. Overloading `=` with two unrelated
+meanings, switched by *where you stand*, was implicit and un-Pontif-y; the wall it hit ("no way to build a
+next-self to return") was the design pushing back. So mutation stops hiding: it is an explicit type with
+explicit methods, and `=` is *only ever* a local binding, everywhere.
 
 ```
 conductor Editor {
-  doc: Doc = Doc.blank                # mutable, but single-owner → safe
-  onKey:[KeyPress  -> … this.doc = … ]
-  onClick:[Click   -> … this.doc = … ]
-  onSaved:[Saved   -> … this.doc = … ]
+  id:   Int                       # immutable, final — the default
+  doc:  Mutable[Doc](Doc.blank)   # explicitly mutable, single-owner → safe
+  onKey:[KeyPress -> this.doc.setNext(edit(this.doc.current, key))]
 }
 ```
 
-Mutable state stays *deterministically replayable*: re-running the event sequence through the handlers
-rebuilds `doc`, deterministic as long as nothing ambient leaks in (the determinism rule) — which is what
-keeps the journal usable for *deliberate* recovery, not that the runtime auto-restarts (see *Failure* —
-it doesn't). Conductor **methods** are private
-helpers — they group logic and touch the state but aren't exported to dispatch. A **handle** (`let h =
-spawn Editor`) is the only conductor value that escapes; the worker itself never becomes a passable value.
+**`Mutable[T]` makes the MVCC model legible** instead of hidden in the interpreter:
 
-> **Implemented (2026-08-02) vs ratified.** The conductor authoring model above is **built and
-> end-to-end tested**: `conductor Name { field:T = init, handler(e:E) -> … this.field = … }` parses,
-> seats via entry-point `spawn`, and runs with mutable single-owner state (several handlers sharing one
-> field — `ConductorStateTest`). **Two ratified pieces are not yet wired** (roadmap gaps 1–2): the
-> `emits`/consumes **interface is extracted but unused** (`EmitInterface`), so the type-checked routing it
-> feeds doesn't exist; and the shipped **dead letter fires on the wrong trigger** (§Honest edges). The
-> standalone `conduit` keyword still uses the older **fold** form (`conduit N(e,s):{R,S} from INIT`,
-> docs/reactive-gui.md) and coexists with the conductor handler form.
+- `m.current` — the value as of the **transaction's read snapshot** (stable for the whole handler).
+- `m.next` — the **pending** next value (or `current` if `setNext` hasn't been called). Reading your own
+  staged write is explicit: `.current` for the snapshot, `.next` to see what you've set.
+- `m.setNext(v)` — stage the next version. Not "mutate now" — *set the next version*.
+- `m.reset()` — stage the initial value as the next version.
+
+**Commit is implicit at the handler-transaction boundary**, atomic across *all* of a conductor's
+`Mutable` fields at once (`next → current`, the version clock advances once) — so a peer never observes a
+half-updated conductor. State stays **deterministically replayable**: re-running the event sequence
+rebuilds the cells (the determinism rule), which is what keeps the journal usable for *deliberate*
+recovery — the runtime does not auto-restart (see *Failure*).
+
+**`Mutable[T]` is not sendable.** It can never be a field of an Event or cross a conductor boundary — it
+is confined to its single owner, the conductor whose handler drains it, which is *why* it needs no lock.
+This is the type-level rule that keeps the concurrency theorem (*only the queue is shared, and messages
+are immutable*) true. `Mutable` **is** "the one place mutation is safe," now a type rather than a
+body-position rule. It is conductor-scoped: outside a conductor there is no transaction boundary, so its
+use there is rejected.
+
+Handlers are therefore **effect-only Actions** again (bracketless): they read `.current`, `emit`, and
+`setNext` — they do not return a next self. Conductor **methods** are private helpers — they group logic
+and touch the cells but aren't exported to dispatch. A **handle** (`let h = spawn Editor`) is the only
+conductor value that escapes; the worker itself never becomes a passable value.
+
+> **Supersedes** the earlier "conductor field = implicitly mutable, `this.field = …` commits" model and the
+> `:[this._type]` state-transition handler (the return-as-commit idea, which dead-ended for lack of a
+> next-self constructor). Those are being unwound in favour of `Mutable[T]`. **Not yet built** as of
+> 2026-08-09 — this is the design of record; implementation replaces the `#assign-self#` sentinel
+> machinery with `Mutable` cells.
 
 ### The block grammar — a `let`-led preamble, and the return type is the effect contract (RULED 2026-08-06)
 
@@ -224,17 +229,14 @@ conditions" gotcha.
 The whole imperative surface collapses to **two leaders**, `let` and `emit`:
 
 ```
-let x = expr             # bind a fresh name
-let this.field = expr    # bind the field's NEXT VERSION (an MVCC commit, not a mutation — see below)
+let x = expr             # bind a fresh name (a transient local — the ONLY meaning of `=`)
 let expr                 # evaluate for effect, discard any value ("let it happen")
 emit Event(args)         # emit
 ```
 
-- **`let this.field = …` is not a mutation.** Under the MVCC store (`docs/mvcc-state.md`) each assignment
-  binds the field's *next immutable version*, so `let` is literally the right word — "let `this.field`
-  henceforth be …". Successive `let this.x =` within a handler rebind the working value (read-after-write
-  holds via the live head); the global version advances **once** at the handler-transaction's commit, not
-  per assignment.
+- **`=` is always a local binding.** State change is *not* an assignment — it is a method call on a
+  `Mutable[T]` cell (`this.doc.setNext(…)`, see *Isolated mutability is explicit*). So there is no
+  `let this.field = …` state-commit form; that overloading is gone.
 - **`let expr` (no `=`) is the effect/discard form** — `let emitAllMyTriggers()`. It reads as "let it
   happen," is `let`-led so it is unambiguously preamble, and it subsumes value-discard (any returned value
   is dropped). No separate `call` keyword: `let` is already a whitelist leader, so a bare invocation just
@@ -251,16 +253,17 @@ write-only terminus" hole by construction):
 | `:T` | returns a `T` | preamble + a terminal expression of type `T` |
 | `:_` | returns a value, type inferred/unconstrained | preamble + a terminal expression |
 | `[]` **or no qualifier** | **unit** — effect-only | preamble only; **no** terminal expression |
-| `:[this._type]` | **returns Self** — a state transition | preamble (`let this.field = …` staging) + terminal `this` (the committed next version) |
 
-So an **Action** is the bracketless/unit case (all-preamble, effect-only); an ordinary function or
-private helper method carries `:T`/`:_`. `_` means "a value, don't pin the type," **not** "no value."
+So an **Action** is the bracketless/unit case (all-preamble, effect-only — it reads `.current`, `emit`s,
+and `setNext`s its `Mutable` cells); an ordinary function or private helper method carries `:T`/`:_`. `_`
+means "a value, don't pin the type," **not** "no value."
 
-> **Conduit is gone (2026-08-08).** The old third case — a member carrying a `:{E, S}` value terminus —
-> was the fold-era statefulness hack (`S` = state-threading, now `let this.field =`; `R` = emit-in-disguise,
-> now `emit`). A conductor handler never returns a value, so it is **always an Action**; only real *helpers*
-> and *functions* — which have a caller to return to — use `:T`/`:_`. The taxonomy is now two cases, not
-> three. See *The coordinated glossary*.
+> **Conduit is gone (2026-08-08); the `:[this._type]` state-transition handler is gone too (2026-08-09).**
+> The old `:{E, S}` Conduit terminus was a fold-era statefulness hack. Its successor — a handler returning
+> `[this._type]` (its next self) — was itself superseded when state moved to the explicit `Mutable[T]` type:
+> a handler no longer *returns* its next state, it calls `this.field.setNext(…)`. So a conductor handler
+> never returns a value — it is **always an Action** (bracketless, effect-only); only real *helpers* and
+> *functions* use `:T`/`:_`. See *Isolated mutability is explicit* and *The coordinated glossary*.
 
 **There is no declarable bottom.** You can never *declare* a never-returning function — that is a compile
 error — so bracketless/`[]` unambiguously means unit (returns control, carries no value); there is no
