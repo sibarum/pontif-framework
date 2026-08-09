@@ -347,6 +347,12 @@ public final class MethodOperatorResolver {
         // declared alias binding (`_tuple`), which has no method; the declared claim (`Vec3`) is the
         // identity the method dispatches on.
         IrSort receiverSort = nominalReceiverSort(receiver, types.infer(receiver, ctx));
+        // Cell[T] clocked-cell methods (docs/orchestration.md, §"State is a clocked cell") are a builtin
+        // primitive: lower `this.f.apply(op)` / `.setNext(v)` / `.reset()` to a reserved `#cell-…#(Str(f),…)`
+        // call the interpreter stages into the firing conductor's cell. Kept out of the general dispatch —
+        // it's a primitive, like Int's operators, not a user-declared method.
+        IrExpr cell = tryResolveCellMethod(receiverSort, mc, receiver, args);
+        if (cell != null) return cell;
         // Intersection receiver: the some-branch member rule — resolve the method on
         // whichever branch declares it (`[A & B]` has A's methods and B's). A unique
         // branch answers; two branches routing it to different keys is ambiguous.
@@ -391,6 +397,29 @@ public final class MethodOperatorResolver {
      * {@code Call}, a callable field becomes an {@code Apply}, else null. Split out so
      * an intersection receiver can try each branch.
      */
+    /** The Cell[T] methods that lower to reserved {@code #cell-…#} calls. */
+    private static final java.util.Set<String> CELL_METHODS = java.util.Set.of("apply", "setNext", "reset");
+
+    /**
+     * Lowers a {@code Cell[T]} method call to its reserved {@code #cell-…#} form, or null if the receiver
+     * isn't a Cell / the method isn't one of {@link #CELL_METHODS}. The receiver must be a direct conductor
+     * field access ({@code this.field.apply(…)}) so the field name can name the cell to stage into — an
+     * aliased receiver ({@code let c = this.f  c.apply(…)}) is rejected until cells are first-class values.
+     */
+    private IrExpr tryResolveCellMethod(IrSort receiverSort, IrExpr.MethodCall mc, IrExpr receiver,
+            List<IrExpr> args) throws CompileException {
+        if (!"Cell".equals(baseName(receiverSort)) || !CELL_METHODS.contains(mc.methodName())) return null;
+        if (!(receiver instanceof IrExpr.FieldAccess fa)) {
+            throw new CompileException(
+                    "a Cell method (`" + mc.methodName() + "`) must be called directly on a conductor field "
+                            + "— `this.field." + mc.methodName() + "(…)`", mc.origin());
+        }
+        List<IrExpr> cargs = new ArrayList<>(args.size() + 1);
+        cargs.add(new IrExpr.Str(fa.fieldName(), mc.origin()));
+        cargs.addAll(args);
+        return new IrExpr.Call("#cell-" + mc.methodName().toLowerCase() + "#", cargs, mc.origin());
+    }
+
     private IrExpr tryResolveMethodOn(
             IrSort candSort, String typeName, IrExpr.MethodCall mc,
             IrExpr receiver, List<IrExpr> args, InferenceContext ctx) {

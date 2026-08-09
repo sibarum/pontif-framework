@@ -1,0 +1,23 @@
+module examples.cell_counter
+
+# The Cell[T] clocked-cell primitive (docs/orchestration.md, §"State is a clocked cell").
+#
+# A conductor's mutable state is an explicit `Cell[T]` field — the one field kind that changes,
+# named in the type. A write is STAGED and latches on the clock edge (the handler-transaction
+# yield), so `current` is a stable snapshot through the whole handler: no pure call stack ever
+# observes a mutation. `apply(op)` folds a pure operation into the next version; `.next` reads the
+# staged value, `.current` the snapshot. (`setNext`/`reset` are sugar over `apply`.)
+
+requires pontif.events.{Event, StdOut}
+
+struct Tick(n:Int)
+assign trait Tick:Event{}
+
+conductor Counter {
+  count: Cell[Int](0),
+  onTick(e:Tick) -> let this.count.apply([(x:Int) -> x + 1])  emit StdOut("" + this.count.next + " ")  e
+}
+
+spawn Counter
+
+main ( emit Tick(1)  emit Tick(1)  emit Tick(1)  0 )   # prints: 1 2 3

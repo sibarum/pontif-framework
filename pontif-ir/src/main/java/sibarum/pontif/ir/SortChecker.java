@@ -75,7 +75,7 @@ public final class SortChecker {
      * is an <em>incompleteness</em>, not a lie: it correctly admits {@code Stream},
      * it just won't yet admit a user's own parametric trait in a let/param sort.
      */
-    private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream");
+    private static final Set<String> BUILTIN_PARAMETRIC_TYPES = Set.of("Stream", "Cell");
 
     private SortChecker() {}
 

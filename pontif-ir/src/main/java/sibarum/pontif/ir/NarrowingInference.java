@@ -835,6 +835,15 @@ public final class NarrowingInference {
         // Named — so read it explicitly here (the shared baseName helper stays Named/Refined-only,
         // its contract for the struct-field paths). Without this a metareference field access has no
         // nominal to project through and the attribute-producer lookup below never fires.
+        // A conductor handler's `this` is the synthetic state record (an inline Structural named
+        // `<Conductor>$state`, never a registered struct) — project through its OWN members so
+        // `this.field` is typed (needed for `this.cell.apply(…)` to resolve). Scoped to the `$state`
+        // marker so the general Phase-C contract (user inline aggregates resolve via the registered
+        // struct table, else null) is unchanged.
+        if (baseNarrowing instanceof IrSort.Structural sp && sp.name().endsWith("$state")) {
+            IrSort field = sp.members().get(fa.fieldName());
+            if (field != null) return field;
+        }
         String baseName = baseName(baseNarrowing);
         if (baseName == null && baseNarrowing instanceof IrSort.CallSig cs) {
             baseName = cs.typeName();

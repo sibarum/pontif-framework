@@ -290,7 +290,21 @@ public final class IrCompiler {
                     for (IrStmt.ConductorDecl.StateField f : cd.state()) {
                         registerSort(f.sort(), compiledSorts);
                         registerSortsInExpr(f.init(), compiledSorts);
-                        initMembers.put(f.name(), f.init());
+                        // A Cell[T] field seeds a clocked cell (docs/orchestration.md, §"State is a
+                        // clocked cell"): a `Cell` record with current = next = _init = the initial value.
+                        // Bind the init once (it may be a call) then share it across the slots.
+                        if (f.sort() instanceof IrSort.Named n && "Cell".equals(n.name())) {
+                            String tmp = "#cell-init#" + f.name();
+                            Map<String, IrExpr> cellMembers = new LinkedHashMap<>();
+                            cellMembers.put("current", IrExpr.var(tmp));
+                            cellMembers.put("next", IrExpr.var(tmp));
+                            cellMembers.put("_init", IrExpr.var(tmp));
+                            IrExpr cellSeed = new IrExpr.LetIn(tmp, IrSort.named("_"), f.init(),
+                                    new IrExpr.Record("Cell", cellMembers, cd.origin()), cd.origin());
+                            initMembers.put(f.name(), cellSeed);
+                        } else {
+                            initMembers.put(f.name(), f.init());
+                        }
                     }
                     IrSort seedReturn = IrSort.named("_");
                     registerSort(seedReturn, compiledSorts);   // else compileFunctionDecl gets a null return Sort

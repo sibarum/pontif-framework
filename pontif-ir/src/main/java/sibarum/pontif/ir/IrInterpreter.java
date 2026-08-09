@@ -800,6 +800,8 @@ public final class IrInterpreter {
                     pinnedVersion.set(versionClock.get());
                     try {
                         eval(fn.body(), reactionEnv.extend("this", CONDUCTOR_SELF), module);
+                        // The clock edge: latch every Cell (next → current) atomically, then commit.
+                        latchCells(conductor);
                         // Commit the transaction: if the handler changed the working head, append ONE new
                         // committed version (per-transaction, not per-assignment — so a peer never observes a
                         // half-updated conductor). No change ⇒ no version churn (reference compare: an assign
@@ -1118,6 +1120,31 @@ public final class IrInterpreter {
      * an untouched cell is the very object last committed — so a read-only handler adds no version.
      * Single-owner: only this conductor's thread commits its chain.
      */
+    /**
+     * The clock edge (docs/orchestration.md, §"State is a clocked cell"): latch every {@code Cell} field
+     * of the firing conductor — {@code current := next} — atomically, once per transaction. A cell whose
+     * {@code next} never moved is left as the same object (so an untouched conductor still commits nothing).
+     * This is the ONLY point a staged write becomes visible; within the handler, {@code current} was frozen.
+     */
+    private void latchCells(String conductorName) {
+        RecordValue live = conductorState.get(conductorName);
+        if (live == null) return;
+        Map<String, Object> latched = null;
+        for (Map.Entry<String, Object> e : live.members().entrySet()) {
+            if (e.getValue() instanceof RecordValue cell && "Cell".equals(cell.typeName())) {
+                Object curr = cell.get("current", Origin.NONE);
+                Object next = cell.get("next", Origin.NONE);
+                if (curr != next) {
+                    Map<String, Object> m = new LinkedHashMap<>(cell.members());
+                    m.put("current", next);
+                    if (latched == null) latched = new LinkedHashMap<>(live.members());
+                    latched.put(e.getKey(), new RecordValue("Cell", m));
+                }
+            }
+        }
+        if (latched != null) conductorState.put(conductorName, new RecordValue(latched));
+    }
+
     private void commitConductorState(String conductorName) {
         VersionChain chain = committed.get(conductorName);
         RecordValue working = conductorState.get(conductorName);
@@ -1890,6 +1917,41 @@ public final class IrInterpreter {
             next.put(field, value);
             conductorState.put(firing, new RecordValue(next));
             return new RecordValue("Nothing", Map.of());   // write-only; the desugaring discards it
+        }
+        // Cell[T] clocked-cell writes (docs/orchestration.md, §"State is a clocked cell"). The method
+        // resolver lowers `this.f.apply(op)` / `.setNext(v)` / `.reset()` to `#cell-<op>#(Str(f), …)`:
+        // stage into the firing conductor's cell `f`. `current` (the snapshot) is untouched; only `next`
+        // moves. The latch (next → current) happens once, atomically, at the transaction commit
+        // (`latchCells`). So no assignment is observed mid-handler — the cell is a clocked latch.
+        if (call.functionName().startsWith("#cell-")) {
+            String field = ((IrExpr.Str) call.args().get(0)).value();
+            String firing = currentConductor.get();
+            if (firing == null) {
+                throw new RuntimeCheckException("a Cell operation outside a conductor handler", call.origin());
+            }
+            RecordValue live = conductorStateCell(call.origin());
+            if (!(live.get(field, call.origin()) instanceof RecordValue cell)) {
+                throw new RuntimeCheckException(
+                        "conductor '" + firing + "' has no Cell field '" + field + "'", call.origin());
+            }
+            Object pending = cell.get("next", call.origin());
+            Object newNext = switch (call.functionName()) {
+                case "#cell-setnext#" -> eval(call.args().get(1), env, module);
+                case "#cell-reset#" -> cell.get("_init", call.origin());
+                default -> {   // #cell-apply#: next = op(next), op a pure T -> T
+                    Object op = eval(call.args().get(1), env, module);
+                    if (!(op instanceof Closure opc)) {
+                        throw new RuntimeCheckException("Cell.apply expects a function", call.origin());
+                    }
+                    yield opc.invoke(java.util.List.of(pending), this, module);
+                }
+            };
+            Map<String, Object> newCell = new LinkedHashMap<>(cell.members());
+            newCell.put("next", newNext);
+            Map<String, Object> newLive = new LinkedHashMap<>(live.members());
+            newLive.put(field, new RecordValue("Cell", newCell));
+            conductorState.put(firing, new RecordValue(newLive));
+            return new RecordValue("Nothing", Map.of());   // write-only
         }
         // Lexical scope wins: if the name is locally bound (let / param), invoke
         // the bound value as a closure rather than dispatching by name.

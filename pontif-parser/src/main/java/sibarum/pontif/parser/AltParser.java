@@ -2983,6 +2983,9 @@ public final class AltParser {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         for (IrParam p : params) currentScope.put(p.name(), p.sort());
+        // `this` is in scope for the body so `this.field.method(…)` parses as a value-receiver MethodCall
+        // (not a dotted Call) — its concrete state sort is patched in by parseConductor afterward.
+        currentScope.put("this", IrSort.named("_"));
         bindParamDestructures(destrs);
         boolean savedInConductor = inConductorHandler;
         inConductorHandler = true;   // enables `this.field = …` assignment in this body only
@@ -6057,6 +6060,11 @@ public final class AltParser {
 
     private IrExpr parsePrimary() throws ParseException {
         AltToken t = peek();
+        // A fragment literal `[(x:T) -> body]` in value position is a lambda — usable as any argument
+        // (e.g. `cell.apply([(x:Int) -> x + 1])`), not only as a `:`-clause ascription.
+        if (looksLikeFragmentLiteral()) {
+            return parseClause();
+        }
         return switch (t.kind()) {
             case INTEGER -> {
                 consume();
