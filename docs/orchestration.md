@@ -33,29 +33,76 @@ placement sound (the reason Erlang's transparency works).
 > are "a routine over `X` targeting `Y`"; they differ only in whether the placed thing is a live worker or
 > a single computation, and `spawn` is no longer a body-level term.
 
-## Three roles
+## The coordinated glossary (RULED 2026-08-08)
 
-They **name seams that already exist** — this is a unification, not an invention.
+Four words name the whole model. They **name seams that already exist** — this is a unification, not
+an invention.
 
-| Role | Is | Nature |
+| Term | Role | Purity |
 | --- | --- | --- |
-| **Player** | a **conduit** — an event handler over its conductor's (single-owner, mutable) state; ticked by a cadence (see *Authoring*) | single-owner, shares nothing → the conductor is **mobile** (place it anywhere) |
-| **Instrument** | an **effect sink** (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | impure, touches the world → **pinned** to its hardware |
-| **Conductor** | a **worker** that runs Pontif code (a thread/process; one per worker — see *The conductor graph*) | owns conduits + an inbox, wires clocks, routes emits on the static graph |
+| **Conductor** | the **worker** that conducts the orchestration — runs Pontif code, owns its (single-owner, MVCC) state and an inbox, wires clocks, routes emits on the static graph | pure |
+| **Event** | the **message** — an immutable value on the wire; its type (with any `[@…]` refinement) is the *shape-and-filter contract* that gates which messages reach a receiver | immutable data |
+| **Action** | a message **receiver** — an internal reaction (a conductor handler). Reads `this`, produces output with `emit`. **Bracketless** when it is pure effect (no state change); **`:[this._type]`** when it is a state transition (returns its next self) | pure |
+| **Instrument** | a message **sink** — the boundary where a message *leaves the pure world* and becomes real I/O (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | **the impure edge** |
 
-Consequences:
+The line that carries the whole model: **an Action is a pure receiver; an Instrument is the one
+impure sink.** Side-effects happen *only* when an Event crosses the boundary into an Instrument —
+that is the property the crash-safety and no-GUI-bugs stories rest on, so it earns its own word
+rather than folding into Action.
 
-- **Players are mobile, Instruments are pinned.** The Conductor moves Players *toward* Instruments
-  (and data), never the reverse. That is the honest definition of `main`: the Player the Conductor
+**Two retired words** (do not reintroduce):
+
+- **`Player`** — the per-cadence drained worker a Conductor used to seat — **is absorbed into
+  Conductor.** The worker *is* the Conductor (its statically-declared sub-conductors ride along as its
+  subtree). Code still carrying `runtime.module.Player` is renaming debt, not a live concept.
+- **`Conduit` as a member return-contract** (`:{E, S}`) — the fold-era statefulness hack — is
+  **obsolete.** Its `S` (state-threading) is now `let this.field =`; its `R` (emit-in-disguise) is now
+  `emit`. A conductor handler therefore never returns a value — it is always an **Action** (bracketless,
+  effect-only), because forward-only / no-`await` means no caller waits on a return. (The word "conduit"
+  in the *runtime-worker* sense — a single-owner event drainer — is the Conductor; only the return-type
+  contract is gone.)
+
+Consequences that survive the rename:
+
+- **Conductors are mobile, Instruments are pinned.** The runtime moves a Conductor *toward* its
+  Instruments (and data), never the reverse. That is the honest definition of `main`: the Conductor that
   had to seat next to an immovable Instrument (the window/present Instrument GLFW nailed to the main
   thread).
 - **Cadence usually originates *at* an Instrument.** The display/DAC *pulls* — that backpressure is
   the tempo (ChucK: the soundcard's fixed consumption rate is the clock). Some cadences are virtual
-  timers the Conductor owns directly (`Fixed(dt)` physics). So the Conductor's job splits: *place*
-  Players and *wire clocks* (which Instrument-pull or virtual timer drives which Players).
+  timers the Conductor owns directly (`Fixed(dt)` physics). So the Conductor's job splits: *place* its
+  work and *wire clocks* (which Instrument-pull or virtual timer drives which reactions).
 - The musical metaphor bends on purpose: a real player *holds* an instrument (one unit); here the
-  Player emits notes (events) and the Instrument sounds them (side-effect). That split **is** the
+  Conductor emits notes (Events) and the Instrument sounds them (side-effect). That split **is** the
   purity win — computation stays relocatable because it isn't glued to I/O.
+
+### `this._type` and the forced-member convention (RULED 2026-08-08)
+
+A state-changing handler returns its next self, and its return type is spelled **`[this._type]`** — "the
+sort of `this`," i.e. Self. This rests on a small language-wide addition and a naming rule:
+
+- **`_type` is a universal forced member.** Every value has `._type` — its **concrete sort, as a
+  first-class value** (Pontif's sorts are already values — `[@==5]` is one — so a concrete sort being one
+  is no new category). It is static where the concrete type is known (`this._type` in a conductor *is* the
+  conductor's sort, i.e. Self) and genuinely reflective where it isn't (a `[A | B]` value's runtime variant).
+  In a sort position, `[this._type]` reads as that sort — so `bump(e): [this._type]` returns Self, and the
+  general `f(x): [x._type]` is a dependently-typed return.
+- **Leading `_` is the forced-member namespace.** Compiler-provided ("forced") members are prefixed with an
+  underscore; user-declared members must not lead with `_`. This is not new — tuple accessors `._0` / `._1`
+  are pre-existing forced members already following it. `_type` is the first *universal* forced member
+  (present on every object, not just tuples); future ones (`_hash`, `_id`, …) live in the same namespace.
+- **Why the prefix matters here:** the reserved thing is the *underscore namespace*, not the word `type`. So
+  a user keeps the full right to a `type:` data field — the intrinsic is `_type` — and the two can never
+  collide. Cleaner than reserving an English word, and it reads unmistakably as compiler-provided.
+
+Canonical state-transition handler:
+
+```
+bump(e: Press): [this._type] -> let this.count = this.count + 1   this
+```
+
+`@` stays the refinement/match subject; `this` stays the object; `this._type` is its sort; the trailing
+`this` is the committed next MVCC version.
 
 ## Cadence — a trait
 
@@ -116,12 +163,19 @@ output type":
 onKey:[KeyPress -> match @ { [ctrl 's'] -> emit SaveRequested()  [char] -> emit Insert(@.ch) }]
 ```
 
-`@` is the event in flight; the stages emit; nothing is returned. A **Conduit** is the same with a value
-terminus (the state) alongside its effects. These compose exactly like the README's **shells**:
+`@` is the match subject (here, the event `e`); the stages emit; nothing is returned. These compose
+exactly like the README's **shells**:
 author-owned when written in a conductor, **trait-owned** when a conductor *satisfies* an event-interface
 trait — so the sort carries the consumed/emitted interface, the routing graph becomes **type-checkable**
 (single-owner, no-consumer, cross-conductor cycles — from the types alone), and conductors become
 **interface-typed, swappable components** on the same narrowing/satisfaction machinery traits already use.
+
+> **Reconciled with the settled rulings (2026-08-08).** Two things in this (provisional, Fork-B) surface are
+> superseded: (1) `@` is the **refinement/match subject** (the value under `[@…]` or `match @`), *not* an alias
+> for the receiving object — the object is `this`, and the event is its named parameter (`e`). (2) The
+> "**Conduit** = same with a value terminus (the state)" clause is **gone** — a state-changing handler is an
+> **Action that returns `[this._type]`** (its next self; the MVCC commit *is* the return), while a pure-effect
+> handler stays bracketless. See *The coordinated glossary* and *The return type is the effect contract*.
 
 ### A conductor has mutable, single-owner state
 
@@ -197,10 +251,16 @@ write-only terminus" hole by construction):
 | `:T` | returns a `T` | preamble + a terminal expression of type `T` |
 | `:_` | returns a value, type inferred/unconstrained | preamble + a terminal expression |
 | `[]` **or no qualifier** | **unit** — effect-only | preamble only; **no** terminal expression |
+| `:[this._type]` | **returns Self** — a state transition | preamble (`let this.field = …` staging) + terminal `this` (the committed next version) |
 
-So an **Action** is the bracketless/unit case (all-preamble, effect-only); a **Conduit** carries a
-`:{E, S}` value terminus; an ordinary function carries `:T`/`:_`. `_` means "a value, don't pin the type,"
-**not** "no value."
+So an **Action** is the bracketless/unit case (all-preamble, effect-only); an ordinary function or
+private helper method carries `:T`/`:_`. `_` means "a value, don't pin the type," **not** "no value."
+
+> **Conduit is gone (2026-08-08).** The old third case — a member carrying a `:{E, S}` value terminus —
+> was the fold-era statefulness hack (`S` = state-threading, now `let this.field =`; `R` = emit-in-disguise,
+> now `emit`). A conductor handler never returns a value, so it is **always an Action**; only real *helpers*
+> and *functions* — which have a caller to return to — use `:T`/`:_`. The taxonomy is now two cases, not
+> three. See *The coordinated glossary*.
 
 **There is no declarable bottom.** You can never *declare* a never-returning function — that is a compile
 error — so bracketless/`[]` unambiguously means unit (returns control, carries no value); there is no
