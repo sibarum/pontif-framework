@@ -2910,8 +2910,19 @@ public final class AltParser {
             }
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
-            if (peek().kind() == AltToken.Kind.EQUALS) {
-                // State field: `name:Sort = init` — the mutable single-owner state.
+            if (isMutableSort(memberSort) && peek().kind() == AltToken.Kind.LPAREN) {
+                // Explicit mutable state: `name: Mutable[T](init)` (docs/orchestration.md, §"Isolated
+                // mutability is explicit"). The one field kind that can change; the `(init)` seeds its
+                // first version. Stored as a StateField whose sort is `Mutable[T]` — the Mutable-ness is
+                // in the type, not a body-position rule. (Runtime methods `.current/.next/.setNext/.reset`
+                // + per-transaction commit are a later cut; here it is parse + represent.)
+                consume();  // `(`
+                IrExpr init = parseExpr();
+                expect(AltToken.Kind.RPAREN);
+                state.add(new IrStmt.ConductorDecl.StateField(memberName.text(), memberSort, init));
+            } else if (peek().kind() == AltToken.Kind.EQUALS) {
+                // A field with an initializer: `name:Sort = init`. Under the Mutable model a plain field
+                // is immutable (final); only a `Mutable[T]` field changes.
                 consume();
                 IrExpr init = parseExpr();
                 state.add(new IrStmt.ConductorDecl.StateField(memberName.text(), memberSort, init));
@@ -2942,6 +2953,11 @@ public final class AltParser {
             typedReactions.add(new IrStmt.FunctionDecl(r.name(), params, r.returnSort(), r.body(), r.origin()));
         }
         return new IrStmt.ConductorDecl(name, state, handlers, typedReactions, start.spanTo(close));
+    }
+
+    /** True iff {@code sort} is a {@code Mutable[T]} — the explicit single-owner mutable-cell type. */
+    private static boolean isMutableSort(IrSort sort) {
+        return sort instanceof IrSort.Named n && "Mutable".equals(n.name()) && n.typeArgs().size() == 1;
     }
 
     /**

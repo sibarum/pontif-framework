@@ -68,6 +68,21 @@ class ConductorDeclTest {
     }
 
     @Test
+    void mutableStateField_parsesWithConstructionInit() throws Exception {
+        // Explicit mutable state: `doc: Mutable[Doc](Doc.blank)` (docs/orchestration.md, §Isolated
+        // mutability). The Mutable-ness is in the TYPE; the `(init)` seeds the first version.
+        IrStmt.ConductorDecl cd = parseConductor(
+                "conductor Editor { id:Int = 0, doc:Mutable[Doc](blank()) }");
+        assertEquals(2, cd.state().size());
+        IrStmt.ConductorDecl.StateField doc = cd.state().get(1);
+        assertEquals("doc", doc.name());
+        IrSort.Named mut = assertInstanceOf(IrSort.Named.class, doc.sort());
+        assertEquals("Mutable", mut.name());
+        assertEquals(1, mut.typeArgs().size(), "Mutable[T] carries its element type");
+        assertEquals("Doc", ((IrSort.Named) mut.typeArgs().get(0)).name());
+    }
+
+    @Test
     void duplicateMember_isRejected() {
         ParseException ex = assertThrows(ParseException.class, () ->
                 parseConductor("conductor Bad { doc:Int = 0, doc:[Action(e:Tick):_] }"));
