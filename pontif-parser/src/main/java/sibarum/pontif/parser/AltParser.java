@@ -2910,12 +2910,12 @@ public final class AltParser {
             }
             expect(AltToken.Kind.COLON);
             IrSort memberSort = parseSort();
-            if (isMutableSort(memberSort) && peek().kind() == AltToken.Kind.LPAREN) {
-                // Explicit mutable state: `name: Mutable[T](init)` (docs/orchestration.md, §"Isolated
-                // mutability is explicit"). The one field kind that can change; the `(init)` seeds its
-                // first version. Stored as a StateField whose sort is `Mutable[T]` — the Mutable-ness is
-                // in the type, not a body-position rule. (Runtime methods `.current/.next/.setNext/.reset`
-                // + per-transaction commit are a later cut; here it is parse + represent.)
+            if (isCellSort(memberSort) && peek().kind() == AltToken.Kind.LPAREN) {
+                // Explicit clocked state: `name: Cell[T](init)` (docs/orchestration.md, §"State is a
+                // clocked cell"). The one field kind that can change; the `(init)` seeds it. Stored as a
+                // StateField whose sort is `Cell[T]` — state is named in the type, not a body-position
+                // rule. (Runtime `apply`/`current`/`next` + latch-at-clock-edge are a later cut; here it
+                // is parse + represent.)
                 consume();  // `(`
                 IrExpr init = parseExpr();
                 expect(AltToken.Kind.RPAREN);
@@ -2955,9 +2955,9 @@ public final class AltParser {
         return new IrStmt.ConductorDecl(name, state, handlers, typedReactions, start.spanTo(close));
     }
 
-    /** True iff {@code sort} is a {@code Mutable[T]} — the explicit single-owner mutable-cell type. */
-    private static boolean isMutableSort(IrSort sort) {
-        return sort instanceof IrSort.Named n && "Mutable".equals(n.name()) && n.typeArgs().size() == 1;
+    /** True iff {@code sort} is a {@code Cell[T]} — the explicit single-owner clocked-cell type. */
+    private static boolean isCellSort(IrSort sort) {
+        return sort instanceof IrSort.Named n && "Cell".equals(n.name()) && n.typeArgs().size() == 1;
     }
 
     /**

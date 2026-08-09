@@ -42,7 +42,7 @@ an invention.
 | --- | --- | --- |
 | **Conductor** | the **worker** that conducts the orchestration — runs Pontif code, owns its (single-owner, MVCC) state and an inbox, wires clocks, routes emits on the static graph | pure |
 | **Event** | the **message** — an immutable value on the wire; its type (with any `[@…]` refinement) is the *shape-and-filter contract* that gates which messages reach a receiver | immutable data |
-| **Action** | a message **receiver** — an internal reaction (a conductor handler). **Bracketless / effect-only**: reads `this` and its `Mutable[T]` cells (`.current`), produces output with `emit`, and stages state with `setNext`. It returns no value | pure |
+| **Action** | a message **receiver** — an internal reaction (a conductor handler). **Bracketless / effect-only**: reads `this` and its `Cell[T]` cells (`.current`), produces output with `emit`, and stages state with `apply` (`setNext` is sugar). It returns no value | pure |
 | **Instrument** | a message **sink** — the boundary where a message *leaves the pure world* and becomes real I/O (`NativeFunctions.Effect`: `StdOut`, `SetText`, `present`) | **the impure edge** |
 
 The line that carries the whole model: **an Action is a pure receiver; an Instrument is the one
@@ -79,7 +79,7 @@ Consequences that survive the rename:
 ### `_type` and the forced-member convention (RULED 2026-08-08)
 
 > This is a general reflection primitive, kept for when it's needed (`this._type.traits`, `._type.name`,
-> `._type.super`). It is **no longer the state-transition mechanism** — state is the explicit `Mutable[T]`
+> `._type.super`). It is **no longer the state-transition mechanism** — state is the explicit `Cell[T]`
 > type (see *Isolated mutability is explicit*), not a handler returning `[this._type]`.
 
 - **`_type` is a universal forced member.** Every value has `._type` — its **concrete sort, as a
@@ -167,57 +167,75 @@ trait — so the sort carries the consumed/emitted interface, the routing graph 
 > for the receiving object — the object is `this`, and the event is its named parameter (`e`). (2) The
 > "**Conduit** = same with a value terminus (the state)" clause is **gone** — every handler is a
 > bracketless, effect-only **Action**; state change is an explicit `this.field.setNext(…)` call on a
-> `Mutable[T]` cell, not a returned value. See *Isolated mutability is explicit* and *The coordinated glossary*.
+> `Cell[T]` cell, not a returned value. See *State is a clocked cell* and *The coordinated glossary*.
 
-### Isolated mutability is explicit — the `Mutable[T]` type (RULED 2026-08-09)
+### State is a clocked cell — the `Cell[T]` primitive (RULED 2026-08-09)
 
 Everything in the language is immutable, **including conductor fields** — with one exception that is
-*named in the type*, never inferred from position: a field of type **`Mutable[T]`**. This replaces the
-earlier model, where `this.field = …` inside a conductor body silently meant "commit an MVCC version"
-while `let a = b` meant "bind a transient local" everywhere else. Overloading `=` with two unrelated
-meanings, switched by *where you stand*, was implicit and un-Pontif-y; the wall it hit ("no way to build a
-next-self to return") was the design pushing back. So mutation stops hiding: it is an explicit type with
-explicit methods, and `=` is *only ever* a local binding, everywhere.
+*named in the type*, never inferred from position: a field of type **`Cell[T]`**. This replaces the
+earlier model, where `this.field = …` inside a conductor body silently meant "commit a version" while
+`let a = b` meant "bind a transient local" everywhere else. Overloading `=` with two unrelated meanings,
+switched by *where you stand*, was implicit and un-Pontif-y. So state stops hiding: it is an explicit
+type, and `=` is *only ever* a local binding, everywhere.
+
+**A `Cell[T]` is not a mutable variable — it is a clocked cell (a latch).** This is the key: a write does
+*not* take effect immediately. It is *staged*, and the value latches on the **clock edge** — the yield at
+the transaction boundary. So within a handler, `current` is a **stable snapshot** from the first line to
+the last; no pure call stack ever observes a mutation. The world only changes *between* epochs, at the
+edge. This is the hardware-register / synchronous-dataflow model (Lustre `pre`/`fby`), and it makes
+purity a *theorem*, not a carve-out: a handler is a pure function `(event, snapshot) → (emits, staged
+writes)`, and the runtime is the sole mutator, only at clock edges.
 
 ```
 conductor Editor {
-  id:   Int                       # immutable, final — the default
-  doc:  Mutable[Doc](Doc.blank)   # explicitly mutable, single-owner → safe
-  onKey:[KeyPress -> this.doc.setNext(edit(this.doc.current, key))]
+  id:   Int                  # immutable, final — the default
+  doc:  Cell[Doc](blank())   # a clocked cell; the (init) seeds it
+  onKey:[KeyPress -> this.doc.apply(d -> edit(d, key))]
 }
 ```
 
-**`Mutable[T]` makes the MVCC model legible** instead of hidden in the interpreter:
+**The primitive write is `apply`; everything else is sugar.**
 
-- `m.current` — the value as of the **transaction's read snapshot** (stable for the whole handler).
-- `m.next` — the **pending** next value (or `current` if `setNext` hasn't been called). Reading your own
-  staged write is explicit: `.current` for the snapshot, `.next` to see what you've set.
-- `m.setNext(v)` — stage the next version. Not "mutate now" — *set the next version*.
-- `m.reset()` — stage the initial value as the next version.
+- `c.apply(op: T -> T)` — stage the **pure** operation `op`. Staged operations fold **serially** (in
+  post order) and latch at the clock edge. `op` must be pure (no `emit`/effect) — it runs at commit;
+  effects still leave via `emit`. This is the base operation.
+- `c.setNext(v)` ≡ `c.apply(_ -> v)` — the replace/set case (a constant operation). Sugar.
+- `c.reset()` ≡ `c.apply(_ -> init)` — stage the initial value. Sugar.
+- `c.current` — the value as of the **clock-edge snapshot**, stable for the whole handler.
+- `c.next` — the **pending** value: the staged operations folded over `current` so far. Reading your own
+  in-flight write is explicit — `.current` for the snapshot, `.next` for what you've built this tick.
 
-**Commit is implicit at the handler-transaction boundary**, atomic across *all* of a conductor's
-`Mutable` fields at once (`next → current`, the version clock advances once) — so a peer never observes a
-half-updated conductor. State stays **deterministically replayable**: re-running the event sequence
-rebuilds the cells (the determinism rule), which is what keeps the journal usable for *deliberate*
-recovery — the runtime does not auto-restart (see *Failure*).
+Because `apply` composes, contributions never clobber: two `apply(s -> s+1)` fold to **+2**, in order,
+with no `.next`-chaining ceremony — and the same fold, over arrival order, is how multiple writers merge
+once multi-writer state exists. (The value-cell vs operation-cell distinction dissolves: `setNext` is
+just `apply` of a constant, so there is **one** primitive, not two.)
 
-**`Mutable[T]` is not sendable.** It can never be a field of an Event or cross a conductor boundary — it
-is confined to its single owner, the conductor whose handler drains it, which is *why* it needs no lock.
-This is the type-level rule that keeps the concurrency theorem (*only the queue is shared, and messages
-are immutable*) true. `Mutable` **is** "the one place mutation is safe," now a type rather than a
-body-position rule. It is conductor-scoped: outside a conductor there is no transaction boundary, so its
-use there is rejected.
+**Commit is implicit at the clock edge** (the handler-transaction boundary), atomic across *all* of a
+conductor's `Cell` fields at once (fold each cell's staged ops → new `current`, the version clock advances
+once) — so a peer never observes a half-updated conductor. State stays **deterministically replayable**:
+re-running the event sequence rebuilds the cells (the determinism rule), keeping the journal usable for
+*deliberate* recovery — the runtime does not auto-restart (see *Failure*).
 
-Handlers are therefore **effect-only Actions** again (bracketless): they read `.current`, `emit`, and
-`setNext` — they do not return a next self. Conductor **methods** are private helpers — they group logic
-and touch the cells but aren't exported to dispatch. A **handle** (`let h = spawn Editor`) is the only
-conductor value that escapes; the worker itself never becomes a passable value.
+**`Cell[T]` is not sendable.** It can never be a field of an Event or cross a conductor boundary — it is
+confined to its clock domain's single owner, which is *why* it needs no lock. This is the type-level rule
+that keeps the concurrency theorem (*only the queue is shared, and messages are immutable*) true. A
+`Cell`'s natural home is any **clock domain**; today that is a conductor (the handler is its tick), so a
+`Cell` outside a conductor — with no clock edge to latch on — is rejected.
 
-> **Supersedes** the earlier "conductor field = implicitly mutable, `this.field = …` commits" model and the
-> `:[this._type]` state-transition handler (the return-as-commit idea, which dead-ended for lack of a
-> next-self constructor). Those are being unwound in favour of `Mutable[T]`. **Not yet built** as of
-> 2026-08-09 — this is the design of record; implementation replaces the `#assign-self#` sentinel
-> machinery with `Mutable` cells.
+Handlers are therefore **effect-only Actions** (bracketless): they read `.current`, `emit`, and `apply` —
+they return no value. Conductor **methods** are private helpers — they group logic and touch the cells but
+aren't exported to dispatch. A **handle** (`let h = spawn Editor`) is the only conductor value that
+escapes; the worker itself never becomes a passable value.
+
+> **Naming.** It is `Cell` and not `Mutable`/`AtomicMutation` deliberately: the mechanism is a clocked
+> latch, not mutation, and the primitive write is an *operation* (`apply`), not a value assignment —
+> `AtomicMutation`'s serial-composition goal is delivered by `apply`'s staged fold, so no second type is
+> needed. A future **operation-cell that takes immediate serialized effect** (a monitor) is *not* this —
+> that is what a conductor already is.
+>
+> **Supersedes** the earlier implicit-mutation model and the `:[this._type]` state-transition handler.
+> **Not yet fully built** as of 2026-08-09 — this is the design of record; implementation registers `Cell`
+> as a Java builtin (primitive tier, like `Int`/`Decimal`) and replaces the `#assign-self#` machinery.
 
 ### The block grammar — a `let`-led preamble, and the return type is the effect contract (RULED 2026-08-06)
 
@@ -235,7 +253,7 @@ emit Event(args)         # emit
 ```
 
 - **`=` is always a local binding.** State change is *not* an assignment — it is a method call on a
-  `Mutable[T]` cell (`this.doc.setNext(…)`, see *Isolated mutability is explicit*). So there is no
+  `Cell[T]` cell (`this.doc.apply(…)`, see *State is a clocked cell*). So there is no
   `let this.field = …` state-commit form; that overloading is gone.
 - **`let expr` (no `=`) is the effect/discard form** — `let emitAllMyTriggers()`. It reads as "let it
   happen," is `let`-led so it is unambiguously preamble, and it subsumes value-discard (any returned value
@@ -255,12 +273,12 @@ write-only terminus" hole by construction):
 | `[]` **or no qualifier** | **unit** — effect-only | preamble only; **no** terminal expression |
 
 So an **Action** is the bracketless/unit case (all-preamble, effect-only — it reads `.current`, `emit`s,
-and `setNext`s its `Mutable` cells); an ordinary function or private helper method carries `:T`/`:_`. `_`
+and `apply`s its `Cell` cells); an ordinary function or private helper method carries `:T`/`:_`. `_`
 means "a value, don't pin the type," **not** "no value."
 
 > **Conduit is gone (2026-08-08); the `:[this._type]` state-transition handler is gone too (2026-08-09).**
 > The old `:{E, S}` Conduit terminus was a fold-era statefulness hack. Its successor — a handler returning
-> `[this._type]` (its next self) — was itself superseded when state moved to the explicit `Mutable[T]` type:
+> `[this._type]` (its next self) — was itself superseded when state moved to the explicit `Cell[T]` type:
 > a handler no longer *returns* its next state, it calls `this.field.setNext(…)`. So a conductor handler
 > never returns a value — it is **always an Action** (bracketless, effect-only); only real *helpers* and
 > *functions* use `:T`/`:_`. See *Isolated mutability is explicit* and *The coordinated glossary*.
