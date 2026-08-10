@@ -149,13 +149,13 @@ class AltParserLetTest {
     // --- Spec-only and error cases ------------------------------------------
 
     @Test
-    void let_sortOnly_noValue_noDirective_throws() {
-        // Synthesis is explicit: a bare `let f:Sort` with no value and no `;`
-        // directive is an error, not an implicit synthesis or a silent NoOp.
+    void let_sortOnly_nonPinningSort_noValue_throws() {
+        // Synthesis is a consequence, not a directive: terminating `let f:Int` with no
+        // value attempts synthesis, and since `Int` pins no unique witness it fails
+        // with the honest "doesn't pin a synthesizable value" — never a silent NoOp.
         ParseException ex = assertThrows(ParseException.class, () ->
                 AltParser.parseModule("let f:Int", "t"));
-        assertTrue(ex.getMessage().contains("needs a value")
-                        && ex.getMessage().contains("';'"),
+        assertTrue(ex.getMessage().contains("does not pin a synthesizable value"),
                 () -> "Unexpected: " + ex.getMessage());
     }
 

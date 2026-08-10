@@ -27,7 +27,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         // Punctuation
         COMMA,                  // ,
         COLON,                  // :
-        SEMICOLON,              // ; — the synthesis directive (bodyless function/method/let)
+        SEMICOLON,              // ; — the optional definition/member terminator (end-this-definition-early)
         DOT,                    // .
         AT,                     // @
         DOLLAR,                 // $ — name-literal sigil ($fqn; metareferences)

@@ -198,6 +198,29 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    @Test
+    void readmeMultiMethodTraitSnippet_newlineTerminated_evaluatesTo26() {
+        // The multi-member trait: members are newline-terminated, no commas. This is
+        // the case the comma-separator papercut was about — pin it so it stays legal.
+        assertEquals("26", runGated("""
+                trait Metrics {
+                  area():Int
+                  perimeter():Int
+                }
+
+                struct Box(w:Int, h:Int)
+
+                assign trait Box:Metrics {
+                  area():Int      -> this.w * this.h
+                  perimeter():Int -> 2 * (this.w + this.h)
+                }
+
+                function report(m:Metrics):Int -> m.area() + m.perimeter()
+
+                report(Box(4, 3))
+                """));
+    }
+
     // --- Traits: DATA attributes + bidirectional coercion --------------------
 
     @Test

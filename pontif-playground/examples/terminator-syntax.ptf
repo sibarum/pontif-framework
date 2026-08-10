@@ -1,0 +1,37 @@
+# Terminator syntax — members are terminated, not comma-separated.
+#
+# A newline ends a trait / struct / conductor member; no comma is needed between
+# them. An explicit `;` is only for putting two members on one line, or closing a
+# member the parser would otherwise read as continuing. `;` is NOT a synthesis
+# command any more — synthesis is simply what happens when a definition is
+# terminated without a value and its sort pins one.
+
+# A trait with SEVERAL methods, one per line, no punctuation between them.
+trait Metrics {
+  area():Int
+  perimeter():Int
+  aspect():Int -> this.perimeter() / this.area()   # a default, in terms of siblings
+}
+
+# A struct's fields are terminated the same way — newline between them, no commas.
+struct Box(
+  w:[Int:@>0]
+  h:[Int:@>0]
+)
+
+assign trait Box:Metrics {
+  area():Int      -> this.w * this.h
+  perimeter():Int -> 2 * (this.w + this.h)
+}
+
+# Spec-only synthesis with NO `;`: the sort pins a single value, terminating the
+# definition without a value synthesizes it. (The old `let scale:[Int:@==3];` still
+# parses — `;` is now just an optional terminator.)
+let scale:[Int:@==3]
+
+function report(m:Metrics):Int -> m.area() + m.perimeter()
+
+# On one line, `;` separates the two lets — the same terminator, made explicit.
+let a = report(Box(4, 3)); let b = report(Box(2, 2))
+
+(a + b) * scale   # (26 + 12) * 3 = 114

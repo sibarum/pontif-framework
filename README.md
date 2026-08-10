@@ -233,6 +233,29 @@ accepts *any* satisfier: the call `w.weeklyPay()` resolves to `Hourly.weeklyPay`
 type the value carries. There is no inheritance and no vtable — trait dispatch is the
 same module-coherent multi-dispatch the rest of the language uses, keyed on the receiver.
 
+A trait usually names **more than one** member. Members are *terminated*, not
+comma-separated: one per line is enough — a newline ends a member, and an explicit
+`;` is only needed to put two on the same line or to close a member the parser would
+otherwise read as continuing:
+
+```pontif
+trait Metrics {
+  area():Int
+  perimeter():Int
+}
+
+struct Box(w:Int, h:Int)
+
+assign trait Box:Metrics {
+  area():Int      -> this.w * this.h
+  perimeter():Int -> 2 * (this.w + this.h)
+}
+
+function report(m:Metrics):Int -> m.area() + m.perimeter()
+
+report(Box(4, 3))   # → 12 + 14 = 26
+```
+
 Members can also be typed **data attributes** — a pure projection of the struct:
 
 ```pontif

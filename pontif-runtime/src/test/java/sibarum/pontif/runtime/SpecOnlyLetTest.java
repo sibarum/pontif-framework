@@ -9,15 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Spec-only top-level lets: a value-pinning sort IS the definition, requested
- * with the explicit {@code ;} synthesis directive. The predicate {@code @==EXPR}
- * carries its witness as an expression, so the parser synthesizes the body
- * verbatim from the pin — {@code let zero:[Decimal:@==0.0];} means
- * {@code zero = 0.0}. The synthesized binding rides everything a written one
- * does: the claim wrapper (compile-checked like any claim — the synthesis-bug
- * detector), Int→Decimal promotion, and the Inquisition's force-evaluation. A {@code ;} on
- * a sort that doesn't pin a unique witness ({@code [Int:@>0]}, self-referential
- * pins) is an honest "does not pin" error — not a silent NoOp.
+ * Spec-only top-level lets: a value-pinning sort IS the definition. Terminating the
+ * let without a value synthesizes it — synthesis is a consequence of the definition,
+ * not a directive. The optional {@code ;} is just a terminator, so both
+ * {@code let zero:[Decimal:@==0.0];} and {@code let zero:[Decimal:@==0.0]} mean
+ * {@code zero = 0.0}. The predicate {@code @==EXPR} carries its witness as an
+ * expression, synthesized verbatim from the pin. The synthesized binding rides
+ * everything a written one does: the claim wrapper (compile-checked like any claim —
+ * the synthesis-bug detector), Int→Decimal promotion, and the Inquisition's
+ * force-evaluation. A sort that doesn't pin a unique witness ({@code [Int:@>0]},
+ * self-referential pins) is an honest "does not pin" error — not a silent NoOp.
  */
 class SpecOnlyLetTest {
 
@@ -32,6 +33,19 @@ class SpecOnlyLetTest {
     void pinnedDecimal_definesTheBinding_andFlowsIntoMixedArithmetic() {
         // The motivating program, verbatim.
         String src = "let zero:[Decimal:@==0.0];\nlet five = zero + 5\nfive";
+        for (Engine engine : Engine.values()) {
+            RunResult r = run(src, engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("5.0", r.text(), engine.toString());
+        }
+    }
+
+    @Test
+    void pinnedSort_withoutTerminator_stillSynthesizes() {
+        // The `;` is optional — a value-pinning let terminated by a newline (the next
+        // statement) synthesizes just the same. This is the core of demoting `;` from
+        // a synthesis directive to a mere terminator.
+        String src = "let zero:[Decimal:@==0.0]\nlet five = zero + 5\nfive";
         for (Engine engine : Engine.values()) {
             RunResult r = run(src, engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());

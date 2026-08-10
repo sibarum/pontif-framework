@@ -321,6 +321,47 @@ public final class AltParser {
         return t.kind() == AltToken.Kind.IDENT && t.text().equals(text);
     }
 
+    /**
+     * The shared member-boundary rule for every brace/paren-delimited type body —
+     * trait, struct, and conductor. Members are <em>terminated</em>, not
+     * comma-separated: after one member is fully parsed, the next is recognized when
+     * either an explicit {@code ;} terminator is present (consumed here) or the next
+     * token simply starts on a later source line — a newline ends the member, no
+     * punctuation required. This is what lets a defaulted method whose body ends in
+     * {@code -> {this}} sit on its own line with nothing trailing it.
+     *
+     * <p>{@code ,} is accepted as a transitional alias for {@code ;} while the docs
+     * and examples migrate off comma-separation; it behaves identically. A member
+     * that shares a line with the previous one and supplies no explicit terminator is
+     * the single genuine error — that is exactly the greedy-continuation case where an
+     * explicit {@code ;} earns its keep.
+     *
+     * <p>Called in place of the old {@code while (peek()!=close) { if(!first) expect(COMMA); }}
+     * pair: it folds the loop-continuation test and the separator consumption into one
+     * call so the three body parsers can't drift apart again.
+     *
+     * @param first whether this is the first member (no preceding terminator to read)
+     * @param close the block's closing token ({@code RBRACE} for trait/conductor,
+     *              {@code RPAREN} for struct fields)
+     * @return {@code true} to parse another member, {@code false} when the block is over
+     */
+    private boolean atMemberBoundary(boolean first, AltToken.Kind close) throws ParseException {
+        if (peek().kind() == close) return false;
+        if (first) return true;
+        if (peek().kind() == AltToken.Kind.SEMICOLON || peek().kind() == AltToken.Kind.COMMA) {
+            consume();                                   // explicit terminator (`,` = transitional alias)
+            return peek().kind() != close;               // a trailing terminator before the close is fine
+        }
+        // No explicit terminator: the previous member must have ended on an earlier
+        // line than this one (a newline terminates it). `pos-1` is that member's last
+        // consumed token.
+        if (peek().line() > tokens.get(pos - 1).line()) return true;
+        throw new ParseException(
+                "members are separated by a newline or ';'; found '" + peek().text()
+                        + "' on the same line as the previous member — add a ';' between them",
+                peek().origin());
+    }
+
     // --- Top-level ---
 
     public IrModule parseModule() throws ParseException {
@@ -1012,26 +1053,22 @@ public final class AltParser {
                 currentScope.putAll(savedScope);
             }
         }
-        // No body — synthesis requires the explicit `;` directive.
-        if (peek().kind() == AltToken.Kind.SEMICOLON) {
-            consume();
-            IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
-            if (derived != null) {
-                // The synthesized body references destructured params (S4) and
-                // conversion params, so wrap it in both bindings.
-                IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
-                IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
-                declaredFunctionReturns.put(name, effReturn);
-                if (params.isEmpty()) declaredZeroArgFunctions.add(name);
-                return new IrStmt.FunctionDecl(
-                        name, params, effReturn, body, start.origin(), false, typeParams);
-            }
-            throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
+        // No body: a function terminated without a `-> body` IS a synthesis request
+        // when its return sort pins a value — synthesis is a consequence of the
+        // definition, not a separate directive. `;` is now just an optional terminator.
+        if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+        IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
+        if (derived != null) {
+            // The synthesized body references destructured params (S4) and
+            // conversion params, so wrap it in both bindings.
+            IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
+            IrSort effReturn = effectiveSynthesizedReturn(derived, returnSort);
+            declaredFunctionReturns.put(name, effReturn);
+            if (params.isEmpty()) declaredZeroArgFunctions.add(name);
+            return new IrStmt.FunctionDecl(
+                    name, params, effReturn, body, start.origin(), false, typeParams);
         }
-        throw new ParseException(
-                "function '" + name + "' needs a body ('-> expr') or a synthesis "
-                        + "directive (';')",
-                peek().origin());
+        throw specOnlyWithoutSynthesis("function", name, returnSort, start.origin());
     }
 
     /** Monotonic counter making each lowered action's synthetic key unique. */
@@ -1375,14 +1412,9 @@ public final class AltParser {
         desugaredParams.addAll(params);
 
         if (peek().kind() != AltToken.Kind.ARROW) {
-            // Spec-only — synthesis requires the explicit `;` directive.
-            if (peek().kind() != AltToken.Kind.SEMICOLON) {
-                throw new ParseException(
-                        "method '" + name + "' needs a body ('-> expr') or a "
-                                + "synthesis directive (';')",
-                        peek().origin());
-            }
-            consume();  // SEMICOLON
+            // Spec-only: a bodyless method synthesizes from its return sort when that
+            // sort pins a value. `;` is an optional terminator, no longer a directive.
+            if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
                 IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
@@ -1981,24 +2013,25 @@ public final class AltParser {
             consume();
             value = parseExpr();
         }
-        // `;` is the explicit synthesis directive (mirrors function/method).
-        // With a value present it requests partial-value + pin synthesis (S6,
-        // below); with no value it requests pure pin synthesis (further down).
-        boolean synthDirective = peek().kind() == AltToken.Kind.SEMICOLON;
-        if (synthDirective) consume();
+        // `;` is now just an optional definition terminator — never a synthesis
+        // directive. Synthesis is a CONSEQUENCE of terminating without a value when
+        // the sort pins one (below), not something `;` requests.
+        if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
         if (declaredSort == null && value == null) {
             throw new ParseException(
                     "let '" + name + "' needs either a sort annotation (':Sort') "
                             + "or a value ('= EXPR')",
                     start.origin());
         }
-        // S6: promotion via value synthesis — `let x:[Target:@.f==v] = partial;`.
-        // The `;` requests synthesis; the value (a DIFFERENT struct) supplies the
-        // base fields, the pin supplies the rest, merged into a Target
-        // construction. The result IS a Target by construction (definitional), so
-        // the binding becomes the bare struct sort and the base-mismatch check
+        // S6: promotion via value synthesis — `let x:[Target:@.f==v] = partial`.
+        // The value (a DIFFERENT struct) supplies the base fields, the pin supplies
+        // the rest, merged into a Target construction. The guard conditions (a refined
+        // STRUCT target whose base differs from the value's) are specific enough that
+        // this can't be confused with a plain coercion, so it fires on structure
+        // alone — no `;` needed. The result IS a Target by construction (definitional),
+        // so the binding becomes the bare struct sort and the base-mismatch check
         // below sees a match.
-        if (synthDirective && value != null && declaredSort instanceof IrSort.Refined ref
+        if (value != null && declaredSort instanceof IrSort.Refined ref
                 && types.isStruct(ref.name())) {
             String valueBase = baseSortName(inference.maximalSort(value));
             if (!ref.name().equals(valueBase)) {
@@ -2011,19 +2044,12 @@ public final class AltParser {
             }
         }
         if (value == null) {
-            // Spec-only let: a value-pinning sort IS the definition, but
-            // synthesis must be requested explicitly with `;` (mirrors
-            // function/method). A bare `let x:Sort` with no value and no
-            // directive is an error, not an implicit synthesis.
-            if (!synthDirective) {
-                throw new ParseException(
-                        "let '" + name + "' with a sort needs a value ('= EXPR') "
-                                + "or a synthesis directive (';')",
-                        start.origin());
-            }
+            // Spec-only let: a value-pinning sort with no `= EXPR` IS the definition.
+            // Terminating without a value synthesizes the pinned value (when the sort
+            // pins one); it is not an error and needs no directive.
             // The predicate `@==EXPR` carries its witness as an expression, so
             // the body is synthesized verbatim from the pin (`let
-            // zero:[Decimal:@==0.0];` means zero = 0.0; the claim wrapper below
+            // zero:[Decimal:@==0.0]` means zero = 0.0; the claim wrapper below
             // still notarizes the synthesis at force).
             value = syntacticPin(declaredSort);
             // Everything else is the prover's job: a value-pinning or finite-range
@@ -2034,13 +2060,13 @@ public final class AltParser {
             // `[Int:P]` → its unique witness.
             if (value == null) value = synthesizeFromSort(declaredSort, start.origin());
             if (value == null) {
-                // `;` given, but the sort pins no synthesizable value
-                // (e.g. [Int:@>0], unbounded) — honest error, not a silent NoOp.
+                // No value and the sort pins nothing synthesizable (e.g. [Int:@>0],
+                // unbounded) — honest error, not a silent NoOp.
                 throw new ParseException(
-                        "let '" + name + "': declared sort " + declaredSort
-                                + " does not pin a synthesizable value — `;` needs a "
-                                + "value-pinning sort (e.g. [Int:0], [Int:@==EXPR], "
-                                + "or a finite range Stream[Int:LO <= @ < HI])",
+                        "let '" + name + "' has no value ('= EXPR') and its sort "
+                                + declaredSort + " does not pin a synthesizable value "
+                                + "(e.g. [Int:0], [Int:@==EXPR], or a finite range "
+                                + "Stream[Int:LO <= @ < HI])",
                         start.origin());
             }
         }
@@ -2541,8 +2567,7 @@ public final class AltParser {
         expect(AltToken.Kind.LPAREN);
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RPAREN) {
-            if (!first) expect(AltToken.Kind.COMMA);
+        while (atMemberBoundary(first, AltToken.Kind.RPAREN)) {
             AltToken fieldName = expect(AltToken.Kind.IDENT);
             expect(AltToken.Kind.COLON);
             IrSort fieldSort = parseSort();
@@ -2891,8 +2916,7 @@ public final class AltParser {
         List<IrStmt.FunctionDecl> reactions = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
+        while (atMemberBoundary(first, AltToken.Kind.RBRACE)) {
             AltToken memberName = expect(AltToken.Kind.IDENT);
             if (!seen.add(memberName.text())) {
                 throw new ParseException(
@@ -3060,8 +3084,7 @@ public final class AltParser {
         // (dispatch-unification B1). Keyed by the operator symbol.
         Map<String, IrSort.CallSig> operators = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
+        while (atMemberBoundary(first, AltToken.Kind.RBRACE)) {
             // An OPERATOR member key — `+:[Dispatch(this.type, this.type):this.type]`.
             // The key is an operator symbol (not an identifier); the sort must be a
             // homogeneous self-typed Dispatch (the v1 bound). This is a mechanism-1
@@ -3837,8 +3860,7 @@ public final class AltParser {
         // the slot ORDER positional forms need. The local (struct-known) path is
         // unchanged below.
         boolean deferred = patternShapeFor(typeName) == null;
-        while (peek().kind() != AltToken.Kind.RPAREN) {
-            if (!first) expect(AltToken.Kind.COMMA);
+        while (atMemberBoundary(first, AltToken.Kind.RPAREN)) {
             clauseIndex++;
             AltToken t = peek();
             boolean literalClause = t.kind() == AltToken.Kind.INTEGER
