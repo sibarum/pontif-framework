@@ -124,6 +124,22 @@ public final class NameResolver {
     }
 
     /**
+     * FQN-resolve a trait default-method {@link IrStmt.FunctionDecl}: its param
+     * sorts, return sort, and body — exactly as an impl method is resolved (the
+     * TraitImpl case above). The NAME is left untouched: a default is keyed by its
+     * short member name in {@link IrSort.Trait#methodDefaults()}, and
+     * {@link TraitDefaultExpansion} mints the final {@code Type.member} name from
+     * that key when it clones the default into an impl.
+     */
+    private static IrStmt.FunctionDecl resolveTraitFn(
+            IrStmt.FunctionDecl fd, String m, ModuleSymbolTable table) throws CompileException {
+        return new IrStmt.FunctionDecl(
+                fd.name(), rewriteParams(fd.params(), m, table),
+                rewriteSort(fd.returnSort(), m, table), rewrite(fd.body(), m, table),
+                fd.origin(), fd.topLevelLet(), fd.typeParams());
+    }
+
+    /**
      * Resolve a type name to its FQN (mirrors {@link #resolveCallName} over
      * {@code typeOwners}). A bare name not resolvable locally, by import, or by
      * module-qualification but declared in <b>two or more</b> other modules is an
@@ -219,13 +235,35 @@ public final class NameResolver {
                 // be a user type needing FQN-qualification — and preserved.
                 List<IrSort> resolvedArgs = new ArrayList<>(t.typeArgs().size());
                 for (IrSort a : t.typeArgs()) resolvedArgs.add(rewriteSort(a, m, table));
-                // methodDefaults bodies live inside the sort (not walked as
-                // statements), so they are carried through verbatim here — they are
-                // cloned into the impl and resolved in-context by TraitDefaultExpansion.
+                // A default-method / shell signature is the SAME signature as the
+                // contract member (`methods` above), so it must be FQN-resolved the
+                // SAME way — a default whose return names a user type (`simplify():Expr`
+                // on a trait `Expr`) otherwise keeps a bare `Expr` while the contract
+                // gets `mod/Expr`, and TraitDefaultExpansion then clones the bare name
+                // into the impl where nothing in scope resolves it (AliasResolver's table
+                // is FQN-keyed) — an unknown-sort error at a name that IS declared. The
+                // bodies are resolved here too, exactly as impl-method bodies are (above),
+                // so a default body naming a user type resolves as well.
+                Map<String, IrStmt.FunctionDecl> defs = new LinkedHashMap<>();
+                for (Map.Entry<String, IrStmt.FunctionDecl> e : t.methodDefaults().entrySet()) {
+                    defs.put(e.getKey(), resolveTraitFn(e.getValue(), m, table));
+                }
+                Map<String, IrExpr.Lambda> retShells = new LinkedHashMap<>();
+                for (Map.Entry<String, IrExpr.Lambda> e : t.returnShells().entrySet()) {
+                    retShells.put(e.getKey(), (IrExpr.Lambda) rewrite(e.getValue(), m, table));
+                }
+                Map<String, Map<Integer, IrExpr.Lambda>> argShells = new LinkedHashMap<>();
+                for (Map.Entry<String, Map<Integer, IrExpr.Lambda>> e : t.argShells().entrySet()) {
+                    Map<Integer, IrExpr.Lambda> byPos = new LinkedHashMap<>();
+                    for (Map.Entry<Integer, IrExpr.Lambda> pe : e.getValue().entrySet()) {
+                        byPos.put(pe.getKey(), (IrExpr.Lambda) rewrite(pe.getValue(), m, table));
+                    }
+                    argShells.put(e.getKey(), byPos);
+                }
                 yield new IrSort.Trait(
                         resolveTypeName(t.name(), m, table, t.origin()), methods, attrs, assoc,
                         t.typeParams(), t.operators(), t.baseTrait(), resolvedArgs,
-                        t.methodDefaults(), t.returnShells(), t.argShells(), t.origin());
+                        defs, retShells, argShells, t.origin());
             }
             case IrSort.Union u -> {
                 List<IrSort> bs = new ArrayList<>(u.branches().size());

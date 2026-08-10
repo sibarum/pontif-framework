@@ -163,4 +163,47 @@ class TraitDefaultMethodTest {
                 function useGreeter(g:Greeter):Int -> g.greet()
                 useGreeter(T(0))"""));
     }
+
+    // 10. A default method whose SIGNATURE names its own (self-referential) trait
+    //     must resolve. NameResolver FQN-qualifies contract-method signatures but
+    //     once carried the parallel methodDefaults signatures through verbatim, so
+    //     the cloned default kept a bare `Expr` while the contract had `mod/Expr`;
+    //     the FQN-keyed alias table then failed to resolve the bare name and the
+    //     default's return was rejected as an unknown sort — at a trait that IS
+    //     declared. Regression guard: the self-typed default synthesizes and runs.
+    @Test
+    void defaultReturnNamesOwnTrait() {
+        assertEquals("Leaf{}", run("""
+                trait Expr{ simplify():[Method():Expr] -> this }
+                struct Leaf()
+                assign trait Leaf:Expr {
+                }
+                Leaf().simplify()"""));
+    }
+
+    // 11. Same self-reference nested inside a parametric return, exercised through
+    //     an inherited default on a sub-struct along a base chain — the shape the
+    //     original traction bug report hit (`walk():Stream[this.type]` beside a
+    //     `simplify():Expr` default, invoked on an `Exp:BiOp` value).
+    @Test
+    void selfReferentialDefaultAlongInheritanceChain() {
+        assertEquals(
+                "{_anonymous/Leaf{}, _anonymous/Exp{left: _anonymous/Leaf{}, "
+                        + "right: _anonymous/Leaf{}}, _anonymous/Leaf{}}",
+                run("""
+                requires pontif.core.{Stream}
+                trait Expr{
+                  walk():[Method():Stream[this.type]] -> {this},
+                  simplify():[Method():Expr] -> this
+                }
+                struct Leaf()
+                struct BiOp(left:Expr, right:Expr)
+                struct Exp:BiOp(left:Expr, right:Expr)
+                assign trait Leaf:Expr {}
+                assign trait BiOp:Expr {
+                  walk():Stream[Expr] -> this.left.walk() + {this} + this.right.walk()
+                }
+                let sample:Exp = Exp(Leaf(), Leaf())
+                sample.walk()"""));
+    }
 }

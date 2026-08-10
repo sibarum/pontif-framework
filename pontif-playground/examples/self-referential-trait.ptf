@@ -1,0 +1,41 @@
+module experiment.traction
+
+# A trait whose own method signatures name the trait itself — `simplify():Expr`
+# returns an `Expr`, `walk()` streams `this.type`. The self-reference is the
+# whole point of an expression algebra: an Expr rewrites to an Expr.
+#
+# This exercises the fix where a trait's DEFAULT-method signature (`-> this`)
+# was carried through name-resolution unqualified while the contract signature
+# was FQN-qualified, so cloning the default into an impl left a bare `Expr` that
+# nothing in scope could resolve — an "unknown sort Expr" at a trait that is
+# plainly declared. Defaults whose signatures name their own trait now resolve.
+
+requires pontif.core.{Stream}
+
+trait Expr {
+  walk():[Method():Stream[this.type]] -> {this},   # default: a leaf walks to itself
+  simplify():[Method():Expr] -> this               # default: already simplified
+}
+
+struct Leaf()
+struct Residue:Leaf(exp:[Int:@!=0], sign:Bool)
+
+let zero  = Residue(1, false)
+let omega = Residue(-1, false)
+
+struct BiOp(left:Expr, right:Expr)
+struct Exp:BiOp(left:Expr, right:Expr)
+struct Log:BiOp(left:Expr, right:Expr)
+
+assign trait Leaf:Expr {
+}
+
+# A BiOp walks to: everything on the left, itself, then everything on the right.
+# Exp/Log inherit this impl down the struct-inheritance chain.
+assign trait BiOp:Expr {
+  walk():Stream[Expr] -> this.left.walk() + {this} + this.right.walk()
+}
+
+let sample:Exp = Exp(Log(zero, omega), omega)
+
+sample.walk()
