@@ -282,9 +282,10 @@ class ConstructionGateTest {
     void decimalRefinedField_provableFitCompiles_missIsCompileError() {
         // A Decimal-literal fit IS decided at compile time (Refinements kernel):
         // Account(100.0, …) discharges [Decimal:@==100.0] ⊑ [Decimal:@>=0]. A miss
-        // (-5.0) is outside the integer kernel's DISJOINT reach, so it lands as
-        // "cannot be proved" — and §1d rejects it at compile time rather than
-        // stamping a runtime check that dies at a later boundary.
+        // (-5.0) is DISJOINT from [Decimal:@>=0]; the Decimal predicate kernel now
+        // decides this (dense open/closed intervals, like Int), so §1d rejects it
+        // at compile time as "can never satisfy" rather than the old "cannot be
+        // proved" fallback.
         String accounts = """
                 struct Account(balance:[Decimal:@>=0], rate:Decimal)
                 """;
@@ -292,7 +293,7 @@ class ConstructionGateTest {
             RunResult ok = run(accounts + "let a = Account(100.0, 0.05)\na.rate", engine);
             assertFalse(ok.isError(), () -> engine + " got: " + ok.text());
         }
-        assertUnprovableConstruction(accounts + "let a = Account(-5.0, 0.05)\na.rate");
+        assertCompileError(accounts + "let a = Account(-5.0, 0.05)\na.rate");
     }
 
     /** The named construction anywhere in the module — function bodies first, then main. */

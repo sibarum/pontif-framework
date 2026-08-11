@@ -168,13 +168,14 @@ class SpecOnlyLetTest {
     void synthesizedBinding_claimIsCompileCheckedLikeAnyOther() {
         // The synthesized let is a top-level let, judged like any written one. Its
         // pinned witness (zero = 0.0) flows into the chained binding's claim via the
-        // effective-sort lens: `bad`'s value is [Decimal:@==0.0], which cannot be
-        // proved to satisfy [Decimal:@>0]. §1d: a compile error, not a runtime force.
+        // effective-sort lens: `bad`'s value is [Decimal:@==0.0], DISJOINT from
+        // [Decimal:@>0]. The Decimal predicate kernel decides this outright, so §1d
+        // rejects it as "can never satisfy" (not merely "cannot be proved").
         String misses = "let zero:[Decimal:@==0.0];\nlet bad:[Decimal:@>0] = zero\n42";
         for (Engine engine : Engine.values()) {
             RunResult bad = run(misses, engine);
             assertTrue(bad.isError(), () -> engine + ": expected a compile-time rejection");
-            assertTrue(bad.text().contains("cannot be proved to satisfy"),
+            assertTrue(bad.text().contains("can never satisfy"),
                     () -> engine + " got: " + bad.text());
         }
     }

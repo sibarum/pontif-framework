@@ -139,10 +139,11 @@ class LetClaimGateTest {
 
     @Test
     void decimalClaim_misses_isCompileError() {
-        // [Decimal:@==1.0] does not imply [Decimal:@==0], and the miss is outside
-        // the integer kernel's DISJOINT reach — so it lands as "cannot be proved".
-        // §1d rejects it at compile time (it formerly ran clean, then was stamped).
-        assertUnprovable("let z:[Decimal:@==0] = 1.0\nz");
+        // [Decimal:@==1.0] is DISJOINT from [Decimal:@==0]. The predicate kernel
+        // now reasons over Decimal (dense open/closed intervals) as it does over
+        // Int, so the miss is a definite "can never satisfy", not merely
+        // "cannot be proved". §1d rejects it at compile time either way.
+        assertCompileError("let z:[Decimal:@==0] = 1.0\nz");
     }
 
     @Test
@@ -201,16 +202,16 @@ class LetClaimGateTest {
     @Test
     void unreferencedTopLevelLet_claimIsCompileChecked() {
         // Nothing references `zero`, yet its claim is judged at compile time —
-        // reachability is irrelevant to a compile error. §1d: the unprovable
-        // Decimal claim is rejected before the program ever runs. (Formerly this
-        // slipped past parse-time and was caught only by runtime forcing.)
-        assertUnprovable("let zero:[Decimal:@==0.0] = 1\n42");
+        // reachability is irrelevant to a compile error. §1d: the disjoint
+        // Decimal claim (1 vs @==0.0) is rejected before the program ever runs.
+        assertCompileError("let zero:[Decimal:@==0.0] = 1\n42");
     }
 
     @Test
     void unreferencedTopLevelLet_constructionClaimsAreCompileChecked() {
         // Same for a construction claim living inside an unreferenced let's value.
-        assertUnprovable("""
+        // -5.0 is disjoint from [Decimal:@>=0] — decided by the Decimal kernel.
+        assertCompileError("""
                 struct Account(balance:[Decimal:@>=0], rate:Decimal)
                 let a = Account(-5.0, 0.05)
                 42
@@ -244,7 +245,8 @@ class LetClaimGateTest {
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("2.0", r.text(), engine.toString());
         }
-        assertUnprovable("let b = -2.0\nlet a:[Decimal:@>0] = b\n42");
+        // b=-2.0 gives [Decimal:@==-2.0], DISJOINT from [Decimal:@>0] — now decided.
+        assertCompileError("let b = -2.0\nlet a:[Decimal:@>0] = b\n42");
     }
 
     /** The named let binding anywhere in the module — function bodies first, then main. */
