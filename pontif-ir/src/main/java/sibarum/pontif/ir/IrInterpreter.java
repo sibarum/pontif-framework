@@ -2201,12 +2201,8 @@ public final class IrInterpreter {
 
     private boolean satisfiesTrait(RecordValue value, String traitName, CompiledModule module) {
         if (value == null || value.typeName() == null || traitName == null) return false;
-        sibarum.pontif.core.symbolic.TraitRegistry tr = module.dispatch().traitRegistry();
-        String type = value.typeName();
-        String bareType = bareName(type);
-        String bareTrait = bareName(traitName);
-        return tr.satisfies(traitName, type) || tr.satisfies(bareTrait, type)
-                || tr.satisfies(traitName, bareType) || tr.satisfies(bareTrait, bareType);
+        // The bare/qualified tolerance policy lives once in TraitRegistry now.
+        return module.dispatch().traitRegistry().satisfiesTolerant(traitName, value.typeName());
     }
 
     /**

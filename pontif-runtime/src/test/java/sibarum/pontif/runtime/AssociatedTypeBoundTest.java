@@ -55,6 +55,32 @@ class AssociatedTypeBoundTest {
     }
 
     @Test
+    void boundSatisfiedViaInheritedImpl_compilesAndRuns() {
+        // Pin satisfies Showable only through its base Marker (assign trait
+        // Marker:Showable); the bound `type T:Showable` must accept `type T = [Pin]`
+        // via the struct-inheritance chain. Before the bound check consulted the
+        // shared TraitRegistry, its flat impl-only relation missed the inherited
+        // impl and wrongly rejected this.
+        assertEquals("42", run("""
+                trait Showable{ describe:[Method():Int] }
+                struct Marker()
+                assign trait Marker:Showable { describe():Int -> 42 }
+                struct Pin:Marker(n:Int)
+
+                trait Box{
+                  type T:Showable,
+                  get:[Method():T]
+                }
+                struct PinBox(item:Pin)
+                assign trait PinBox:Box {
+                  type T = [Pin]
+                  get():Pin -> this.item
+                }
+                PinBox(Pin(9)).get().describe()
+                """));
+    }
+
+    @Test
     void boundViolated_isRejected() {
         // Int does not satisfy Showable — the bound `type T:Showable` rejects it.
         PontifCompiler.CompileResult.Failed f = rejects(SETUP + """

@@ -221,6 +221,20 @@ public final class TraitRegistry {
         return false;
     }
 
+    /**
+     * Fully qualifier-tolerant satisfaction: does {@code typeName} satisfy
+     * {@code traitName}, matching either name bare-or-qualified on either side?
+     * The single home for the "try all bare/qualified combinations" policy that
+     * callers (the interpreter's match-arm trait gate, dispatch trait-param
+     * enforcement) otherwise open-code. Delegates to {@link #satisfiesBareTrait},
+     * which already bares the trait and tries the type both ways — a qualified
+     * {@code traitName} bares to the same key, so this covers all four combos.
+     */
+    public boolean satisfiesTolerant(String traitName, String typeName) {
+        if (traitName == null || typeName == null) return false;
+        return satisfies(traitName, typeName) || satisfiesBareTrait(traitName, typeName);
+    }
+
     private static String bare(String name) {
         if (name == null) return null;
         int slash = name.lastIndexOf('/');

@@ -121,6 +121,9 @@ public final class IrCompiler {
         this.simplifier = this.simplifier.withRegistry(structRegistry);
 
         DispatchTable dispatch = new DispatchTable();
+        // Populate the trait/struct/impl relations up front via the shared builder
+        // (the same one SortChecker uses), so both see one transitive relation.
+        TraitRelations.populate(resolved, dispatch.traitRegistry());
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
         // Eager pre-compilation: every IrSort reachable from the module gets
         // compiled to a Sort here. Match-branch patterns and other runtime sort
@@ -259,21 +262,13 @@ public final class IrCompiler {
                         registerSortsInExpr(a.body(), compiledSorts);
                         compileFunctionDecl(a, dispatch, functions, compiledSorts);
                     }
-                    dispatch.traitRegistry().register(ti.traitName(), ti.typeName());
+                    // Trait/struct/impl relations are populated once, up front, via
+                    // the shared TraitRelations builder (see below) — not here.
                 }
                 case IrStmt.TypeAlias ta -> {
-                    // AliasResolver keeps trait TypeAliases so SortChecker
-                    // can find contracts; also register the trait name so
-                    // bare-named param sorts can be identified as traits at
-                    // dispatch time, even before any impl block is seen.
-                    if (ta.sort() instanceof IrSort.Trait t) {
-                        dispatch.traitRegistry().declareTrait(t.name(), t.baseTrait());
-                    }
-                    // Record the struct is-a base so a trait impl assigned to the base is inherited by
-                    // this struct (the runtime fallback walks the chain to the ancestor that declares it).
-                    if (ta.sort() instanceof IrSort.Structural s && s.baseSort() != null) {
-                        dispatch.traitRegistry().declareStruct(s.name(), Coercions.baseName(s.baseSort()));
-                    }
+                    // AliasResolver keeps trait TypeAliases so SortChecker can find
+                    // contracts; the trait/struct relations they carry are recorded
+                    // up front via TraitRelations, shared with SortChecker.
                 }
                 case IrStmt.Proof p -> {
                     // proof metadata; not compiled/evaluated — but an `f:Algebraic` claim

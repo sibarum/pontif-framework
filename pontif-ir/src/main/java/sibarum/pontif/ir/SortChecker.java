@@ -92,14 +92,12 @@ public final class SortChecker {
         // gate can stamp a metareference `$f[…]` as AlgebraicDispatch (its `.ast` resolves)
         // vs DispatchBase (`.ast` is a compile error). Mirrors IrCompiler/InferenceContext.
         Set<String> algebraicFunctions = collectAlgebraicFunctions(module);
-        // The declared trait-satisfaction relation (type satisfies trait), from
-        // every `assign trait` block — used to check associated-type bounds.
-        Set<String> satisfies = new HashSet<>();
-        for (IrStmt s : module.statements()) {
-            if (s instanceof IrStmt.TraitImpl t) {
-                satisfies.add(t.typeName() + " " + t.traitName());
-            }
-        }
+        // The declared trait-satisfaction relation (type satisfies trait) — used
+        // to check associated-type bounds. Built through the shared TraitRegistry
+        // so the bound check sees the SAME transitive relation the runtime uses
+        // (inherited impls via trait-extends / struct-inheritance chains), not a
+        // flat impl-only string set that misses them.
+        sibarum.pontif.core.symbolic.TraitRegistry satisfies = TraitRelations.from(module);
         // Declared type-alias names — a reusable-sort alias may reference another alias
         // (`let B:Type[A]`); AliasResolver does not inline names inside an alias declaration's own
         // target, so validating those targets (below) must treat a declared alias name as known.
@@ -425,7 +423,7 @@ public final class SortChecker {
             Map<String, IrSort.Trait> traitContracts,
             Map<String, IrSort> functionReturns,
             Map<String, IrSort.Structural> structDefs,
-            Set<String> satisfies,
+            sibarum.pontif.core.symbolic.TraitRegistry satisfies,
             Map<String, List<IrStmt.FunctionDecl>> overloads,
             Set<String> algebraicFunctions) throws CompileException {
         IrSort.Trait ownContract = traitContracts.get(ti.traitName());
@@ -482,7 +480,7 @@ public final class SortChecker {
             if (reqTrait == null) continue;  // unknown bound shape — nothing to check
             boolean ok = boundType != null
                     && (boundType.equals(reqTrait)
-                            || satisfies.contains(boundType + " " + reqTrait));
+                            || satisfies.satisfies(reqTrait, boundType));
             if (!ok) {
                 throw new CompileException(
                         "Trait impl '" + ti.typeName() + " : " + ti.traitName()
