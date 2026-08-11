@@ -1399,7 +1399,22 @@ public final class IrInterpreter {
         for (int i = 0; i < match.branches().size(); i++) {
             IrExpr.MatchBranch branch = match.branches().get(i);
             Sort pattern = module.sortFor(branch.pattern());
-            ProofResult result = Refinements.satisfies(symbolicValue, pattern, checker(module));
+            // A bare NOMINAL TRAIT pattern (`[HasToString] -> …`) must test actual
+            // trait satisfaction against the value's concrete type. Refinements is
+            // deliberately lenient on non-primitive bare names (it passes any
+            // value), because trait membership is normally enforced at dispatch
+            // time — but a match arm has no dispatch gate, so without this a
+            // non-satisfier falls into the trait arm and then dies with a baffling
+            // "No method 'Trait.m' is declared" when the arm calls the method.
+            String traitPattern = bareTraitPatternName(pattern, module);
+            ProofResult result;
+            if (traitPattern != null) {
+                result = (value instanceof RecordValue rv && satisfiesTrait(rv, traitPattern, module))
+                        ? ProofResult.passed()
+                        : ProofResult.failed("value does not satisfy trait '" + traitPattern + "'");
+            } else {
+                result = Refinements.satisfies(symbolicValue, pattern, checker(module));
+            }
             if (result instanceof ProofResult.Passed) {
                 try {
                     return eval(branch.result(), env, module);
@@ -2162,6 +2177,28 @@ public final class IrInterpreter {
      * module-qualified spellings of both the trait and the value's type (the registry and the
      * runtime value may carry either form), mirroring the action keying.
      */
+    /**
+     * If {@code pattern} is a bare (unrefined, non-parametric) nominal reference
+     * to a DECLARED trait, returns the trait name; otherwise null. Used by
+     * {@link #evalMatch} to route trait-pattern arms through real satisfaction
+     * checking rather than {@link Refinements}' permissive bare-name pass.
+     */
+    private String bareTraitPatternName(Sort pattern, CompiledModule module) {
+        if (pattern == null || pattern.isRefined() || pattern.isStructural()
+                || pattern.isUnion() || pattern.isIntersection() || pattern.isMethod()
+                || pattern.isDispatch()) {
+            return null;
+        }
+        if (pattern.typeArgs() != null && !pattern.typeArgs().isEmpty()) return null;
+        String name = pattern.name();
+        if (name == null) return null;
+        sibarum.pontif.core.symbolic.TraitRegistry tr = module.dispatch().traitRegistry();
+        if (tr.isDeclaredTrait(name)) return name;
+        String bare = bareName(name);
+        if (!bare.equals(name) && tr.isDeclaredTrait(bare)) return bare;
+        return null;
+    }
+
     private boolean satisfiesTrait(RecordValue value, String traitName, CompiledModule module) {
         if (value == null || value.typeName() == null || traitName == null) return false;
         sibarum.pontif.core.symbolic.TraitRegistry tr = module.dispatch().traitRegistry();
