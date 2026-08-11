@@ -310,15 +310,7 @@ public final class BoundAnalysis {
      * one line that must never apply an integer-strict cut to a Decimal bound.
      */
     private static RealInterval quantize(RealInterval iv, Domain domain) {
-        if (domain != Domain.INT || iv.isEmpty()) return iv;
-        BigDecimal lo = iv.lo();
-        BigDecimal hi = iv.hi();
-        BigDecimal newLo = lo == null ? null
-                : (iv.loIncl() ? RealInterval.ceil(lo) : RealInterval.floor(lo).add(BigDecimal.ONE));
-        BigDecimal newHi = hi == null ? null
-                : (iv.hiIncl() ? RealInterval.floor(hi) : RealInterval.ceil(hi).subtract(BigDecimal.ONE));
-        RealInterval r = new RealInterval(newLo, newLo != null, newHi, newHi != null);
-        return r.isEmpty() ? RealInterval.empty() : r;
+        return domain == Domain.INT ? iv.quantizeToInt() : iv;
     }
 
     // --- Linear normal form -------------------------------------------------

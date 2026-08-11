@@ -231,6 +231,25 @@ public record RealInterval(BigDecimal lo, boolean loIncl, BigDecimal hi, boolean
         }
     }
 
+    /**
+     * Project onto the integer grid: the tightest CLOSED integer-aligned
+     * interval with the same integer content. An exclusive bound moves inward
+     * to the next integer ({@code (0,∞)} ⇒ {@code [1,∞)}), an inclusive bound
+     * rounds inward to an integer ({@code (-∞, 2.5]} ⇒ {@code (-∞, 2]}). Empties
+     * when no integer falls inside ({@code (0,1)} ⇒ ∅). This is the one
+     * dense-invalid move, sound only over a discrete domain — the single place
+     * integer semantics live (cf. {@link BoundAnalysis}, which delegates here).
+     */
+    public RealInterval quantizeToInt() {
+        if (isEmpty()) return EMPTY;
+        BigDecimal newLo = lo == null ? null
+                : (loIncl ? ceil(lo) : floor(lo).add(BigDecimal.ONE));
+        BigDecimal newHi = hi == null ? null
+                : (hiIncl ? floor(hi) : ceil(hi).subtract(BigDecimal.ONE));
+        RealInterval r = new RealInterval(newLo, newLo != null, newHi, newHi != null);
+        return r.isEmpty() ? EMPTY : r;
+    }
+
     /** {@code ⌊v⌋} as a {@link BigDecimal}. */
     public static BigDecimal floor(BigDecimal v) {
         return v.setScale(0, RoundingMode.FLOOR);
