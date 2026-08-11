@@ -81,6 +81,7 @@ public final class AltParser {
             "function", "method", "struct", "let", "cast",
             "assign", "trait", "Type", "type",
             "match", "proof", "main", "emit", "action", "conduit", "conductor", "spawn",
+            "if", "then", "else",
             "true", "false");
 
     /** Standard precedence for binary operators (higher = tighter). */
@@ -5031,6 +5032,45 @@ public final class AltParser {
     }
 
     /**
+     * Inline conditional {@code if c then a else b} — a full expression, valid
+     * anywhere a value is (the same positions as {@code match}, which it is sugar
+     * for). It lowers to a two-arm boolean match, so it reuses typing, receipts,
+     * {@code evalMatch}, and the totality machinery — no new IR node:
+     * <pre>
+     *   match (c)  [Bool: @] -&gt; a   _ -&gt; b
+     * </pre>
+     * {@code [Bool: @]} is the sub-sort of {@code Bool} whose refinement predicate
+     * is the value itself (= {@code {true}}); the ordered {@code _} complement is
+     * {@code {false}}. Totality holds by construction, so {@code else} is
+     * mandatory (there is no partial {@code if}). An {@code else if} chain falls
+     * out for free — the else-branch is any expression, including another {@code if}.
+     */
+    private IrExpr parseConditional() throws ParseException {
+        AltToken start = expectKeyword("if");
+        IrExpr cond = parseExpr();
+        expectKeyword("then");
+        IrExpr thenExpr = parseExpr();
+        expectKeyword("else");
+        IrExpr elseExpr = parseExpr();
+
+        Origin o = start.origin();
+        IrSort trueSort = new IrSort.Refined("Bool", new IrExpr.SelfRef(o), o);
+        List<IrExpr.MatchBranch> branches = new ArrayList<>();
+        branches.add(new IrExpr.MatchBranch(trueSort, thenExpr));
+        int defaultArmIndex = branches.size();
+        branches.add(new IrExpr.MatchBranch(
+                new IrSort.Named("__default_placeholder", o), elseExpr));
+
+        // Compute the `_` complement of `[Bool: @]` over Bool — precise
+        // (`[Bool: !@]`) where the kernel can, universal `_` otherwise. Same tail
+        // as parseMatch, so downstream sees a shape the totality checker knows.
+        IrSort defaultPattern = DefaultArmComplement.compute(
+                new IrSort.Named("Bool", o), branches, defaultArmIndex, o);
+        branches.set(defaultArmIndex, new IrExpr.MatchBranch(defaultPattern, elseExpr));
+        return desugarStructuralDestructure(cond, branches, o);
+    }
+
+    /**
      * The iteration construct (docs/iteration.md §8), slice 1 — map + filter only.
      * {@code iter(src).{value, accept, reject} { match value <arms> }} lowers to
      * {@link IrExpr.Iterate}: destructured members pick outputs (accept/reject →
@@ -6115,6 +6155,9 @@ public final class AltParser {
                 }
                 if (t.text().equals("match")) {
                     yield parseMatch();
+                }
+                if (t.text().equals("if")) {
+                    yield parseConditional();
                 }
                 if (t.text().equals("let")) {
                     yield parseLetExpr();

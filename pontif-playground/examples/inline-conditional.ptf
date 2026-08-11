@@ -1,0 +1,24 @@
+# The inline conditional `if c then a else b` — a FULL expression, valid
+# anywhere a value is (the same positions as `match`, which it lowers to).
+#
+# Lowering (no new IR node):   if c then a else b   ==   match (c) [Bool: @] -> a  _ -> b
+# `[Bool: @]` is the sub-sort of Bool where the value itself holds (= {true});
+# the ordered `_` complement is {false}. Total by construction — so `else` is
+# mandatory (there is no partial `if`), and `else if` chains fall out for free.
+
+module examples.inline_conditional
+
+# 1. Nested in a call argument — the position a let-only rule would have forbidden.
+function abs(n:Int):Int -> if n < 0 then 0 - n else n
+
+# 2. An `else if` chain — falls out for free (the else-branch is any expression,
+#    including another `if`; no special grammar).
+function grade(score:Int):Int -> if score >= 90 then 4 else if score >= 80 then 3 else if score >= 70 then 2 else 1
+
+# 3. As the terminal expression of a member.
+function max(a:Int, b:Int):Int -> if a > b then a else b
+
+# main — a `let` RHS position (`peak`) plus the three calls.
+# abs(-7)=7, grade(85)=3, max(4,9)=9, peak=99  ->  7 + 3 + 9 + 99 = 118
+let peak = if grade(85) > 2 then 99 else 0
+abs(0 - 7) + grade(85) + max(4, 9) + peak
