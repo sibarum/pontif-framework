@@ -5002,7 +5002,21 @@ public final class AltParser {
                     }
                 }
             }
-            if (braced) expect(AltToken.Kind.RBRACE);
+            if (braced) {
+                // A common mistake: writing an arm pattern as a bare constructor
+                // or literal (`A(v) -> ...`) instead of the required bracket-sort
+                // (`[A(v)] -> ...`). The arm loop stops at the unbracketed token,
+                // so without this the user sees a bewildering "Expected RBRACE".
+                if (peek().kind() != AltToken.Kind.RBRACE && looksLikeUnbracketedArm()) {
+                    throw new ParseException(
+                            "Match arm patterns must be written as bracket-sorts: '["
+                            + peek().text() + " ...] -> ...', not a bare '" + peek().text()
+                            + " ...'. Wrap the pattern in '[...]' (e.g. `[Point(x, y)] -> ...`,"
+                            + " `[@>0] -> ...`, or `_` for the default arm).",
+                            peek().origin());
+                }
+                expect(AltToken.Kind.RBRACE);
+            }
 
             if (branches.isEmpty()) {
                 throw new ParseException(
@@ -5768,6 +5782,29 @@ public final class AltParser {
     /** True if the next token starts a match arm — either `[` or the `_` default. */
     private boolean isMatchArmStart() {
         return peek().kind() == AltToken.Kind.LBRACKET || isUnderscoreArm();
+    }
+
+    /**
+     * Heuristic for the "forgot the brackets" match-arm mistake: the current
+     * token begins something pattern-shaped (an identifier, {@code (}, or a
+     * literal) and an {@code ->} follows before the enclosing {@code }} — i.e.
+     * the user wrote {@code A(v) -> ...} where {@code [A(v)] -> ...} is required.
+     * Bounded lookahead so a genuinely broken tail doesn't scan forever.
+     */
+    private boolean looksLikeUnbracketedArm() {
+        AltToken t = peek();
+        boolean patternish = switch (t.kind()) {
+            case IDENT, LPAREN, INTEGER, DECIMAL, STRING, CHAR -> true;
+            case OP -> t.text().equals("-"); // a negative-literal pattern like -1
+            default -> false;
+        };
+        if (!patternish) return false;
+        for (int i = 0; i < 32; i++) {
+            AltToken.Kind k = peek(i).kind();
+            if (k == AltToken.Kind.ARROW) return true;
+            if (k == AltToken.Kind.RBRACE || k == AltToken.Kind.EOF) return false;
+        }
+        return false;
     }
 
     /** True if the next token is the `_` default-arm marker (an IDENT with text "_"). */

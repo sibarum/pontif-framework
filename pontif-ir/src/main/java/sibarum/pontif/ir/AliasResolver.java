@@ -56,6 +56,11 @@ public final class AliasResolver {
         // discipline, enforced for free by the exclusion.
         Map<String, IrSort> aliases = new HashMap<>();
         Set<String> declaredNames = new HashSet<>();
+        // Alias name → underlying nominal struct name, for aliases that stand for
+        // a struct (`let Pt:Type[P]`). These are deliberately kept OUT of the
+        // inlining table (structs are nominal), so they need their own map to let
+        // a trait impl whose target is such an alias re-attach to the struct.
+        Map<String, String> structAliases = new HashMap<>();
         for (IrStmt stmt : module.statements()) {
             if (stmt instanceof IrStmt.TypeAlias ta) {
                 if (!declaredNames.add(ta.name())) {
@@ -74,6 +79,9 @@ public final class AliasResolver {
                         && !TUPLE_SENTINEL.equals(s.name());
                 if (!nominalStruct) {
                     aliases.put(ta.name(), ta.sort());
+                } else {
+                    structAliases.put(ta.name(),
+                            ((IrSort.Structural) ta.sort()).name());
                 }
             }
         }
@@ -139,8 +147,56 @@ public final class AliasResolver {
                     rewrittenParams.put(e.getKey(),
                             e.getValue() == null ? null : substituteResolved(e.getValue(), resolvedAliases));
                 }
+                // The impl's TARGET type may itself be a sort alias
+                // (`let Pt:Type[P]` then `assign trait Pt:Trait {…}`). Downstream
+                // keys the impl's methods on this name and looks them up under the
+                // receiver's actual struct name, so an unresolved alias here
+                // silently detaches the impl — the user later sees a baffling
+                // "No method 'm' on type 'P'". Resolve it to the underlying
+                // nominal struct; reject aliases that stand for a non-nominal sort
+                // (a union/refinement/tuple can't carry a trait impl).
+                String implTarget = ti.typeName();
+                // Follow struct-aliases (`let Pt:Type[P]`, possibly chained
+                // `let Pt2:Type[Pt]`) to the underlying struct name.
+                for (int hops = 0; structAliases.containsKey(implTarget) && hops < 64; hops++) {
+                    implTarget = structAliases.get(implTarget);
+                }
+                // A non-struct alias (`let AB:Type[A|B]`, `let Pos:Type[[Int:@>0]]`)
+                // can't carry a trait impl — reject with guidance instead of
+                // silently detaching the methods.
+                IrSort aliasedTarget = resolvedAliases.get(implTarget);
+                if (aliasedTarget instanceof IrSort.Named n && n.typeArgs().isEmpty()) {
+                    // Alias for a plain (non-parametric) nominal type — re-attach.
+                    implTarget = n.name();
+                } else if (aliasedTarget instanceof IrSort.Union
+                        || aliasedTarget instanceof IrSort.Intersection
+                        || aliasedTarget instanceof IrSort.Refined) {
+                    // A union / intersection / refinement can't carry a trait impl;
+                    // silently detaching the methods would strand them. Trait-alias
+                    // targets (sub-trait routing, `assign trait AnonTrait:Event`) and
+                    // parametric aliases are deliberately left as-is — the prior
+                    // pass-through behavior that downstream relies on.
+                    throw new CompileException(
+                            "Cannot `assign trait " + ti.typeName() + ":" + ti.traitName()
+                                    + "` — '" + ti.typeName() + "' is a sort alias standing for "
+                                    + describeAliasTarget(aliasedTarget) + ", not a plain struct. "
+                                    + "A trait can only be assigned to a struct: assign it to the "
+                                    + "underlying struct the alias names, not the alias.",
+                            ti.origin());
+                }
+                // The impl's methods/attributes were named `<alias>.member` at
+                // parse time (the target name is baked into the qualified name).
+                // When the target resolved through an alias, re-qualify them under
+                // the real struct so dispatch (`P.sum`) finds them. Self-param
+                // sorts were already alias-resolved by rewriteFunctionDecl above.
+                if (!implTarget.equals(ti.typeName())) {
+                    String oldPrefix = ti.typeName() + ".";
+                    String newPrefix = implTarget + ".";
+                    rewrittenMethods = requalify(rewrittenMethods, oldPrefix, newPrefix);
+                    rewrittenAttrs = requalify(rewrittenAttrs, oldPrefix, newPrefix);
+                }
                 newStatements.add(new IrStmt.TraitImpl(
-                        ti.typeName(), ti.traitName(), rewrittenMethods, rewrittenAttrs,
+                        implTarget, ti.traitName(), rewrittenMethods, rewrittenAttrs,
                         rewrittenBinds, rewrittenParams, rewrittenTraitArgs, ti.origin()));
             } else if (stmt instanceof IrStmt.TypeAlias ta) {
                 // Type aliases are kept downstream so SortChecker can see them:
@@ -197,6 +253,36 @@ public final class AliasResolver {
         IrExpr newMain = rewriteExpr(module.main(), resolvedAliases);
 
         return new IrModule(module.name(), newStatements, newMain);
+    }
+
+    /** Re-qualify each decl's {@code oldPrefix.member} name to {@code newPrefix.member}. */
+    private static List<IrStmt.FunctionDecl> requalify(
+            List<IrStmt.FunctionDecl> decls, String oldPrefix, String newPrefix) {
+        List<IrStmt.FunctionDecl> out = new ArrayList<>(decls.size());
+        for (IrStmt.FunctionDecl d : decls) {
+            if (d.name().startsWith(oldPrefix)) {
+                out.add(new IrStmt.FunctionDecl(
+                        newPrefix + d.name().substring(oldPrefix.length()),
+                        d.params(), d.returnSort(), d.body(), d.origin(),
+                        d.topLevelLet(), d.typeParams()));
+            } else {
+                out.add(d);
+            }
+        }
+        return out;
+    }
+
+    /** Human-readable category for a non-nominal alias target, for error text. */
+    private static String describeAliasTarget(IrSort s) {
+        return switch (s) {
+            case IrSort.Union ignored -> "a union of sorts";
+            case IrSort.Intersection ignored -> "an intersection of sorts";
+            case IrSort.Refined ignored -> "a refined sort";
+            case IrSort.Trait ignored -> "a trait";
+            case IrSort.Named n when !n.typeArgs().isEmpty() ->
+                    "a parametric sort '" + n.name() + "[…]'";
+            default -> "a compound sort";
+        };
     }
 
     // --- Sort resolution ---

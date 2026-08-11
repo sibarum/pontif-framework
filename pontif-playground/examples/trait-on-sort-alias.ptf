@@ -1,0 +1,37 @@
+module experiment.aliastrait
+
+# A sort alias (`let X:Type[...]`) that names a struct can be the TARGET of an
+# `assign trait` block. The impl re-attaches to the underlying struct, so the
+# trait's methods dispatch on values of the struct — whether you construct them
+# by the struct name or by the alias.
+#
+# This used to fail with a baffling "No method 'perimeter' on type 'Rect'": the
+# impl's methods were qualified under the alias name and method resolution ran
+# before the alias was resolved, silently detaching them. The single-file
+# pipeline now resolves aliases first (matching the compiler's canonical order),
+# and an impl on a NON-struct alias (a union / refinement) is rejected with a
+# clear message instead of stranding its methods.
+
+struct Rect(w:Int, h:Int)
+
+# Two aliases for the same struct — one direct, one chained through the first.
+let Box:Type[Rect]
+let Frame:Type[Box]
+
+trait Measured {
+  area:[Method():Int]
+  perimeter:[Method():Int]
+}
+
+# Assign the trait to the ALIAS; it attaches to Rect.
+assign trait Frame:Measured {
+  area():Int -> this.w * this.h
+  perimeter():Int -> 2 * (this.w + this.h)
+}
+
+# Dispatch works on a value built by the struct name...
+let r = Rect(3, 4)
+# ...and on one whose declared sort is the alias.
+let b:Box = Rect(5, 6)
+
+r.area() + r.perimeter() + b.area() + b.perimeter()

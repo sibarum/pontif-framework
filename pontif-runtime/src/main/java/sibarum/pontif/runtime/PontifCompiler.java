@@ -243,8 +243,16 @@ public final class PontifCompiler {
         // (the re-run inside IrCompiler is a no-op).
         IrModule module;
         try {
+            // Resolve type aliases FIRST (matching IrCompiler's canonical
+            // AliasResolver → MethodOperatorResolver order). Without this, a
+            // trait impl whose TARGET is a sort alias (`assign trait Pt:T` for
+            // `let Pt:Type[P]`) reaches method resolution with the unresolved
+            // alias name and its methods silently detach from the struct — the
+            // user then hits "No method 'm' on type 'P'". AliasResolver is
+            // idempotent, so IrCompiler's own re-run stays a no-op.
             module = sibarum.pontif.ir.MethodOperatorResolver.resolve(
-                    sibarum.pontif.ir.TraitDefaultExpansion.expand(rawModule));
+                    sibarum.pontif.ir.TraitDefaultExpansion.expand(
+                            sibarum.pontif.ir.AliasResolver.resolve(rawModule)));
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));
