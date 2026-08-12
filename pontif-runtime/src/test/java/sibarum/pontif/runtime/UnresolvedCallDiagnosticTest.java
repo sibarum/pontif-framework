@@ -73,6 +73,28 @@ class UnresolvedCallDiagnosticTest {
                 () -> "must not cascade into the receiver error; got: " + err);
     }
 
+    @Test
+    void bareFieldMethodCall_hintsThisNotRequires() {
+        // Classic slip: `left.walk()` inside a member body instead of `this.left.walk()`. A bare
+        // field isn't in local scope, so `left.walk` is read as a `module.function` call and fails
+        // here — the message should point at `this`, not suggest a `requires` import.
+        String err = compileError("""
+                trait Expr {
+                  walk:[Method():Stream[Expr]]
+                }
+                struct AddOp(left:Expr, right:Expr)
+                assign trait AddOp:Expr {
+                  walk():Stream[Expr] -> left.walk() + right.walk() + {this}
+                }""");
+        assertTrue(err != null && err.contains("left.walk"),
+                () -> "should name the unresolved call; got: " + err);
+        assertTrue(err != null && err.contains("field of the enclosing type")
+                        && err.contains("this.left.walk"),
+                () -> "should hint at `this.left.walk`; got: " + err);
+        assertFalse(err.contains("imported with `requires`"),
+                () -> "must NOT suggest a requires import for a same-type field; got: " + err);
+    }
+
     // --- non-regression: legitimate deferrals must NOT be flagged ---
 
     @Test
