@@ -153,23 +153,22 @@ public final class OverloadOverlap {
      * {@code a}. Mirrors {@code DispatchTable.isStrictlyMoreSpecific}.
      */
     private static boolean strictlyMoreSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b) {
-        if (!isAtLeastAsSpecific(a, b)) return false;
-        return !isAtLeastAsSpecific(b, a);
+        List<Sort> as = compiledParamSorts(a);
+        List<Sort> bs = compiledParamSorts(b);
+        // An uncompilable parameter leaves the overloads incomparable (as before).
+        if (as == null || bs == null) return false;
+        return Refinements.strictlyMoreSpecific(as, bs, new Simplifier(List.of()));
     }
 
-    private static boolean isAtLeastAsSpecific(IrStmt.FunctionDecl a, IrStmt.FunctionDecl b) {
-        if (a.params().size() != b.params().size()) return false;
-        Simplifier simp = new Simplifier(List.of());
-        for (int i = 0; i < a.params().size(); i++) {
-            try {
-                Sort aSort = IrCompiler.compileSort(a.params().get(i).sort());
-                Sort bSort = IrCompiler.compileSort(b.params().get(i).sort());
-                if (!Refinements.imply(aSort, bSort, simp).isPassed()) return false;
-            } catch (CompileException ce) {
-                return false;
-            }
+    /** Compiles a decl's parameter sorts, or null if any is outside the compilable fragment. */
+    private static List<Sort> compiledParamSorts(IrStmt.FunctionDecl decl) {
+        List<Sort> sorts = new ArrayList<>(decl.params().size());
+        try {
+            for (IrParam p : decl.params()) sorts.add(IrCompiler.compileSort(p.sort()));
+        } catch (CompileException ce) {
+            return null;
         }
-        return true;
+        return sorts;
     }
 
     /**

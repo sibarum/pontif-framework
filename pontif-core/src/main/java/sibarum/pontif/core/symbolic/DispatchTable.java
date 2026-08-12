@@ -301,19 +301,12 @@ public final class DispatchTable {
     }
 
     private static boolean isStrictlyMoreSpecific(FunctionDecl a, FunctionDecl b, Simplifier simp) {
-        if (!isAtLeastAsSpecific(a, b, simp)) return false;
-        return !isAtLeastAsSpecific(b, a, simp);
+        return Refinements.strictlyMoreSpecific(paramSorts(a), paramSorts(b), simp);
     }
 
-    private static boolean isAtLeastAsSpecific(FunctionDecl a, FunctionDecl b, Simplifier simp) {
-        if (a.parameters().size() != b.parameters().size()) return false;
-        for (int i = 0; i < a.parameters().size(); i++) {
-            Sort aSort = a.parameters().get(i).sort();
-            Sort bSort = b.parameters().get(i).sort();
-            if (!Refinements.imply(aSort, bSort, simp).isPassed()) {
-                return false;
-            }
-        }
-        return true;
+    private static List<Sort> paramSorts(FunctionDecl decl) {
+        List<Sort> sorts = new ArrayList<>(decl.parameters().size());
+        for (var p : decl.parameters()) sorts.add(p.sort());
+        return sorts;
     }
 }

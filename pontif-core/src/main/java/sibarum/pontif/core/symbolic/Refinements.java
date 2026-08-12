@@ -412,6 +412,30 @@ public final class Refinements {
         return imply(tighter, looser, simplifier, Coinduction.Assumed.empty());
     }
 
+    /**
+     * Overload specificity — the single home for the "is A at least as specific
+     * as B" ordering that dispatch selection, static call resolution, and
+     * overload-overlap subsumption each need. A is at least as specific as B iff
+     * they have the same arity and every A-parameter sort {@link #imply implies}
+     * the corresponding B-parameter sort (a more-refined / narrower parameter is
+     * more specific). Operates on already-compiled parameter {@link Sort}s so the
+     * one relation serves the runtime ({@code core} {@code FunctionDecl}s, sorts
+     * pre-compiled) and the compile passes (IR decls, sorts compiled by the
+     * caller) alike.
+     */
+    public static boolean atLeastAsSpecific(java.util.List<Sort> a, java.util.List<Sort> b, Simplifier simplifier) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            if (!imply(a.get(i), b.get(i), simplifier).isPassed()) return false;
+        }
+        return true;
+    }
+
+    /** A is STRICTLY more specific than B: A ⪰ B and not B ⪰ A. The dispatch tiebreak. */
+    public static boolean strictlyMoreSpecific(java.util.List<Sort> a, java.util.List<Sort> b, Simplifier simplifier) {
+        return atLeastAsSpecific(a, b, simplifier) && !atLeastAsSpecific(b, a, simplifier);
+    }
+
     private static ProofResult imply(Sort tighter, Sort looser, Simplifier simplifier,
                                      Coinduction.Assumed assumed) {
         // Resolve by-reference struct sorts so subsumption compares structure.
