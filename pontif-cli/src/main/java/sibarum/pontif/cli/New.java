@@ -12,7 +12,7 @@ import java.util.stream.Stream;
 
 /**
  * {@code pontif new <namespace>} — scaffold a fresh project: a directory with a
- * {@code module.ptf.toml} marker (name / namespace / version / entry) and one
+ * {@code module.toml} marker (name / namespace / version / entry) and one
  * sample {@code .ptf} module that declares the namespace and ends in a runnable
  * {@code main}. The result runs as-is ({@code pontif run <dir>}).
  *

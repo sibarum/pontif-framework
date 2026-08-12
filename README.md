@@ -1351,9 +1351,9 @@ See `docs/TODO.md` for the active work list and parked design sketches.
 and `PontifRunner`, so the gates a program passes in the editor it passes here too.
 
 ```
-pontif new my.app                 # scaffold a project (module.ptf.toml + sample source)
+pontif new my.app                 # scaffold a project (module.toml + sample source)
 pontif run app.ptf                # run a file, a project dir, or a .ptfpkg
-pontif run my.app                 #   (directory with a module.ptf.toml)
+pontif run my.app                 #   (directory with a module.toml)
 pontif pack                       # validate-by-compiling, then zip to <name>-<version>.ptfpkg
 pontif run app-0.1.0.ptfpkg       # execute the packaged artifact
 pontif console                    # REPL: declarations persist, expressions print
@@ -1361,7 +1361,7 @@ pontif console --include lib/     #   resolve `requires` against a directory or 
 pontif editor app.ptf             # open the Pontif Editor GUI on a file
 ```
 
-A `.ptfpkg` artifact is a compressed **source bundle** (the `module.ptf.toml`
+A `.ptfpkg` artifact is a compressed **source bundle** (the `module.toml`
 marker plus the `.ptf` sources) — not compiled IR, so the full compile and proof
 gates re-run on execution and an artifact can never carry unproven code.
 

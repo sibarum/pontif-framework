@@ -40,6 +40,7 @@ final class SessionManager {
     private volatile int winHeight = SessionState.UNSET;
     private volatile boolean winMaximized = false;
     private volatile boolean openMostRecent = false;  // "Always open most recent file" setting
+    private volatile boolean autoCreateMarker = true; // "Auto-Create module.toml" setting (default on)
 
     // --- guarded by lock: recovery bookkeeping ---
     private final Object lock = new Object();
@@ -118,6 +119,11 @@ final class SessionManager {
         this.openMostRecent = value;
     }
 
+    /** Record the "Auto-Create module.toml" setting so it round-trips through the session file. */
+    void setAutoCreateMarker(boolean value) {
+        this.autoCreateMarker = value;
+    }
+
     /** Sample the window rect (screen coordinates). Maximized geometry is not
      *  recorded as the floating size, so un-maximizing restores the prior box. */
     void updateGeometry(int x, int y, int width, int height, boolean maximized) {
@@ -177,6 +183,7 @@ final class SessionManager {
         s.windowHeight = winHeight;
         s.maximized = winMaximized;
         s.openMostRecent = openMostRecent;
+        s.autoCreateMarker = autoCreateMarker;
         String fingerprint = s.fingerprint();
         if (fingerprint.equals(lastSessionFingerprint)) return;
         s.write(AppPaths.sessionFile());

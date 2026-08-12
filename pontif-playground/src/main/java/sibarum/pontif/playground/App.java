@@ -68,6 +68,7 @@ import sibarum.pontif.runtime.QuickTour;
 import sibarum.pontif.runtime.ReceiptGraphReport;
 import sibarum.pontif.runtime.ReflectionReport;
 import sibarum.pontif.runtime.module.Extensions;
+import sibarum.pontif.runtime.module.ProjectRoot;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -182,6 +183,10 @@ public final class App {
     // open file and boots into the Editor tab; when false (default) it opens the Info/Welcome
     // tab with an untitled buffer. Persisted through SessionState.openMostRecent.
     private static Property<Boolean> openMostRecentSetting;
+    // Settings menu: "Auto-Create module.toml". When true (default) creating a new module
+    // scaffolds a module.toml marker alongside the source. Persisted through
+    // SessionState.autoCreateMarker.
+    private static Property<Boolean> autoCreateMarkerSetting;
     // Last-published cursor string, so the per-frame refresh only writes the
     // ribbon's docked field when the caret actually moved.
     private static String lastCursorText = null;
@@ -332,6 +337,12 @@ public final class App {
             session.setOpenMostRecent(openRecent);
             openMostRecentSetting.subscribe(v -> { if (v != null) session.setOpenMostRecent(v); });
 
+            // "Auto-Create module.toml" setting — defaults on, restored from the session file.
+            boolean autoCreate = restored == null || restored.autoCreateMarker;
+            autoCreateMarkerSetting = new Property<>(autoCreate);
+            session.setAutoCreateMarker(autoCreate);
+            autoCreateMarkerSetting.subscribe(v -> { if (v != null) session.setAutoCreateMarker(v); });
+
             try (Texture primaryTexture = Texture.fromPngResource("/dasum/atlas/primary.png");
                  Texture monoTexture    = Texture.fromPngResource("/dasum/atlas/mono.png");
                  Texture iconsTexture   = Texture.fromPngResource("/dasum/atlas/icons.png")) {
@@ -461,8 +472,9 @@ public final class App {
         Component newBtn    = Themed.iconButton(Icons.FILE,     Em.of(2f), Variant.DEFAULT, 0, App::onNewClicked);
         Component openBtn   = Themed.iconButton(Icons.FOLDER,   Em.of(2f), Variant.DEFAULT, 0, App::onOpenClicked);
         Component saveBtn   = Themed.iconButton(Icons.SAVE,     Em.of(2f), Variant.DEFAULT, 0, App::onSaveClicked);
-        Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, "Save As", Em.of(7.5f), Variant.DEFAULT, 0, App::onSaveAsClicked);
-        Component modulesBtn = Themed.button("Modules", Em.of(8f), Variant.DEFAULT, 0, App::openModuleExplorer);
+        Component saveAsBtn = Themed.iconButton(Icons.SAVE_ALL, Em.of(2f), Variant.DEFAULT, 0, App::onSaveAsClicked);
+        // Icons.PACKAGE_ — the codegen appends '_' because `package` is a Java keyword.
+        Component modulesBtn = Themed.iconButton(Icons.PACKAGE_, Em.of(2f), Variant.DEFAULT, 0, App::openModuleExplorer);
         Component systemBtn = Themed.iconButton(Icons.SETTINGS, "System", Em.of(7f), Variant.DEFAULT, 0, App::openSystemMenu);
 
         filenameLabel = new Component.Text(
@@ -1058,9 +1070,55 @@ public final class App {
                 session.onSaved(prevKey, RecoveryStore.keyFor(path), content,
                         path.toAbsolutePath().normalize().toString());
             }
-            Status.good("Saved " + path.getFileName());
+            boolean markerCreated = maybeCreateModuleMarker(path);
+            Status.good(markerCreated
+                    ? "Saved " + path.getFileName() + " · created " + ProjectRoot.MARKER
+                    : "Saved " + path.getFileName());
         } catch (IOException e) {
             Status.bad("Error saving " + path.getFileName() + ": " + e.getMessage(), path.toString());
+        }
+    }
+
+    /**
+     * After a successful save, drop an empty {@code module.toml} beside the file when the
+     * "Auto-Create module.toml" setting is on, the directory has no marker yet, and it looks
+     * like a Pontif source directory — i.e. empty apart from the file just saved, or already
+     * holding another {@code .ptf} source. A directory cluttered with unrelated files (and no
+     * sibling {@code .ptf}) is left untouched, so saving a stray script somewhere general
+     * doesn't scatter markers. Best-effort: any I/O failure just skips the marker.
+     *
+     * @return true if a marker was created (so the caller can fold it into the save message)
+     */
+    private static boolean maybeCreateModuleMarker(Path savedFile) {
+        if (autoCreateMarkerSetting == null || !Boolean.TRUE.equals(autoCreateMarkerSetting.get())) {
+            return false;
+        }
+        Path dir = savedFile.getParent();
+        if (dir == null) return false;
+        Path marker = dir.resolve(ProjectRoot.MARKER);
+        if (Files.exists(marker)) return false;
+
+        Path savedName = savedFile.getFileName();
+        boolean emptyApartFromSaved = true;
+        boolean hasOtherPtf = false;
+        try (java.util.stream.Stream<Path> entries = Files.list(dir)) {
+            for (Path p : (Iterable<Path>) entries::iterator) {
+                if (p.getFileName().equals(savedName)) continue;  // the file we just wrote
+                emptyApartFromSaved = false;
+                if (!Files.isDirectory(p) && p.getFileName().toString().endsWith(".ptf")) {
+                    hasOtherPtf = true;
+                }
+            }
+        } catch (IOException e) {
+            return false;  // can't inspect the directory — don't guess
+        }
+        if (!(emptyApartFromSaved || hasOtherPtf)) return false;
+
+        try {
+            Files.writeString(marker, "", StandardCharsets.UTF_8);
+            return true;
+        } catch (IOException e) {
+            return false;  // save already succeeded; a missing marker is non-fatal
         }
     }
 
@@ -1151,6 +1209,16 @@ public final class App {
                 java.util.List.of(
                         Themed.checkbox(Em.of(1.1f), openMostRecentSetting, Variant.PRIMARY),
                         new Component.Text("Always open most recent file", Em.of(0.95f), MENU_TITLE_FG)),
+                false, 0));
+
+        // Setting: "Auto-Create module.toml". Bound to autoCreateMarkerSetting, whose
+        // subscription (wired in main) mirrors it into the session file.
+        rows.add(new Component.Flex(
+                null, null, Em.ZERO, Color.TRANSPARENT,
+                Direction.ROW, JustifyContent.START, AlignItems.CENTER, Em.of(0.5f),
+                java.util.List.of(
+                        Themed.checkbox(Em.of(1.1f), autoCreateMarkerSetting, Variant.PRIMARY),
+                        new Component.Text("Auto-Create module.toml", Em.of(0.95f), MENU_TITLE_FG)),
                 false, 0));
 
         if (hasRecovery) {

@@ -46,7 +46,7 @@ class CliRoundTripTest {
         // new
         Result created = run("new", "demo.app", "--dir", projectDir.toString());
         assertEquals(0, created.exitCode(), created.stdout());
-        assertTrue(Files.isRegularFile(projectDir.resolve("module.ptf.toml")));
+        assertTrue(Files.isRegularFile(projectDir.resolve(PackageManifest.MARKER)));
         assertTrue(Files.isRegularFile(projectDir.resolve("app.ptf")));
 
         // run the source directory
@@ -67,7 +67,7 @@ class CliRoundTripTest {
 
     @Test
     void packRefusesABrokenProject(@TempDir Path tmp) throws Exception {
-        Files.writeString(tmp.resolve("module.ptf.toml"), "entry = \"broke\"\n");
+        Files.writeString(tmp.resolve(PackageManifest.MARKER), "entry = \"broke\"\n");
         Files.writeString(tmp.resolve("broke.ptf"), "module broke\nfunction f(x:Int):Int -> x +\n");
         Result packed = run("pack", tmp.toString());
         assertEquals(1, packed.exitCode(), "a project that does not compile must not pack");
@@ -77,18 +77,18 @@ class CliRoundTripTest {
     void artifactRoundTripPreservesSources(@TempDir Path tmp) throws Exception {
         Path root = tmp.resolve("src");
         Files.createDirectories(root.resolve("sub"));
-        Files.writeString(root.resolve("module.ptf.toml"), "name = \"x\"\nversion = \"9.9\"\n");
+        Files.writeString(root.resolve(PackageManifest.MARKER), "name = \"x\"\nversion = \"9.9\"\n");
         Files.writeString(root.resolve("a.ptf"), "module a\n0\n");
         Files.writeString(root.resolve("sub/b.ptf"), "module b\n0\n");
 
         Path pkg = tmp.resolve("x.ptfpkg");
         Artifacts.writeZip(pkg, root, List.of(
-                root.resolve("module.ptf.toml"), root.resolve("a.ptf"), root.resolve("sub/b.ptf")));
+                root.resolve(PackageManifest.MARKER), root.resolve("a.ptf"), root.resolve("sub/b.ptf")));
 
         Path back = tmp.resolve("back");
         Artifacts.unpack(pkg, back);
         assertEquals("module a\n0\n", Files.readString(back.resolve("a.ptf")));
         assertEquals("module b\n0\n", Files.readString(back.resolve("sub/b.ptf")));
-        assertTrue(Files.isRegularFile(back.resolve("module.ptf.toml")));
+        assertTrue(Files.isRegularFile(back.resolve(PackageManifest.MARKER)));
     }
 }

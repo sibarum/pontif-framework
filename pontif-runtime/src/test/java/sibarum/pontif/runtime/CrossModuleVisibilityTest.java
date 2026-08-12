@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
+import sibarum.pontif.runtime.module.ProjectRoot;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -38,7 +39,7 @@ class CrossModuleVisibilityTest {
                 function mk():Vec -> Vec(1, 2)
                 function +(a:Vec, b:Vec):Vec -> Vec(a.x + b.x, a.y + b.y)
                 """);
-        write(root, "module.ptf.toml", "entry = \"app.use\"\n");
+        write(root, ProjectRoot.MARKER, "entry = \"app.use\"\n");
     }
 
     @Test

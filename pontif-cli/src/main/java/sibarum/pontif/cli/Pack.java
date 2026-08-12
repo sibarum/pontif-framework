@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  * <p>The project is first <b>validated by compiling it</b>
  * ({@code compileProjectDir}), so a project that doesn't compile — or whose
  * proof gates reject it — never produces an artifact. Only then are the
- * {@code module.ptf.toml} marker and every {@code .ptf} source zipped (paths
+ * {@code module.toml} marker and every {@code .ptf} source zipped (paths
  * preserved relative to the root). Symmetric with {@link Artifacts#run}.
  */
 @Command(name = "pack",

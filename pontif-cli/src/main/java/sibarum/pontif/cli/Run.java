@@ -10,7 +10,7 @@ import java.util.concurrent.Callable;
 
 /**
  * {@code pontif run <target>} — execute a single {@code .ptf} file, a project
- * directory (one holding a {@code module.ptf.toml} marker, or a sole module
+ * directory (one holding a {@code module.toml} marker, or a sole module
  * with a {@code main}), or a packaged {@code .ptfpkg} artifact.
  *
  * <p>Each target shape maps onto an existing compiler entry point:

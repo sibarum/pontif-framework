@@ -259,7 +259,7 @@ namespacing: every function and type it declares gets a fully-qualified key
 can reuse names without colliding. `requires pkg.{names}` imports; `exports
 @.{names}` lists what it makes visible (`@` = this module). A project is a
 directory tree of modules linked into one program, entry named in
-`module.ptf.toml`. See **coherence rule**.
+`module.toml`. See **coherence rule**.
 
 **metareference** — A first-class reference to the META level, sorted
 narrowly enough to use safely. Function references don't exist in Pontif —

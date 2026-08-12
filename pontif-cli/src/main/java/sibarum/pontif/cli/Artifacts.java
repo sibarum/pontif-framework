@@ -13,7 +13,7 @@ import java.util.zip.ZipOutputStream;
 
 /**
  * The {@code .ptfpkg} artifact format: a plain zip of a project's
- * {@code module.ptf.toml} marker and its {@code .ptf} sources, paths preserved
+ * {@code module.toml} marker and its {@code .ptf} sources, paths preserved
  * relative to the project root. Source bundle, not compiled IR — so execution
  * re-runs the full compile/proof pipeline and an artifact can never carry
  * unproven code past the gates.

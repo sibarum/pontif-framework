@@ -35,6 +35,7 @@ final class SessionState {
     int windowHeight = UNSET;
     boolean maximized = false;
     boolean openMostRecent = false;  // setting: reopen openFile + boot into Editor tab on launch
+    boolean autoCreateMarker = true; // setting: scaffold a module.toml when creating a new module (default on)
 
     boolean hasGeometry() {
         return windowWidth > 0 && windowHeight > 0;
@@ -69,6 +70,11 @@ final class SessionState {
         s.windowHeight = parseInt(kv.get("window.height"));
         s.maximized = Boolean.parseBoolean(kv.get("window.maximized"));
         s.openMostRecent = Boolean.parseBoolean(kv.get("open.mostRecent"));
+        // Absent key means "never written" (older build or fresh session) — keep the
+        // default-on value rather than letting parseBoolean(null) force it off.
+        s.autoCreateMarker = kv.containsKey("module.autoCreate")
+                ? Boolean.parseBoolean(kv.get("module.autoCreate"))
+                : true;
         return Optional.of(s);
     }
 
@@ -83,6 +89,7 @@ final class SessionState {
         sb.append("window.height=").append(windowHeight).append('\n');
         sb.append("window.maximized=").append(maximized).append('\n');
         sb.append("open.mostRecent=").append(openMostRecent).append('\n');
+        sb.append("module.autoCreate=").append(autoCreateMarker).append('\n');
         try {
             Files.writeString(file, sb.toString(), StandardCharsets.UTF_8);
         } catch (IOException e) {
@@ -93,7 +100,8 @@ final class SessionState {
     /** A stable serialized form used to skip rewriting an unchanged session. */
     String fingerprint() {
         return openFile + "|" + windowX + "|" + windowY + "|"
-                + windowWidth + "|" + windowHeight + "|" + maximized + "|" + openMostRecent;
+                + windowWidth + "|" + windowHeight + "|" + maximized + "|" + openMostRecent
+                + "|" + autoCreateMarker;
     }
 
     private static int parseInt(String v) {

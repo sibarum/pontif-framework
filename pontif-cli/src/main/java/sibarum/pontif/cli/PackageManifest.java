@@ -1,5 +1,7 @@
 package sibarum.pontif.cli;
 
+import sibarum.pontif.runtime.module.ProjectRoot;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,7 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The hand-parsed contents of a project's {@code module.ptf.toml} marker, for
+ * The hand-parsed contents of a project's {@code module.toml} marker, for
  * the CLI's purposes: {@code name}, {@code namespace}, {@code version}, and
  * {@code entry}. Deliberately dependency-free — the same single-pass
  * {@code key = "value"} reader the runtime's {@code ProjectRoot} uses, just
@@ -24,7 +26,8 @@ record PackageManifest(
         Optional<String> version,
         Optional<String> entry) {
 
-    static final String MARKER = "module.ptf.toml";
+    /** The project-root marker filename — single source of truth in {@link ProjectRoot#MARKER}. */
+    static final String MARKER = ProjectRoot.MARKER;
 
     static PackageManifest read(Path rootDir) throws IOException {
         Path marker = rootDir.resolve(MARKER);

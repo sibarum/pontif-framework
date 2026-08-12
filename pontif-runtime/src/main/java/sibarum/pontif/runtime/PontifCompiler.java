@@ -146,7 +146,7 @@ public final class PontifCompiler {
     }
 
     /**
-     * Compiles a project from disk: discovers the {@code module.ptf.toml} root
+     * Compiles a project from disk: discovers the {@code module.toml} root
      * marker, scans + parses every {@code .ptf} module under {@code rootDir},
      * resolves the entry module (marker {@code entry}, else the sole module with
      * a {@code main}), and links. The on-disk counterpart of

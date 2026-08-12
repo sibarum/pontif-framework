@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * A Pontif project root: the directory holding the {@code module.ptf.toml}
+ * A Pontif project root: the directory holding the {@code module.toml}
  * marker (echoing SPN's {@code module.spn}). The marker's presence marks the
  * root; its one optional hand-parsed line, {@code entry = "a.b"}, names the
  * module whose {@code main} runs. No TOML dependency — anything past the single
@@ -14,7 +14,7 @@ import java.util.Optional;
  */
 public record ProjectRoot(Path rootDir, Optional<String> entryModule) {
 
-    public static final String MARKER = "module.ptf.toml";
+    public static final String MARKER = "module.toml";
 
     /**
      * Reads the project root at {@code rootDir}, parsing the optional
