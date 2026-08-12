@@ -627,8 +627,10 @@ public final class App {
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
         // Resolve sibling `requires` from the open file's directory; captured on the
         // main thread (the click handler) so the worker doesn't race a file change.
+        // No success message: "launching …" and the debug port's "run completed" already
+        // bracket the run. A third "… finished" line is redundant noise.
         launchProgram("sibarum.pontif.net.ProgramLauncher", RUN_HEADLESS_FLAG, sourceName, code,
-                resolveDir(), sourceName + " finished");
+                resolveDir(), null);
     }
 
     /**
@@ -686,7 +688,11 @@ public final class App {
                 String captured = drainAndCapture(proc);
                 int exit = proc.waitFor();
                 if (exit == 0) {
-                    Status.good(successMessage);
+                    // successMessage is null for ordinary runs (the "run completed" event
+                    // already reports success); the GUI path passes a "window closed" note.
+                    if (successMessage != null) {
+                        Status.good(successMessage);
+                    }
                 } else {
                     // The process-level exit code is the crash backstop: a hard death (segfault,
                     // System.exit, OOM) never gets to send RunFailed over the debug port, so this
@@ -767,7 +773,9 @@ public final class App {
         try {
             return DebugServer.start(new DebugServer.Listener() {
                 @Override public void onRunStarted(String src) {
-                    Status.notify("run started: " + src);
+                    // Intentionally quiet: "launching …" already announced the run, and
+                    // "run completed" reports the end. A separate "run started" line in
+                    // between is just noise (three logs for one run).
                 }
                 @Override public void onEvent(long seq, String typeName, sibarum.elektro.queue.dyn.DynValue payload) {
                     Status.log("event #" + seq + " " + typeName + " " + payload);
