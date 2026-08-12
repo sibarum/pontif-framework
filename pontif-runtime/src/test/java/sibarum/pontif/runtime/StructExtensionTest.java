@@ -170,6 +170,36 @@ class StructExtensionTest {
     }
 
     @Test
+    void inheritedField_accessedDirectlyOnSubStruct() {
+        // e.op resolves op through Exp's is-a base BiOp — the field-access mirror
+        // of the method-dispatch base-chain walk. op is materialized on the value,
+        // so both engines read it: Exp → "+", Log → "-".
+        String prelude = """
+                struct Expr()
+                let Operation:Type[String:@=="+" | @=="-"]
+                struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
+                struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
+                struct Log:[BiOp:@.op=="-"](left:Expr, right:Expr)
+                let leaf = Expr()
+                """;
+        for (Engine engine : Engine.values()) {
+            RunResult e = runner.run(compiler.compileAlt(
+                    prelude + "let e:Exp = Exp(leaf, leaf)\ne.op", "t.ptf"), engine);
+            assertFalse(e.isError(), () -> engine + " got: " + e.text());
+            assertEquals("\"+\"", e.text(), engine.toString());
+            RunResult l = runner.run(compiler.compileAlt(
+                    prelude + "let l:Log = Log(leaf, leaf)\nl.op", "t.ptf"), engine);
+            assertEquals("\"-\"", l.text(), engine.toString());
+        }
+        // A field on neither Exp nor its base chain is still a compile error (typo
+        // coverage is preserved — the walk widens, it doesn't wave through).
+        RunResult bogus = runner.run(compiler.compileAlt(
+                prelude + "let e:Exp = Exp(leaf, leaf)\ne.nope", "t.ptf"), Engine.INTERPRETER);
+        assertTrue(bogus.isError() && bogus.text().contains("has no field 'nope'"),
+                () -> "got: " + bogus.text());
+    }
+
+    @Test
     void demotion_projectsTheMorphism() {
         // let b:Point = a runs the morphism: b is Point(2, 3); 2 + 3 = 5.
         String src = """

@@ -1726,7 +1726,8 @@ public final class SortChecker {
                         // aggregates carry no producers, so this stays false for them.)
                         boolean isAttributeProjection =
                                 functionReturns.containsKey(sp.name() + "." + fa.fieldName());
-                        if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection) {
+                        if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection
+                                && !inheritedFieldOnIsaChain(sp, fa.fieldName(), structDefs)) {
                             String subject = sp.name().startsWith("_")
                                     ? "Anonymous " + (sp.name().equals("_tuple") ? "tuple" : "record")
                                     : "Record of sort '" + sp.name() + "'";
@@ -2500,6 +2501,35 @@ public final class SortChecker {
      * recursing into the struct body) is what keeps every consumer terminating
      * on a recursive type.
      */
+    /**
+     * Whether an is-a ANCESTOR struct of {@code sp} declares {@code field}. The
+     * is-a coverage check guarantees every base field is materialized on a
+     * sub-struct value — carried by same-name (so it is already in {@code
+     * sp.members()}) or pinned (materialized at construction by {@link
+     * ConstructionGate}) — so a base-only field like {@code op} on an {@code
+     * Exp:BiOp} is genuinely present and {@code e.op} resolves it through the
+     * chain. This is the field-access mirror of the method-dispatch base-chain
+     * walk (DispatchResolver.routeMethod); {@link Coercions#baseName} names the
+     * base at each hop (shared with TraitRelations / InferenceContext), and the
+     * seen-set guards a cycle.
+     */
+    private static boolean inheritedFieldOnIsaChain(
+            IrSort.Structural sp, String field, Map<String, IrSort.Structural> structDefs) {
+        Set<String> seen = new HashSet<>();
+        // The passed sp may be an inference-stripped instance (baseSort null); the
+        // canonical declaration in structDefs carries the is-a linkage, so resolve
+        // by name at each hop.
+        IrSort.Structural cur = structDefs.getOrDefault(sp.name(), sp);
+        while (cur != null && cur.baseSort() != null && seen.add(cur.name())) {
+            String base = Coercions.baseName(cur.baseSort());
+            if (base == null) return false;
+            IrSort.Structural bs = structDefs.get(base);
+            if (bs != null && bs.members().containsKey(field)) return true;
+            cur = bs;
+        }
+        return false;
+    }
+
     private static IrSort.Structural resolveNominal(
             IrSort sort, Map<String, IrSort.Structural> structDefs) {
         if (sort == null) return null;  // unknown inferred sort — not a struct

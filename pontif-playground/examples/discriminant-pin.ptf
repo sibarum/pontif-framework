@@ -19,10 +19,10 @@ struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
 struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
 struct Log:[BiOp:@.op=="-"](left:Expr, right:Expr)
 
-# The pinned `op` is materialized on each subtype's value at construction, so
-# demoting to a BiOp view reconstitutes it: an Exp reads op == "+".
+# The pinned `op` is materialized on each subtype's value at construction and
+# resolves through the is-a base, so it reads directly off the subtype: an Exp's
+# op is "+", a Log's is "-" — no explicit demotion needed.
 let leaf = Expr()
 let e:Exp = Exp(leaf, leaf)
 let l:Log = Log(leaf, leaf)
-let asBiOp:BiOp = e
-asBiOp.op
+e.op
