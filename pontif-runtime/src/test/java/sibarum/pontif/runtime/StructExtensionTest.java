@@ -200,6 +200,25 @@ class StructExtensionTest {
     }
 
     @Test
+    void pinnedField_materializesTransitivelyThroughAPlainBase() {
+        // Leaf:Mid is a plain (Named) is-a edge; Mid:[Base:@.tag==0] pins tag two
+        // levels up. Constructing a Leaf must still materialize tag — the is-a walk
+        // climbs past the Named edge to the pinning ancestor. b.tag is 0.
+        String src = """
+                struct Base(tag:Int)
+                struct Mid:[Base:@.tag==0](left:Int)
+                struct Leaf:Mid(left:Int)
+                let x:Leaf = Leaf(9)
+                let b:Base = x
+                b.tag""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("0", r.text(), engine.toString());
+        }
+    }
+
+    @Test
     void demotion_projectsTheMorphism() {
         // let b:Point = a runs the morphism: b is Point(2, 3); 2 + 3 = 5.
         String src = """

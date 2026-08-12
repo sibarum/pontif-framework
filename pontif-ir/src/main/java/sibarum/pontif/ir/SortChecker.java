@@ -2515,17 +2515,8 @@ public final class SortChecker {
      */
     private static boolean inheritedFieldOnIsaChain(
             IrSort.Structural sp, String field, Map<String, IrSort.Structural> structDefs) {
-        Set<String> seen = new HashSet<>();
-        // The passed sp may be an inference-stripped instance (baseSort null); the
-        // canonical declaration in structDefs carries the is-a linkage, so resolve
-        // by name at each hop.
-        IrSort.Structural cur = structDefs.getOrDefault(sp.name(), sp);
-        while (cur != null && cur.baseSort() != null && seen.add(cur.name())) {
-            String base = Coercions.baseName(cur.baseSort());
-            if (base == null) return false;
-            IrSort.Structural bs = structDefs.get(base);
-            if (bs != null && bs.members().containsKey(field)) return true;
-            cur = bs;
+        for (IrSort.Structural ancestor : StructAncestry.ancestors(structDefs, sp)) {
+            if (ancestor.members().containsKey(field)) return true;
         }
         return false;
     }

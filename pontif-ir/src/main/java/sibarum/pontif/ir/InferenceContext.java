@@ -295,16 +295,8 @@ public record InferenceContext(
         Map<String, Set<String>> out = new java.util.HashMap<>();
         for (Map.Entry<String, IrSort.Structural> e : structDefs.entrySet()) {
             Set<String> ancestors = new LinkedHashSet<>();
-            Set<String> guard = new java.util.HashSet<>();
-            IrSort.Structural s = e.getValue();
-            while (s != null && s.baseSort() != null) {
-                String base = Coercions.baseName(s.baseSort());
-                if (base == null || !guard.add(base)) break;
-                String bareBase = bareName(base);
-                ancestors.add(bareBase);
-                IrSort.Structural next = structDefs.get(base);
-                if (next == null) next = structDefs.get(bareBase);
-                s = next;
+            for (IrSort.Structural a : StructAncestry.ancestors(structDefs, e.getValue())) {
+                ancestors.add(bareName(a.name()));
             }
             out.put(bareName(e.getKey()), ancestors);
         }

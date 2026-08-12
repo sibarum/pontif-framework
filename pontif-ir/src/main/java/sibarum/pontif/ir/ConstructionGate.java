@@ -468,9 +468,8 @@ final class ConstructionGate {
     private static void materializePinnedBaseFields(
             IrSort.Structural decl, Map<String, IrExpr> members,
             Map<String, IrSort.Structural> structs) {
-        IrSort.Structural cur = decl;
-        java.util.Set<String> seen = new java.util.HashSet<>();
-        while (cur != null && cur.baseSort() instanceof IrSort.Refined base && seen.add(cur.name())) {
+        for (IrSort.Structural node : StructAncestry.selfAndAncestors(structs, decl)) {
+            if (!(node.baseSort() instanceof IrSort.Refined base)) continue;
             Map<String, IrExpr> pins = new LinkedHashMap<>();
             SortChecker.collectPinnedFieldExprs(base.predicate(), pins);
             for (Map.Entry<String, IrExpr> pin : pins.entrySet()) {
@@ -478,7 +477,6 @@ final class ConstructionGate {
                     members.put(pin.getKey(), substituteRecordFields(pin.getValue(), members));
                 }
             }
-            cur = structs.get(base.name());
         }
     }
 
