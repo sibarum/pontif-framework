@@ -70,6 +70,29 @@ class AltParserTraitTest {
     }
 
     @Test
+    void traitDecl_parensFormWithCallSigReturn_throws() {
+        // `walk():[Method():X]` doubles the two mutually-exclusive method forms: the
+        // `()` already declares a method, so the `[Method(...)]` becomes a spurious
+        // thunk return. Reject it — write `walk:[Method():X]` (abstract) or
+        // `walk():X` (parens form) instead.
+        ParseException ex = assertThrows(ParseException.class, () ->
+                parse("trait Expr{ walk():[Method():Int] }"));
+        assertTrue(ex.getMessage().contains("plain value sort"),
+                () -> "got: " + ex.getMessage());
+    }
+
+    @Test
+    void traitImpl_parensFormWithCallSigReturn_throws() {
+        // The same doubling on the impl side: `simplify():[Method():Int]` must be
+        // `simplify():Int`.
+        ParseException ex = assertThrows(ParseException.class, () ->
+                parse("trait Expr{ v:Int }\nstruct S(v:Int)\n"
+                        + "assign trait S:Expr{ simplify():[Method():Int] -> this.v }"));
+        assertTrue(ex.getMessage().contains("plain value sort"),
+                () -> "got: " + ex.getMessage());
+    }
+
+    @Test
     void anonymousTypeSort_usableInAnySortPosition_parses() throws Exception {
         // `Type{…}` is an anonymous trait sort literal usable wherever a sort can
         // appear (the unified type-spec system, parallel to `[Int:@>0]`), not only

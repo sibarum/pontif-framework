@@ -13,8 +13,8 @@ module experiment.traction
 requires pontif.core.{Stream}
 
 trait Expr {
-  walk():[Method():Stream[this.type]] -> {this},   # default: a leaf walks to itself
-  simplify():[Method():Expr] -> this               # default: already simplified
+  walk():Stream[this.type] -> {this},   # default: a leaf walks to itself
+  simplify():Expr -> this               # default: already simplified
 }
 
 struct Leaf()

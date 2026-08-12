@@ -8,7 +8,7 @@ requires pontif.core.{Stream}
 # no per-leaf impl, no free-function dispatch.
 
 trait Expr {
-  walk():[Method():Stream[Expr]]
+  walk:[Method():Stream[Expr]]
 }
 
 # Two abstract bases carve the AST in half: atoms and binary operators.

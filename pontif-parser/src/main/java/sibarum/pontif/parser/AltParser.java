@@ -2508,6 +2508,18 @@ public final class AltParser {
         }
         expect(AltToken.Kind.COLON);
         IrSort returnSort = parseSort();
+        // The impl method's return is a plain VALUE sort — never a `[Method(...)]` /
+        // `[Action(...)]` / `[Conduit(...)]` call-signature. `name():[Method():Ret]`
+        // is the doubled form (the `()` already says it's a method); write `name():Ret`.
+        if (returnSort instanceof IrSort.CallSig csRet
+                && isCallableMemberKind(CallKinds.builtin(csRet.typeName()))) {
+            throw new ParseException(
+                    "Method '" + nameTok.text() + "' returns a `[" + csRet.typeName()
+                            + "(...)]` sort — the `()` already declares a method, so its return "
+                            + "must be a plain value sort. Drop the `[" + csRet.typeName()
+                            + "(...)]` wrapper: write `" + nameTok.text() + "(...):Ret`.",
+                    nameTok.origin());
+        }
         expect(AltToken.Kind.ARROW);
 
         List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
@@ -3260,6 +3272,22 @@ public final class AltParser {
         // (what callers/dispatch see) is the terminus D; the kernel returns the domain C.
         ReturnClause rc = parseReturnClause();
         IrSort contractReturn = rc.sort();
+        // The `()` already declares this a method: its return must be a plain VALUE
+        // sort, never a `[Method(...)]`/`[Action(...)]`/`[Conduit(...)]` call-signature.
+        // Writing `name():[Method(...):Ret]` doubly wraps it — the two surface forms are
+        // mutually exclusive (`name(...):Ret` with parens, or `name:[Method(...):Ret]`
+        // without). Reject the combination here rather than storing a nonsense return.
+        if (contractReturn instanceof IrSort.CallSig csRet
+                && isCallableMemberKind(CallKinds.builtin(csRet.typeName()))) {
+            throw new ParseException(
+                    "Method '" + nameTok.text() + "' opens with `()` but its return is a `["
+                            + csRet.typeName() + "(...)]` sort — the `()` already declares a "
+                            + "method, so its return must be a plain value sort. Drop the `()` "
+                            + "for the abstract form `" + nameTok.text() + ":[" + csRet.typeName()
+                            + "(...):Ret]`, or drop the `[" + csRet.typeName() + "(...)]` wrapper "
+                            + "for the parens form `" + nameTok.text() + "(...):Ret`.",
+                    nameTok.origin());
+        }
         IrSort kernelReturn = rc.transform() != null
                 ? rc.transform().params().get(0).sort()
                 : rc.sort();

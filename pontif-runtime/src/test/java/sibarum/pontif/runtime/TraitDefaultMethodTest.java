@@ -174,7 +174,7 @@ class TraitDefaultMethodTest {
     @Test
     void defaultReturnNamesOwnTrait() {
         assertEquals("Leaf{}", run("""
-                trait Expr{ simplify():[Method():Expr] -> this }
+                trait Expr{ simplify():Expr -> this }
                 struct Leaf()
                 assign trait Leaf:Expr {
                 }
@@ -193,8 +193,8 @@ class TraitDefaultMethodTest {
                 run("""
                 requires pontif.core.{Stream}
                 trait Expr{
-                  walk():[Method():Stream[this.type]] -> {this},
-                  simplify():[Method():Expr] -> this
+                  walk():Stream[this.type] -> {this},
+                  simplify():Expr -> this
                 }
                 struct Leaf()
                 struct BiOp(left:Expr, right:Expr)

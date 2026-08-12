@@ -637,6 +637,32 @@ public final class SortChecker {
                                 impl.origin());
                     }
                 }
+            } else if (!contract.returnShells().containsKey(methodName)) {
+                // Non-dependent contract method (no associated type / this.type / trait
+                // param in its signature). Closes the hole where only the type-var
+                // branch checked returns, so a plain `simplify():Int` impl against a
+                // `simplify():Expr` contract slipped through arity-only.
+                //
+                // CONSERVATIVE by design: fire only on a DEFINITE nominal-head mismatch.
+                // Compare on the last path segment of each return's baseName(), which
+                // (a) covers trait-typed returns — Stream/Expr are IrSort.Trait, whose
+                // name baseName() yields — and (b) normalizes the module qualifier, so a
+                // bare `Stream` impl matches a `pontif.core/Stream` contract. Type args
+                // are intentionally NOT compared: `Stream[[Int]]` vs `Stream[Int]` share
+                // the head and are the rest of the pipeline's to reconcile. A headless
+                // composite (Union/Intersection) yields null → skip. Shelled contract
+                // returns are exempt (kernel returns the clause-chain domain; the
+                // contract carries the terminus).
+                String implBase = lastPathSegment(impl.returnSort().baseName());
+                String wantBase = lastPathSegment(contractSig.returnSort().baseName());
+                if (implBase != null && wantBase != null && !implBase.equals(wantBase)) {
+                    throw new CompileException(
+                            "Method '" + impl.name() + "' returns "
+                                    + describeDomain(impl.returnSort())
+                                    + " but trait '" + ti.traitName() + "' declares it returns "
+                                    + describeDomain(contractSig.returnSort()),
+                            impl.origin());
+                }
             }
         }
 
@@ -2407,6 +2433,11 @@ public final class SortChecker {
     /** Nominal name of a sort, including a trait (which {@link #matchBaseName} omits). */
     private static String boundName(IrSort sort) {
         return sort == null ? null : sort.baseName();
+    }
+
+    /** The segment after the last {@code /} — strips a module qualifier ({@code mod/T} → {@code T}). */
+    private static String lastPathSegment(String name) {
+        return name == null ? null : name.substring(name.lastIndexOf('/') + 1);
     }
 
     /** Conservative conformance: two sorts share a base name (both non-null). */

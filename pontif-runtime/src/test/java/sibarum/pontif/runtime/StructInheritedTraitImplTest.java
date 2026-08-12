@@ -25,7 +25,7 @@ class StructInheritedTraitImplTest {
     /** The Expr/BiOp/Leaf hierarchy from the scoping example, minus the final call. */
     private static final String PRELUDE = """
             requires pontif.core.{Stream}
-            trait Expr { walk():[Method():Stream[Expr]] }
+            trait Expr { walk:[Method():Stream[Expr]] }
             struct Leaf()
             struct Residue:Leaf(exp:Int, sign:Bool)
             let zero = Residue(1, false)
@@ -116,8 +116,8 @@ class StructInheritedTraitImplTest {
         String prelude = """
                 requires pontif.core.{Stream}
                 trait Expr {
-                  walk():[Method():Stream[Expr]]
-                  simplify():[Method():Expr] -> this
+                  walk:[Method():Stream[Expr]]
+                  simplify():Expr -> this
                 }
                 struct Leaf(v:Int)
                 assign trait Leaf:Expr { walk():Stream[Expr] -> {this} }
@@ -127,7 +127,7 @@ class StructInheritedTraitImplTest {
                 }
                 struct Exp:BiOp(left:Expr, right:Expr)
                 assign trait Exp:Expr {
-                  simplify():[Method():Expr] -> Exp(this.left.simplify(), this.right.simplify())
+                  simplify():Expr -> Exp(this.left.simplify(), this.right.simplify())
                 }
                 let e:Exp = Exp(Leaf(1), Leaf(2))
                 """;
@@ -146,12 +146,12 @@ class StructInheritedTraitImplTest {
         String src = """
                 requires pontif.core.{Stream}
                 trait Expr {
-                  walk():[Method():Stream[Expr]]
-                  simplify():[Method():Expr] -> this
+                  walk:[Method():Stream[Expr]]
+                  simplify():Expr -> this
                 }
                 struct BiOp(left:Expr, right:Expr)
                 assign trait BiOp:Expr {
-                  simplify():[Method():Expr] -> this
+                  simplify():Expr -> this
                 }
                 0
                 """;
@@ -175,7 +175,7 @@ class StructInheritedTraitImplTest {
         // Residue supplies its OWN walk (empty stream); it must win over Leaf's inherited singleton.
         String prelude = """
                 requires pontif.core.{Stream}
-                trait Expr { walk():[Method():Stream[Expr]] }
+                trait Expr { walk:[Method():Stream[Expr]] }
                 struct Leaf()
                 struct Residue:Leaf(exp:Int, sign:Bool)
                 let zero = Residue(1, false)
@@ -188,5 +188,44 @@ class StructInheritedTraitImplTest {
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
         assertEquals("{}", runner.run(r, PontifRunner.Engine.INTERPRETER).text());
+    }
+
+    @Test
+    void implReturnNotAssignableToContract_isRejected() {
+        // A non-dependent contract return (`simplify():Expr` — no associated type /
+        // this.type) is now checked: an impl returning an unrelated `Int` must fail.
+        // Before the fix only the type-var branch compared returns, so this slipped
+        // through arity-only.
+        PontifCompiler.CompileResult r = compiler.compileAlt("""
+                trait Expr { simplify():Expr -> this }
+                struct Leaf()
+                assign trait Leaf:Expr { simplify():Int -> 5 }
+                0
+                """, "badreturn.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
+                "an impl whose return isn't assignable to the contract must be rejected");
+        String msg = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(msg.contains("declares it returns"), () -> "got: " + msg);
+    }
+
+    @Test
+    void implReturnParametricElementRepresentationDiffers_isAccepted() {
+        // The return check is deliberately conservative: it fires only on a definite
+        // nominal head-name mismatch. A parametric return whose element sort is written
+        // differently on the impl (`Stream[[Int]]`, refined element) than on the
+        // contract (`Stream[Int]`) shares the head `Stream`, so it is NOT a mismatch —
+        // the representational duality is the rest of the pipeline's to reconcile.
+        // (Regression guard for the PlotExtensionTest Cloud3D false positive.)
+        String src = """
+                requires pontif.core.{Stream}
+                trait Box { items():Stream[Int] -> {} }
+                struct Bag()
+                assign trait Bag:Box { items():Stream[[Int]] -> {1, 2, 3} }
+                Bag().items()
+                """;
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "parametric.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
+                () -> "expected success; got: "
+                        + ((PontifCompiler.CompileResult.Failed) r).error().text());
     }
 }

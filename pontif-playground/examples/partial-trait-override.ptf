@@ -13,8 +13,8 @@ requires pontif.core.{Stream}
 # BiOp.walk; Leaf overrides ONLY walk and inherits the default simplify.
 
 trait Expr {
-  walk():[Method():Stream[Expr]]
-  simplify():[Method():Expr] -> this
+  walk:[Method():Stream[Expr]]
+  simplify():Expr -> this
 }
 
 struct Leaf(v:Int)
@@ -30,7 +30,7 @@ assign trait BiOp:Expr {
 struct Exp:BiOp(left:Expr, right:Expr)
 assign trait Exp:Expr {
   # Overrides simplify only; walk is inherited from BiOp.
-  simplify():[Method():Expr] -> Exp(this.left.simplify(), this.right.simplify())
+  simplify():Expr -> Exp(this.left.simplify(), this.right.simplify())
 }
 
 let e:Exp = Exp(Leaf(1), Leaf(2))
