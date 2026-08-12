@@ -79,7 +79,7 @@ public final class ReceiptGraphReport {
             // so the Receipts view and Run never disagree about whether a branch
             // discharged. Without this the imported vocabulary stays unresolved
             // and every proof-rescued branch would falsely render NOT DISCHARGED.
-            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir, sourceName);
             // Resolve instance-method calls (recv.m(args) → Call("Type.m", …))
             // before drafting — the receipts drafter compiles expressions and
             // would choke on the parser's transient MethodCall placeholder.

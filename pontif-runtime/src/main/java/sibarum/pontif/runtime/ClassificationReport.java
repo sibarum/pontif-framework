@@ -92,7 +92,7 @@ public final class ClassificationReport {
         try {
             // Same resolve/link chain the receipt and conservation reports use,
             // so all three views agree about the module under examination.
-            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir, sourceName);
             IrModule module = AliasResolver.resolve(MethodResolver.resolve(linked));
 
             ReceiptGraph graph = Drafter.draft(module);

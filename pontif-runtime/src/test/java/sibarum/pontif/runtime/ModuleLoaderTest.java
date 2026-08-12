@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.module.ProjectRoot;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -16,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end project loading from disk: write {@code .ptf} files (and an
- * optional {@code module.ptf.toml} marker) under a temp root, then
+ * optional {@code module.toml} marker) under a temp root, then
  * {@code compileProjectDir} → discover + parse + link + run.
  */
 class ModuleLoaderTest {
@@ -55,7 +56,7 @@ class ModuleLoaderTest {
                 requires lib.{inc}
                 inc(41)
                 """);
-        write(root, "module.ptf.toml", "entry = \"app\"\n");
+        write(root, ProjectRoot.MARKER, "entry = \"app\"\n");
         assertEquals("42", run(root).text());
     }
 
@@ -91,16 +92,19 @@ class ModuleLoaderTest {
     }
 
     @Test
-    void duplicateModuleName_isError(@TempDir Path root) throws IOException {
-        write(root, "a.ptf", "module dup\nfunction f(x:Int):Int -> x\n0");
-        write(root, "b.ptf", "module dup\nfunction g(x:Int):Int -> x\n0");
-        assertTrue(rejected(root).contains("Duplicate module 'dup'"), () -> rejected(root));
+    void sameNamespaceAcrossFiles_mergesAndSeesEachOther(@TempDir Path root) throws IOException {
+        // Two files declaring the same namespace are folded into one module: names are
+        // mutually visible with no `requires`, and the one file carrying a real `main`
+        // supplies the entry expression.
+        write(root, "a.ptf", "module pkg\nfunction f(x:Int):Int -> x\n0");
+        write(root, "b.ptf", "module pkg\nfunction g(x:Int):Int -> f(x) + 1\ng(7)");
+        assertEquals("8", run(root).text());
     }
 
     @Test
     void unknownMarkerEntry_isError(@TempDir Path root) throws IOException {
         write(root, "lib.ptf", "module lib\nfunction f(x:Int):Int -> x\n0");
-        write(root, "module.ptf.toml", "entry = \"ghost\"\n");
+        write(root, ProjectRoot.MARKER, "entry = \"ghost\"\n");
         String err = rejected(root);
         assertTrue(err.contains("ghost"), () -> err);
     }

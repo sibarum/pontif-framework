@@ -79,7 +79,7 @@ public final class IrAstReport {
 
         IrModule linked;
         try {
-            linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
+            linked = ModuleResolver.resolveAndCombine(parsed, resolveDir, sourceName);
         } catch (CompileException ce) {
             out.append("(not generated — link failed").append(located(ce.origin())).append(")\n  ")
                     .append(ce.getMessage()).append('\n');

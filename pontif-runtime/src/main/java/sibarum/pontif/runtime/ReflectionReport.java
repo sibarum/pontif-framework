@@ -60,7 +60,7 @@ public final class ReflectionReport {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
         try {
-            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir, sourceName);
             // Resolve methods + route operators (the Run path), so the reflected
             // calls are the resolved dispatch calls and inference sees real targets.
             IrModule resolved = AliasResolver.resolve(MethodOperatorResolver.resolve(linked));

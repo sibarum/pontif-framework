@@ -45,7 +45,7 @@ public final class ConservationReport {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
         try {
-            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir);
+            IrModule linked = ModuleResolver.resolveAndCombine(parsed, resolveDir, sourceName);
             // Resolve instance-method calls before drafting (the drafter would
             // otherwise hit the transient MethodCall placeholder).
             IrModule resolved = AliasResolver.resolve(

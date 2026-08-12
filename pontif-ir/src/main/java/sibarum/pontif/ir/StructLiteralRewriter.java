@@ -1,9 +1,12 @@
 package sibarum.pontif.ir;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Post-link pass that turns a constructor-shaped {@code Call} into a struct
@@ -49,9 +52,16 @@ public final class StructLiteralRewriter {
     private StructLiteralRewriter() {}
 
     public static IrModule rewrite(IrModule combined) throws CompileException {
-        Map<String, IrSort.Structural> structs =
-                sibarum.pontif.types.TypeCatalog.fromModule(combined).structShapes();
+        Map<String, IrSort.Structural> structs = new HashMap<>(
+                sibarum.pontif.types.TypeCatalog.fromModule(combined).structShapes());
         if (structs.isEmpty()) return combined;  // nothing to rewrite
+        // Same-namespace multi-file case: a sibling struct's constructor was parsed as a
+        // bare Call/Record (the buffer couldn't see the sibling's declaration) and left
+        // un-FQN'd (structs aren't in NameResolver's name set). Alias each struct by its
+        // UNIQUE last-path-segment so an intra-namespace bare `Add(…)` still resolves;
+        // ambiguous bare names are left out (fall back to the FQN-only match). Aliases are
+        // additive over the FQN keys, so cross-module (already FQN'd) calls are unaffected.
+        addUniqueBareAliases(structs);
 
         List<IrStmt> out = new ArrayList<>(combined.statements().size());
         for (IrStmt stmt : combined.statements()) {
@@ -162,6 +172,27 @@ public final class StructLiteralRewriter {
             case IrExpr.Cast cast -> new IrExpr.Cast(cast.targetSort(),
                     rewriteExpr(cast.value(), structs), cast.origin());
         };
+    }
+
+    /**
+     * Adds {@code lastSegment -> decl} aliases for every struct whose bare name is unique
+     * across the combined module, letting an un-FQN'd bare constructor call (a sibling
+     * struct in the same namespace) resolve. Skips a bare name that (a) is already a key
+     * — an FQN never contains {@code /}-free duplicates of itself — or (b) is shared by
+     * two structs, where guessing which one is meant would be unsound.
+     */
+    private static void addUniqueBareAliases(Map<String, IrSort.Structural> structs) {
+        Map<String, IrSort.Structural> bare = new HashMap<>();
+        Set<String> ambiguous = new HashSet<>();
+        for (Map.Entry<String, IrSort.Structural> e : structs.entrySet()) {
+            String key = e.getKey();
+            String last = key.substring(key.lastIndexOf('/') + 1);
+            if (last.equals(key)) continue;                 // already a bare key (unqualified struct)
+            if (structs.containsKey(last)) continue;        // a real struct literally named `last`
+            if (bare.putIfAbsent(last, e.getValue()) != null) ambiguous.add(last);
+        }
+        ambiguous.forEach(bare::remove);
+        bare.forEach(structs::putIfAbsent);
     }
 
     /** Zips positional args onto the struct's declared field order, like the parser does locally. */

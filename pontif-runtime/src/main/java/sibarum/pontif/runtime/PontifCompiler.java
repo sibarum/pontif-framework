@@ -133,7 +133,9 @@ public final class PontifCompiler {
         }
         IrModule linked;
         try {
-            linked = ModuleResolver.resolveAndCombine(module, resolveDir);
+            // sourceName is the resolveDir-relative label of the buffer's file, so folding
+            // same-namespace siblings excludes the buffer's own on-disk copy (live buffer wins).
+            linked = ModuleResolver.resolveAndCombine(module, resolveDir, sourceName);
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
@@ -159,6 +161,9 @@ public final class PontifCompiler {
         } catch (ParseException pe) {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + pe.getMessage(), pe.origin()));
+        } catch (CompileException ce) {
+            return new CompileResult.Failed(
+                    RunResult.error("Link error: " + ce.getMessage(), ce.origin()));
         } catch (java.io.IOException io) {
             return new CompileResult.Failed(RunResult.error("Project load error: " + io.getMessage()));
         } catch (RuntimeException e) {

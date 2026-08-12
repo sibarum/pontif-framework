@@ -15,9 +15,8 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -65,20 +64,55 @@ public final class ModuleResolver {
      */
     public static IrModule resolveAndCombine(IrModule entry, Path resolveDir)
             throws CompileException {
+        return resolveAndCombine(entry, resolveDir, null);
+    }
+
+    /**
+     * As {@link #resolveAndCombine(IrModule, Path)}, but {@code entryLabel} is the
+     * {@code resolveDir}-relative path the {@code entry} buffer was parsed from (its
+     * {@code sourceName}), or {@code null} if unsaved / unknown. The file it names is
+     * excluded when folding the entry's same-namespace siblings — otherwise the entry's
+     * own on-disk copy would be merged in twice (buffer + disk). Passing it is what lets
+     * the live buffer be the authoritative version of its own file.
+     */
+    public static IrModule resolveAndCombine(IrModule entry, Path resolveDir, String entryLabel)
+            throws CompileException {
+        // The buffer's own on-disk file, resolved from its label so folding can exclude it.
+        Path entryFile = (resolveDir != null && entryLabel != null)
+                ? resolveDir.resolve(entryLabel) : null;
+        // Fold same-namespace sibling files into the entry unit FIRST — intra-namespace
+        // names must be visible with no `requires`, and this has to happen before the
+        // needsLinking short-circuit (a library-style entry with no requires would else
+        // return bare, never seeing its siblings). With no resolveDir there are no
+        // siblings to fold, so the buffer stands alone.
+        ModuleHeader.Index index = resolveDir == null ? null : ModuleHeader.scan(resolveDir);
+        IrModule unit = index == null ? entry
+                : foldNamespace(entry, index, resolveDir, entryFile);
+        // A genuine multi-file fold produces a NEW module (NamespaceAssembler returns the
+        // sole part unchanged otherwise), so identity inequality means siblings were merged.
+        boolean folded = unit != entry;
+
         // The link-vs-bare decision is ModuleLinker.needsLinking's to make — the single source of
         // truth both this gate and combineSingle share, so they cannot drift (the bug where a
         // spawn-only program skipped seating because this gate still only checked `requires`).
-        if (!ModuleLinker.needsLinking(entry)) return entry;        // bare single-file path
-        if (resolveDir == null) return ModuleLinker.combineSingle(entry);  // builtins-only fallback
+        if (!ModuleLinker.needsLinking(unit)) {
+            // A folded namespace still needs the link pipeline even with no `requires`:
+            // the buffer's references to a sibling-defined struct were parsed as bare calls
+            // (it couldn't see the sibling), and only the link's StructLiteralRewriter /
+            // DestructureResolver / method resolution turn them into constructions. A truly
+            // single-file unit stays on the bare path, byte-for-byte as before.
+            return folded ? ModuleLinker.combine(Map.of(unit.name(), unit), unit.name()) : unit;
+        }
+        if (resolveDir == null) return ModuleLinker.combineSingle(unit);  // builtins-only fallback
 
         Set<String> builtins = BuiltinModules.all().keySet();
-        ModuleHeader.Index index = ModuleHeader.scan(resolveDir);
 
         Map<String, IrModule> collected = new LinkedHashMap<>();
-        collected.put(entry.name(), entry);
+        collected.put(unit.name(), unit);
+        IrModule entryUnit = unit;
 
         Deque<IrModule> work = new ArrayDeque<>();
-        work.push(entry);
+        work.push(entryUnit);
         while (!work.isEmpty()) {
             IrModule current = work.pop();
             for (IrStmt stmt : current.statements()) {
@@ -100,23 +134,54 @@ public final class ModuleResolver {
                     continue;
                 }
 
-                if (index.isAmbiguous(name)) {
-                    throw new CompileException(
-                            "required module '" + name + "' is declared by more than one file under "
-                                    + resolveDir + " — module names must be unique", r.origin());
-                }
-                Path file = index.fileFor(name);
-                if (file == null) {
+                // A required namespace may itself span several files — load and merge
+                // them all (NamespaceAssembler), the same rule the entry namespace uses.
+                List<Path> files = index.filesFor(name);
+                if (files.isEmpty()) {
                     throw new CompileException(
                             "required module '" + name + "' was not found under " + resolveDir
                                     + " (no file declares `module " + name + "`)", r.origin());
                 }
-                IrModule loaded = parseRequired(name, file, resolveDir, r.origin());
+                List<IrModule> parts = new ArrayList<>(files.size());
+                for (Path file : files) {
+                    parts.add(parseRequired(name, file, resolveDir, r.origin()));
+                }
+                IrModule loaded = NamespaceAssembler.merge(name, parts);
                 collected.put(name, loaded);
                 work.push(loaded);
             }
         }
-        return ModuleLinker.combine(collected, entry.name());
+        return ModuleLinker.combine(collected, entryUnit.name());
+    }
+
+    /**
+     * Fold the {@code entry} buffer together with every sibling file that declares
+     * the same namespace (excluding {@code entryFile}, the buffer's own on-disk
+     * copy) into one module. The buffer comes first so it wins for its own file.
+     */
+    private static IrModule foldNamespace(
+            IrModule entry, ModuleHeader.Index index, Path resolveDir, Path entryFile)
+            throws CompileException {
+        List<Path> siblings = index.filesFor(entry.name());
+        if (siblings.isEmpty()) return entry;                 // nothing on disk to fold
+        List<IrModule> parts = new ArrayList<>();
+        parts.add(entry);                                     // live buffer is authoritative
+        for (Path file : siblings) {
+            if (sameFile(file, entryFile)) continue;          // skip the buffer's own disk copy
+            parts.add(parseRequired(entry.name(), file, resolveDir, Origin.NONE));
+        }
+        return NamespaceAssembler.merge(entry.name(), parts);
+    }
+
+    /** Whether two paths denote the same file, tolerating non-normalized forms; false if either is null. */
+    private static boolean sameFile(Path a, Path b) {
+        if (a == null || b == null) return false;
+        try {
+            if (Files.isSameFile(a, b)) return true;
+        } catch (IOException ignored) {
+            // fall through to a normalized-path comparison
+        }
+        return a.toAbsolutePath().normalize().equals(b.toAbsolutePath().normalize());
     }
 
     private static IrModule parseRequired(String name, Path file, Path root, Origin requireOrigin)
@@ -222,16 +287,18 @@ public final class ModuleResolver {
      */
     static final class ModuleHeader {
 
-        record Index(Map<String, Path> byName, Set<String> ambiguous) {
-            Path fileFor(String module) { return byName.get(module); }
-            boolean isAmbiguous(String module) { return ambiguous.contains(module); }
+        record Index(Map<String, List<Path>> byName) {
+            /** Every file declaring {@code module}, in sorted-path order (empty if none). */
+            List<Path> filesFor(String module) { return byName.getOrDefault(module, List.of()); }
         }
 
         private ModuleHeader() {}
 
         static Index scan(Path dir) throws CompileException {
-            Map<String, Path> byName = new HashMap<>();
-            Set<String> ambiguous = new HashSet<>();
+            // name → all files declaring it. A namespace legitimately spans several files
+            // (they merge — see NamespaceAssembler), so same-name files accumulate rather
+            // than collide; sorted-path insertion keeps the merge order stable.
+            Map<String, List<Path>> byName = new LinkedHashMap<>();
             try (Stream<Path> walk = Files.walk(dir)) {
                 walk.filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().endsWith(".ptf"))
@@ -239,8 +306,7 @@ public final class ModuleResolver {
                     .forEach(p -> {
                         String name = declaredModule(p);
                         if (name == null) return;               // no/unreadable header → not name-addressable
-                        Path prior = byName.putIfAbsent(name, p);
-                        if (prior != null) ambiguous.add(name);  // two files, same module name
+                        byName.computeIfAbsent(name, k -> new ArrayList<>()).add(p);
                     });
             } catch (IOException io) {
                 throw new CompileException(
@@ -251,7 +317,7 @@ public final class ModuleResolver {
                         "could not scan module directory " + dir + ": " + io.getMessage(),
                         Origin.NONE);
             }
-            return new Index(byName, ambiguous);
+            return new Index(byName);
         }
 
         /**

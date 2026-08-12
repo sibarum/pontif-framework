@@ -115,6 +115,56 @@ class ModuleResolverTest {
     }
 
     @Test
+    void sameNamespaceSibling_visibleWithoutRequires(@TempDir Path dir) throws IOException {
+        // The editor scenario: a trait lives in one file and its impl/use in another,
+        // both declaring the SAME namespace. They must see each other with no `requires`
+        // (you cannot require your own namespace) — the resolver folds same-namespace
+        // siblings into the entry unit before checking.
+        write(dir, "expr.ptf", """
+                module poly
+                trait Expr { eval:[Method():Int] }
+                """);
+        String entry = """
+                module poly
+                struct Lit(v:Int)
+                assign trait Lit:Expr { eval():Int -> this.v }
+                Lit(41).eval()
+                """;
+        assertEquals("41", run(entry, dir).text());
+    }
+
+    @Test
+    void sameNamespaceSibling_structConstructedAcrossFiles(@TempDir Path dir) throws IOException {
+        // Harder cross-file case: the entry constructs a struct DEFINED in a sibling file.
+        // The buffer parsed `Lit(41)` as a bare call (it couldn't see the sibling's struct);
+        // after the fold, StructLiteralRewriter's unique-bare-alias resolves it to a Record.
+        write(dir, "types.ptf", """
+                module poly
+                struct Lit(v:Int)
+                """);
+        String entry = """
+                module poly
+                Lit(41).v
+                """;
+        assertEquals("41", run(entry, dir).text());
+    }
+
+    @Test
+    void entryFileOnDisk_notDoubleIncluded(@TempDir Path dir) throws IOException {
+        // The entry buffer's own file is among the namespace's on-disk files; it must be
+        // excluded from the fold (identified by sourceName) so its definitions aren't
+        // merged twice. Here `a.ptf` defines f and is compiled as the buffer; `b.ptf` is
+        // its sibling. A double-include would surface as a duplicate-definition error.
+        String a = "module poly\nfunction f(x:Int):Int -> x + 1\n0";
+        write(dir, "a.ptf", a);
+        write(dir, "b.ptf", "module poly\nfunction g(x:Int):Int -> f(x) * 2\ng(20)");
+        CompileResult r = compiler.compileAlt(a, "a.ptf", dir);
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "expected compile; got: " + ((CompileResult.Failed) r).error().text());
+        assertEquals("42", runner.run(r, Engine.INTERPRETER).text());
+    }
+
+    @Test
     void transitiveRequires_resolved(@TempDir Path dir) throws IOException {
         write(dir, "base.ptf", """
                 module base
