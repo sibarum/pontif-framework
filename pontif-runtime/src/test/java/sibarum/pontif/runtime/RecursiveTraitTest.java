@@ -49,28 +49,42 @@ class RecursiveTraitTest {
     }
 
     @Test
-    void selfRefNestedInStream_withoutImport_pointsAtTheRealCause() {
+    void selfRefNestedInStream_withoutImport_compiles() {
         // A self-referential trait nested in a parametric type — the existential
         // `Stream[Expr]` (a stream of *some* Expr, vs the type-preserving
-        // `Stream[this.type]`). Without importing Stream its head isn't an alias,
-        // so AliasResolver never descends to shell the inner `Expr`, and it reaches
-        // SortChecker as a bare Named. The diagnostic must NOT mislabel the declared
-        // trait as a missing struct — it must point at the unresolved parametric
-        // head / missing import.
-        PontifCompiler.CompileResult r = compiler.compileAlt("""
+        // `Stream[this.type]`). The parametric head (Stream) need not be an alias
+        // for AliasResolver to descend into its type ARGUMENTS, so the inner `Expr`
+        // is shelled and this compiles without an explicit Stream import — the
+        // builtin Stream is usable bare, so requiring it here was a wart (James
+        // 2026-08-12). Same result as the with-import case below.
+        assertEquals("0", run("""
                 trait Expr{
                   walkExprTree:[Method():[Stream[Expr]]]
                 }
                 0
-                """, "rec.ptf");
-        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
-                () -> "expected failure without the Stream import; got: " + r);
-        String msg = ((PontifCompiler.CompileResult.Failed) r).error().text();
-        assertTrue(msg.contains("'Expr' is a declared trait")
-                        && msg.contains("requires pontif.core.{Stream}"),
-                () -> "diagnostic should name the trait and the missing import; got: " + msg);
-        assertFalse(msg.contains("struct Expr"),
-                () -> "diagnostic must not suggest declaring a struct for a trait; got: " + msg);
+                """));
+    }
+
+    @Test
+    void selfRefInStream_acrossTraitFunctionAndImpl_withoutImport_runs() {
+        // The full pattern, no `requires`: the trait method, an impl method, and a
+        // free function all return `Stream[Expr]`. Every one resolves the nested
+        // self-referential trait — the fix covers both AliasResolver routines
+        // (resolveSort for the trait body, substituteResolved for function/impl
+        // signatures). walk flattens the tree in-order.
+        assertEquals("{Leaf{v: 1}, Leaf{v: 2}, BiOp{left: Leaf{v: 1}, right: Leaf{v: 2}}}", run("""
+                trait Expr {
+                  walk:[Method():Stream[Expr]]
+                }
+                struct Leaf(v:Int)
+                assign trait Leaf:Expr { walk():Stream[Expr] -> {this} }
+                struct BiOp(left:Expr, right:Expr)
+                assign trait BiOp:Expr {
+                  walk():Stream[Expr] -> this.left.walk() + this.right.walk() + {this}
+                }
+                let e:Expr = BiOp(Leaf(1), Leaf(2))
+                e.walk()
+                """));
     }
 
     @Test

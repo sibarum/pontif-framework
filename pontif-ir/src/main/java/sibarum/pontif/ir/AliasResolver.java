@@ -322,7 +322,18 @@ public final class AliasResolver {
                     for (IrSort a : n.typeArgs()) resolvedArgs.add(resolveSort(a, aliases, path));
                     yield applyTypeArgs(resolved, resolvedArgs, n);
                 }
-                yield n;  // not an alias, primitive or unknown name (incl. nominal structs)
+                // Not an alias to inline (a primitive, a builtin parametric like
+                // Stream, a nominal struct, or an unknown name). Its type ARGUMENTS
+                // may still reference aliases/traits — most importantly a
+                // self-referential trait (`Stream[Expr]` / `Box[Expr]` inside the
+                // `Expr` trait), which must be shelled here (path carries the
+                // enclosing trait's name). Descend into the args rather than
+                // dropping them unresolved; a bare non-parametric name is returned
+                // untouched, so recursive structs still terminate.
+                if (n.typeArgs().isEmpty()) yield n;
+                List<IrSort> argsResolved = new ArrayList<>(n.typeArgs().size());
+                for (IrSort a : n.typeArgs()) argsResolved.add(resolveSort(a, aliases, path));
+                yield new IrSort.Named(n.name(), argsResolved, n.origin());
             }
             case IrSort.Refined r ->
                     // Keep refined sorts as-is — name is the refinement base, not a reference to substitute.
@@ -513,7 +524,18 @@ public final class AliasResolver {
         return switch (sort) {
             case IrSort.Named n -> {
                 IrSort target = resolved.get(n.name());
-                if (target == null) yield n;  // nominal struct / primitive / unknown
+                if (target == null) {
+                    // A non-alias head (a builtin parametric like Stream, a nominal
+                    // struct like Box, or an unknown) still has type ARGUMENTS that
+                    // may reference aliases/traits — a trait inside `Stream[Expr]` /
+                    // `Box[Expr]` must resolve here too, not stay a bare Named that
+                    // trips SortChecker's "unresolved trait reference". Descend into
+                    // the args; a bare non-parametric name is returned untouched.
+                    if (n.typeArgs().isEmpty()) yield n;
+                    List<IrSort> argsResolved = new ArrayList<>(n.typeArgs().size());
+                    for (IrSort a : n.typeArgs()) argsResolved.add(substituteResolved(a, resolved));
+                    yield new IrSort.Named(n.name(), argsResolved, n.origin());
+                }
                 if (n.typeArgs().isEmpty()) yield target;  // bare alias reference
                 // Parametric reference (`Stream[Int]`): inline the trait body with
                 // its type parameters substituted (docs/type-parameters.md §2.3).
