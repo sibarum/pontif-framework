@@ -748,11 +748,12 @@ public final class SortChecker {
      * Fail-closed check that a satisfier's existing field discharges a trait
      * attribute requirement. The bases must match; an unrefined requirement
      * (existence + type) needs only that. A refined requirement (e.g.
-     * {@code [Int:@>0]}) requires the field to already carry a refinement that
-     * matches structurally — a conservative, sound rule: a field whose stronger
-     * predicate merely <em>implies</em> the requirement (but isn't identical) is
-     * rejected here, fail-closed (full predicate-implication is deferred; the
-     * user can instead provide a producer, which rides the proof gate).
+     * {@code [Int:@>0]}) requires the field to <em>imply</em> it, decided by the
+     * shared {@link Refinements#imply} kernel — the same subsumption check the
+     * construction gate and {@code Assignability} use, so a stronger-predicate
+     * field ({@code [Int:@>0]} against a {@code [Int:@>=0]} requirement) is
+     * accepted here instead of demanding a syntactically identical predicate.
+     * Abstains fail-closed (the kernel's non-Passed verdict → rejection).
      */
     private static void requireFieldSatisfies(
             IrStmt.TraitImpl ti, String attrName, IrSort fieldSort, IrSort attrSort)
@@ -766,17 +767,25 @@ public final class SortChecker {
                             + " but trait '" + ti.traitName() + "' requires " + attrBase,
                     ti.origin());
         }
-        if (attrSort instanceof IrSort.Refined attrRef) {
-            if (!(fieldSort instanceof IrSort.Refined fieldRef)
-                    || !predicatesEqual(fieldRef.predicate(), attrRef.predicate())) {
-                throw new CompileException(
-                        "Trait impl '" + ti.typeName() + " : " + ti.traitName()
-                                + "': field '" + attrName + "' does not provably satisfy the "
-                                + "refined requirement trait '" + ti.traitName() + "' places on it "
-                                + "— declare the field with the matching refinement, or provide a "
-                                + "producer (which is proof-checked)",
-                        ti.origin());
-            }
+        if (attrSort instanceof IrSort.Refined && !fieldImpliesAttr(fieldSort, attrSort)) {
+            throw new CompileException(
+                    "Trait impl '" + ti.typeName() + " : " + ti.traitName()
+                            + "': field '" + attrName + "' does not provably satisfy the "
+                            + "refined requirement trait '" + ti.traitName() + "' places on it "
+                            + "— declare the field with a refinement that implies it, or provide a "
+                            + "producer (which is proof-checked)",
+                    ti.origin());
+        }
+    }
+
+    /** Does {@code fieldSort} imply {@code attrSort} via the shared subsumption kernel? Fail-closed on any abstention. */
+    private static boolean fieldImpliesAttr(IrSort fieldSort, IrSort attrSort) {
+        try {
+            return sibarum.pontif.core.symbolic.Refinements.imply(
+                    IrCompiler.compileSort(fieldSort), IrCompiler.compileSort(attrSort),
+                    new sibarum.pontif.core.symbolic.Simplifier(java.util.List.of())).isPassed();
+        } catch (Exception abstain) {  // compileSort's CompileException, or a non-linear predicate
+            return false;
         }
     }
 
@@ -787,29 +796,6 @@ public final class SortChecker {
             case IrSort.Refined r -> r.name();
             case IrSort.Structural s -> s.name();
             default -> null;
-        };
-    }
-
-    /** Structural predicate equality, ignoring {@link sibarum.pontif.core.Origin}. */
-    private static boolean predicatesEqual(IrExpr a, IrExpr b) {
-        if (a == b) return true;
-        if (a == null || b == null || a.getClass() != b.getClass()) return false;
-        return switch (a) {
-            case IrExpr.SelfRef ignored -> true;
-            case IrExpr.Var v -> v.name().equals(((IrExpr.Var) b).name());
-            case IrExpr.Lit l -> java.util.Objects.equals(l.value(), ((IrExpr.Lit) b).value());
-            case IrExpr.BinOp op -> {
-                IrExpr.BinOp ob = (IrExpr.BinOp) b;
-                yield op.op() == ob.op()
-                        && predicatesEqual(op.left(), ob.left())
-                        && predicatesEqual(op.right(), ob.right());
-            }
-            case IrExpr.FieldAccess fa -> {
-                IrExpr.FieldAccess fb = (IrExpr.FieldAccess) b;
-                yield fa.fieldName().equals(fb.fieldName())
-                        && predicatesEqual(fa.base(), fb.base());
-            }
-            default -> a.equals(b);
         };
     }
 
