@@ -450,7 +450,53 @@ final class ConstructionGate {
             }
         }
         deriveAndCheckTypeParams(r, decl, members, ctx, structs);
+        materializePinnedBaseFields(decl, members, structs);
         return new IrExpr.Record(r.typeName(), members, checks, r.origin());
+    }
+
+    /**
+     * Materialize the pinned base fields the constructor doesn't carry, walking
+     * the is-a chain. A sub-struct whose morphism pins a base field that is NOT one
+     * of its own constructor fields (`struct Exp:[BiOp:@.op=="+"]` — op is a BiOp
+     * field, not an Exp field) must carry that field's value from birth: §6.5 says
+     * concrete identity is fixed at construction, and demotion is a pure view, so
+     * the value itself has to hold `op` for both `e.op` and `let b:BiOp = e; b.op`
+     * to resolve. Carried base fields (same name, already present) are left alone;
+     * only genuinely base-only pinned fields are added, evaluating the pin against
+     * the constructor's fields (a literal `"+"`, or a same-record field reference).
+     */
+    private static void materializePinnedBaseFields(
+            IrSort.Structural decl, Map<String, IrExpr> members,
+            Map<String, IrSort.Structural> structs) {
+        IrSort.Structural cur = decl;
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        while (cur != null && cur.baseSort() instanceof IrSort.Refined base && seen.add(cur.name())) {
+            Map<String, IrExpr> pins = new LinkedHashMap<>();
+            SortChecker.collectPinnedFieldExprs(base.predicate(), pins);
+            for (Map.Entry<String, IrExpr> pin : pins.entrySet()) {
+                if (!members.containsKey(pin.getKey())) {
+                    members.put(pin.getKey(), substituteRecordFields(pin.getValue(), members));
+                }
+            }
+            cur = structs.get(base.name());
+        }
+    }
+
+    /**
+     * Rewrite a pin expression into the constructor's scope: a bare field
+     * reference (`@.op == left`) becomes the constructor's argument for that
+     * field; literals pass through unchanged (the common discriminant case).
+     */
+    private static IrExpr substituteRecordFields(IrExpr e, Map<String, IrExpr> members) {
+        return switch (e) {
+            case IrExpr.Var v -> members.getOrDefault(v.name(), v);
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    substituteRecordFields(op.left(), members),
+                    substituteRecordFields(op.right(), members), op.origin());
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    substituteRecordFields(fa.base(), members), fa.fieldName(), fa.origin());
+            default -> e;
+        };
     }
 
     /**

@@ -1290,9 +1290,11 @@ public final class SortChecker {
     /**
      * Records each top-level {@code @.F == <expr>} conjunct as {@code F -> expr}
      * (and {@code <expr> == @.F} symmetrically), so the is-a-base check can find
-     * the child expression a base field is pinned to.
+     * the child expression a base field is pinned to. Package-visible: {@link
+     * ConstructionGate} reuses it to materialize a pinned base field on the
+     * sub-struct value at construction (a discriminant like {@code @.op=="+"}).
      */
-    private static void collectPinnedFieldExprs(IrExpr pred, Map<String, IrExpr> out) {
+    static void collectPinnedFieldExprs(IrExpr pred, Map<String, IrExpr> out) {
         if (pred instanceof IrExpr.BinOp op) {
             switch (op.op()) {
                 case AND -> {

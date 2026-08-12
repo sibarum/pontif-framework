@@ -150,6 +150,26 @@ class StructExtensionTest {
     // --- S3: demotion coercion ----------------------------------------------
 
     @Test
+    void demotion_reconstitutesPinnedDiscriminant() {
+        // Exp pins op=="+" — op is a BiOp field the Exp constructor does NOT carry.
+        // The value materializes op at construction (§6.5: identity set at build),
+        // so demoting to BiOp exposes it: b.op is "+". Runs on both engines.
+        String src = """
+                struct Expr()
+                let Operation:Type[String:@=="+" | @=="-"]
+                struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
+                struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
+                let e:Exp = Exp(Expr(), Expr())
+                let b:BiOp = e
+                b.op""";
+        for (Engine engine : Engine.values()) {
+            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            assertFalse(r.isError(), () -> engine + " got: " + r.text());
+            assertEquals("\"+\"", r.text(), engine.toString());
+        }
+    }
+
+    @Test
     void demotion_projectsTheMorphism() {
         // let b:Point = a runs the morphism: b is Point(2, 3); 2 + 3 = 5.
         String src = """
