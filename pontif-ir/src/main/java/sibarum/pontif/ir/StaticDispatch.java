@@ -6,7 +6,8 @@ import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.core.symbolic.algebra.ProofResult;
 import sibarum.pontif.core.types.Sort;
-import sibarum.pontif.predicates.Interval;
+import sibarum.pontif.predicates.PredicateArithmetic;
+import sibarum.pontif.predicates.SatResult;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -285,11 +286,18 @@ public final class StaticDispatch {
     private static boolean provablyDisjoint(Sort arg, Sort param, Simplifier simp,
                                             java.util.Map<String, java.util.Set<String>> traitImpls,
                                             java.util.Map<String, java.util.Set<String>> structAncestors) {
-        if (isIntRefined(arg) && isIntRefined(param)) {
-            SymExpr self = SymExpr.var("·self");  // synthetic binder, won't collide
-            return Interval.of(self, List.of(
-                    Substitute.applySelf(arg.predicate(), self),
-                    Substitute.applySelf(param.predicate(), self))).isEmpty();
+        // Refined scalars over the same base: decide disjointness with the shared
+        // predicate kernel (Int / Decimal / Bool) — the same engine OverloadOverlap
+        // uses — instead of the legacy Int-only Interval path. A definite verdict
+        // returns; an out-of-fragment Unknown falls through to the nominal /
+        // implication reasoning below.
+        if (arg.isRefined() && param.isRefined()
+                && arg.name() != null && arg.name().equals(param.name())) {
+            SatResult sat = PredicateArithmetic.satisfiable(
+                    SymExpr.and(arg.predicate(), param.predicate()), Sort.of(arg.name()));
+            if (sat instanceof SatResult.No) return true;    // provably disjoint
+            if (sat instanceof SatResult.Yes) return false;  // provably overlaps
+            // Unknown → fall through.
         }
         // The arg's type satisfies the param trait (nominal is-a) → not disjoint. Refinements can't
         // see this relation, so its Failed would otherwise mis-read a satisfying struct as excluded.
@@ -327,9 +335,6 @@ public final class StaticDispatch {
         return slash < 0 ? name : name.substring(slash + 1);
     }
 
-    private static boolean isIntRefined(Sort s) {
-        return s.isRefined() && "Int".equals(s.name());
-    }
 
     // --- Internals ---------------------------------------------------------
 
