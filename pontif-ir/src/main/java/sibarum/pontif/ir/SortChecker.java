@@ -108,6 +108,23 @@ public final class SortChecker {
             }
         }
 
+        // Which method short-names each type's OWN `assign trait` block provides,
+        // keyed type -> trait -> {method}. A sub-struct may provide only some of a
+        // trait's methods and inherit the rest from its base struct's impl (the
+        // dispatcher already routes per-method up the is-a chain); the completeness
+        // check consults this to credit those inherited methods.
+        Map<String, Map<String, Set<String>>> traitMethodsByType = new HashMap<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.TraitImpl ti) {
+                Map<String, Set<String>> byTrait = traitMethodsByType
+                        .computeIfAbsent(ti.typeName(), k -> new HashMap<>());
+                Set<String> ms = byTrait.computeIfAbsent(ti.traitName(), k -> new HashSet<>());
+                for (IrStmt.FunctionDecl m : ti.methods()) {
+                    ms.add(m.name().substring(m.name().lastIndexOf('.') + 1));
+                }
+            }
+        }
+
         // Struct is-a relationships (`struct Name:[Base:rel](fields)`): the base
         // must resolve, and a struct-base morphism must functionally pin every
         // base field. Validated once per declared struct.
@@ -141,7 +158,7 @@ public final class SortChecker {
                 // not at the call site's monomorphization.
                 checkOperatorBounds(fd, typeEnv, traitContracts, functionReturns);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions, traitMethodsByType);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
                 // Validate a trait DECLARATION end-to-end: its member sorts must
                 // reference only known sorts — primitives, declared types, or the
@@ -425,7 +442,8 @@ public final class SortChecker {
             Map<String, IrSort.Structural> structDefs,
             sibarum.pontif.core.symbolic.TraitRegistry satisfies,
             Map<String, List<IrStmt.FunctionDecl>> overloads,
-            Set<String> algebraicFunctions) throws CompileException {
+            Set<String> algebraicFunctions,
+            Map<String, Map<String, Set<String>>> traitMethodsByType) throws CompileException {
         IrSort.Trait ownContract = traitContracts.get(ti.traitName());
         if (ownContract == null) {
             throw new CompileException(
@@ -566,6 +584,14 @@ public final class SortChecker {
             IrSort.CallSig contractSig = e.getValue();
             IrStmt.FunctionDecl impl = implByShortName.get(methodName);
             if (impl == null) {
+                // A partial override: this impl omits the method, but a base struct
+                // in the is-a chain provides it (its signature already validated on
+                // that base's own impl). The dispatcher routes there per-method, so
+                // the omission is not a hole — credit it and move on.
+                if (baseStructProvides(ti.typeName(), ti.traitName(), methodName,
+                        satisfies, traitMethodsByType)) {
+                    continue;
+                }
                 throw new CompileException(
                         "Trait impl '" + ti.typeName() + " : " + ti.traitName()
                                 + "' is missing method '" + methodName + "'",
@@ -727,6 +753,30 @@ public final class SortChecker {
         for (IrStmt.FunctionDecl a : ti.attributeProducers()) {
             validateImplBody(a, functionReturns, structDefs, implTypeVars, algebraicFunctions);
         }
+    }
+
+    /**
+     * Whether some STRICT ancestor of {@code type} in its is-a chain provides
+     * {@code method} in its own {@code assign trait …:trait} block. A sub-struct
+     * may override a subset of a trait's methods and inherit the rest from its
+     * base struct's impl — the dispatcher routes each method up the is-a chain to
+     * the nearest provider (DispatchResolver.routeMethod), so a method the sub
+     * omits but a base supplies is not a hole. Reuses the shared, cycle-guarded
+     * {@link sibarum.pontif.core.symbolic.TraitRegistry#structAncestry} walk (the
+     * same chain runtime dispatch and Assignability consult); index 0 is {@code
+     * type} itself, so only indices ≥1 are strict ancestors.
+     */
+    private static boolean baseStructProvides(
+            String type, String trait, String method,
+            sibarum.pontif.core.symbolic.TraitRegistry satisfies,
+            Map<String, Map<String, Set<String>>> traitMethodsByType) {
+        List<String> ancestry = satisfies.structAncestry(type);
+        for (int i = 1; i < ancestry.size(); i++) {
+            Map<String, Set<String>> byTrait = traitMethodsByType.get(ancestry.get(i));
+            Set<String> ms = byTrait == null ? null : byTrait.get(trait);
+            if (ms != null && ms.contains(method)) return true;
+        }
+        return false;
     }
 
     private static void validateImplBody(

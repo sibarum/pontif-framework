@@ -1,0 +1,37 @@
+requires pontif.core.{Stream}
+
+# Partial trait override across a struct is-a chain.
+#
+# A trait impl no longer has to provide EVERY method in one block. A sub-struct
+# can override just the methods it wants and inherit the rest from its base
+# struct's impl — the dispatcher already routes each method up the is-a chain to
+# the nearest provider, and the compile-time completeness check now credits those
+# inherited methods.
+#
+# Expr has two methods: `walk` (abstract) and `simplify` (defaulted to identity).
+# BiOp defines walk for all binary nodes. Exp overrides ONLY simplify and inherits
+# BiOp.walk; Leaf overrides ONLY walk and inherits the default simplify.
+
+trait Expr {
+  walk():[Method():Stream[Expr]]
+  simplify():[Method():Expr] -> this
+}
+
+struct Leaf(v:Int)
+assign trait Leaf:Expr {
+  walk():Stream[Expr] -> {this}          # inherits the default simplify
+}
+
+struct BiOp(left:Expr, right:Expr)
+assign trait BiOp:Expr {
+  walk():Stream[Expr] -> this.left.walk() + this.right.walk() + {this}
+}
+
+struct Exp:BiOp(left:Expr, right:Expr)
+assign trait Exp:Expr {
+  # Overrides simplify only; walk is inherited from BiOp.
+  simplify():[Method():Expr] -> Exp(this.left.simplify(), this.right.simplify())
+}
+
+let e:Exp = Exp(Leaf(1), Leaf(2))
+e.walk()          # BiOp.walk, inherited by Exp: {Leaf 1, Leaf 2, Exp{…}}

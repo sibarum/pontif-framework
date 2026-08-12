@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A trait impl assigned to a base struct (`assign trait Base:Trait`) is inherited by every
@@ -104,6 +105,70 @@ class StructInheritedTraitImplTest {
     }
 
     // --- override: a sub-struct's own impl wins over the inherited one -----------------------
+
+    @Test
+    void subStructPartialImpl_overridesOneMethod_inheritsBaseForTheRest() {
+        // Expr has two methods; `walk` is ABSTRACT (no trait default) and `simplify`
+        // defaults. BiOp provides walk; Exp:BiOp provides ONLY simplify and must
+        // inherit BiOp.walk. The compile-completeness check credits the base
+        // struct's method (the dispatcher already routes there per-method), so the
+        // partial override is accepted — and walk/simplify each resolve correctly.
+        String prelude = """
+                requires pontif.core.{Stream}
+                trait Expr {
+                  walk():[Method():Stream[Expr]]
+                  simplify():[Method():Expr] -> this
+                }
+                struct Leaf(v:Int)
+                assign trait Leaf:Expr { walk():Stream[Expr] -> {this} }
+                struct BiOp(left:Expr, right:Expr)
+                assign trait BiOp:Expr {
+                  walk():Stream[Expr] -> this.left.walk() + this.right.walk() + {this}
+                }
+                struct Exp:BiOp(left:Expr, right:Expr)
+                assign trait Exp:Expr {
+                  simplify():[Method():Expr] -> Exp(this.left.simplify(), this.right.simplify())
+                }
+                let e:Exp = Exp(Leaf(1), Leaf(2))
+                """;
+        String node = "_anonymous/Exp{left: _anonymous/Leaf{v: 1}, right: _anonymous/Leaf{v: 2}}";
+        // walk inherits BiOp's override: left.walk ++ {this} ++ right.walk, in-order.
+        assertEquals("{_anonymous/Leaf{v: 1}, _anonymous/Leaf{v: 2}, " + node + "}",
+                runOK(prelude + "e.walk()\n"));
+        // simplify uses Exp's own override; leaves take the trait default (identity).
+        assertEquals(node, runOK(prelude + "e.simplify()\n"));
+    }
+
+    @Test
+    void missingMethod_noBaseProvider_stillRejected() {
+        // walk is abstract and NEITHER the impl nor any base struct provides it →
+        // a genuine hole; the completeness check must still reject it.
+        String src = """
+                requires pontif.core.{Stream}
+                trait Expr {
+                  walk():[Method():Stream[Expr]]
+                  simplify():[Method():Expr] -> this
+                }
+                struct BiOp(left:Expr, right:Expr)
+                assign trait BiOp:Expr {
+                  simplify():[Method():Expr] -> this
+                }
+                0
+                """;
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "hole.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
+                "an unprovided abstract method must be rejected");
+        assertTrue(((PontifCompiler.CompileResult.Failed) r).error().text().contains("missing method 'walk'"),
+                () -> "got: " + ((PontifCompiler.CompileResult.Failed) r).error().text());
+    }
+
+    private String runOK(String src) {
+        PontifCompiler.CompileResult r = compiler.compileAlt(src, "partial.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
+                () -> "expected success; got: "
+                        + ((PontifCompiler.CompileResult.Failed) r).error().text());
+        return runner.run(r, PontifRunner.Engine.INTERPRETER).text();
+    }
 
     @Test
     void subStructOwnImplOverridesInheritedBaseImpl() {
