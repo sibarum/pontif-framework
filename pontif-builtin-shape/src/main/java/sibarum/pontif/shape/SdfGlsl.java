@@ -100,6 +100,10 @@ public final class SdfGlsl {
                 }
                 case IrExpr.FieldAccess fa -> glslFloat(scalarField(fa, env));
                 case IrExpr.Call c -> call(c, env);
+                // An implicit Int→Decimal coercion (NumericCoercion) is identity in
+                // the GLSL subset — every scalar is a float — so lower the operand.
+                case IrExpr.Cast cast when "Decimal".equals(cast.targetSort().baseName()) ->
+                        expr(cast.value(), env);
                 default -> throw new Unsupported("unsupported expression "
                         + e.getClass().getSimpleName() + " in a distance body (the GLSL subset is"
                         + " arithmetic, pontif.math calls, let, this.<field>, and distanceAt)");

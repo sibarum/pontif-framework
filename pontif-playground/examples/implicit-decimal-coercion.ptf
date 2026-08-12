@@ -1,0 +1,22 @@
+module experiment.traction
+
+# Implicit Int -> Decimal coercion at value boundaries.
+#
+# The closed, lossless Int -> Decimal tower is the one coercion Pontif keeps
+# implicit. A non-literal Int value meeting a declared Decimal is widened by a
+# compiler-inserted cast at the boundary — no manual `0.0 + x` and no explicit
+# cast needed. (The reverse, lossy Decimal -> Int, stays out; user Type -> Type
+# conversions stay explicit via `cast`.)
+
+trait ValueLiteral {
+  asDecimal:[Method():[Decimal:@!=0]]
+}
+
+struct IntegerLiteral(value:Int)
+assign trait IntegerLiteral:ValueLiteral {
+  # `this.value` is an Int; the declared return is Decimal, so it is widened here.
+  asDecimal():[Decimal:@!=0] -> this.value
+}
+
+# The widened value is a real Decimal: it renders 12.0 and does Decimal arithmetic.
+IntegerLiteral(12).asDecimal() + 0.5

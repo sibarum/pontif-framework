@@ -1781,6 +1781,14 @@ public final class IrInterpreter {
             }
             return new sibarum.pontif.core.types.StringValue(rendered);
         }
+        // The closed built-in tower: Int → Decimal, a lossless embedding. The
+        // compiler inserts this cast implicitly at value boundaries (NumericCoercion);
+        // it is also the runtime for the same widening a value meeting a Decimal
+        // needs. A value already Decimal passes through (idempotent).
+        if ("Decimal".equals(targetBase)) {
+            if (value instanceof Long l) return java.math.BigDecimal.valueOf(l);
+            if (value instanceof BigDecimal) return value;
+        }
         // User-defined coercion: resolve (source → target) by dispatching the
         // already-evaluated value under the reserved coercion key on the target's
         // base (Coercions.coerceKey — handles a refined target like [Int:@>0] via its

@@ -77,6 +77,14 @@ public final class IrCompiler {
         // both single-file and linked compiles get it.
         resolved = DecimalPromotion.rewrite(resolved);
 
+        // Implicit Int→Decimal at value boundaries (let/return/args/members) — the
+        // value-level companion to DecimalPromotion's literal rewrite, inserting an
+        // Int→Decimal cast where a non-literal Int meets a declared Decimal. The
+        // closed lossless tower is the only implicit coercion (docs/dispatch-
+        // unification.md → "Coercion"). Runs after the literal promotion (so
+        // literals already read as Decimal) and before the construction gate.
+        resolved = NumericCoercion.rewrite(resolved);
+
         // The effective-sort lens over the promoted IR (docs/type-records.md, the Inferred record):
         // span → the accumulated effective sort at each position. Computed here — after the promotions
         // so it sees promoted members, and BEFORE the construction gate so the gate consumes it rather

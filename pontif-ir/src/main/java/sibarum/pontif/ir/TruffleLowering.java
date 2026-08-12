@@ -159,8 +159,12 @@ public final class TruffleLowering {
             // iteration construct yet; the IrInterpreter path is slice 1.
             case IrExpr.Iterate it -> throw new UnsupportedOperationException(
                     "Iterate: Truffle lowering not yet implemented (docs/iteration.md §10)");
-            // The Truffle backend fences the `(Type:value)` cast for now, the
-            // same way it fences String `+` — the interpreter path is slice 1.
+            // The closed built-in Int→Decimal tower — the one cast the compiler
+            // inserts implicitly (NumericCoercion). Other cast targets (String
+            // render, user coercions) remain interpreter-only for now.
+            case IrExpr.Cast cast when "Decimal".equals(cast.targetSort().baseName()) ->
+                    sibarum.pontif.ast.coerce.IntToDecimalNode.of(
+                            lowerExpr(cast.value(), module, registry));
             case IrExpr.Cast cast -> throw new UnsupportedOperationException(
                     "Cast (Type:value): Truffle lowering not yet implemented — "
                             + "the interpreter path is slice 1");

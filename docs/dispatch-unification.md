@@ -328,8 +328,27 @@ There is no `(…) ->` lambda to collide with — lambdas are retired; the match
 
 This **reframes B3**: operator promotion stays implicit *but primitive-only*
 (mechanism 1, the closed tower); boundary coercion at assignment/argument/return
-is explicit via `(Type:value)`. The two axes are distinct — which is exactly what
-lets both coexist without contradiction.
+is explicit via `(Type:value)` **for the open (user-extensible) world**. The two
+axes are distinct — which is exactly what lets both coexist without contradiction.
+
+**Revision (James, 2026-08-12): the closed tower is implicit at boundaries too.**
+The original ruling above made *all* boundary coercion explicit, including
+`Int → Decimal`. But the reason boundary coercion is explicit — avoiding the N²
+completeness/ambiguity blow-up — applies only to the *open* world (line "The split"
+above). The closed tower is lossless, unambiguous, and unextendable, so making it
+implicit at boundaries draws the line exactly where the principle already puts it.
+So: a non-literal `Int` value meeting a declared `Decimal` at a **let-claim,
+function/method/attribute return, call argument, or record member** is now widened
+by a compiler-inserted `Int → Decimal` cast (`NumericCoercion`, the value-level
+companion to `DecimalPromotion`'s literal rewrite). `IntegerLiteral(12).asDecimal()`
+with a body of `this.value` returns `12.0`, not `12`. The inserted node is a real
+`IrExpr.Cast` (the interpreter's built-in Decimal branch; the Truffle backend's
+`IntToDecimalNode`), so the conservation ledger records a coercion, not phantom
+`+0.0` arithmetic. Only the closed lossless `Int → Decimal` direction is implicit —
+`Decimal → Int` (lossy) and every user `Type → Type` coercion stay explicit. The
+explicit value-space cast `(Decimal:value)` surface is designed above but not yet
+built at runtime for the built-in tower — a later slice; today the tower is reached
+implicitly (or, for the open world, via a user `cast`).
 
 ## Open design decisions (resolved as we reach each phase)
 
