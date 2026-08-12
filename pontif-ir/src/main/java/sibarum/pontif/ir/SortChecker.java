@@ -1145,20 +1145,33 @@ public final class SortChecker {
         // parameters are in scope, so a forwarding base (`Wrapper[type T]:[Box[T]]`)
         // validates — T is the child's variable.
         validateSortNames(base, structDefs, s.typeParams().keySet());
-        if (base instanceof IrSort.Refined r && structDefs.containsKey(r.name())) {
-            IrSort.Structural baseStruct = structDefs.get(r.name());
+        if (baseName != null && structDefs.containsKey(baseName)) {
+            IrSort.Structural baseStruct = structDefs.get(baseName);
+            // A base field is DETERMINED (so the demotion Child → Base is total)
+            // if the morphism pins it (`@.f == <expr>`) OR the child carries it
+            // through — a same-named field in the SAME constructor position. Any
+            // base field that is neither carried nor pinned must be pinned
+            // explicitly; a bare `struct Exp:BiOp(left, right)` that drops the
+            // parent's `op` field is rejected here (James 2026-08-11).
             Set<String> pinned = new HashSet<>();
-            collectPinnedBaseFields(r.predicate(), pinned);
+            if (base instanceof IrSort.Refined r) {
+                collectPinnedBaseFields(r.predicate(), pinned);
+            }
+            List<String> childFields = new ArrayList<>(s.members().keySet());
+            int i = 0;
             for (String field : baseStruct.members().keySet()) {
-                if (!pinned.contains(field)) {
+                boolean carried = i < childFields.size() && childFields.get(i).equals(field);
+                if (!pinned.contains(field) && !carried) {
                     throw new CompileException(
-                            "struct '" + s.name() + "' demotes to '" + r.name()
-                                    + "' but its morphism does not pin base field '@."
-                                    + field + "' — every base field must be functionally "
-                                    + "determined (e.g. '@." + field + " == <expr>'); pinned: "
-                                    + pinned,
+                            "struct '" + s.name() + "' is-a '" + baseName
+                                    + "' but base field '@." + field + "' is not determined"
+                                    + " — it is neither carried by a same-named field in the"
+                                    + " same constructor position nor pinned by the morphism;"
+                                    + " pin it (e.g. '@." + field + " == <expr>') so the"
+                                    + " demotion to '" + baseName + "' is total.",
                             s.origin());
                 }
+                i++;
             }
         }
         enforceParametricBase(s, base, baseName, structDefs);

@@ -1275,7 +1275,7 @@ class PlotExtensionTest {
                 requires pontif.gui.{Button, window, Clickable}
                 function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
                 assign proof f:Algebraic
-                struct ExportButton:[Button](text:String, data:_)
+                struct ExportButton:Button(id:String, text:String, data:_)
                 assign trait ExportButton:Clickable {
                   onClick():_ -> ( let done = exportSvg(this.data)  this )
                 }
@@ -1283,7 +1283,7 @@ class PlotExtensionTest {
                   let e = $f[Decimal].ast
                   let layers = { expr(e), asymptotes(e), zeros(e) }
                   window({title = "Reliable plot -> SVG", width = 1100, height = 720},
-                         { chartView({}, layers), ExportButton("Export SVG...", layers) })
+                         { chartView({}, layers), ExportButton("export-svg", "Export SVG...", layers) })
                 )""", "svg-export.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
                 () -> "svg-export example should link; got "

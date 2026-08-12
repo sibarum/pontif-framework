@@ -16,7 +16,7 @@ assign proof f:Algebraic
 
 # A button that owns an onClick (subtype the library Button, per the orphan rule) — clicking it
 # exports the layers it carries. `this` is the clicked widget, returned as ui.ptf does.
-struct ExportButton:[Button](text:String, data:_)
+struct ExportButton:Button(id:String, text:String, data:_)
 assign trait ExportButton:Clickable {
   onClick():_ -> ( let done = exportSvg(this.data)  this )
 }
@@ -30,6 +30,6 @@ main (
   let layers = { expr(e), asymptotes(e), zeros(e) }
   window({title = "Reliable plot -> SVG", width = 1100, height = 720}, {
     chartView({}, layers),
-    ExportButton("Export SVG...", layers)
+    ExportButton("export-svg", "Export SVG...", layers)
   })
 )

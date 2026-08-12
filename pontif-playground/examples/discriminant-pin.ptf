@@ -1,0 +1,28 @@
+# Pinning a discriminant base field.
+#
+# A `struct Sub:Base(...)` must DETERMINE every field of Base, so the demotion
+# Sub → Base is total. A base field is determined either by being carried through
+# — a same-named field in the SAME constructor position — or by being pinned in
+# the is-a morphism.
+#
+# BiOp holds two operands AND a discriminant `op`. Exp and Log each carry
+# left/right by position and pin `op` to their operator. Dropping `op`
+# (`struct Exp:BiOp(left, right)`) is now a compile error: op would be
+# undetermined, collapsing Exp and Log into indistinguishable BiOps.
+
+struct Expr()
+let Operation:Type[String:@=="+" | @=="-"]
+
+struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
+
+# left, right carried by name+position; op pinned to the discriminant.
+struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
+struct Log:[BiOp:@.op=="-"](left:Expr, right:Expr)
+
+# Both subtypes construct and carry their operands. (`op` is determined by the
+# pin for the totality of the demotion Exp/Log → BiOp; it is not stored on the
+# subtype, so read it through a BiOp view once demotion reconstitutes it.)
+let leaf = Expr()
+let e:Exp = Exp(leaf, leaf)
+let l:Log = Log(leaf, leaf)
+e.left

@@ -75,16 +75,63 @@ class StructExtensionTest {
 
     @Test
     void nonTotalMorphism_isRejected() {
-        // @.y is left unpinned — the demotion isn't total, so it can't be a
-        // morphism; rejected at compile time.
+        // Base field y is undetermined: the morphism pins only x, and the child's
+        // second constructor slot is z (not y), so y is neither carried by
+        // same-name-same-position nor pinned. The demotion isn't total → rejected.
         String src = """
                 struct Point(x:Int, y:Int)
-                struct Point3D:[Point:@.x==x](x:Int, y:Int, z:Int)
+                struct Point3D:[Point:@.x==x](x:Int, z:Int, y:Int)
                 42""";
         RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "a non-total morphism should be rejected");
-        assertTrue(r.text().contains("does not pin base field"),
+        assertTrue(r.text().contains("is not determined"),
                 () -> "got: " + r.text());
+    }
+
+    @Test
+    void carriedByPosition_needsNoPin() {
+        // Point3D re-declares x, y in the same constructor positions as Point, so
+        // both base fields are carried by name+position — no morphism needed. z is
+        // the added field. (James 2026-08-11: same name AND arg position carries.)
+        String src = """
+                struct Point(x:Int, y:Int)
+                struct Point3D:Point(x:Int, y:Int, z:Int)
+                42""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "carried base fields need no pin; got: " + r.text());
+        assertEquals("42", r.text());
+    }
+
+    @Test
+    void bareBaseDroppingAField_isRejected() {
+        // BiOp has left, right, op; Exp:BiOp carries left, right but DROPS op —
+        // op is undetermined, so the bare form must be rejected (the bug report).
+        String src = """
+                struct Expr()
+                struct BiOp:Expr(left:Expr, right:Expr, op:Int)
+                struct Exp:BiOp(left:Expr, right:Expr)
+                42""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertTrue(r.isError(), "dropping base field op must be rejected");
+        assertTrue(r.text().contains("is not determined") && r.text().contains("op"),
+                () -> "got: " + r.text());
+    }
+
+    @Test
+    void discriminantPin_compilesAndRuns() {
+        // James's fix-form: BiOp has left, right, op; Exp carries left/right by
+        // name+position and PINS the discriminant op to "+". Every base field is
+        // determined → the demotion is total → accepted. (The parseable spelling
+        // of the discriminant pin is the `:[Base:pred]` morphism form.)
+        String src = """
+                struct Expr()
+                let Operation:Type[String:@=="+"|@=="-"]
+                struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
+                struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
+                42""";
+        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "pinned discriminant should compile; got: " + r.text());
+        assertEquals("42", r.text());
     }
 
     @Test
