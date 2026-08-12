@@ -20,6 +20,26 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
 
     Origin origin();
 
+    /**
+     * The nominal base name — the head type name this sort dispatches, refines,
+     * or is-a's on. A {@link CallSig} receiver's base is its head type name (a
+     * metareference dispatches its traits' methods like any nominal). The
+     * anonymous composites ({@link Union} / {@link Intersection}) have no single
+     * base and return {@code null}. The single home for the {@code baseName(sort)}
+     * switch that was open-coded across the dispatch, cast, and check passes.
+     */
+    default String baseName() {
+        return switch (this) {
+            case Named n -> n.name();
+            case Refined r -> r.name();
+            case Structural s -> s.name();
+            case Trait t -> t.name();
+            case CallSig c -> c.typeName();
+            case Union ignored -> null;
+            case Intersection ignored -> null;
+        };
+    }
+
     static Named named(String name) {
         return new Named(name, Origin.NONE);
     }

@@ -446,15 +446,7 @@ public final class Assignability {
     }
 
     private static String baseName(IrSort sort) {
-        if (sort == null) return null;
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            case IrSort.CallSig c -> c.typeName();   // §4: the head type name is the base
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     // --- parametric type-arguments (invariant — the only variance the language has) ------------------

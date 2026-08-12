@@ -155,16 +155,6 @@ final class DispatchResolver {
 
     /** The nominal base type name of a sort, or null if it has none. Mirrors the resolver clients. */
     private static String baseName(IrSort sort) {
-        if (sort == null) return null;
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            // A call-signature receiver routes methods on its head type — a metareference
-            // ($f[…] : AlgebraicDispatch) dispatches its traits' methods like any nominal.
-            case IrSort.CallSig c -> c.typeName();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 }

@@ -652,18 +652,7 @@ public final class MethodOperatorResolver {
     }
 
     private static String baseName(IrSort sort) {
-        if (sort == null) return null;
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            // A call-signature receiver dispatches methods on its head type — a metareference
-            // ($f[…] : AlgebraicDispatch) resolves the methods of the traits it is-a, exactly
-            // like any nominal (docs/dispatch-method-elimination.md §2).
-            case IrSort.CallSig c -> c.typeName();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     /**

@@ -231,12 +231,7 @@ public final class OverloadOverlap {
     }
 
     private static String baseName(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     // --- Result type -------------------------------------------------------

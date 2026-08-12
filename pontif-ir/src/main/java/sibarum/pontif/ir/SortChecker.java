@@ -791,12 +791,7 @@ public final class SortChecker {
 
     /** Base sort name for an attribute/field sort (null if structureless). */
     private static String sortBaseName(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     /**
@@ -2358,13 +2353,7 @@ public final class SortChecker {
 
     /** Nominal name of a sort, including a trait (which {@link #matchBaseName} omits). */
     private static String boundName(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     /** Conservative conformance: two sorts share a base name (both non-null). */

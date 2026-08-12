@@ -190,13 +190,6 @@ public final class CastGate {
     }
 
     private static String baseName(IrSort sort) {
-        return switch (sort) {
-            case null -> null;
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 }

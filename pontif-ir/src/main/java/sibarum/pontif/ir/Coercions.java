@@ -37,16 +37,7 @@ public final class Coercions {
 
     /** The base (nominal) name of a sort, or null if it has none. */
     public static String baseName(IrSort sort) {
-        if (sort == null) {
-            return null;
-        }
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.Trait t -> t.name();
-            default -> null;
-        };
+        return sort == null ? null : sort.baseName();
     }
 
     /** The member (unqualified) base name — the local name a coercion's base resolves to. */
