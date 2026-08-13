@@ -3569,6 +3569,36 @@ public final class AltParser {
         while (peek().kind() != closeKind) {
             if (!first) expect(AltToken.Kind.COMMA);
             String key = "_" + index;
+            // Narrow-in-place binder `name:Sort` — the third cell of the
+            // tuple-component grid, valid in BOTH match/type position (a match
+            // arm's tuple body parses in type position) and destructure-pattern
+            // position. It tests the component's sort AND binds the WHOLE
+            // (narrowed) value: the conditional-cast form. The member sort drives
+            // the per-component test (like a bare `[Int:@>0]` component); the
+            // rename drives the bind (like a bare `a` binder). Distinct from
+            // `Sort(fields)`, which opens the value UP into its fields, and from
+            // bare `a`, which binds whole but tests nothing. A leading `IDENT :`
+            // is unambiguous here — no other tuple-component form starts that way.
+            // The sort after `:` is a type, so read it with the pattern flag off.
+            if (peek().kind() == AltToken.Kind.IDENT
+                    && !peek().text().equals("_")
+                    && peek(1).kind() == AltToken.Kind.COLON) {
+                AltToken binder = consume();
+                consume();  // ':'
+                boolean prevPat = parsingTuplePattern;
+                parsingTuplePattern = false;
+                IrSort narrowed;
+                try {
+                    narrowed = memberSort();
+                } finally {
+                    parsingTuplePattern = prevPat;
+                }
+                members.put(key, narrowed);
+                renames.put(key, binder.text());
+                index++;
+                first = false;
+                continue;
+            }
             if (parsingTuplePattern) {
                 AltToken t = peek();
                 boolean literalClause = t.kind() == AltToken.Kind.INTEGER

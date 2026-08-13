@@ -1,0 +1,31 @@
+module experiment.narrow
+
+# ---------------------------------------------------------------------------
+# Narrow-in-place tuple binder:  `name:Sort`
+#
+# A tuple match component now has THREE forms, one per intent:
+#
+#   {a, b}                bind whole, test nothing        (unconditional names)
+#   {IntegerLiteral, _}   test the sort, bind nothing     (a guard)
+#   {a:IntegerLiteral, b:IntegerLiteral}
+#                         test the sort AND bind the whole (narrowed) value
+#                         — the conditional-cast form
+#
+# The third is the new one. `a` is bound as an IntegerLiteral, so `a.value`
+# type-checks and resolves — no need to open the value up into its fields with
+# the `IntegerLiteral(v)` destructure form when you want to keep it whole.
+# ---------------------------------------------------------------------------
+
+struct IntegerLiteral(value:Int)
+struct AddOp(left:Int, right:Int)
+let Expr:Type[IntegerLiteral | AddOp]
+
+# Fold a pair of Exprs: two literals collapse to their sum; anything else is 0.
+# The arm fires only when BOTH components are IntegerLiterals, and inside it
+# `a`/`b` are narrowed to IntegerLiteral, so `.value` is available.
+function combine(x:Expr, y:Expr):Int -> match {x, y} {
+  [{a:IntegerLiteral, b:IntegerLiteral}] -> a.value + b.value
+  [_]                                    -> 0
+}
+
+combine(IntegerLiteral(3), IntegerLiteral(4))   # => 7
