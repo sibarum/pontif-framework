@@ -235,6 +235,26 @@ public final class TraitRegistry {
         return satisfies(traitName, typeName) || satisfiesBareTrait(traitName, typeName);
     }
 
+    /**
+     * Is nominal type {@code sub} a STRICT subtype of {@code base} — i.e. does
+     * every {@code sub} value necessarily fit where {@code base} is expected —
+     * through the declared relations? Covers a struct is-a its base struct
+     * ({@code S3:S1}), a struct implementing a trait ({@code S1} impl {@code T1},
+     * including impls inherited down the struct chain), and a sub-trait extending
+     * its super-trait ({@code trait B:A}). Reflexive identity is excluded (that is
+     * {@link Refinements}' job via ordinary implication). This is the single
+     * source for the specificity tiebreak's "more specific nominal" question.
+     */
+    public boolean isNominalSubtype(String sub, String base) {
+        if (sub == null || base == null || sub.equals(base)) return false;
+        if (isDeclaredTrait(base)) {
+            // base is a trait: sub is a struct/type that satisfies it, or a sub-trait of it.
+            return satisfies(base, sub) || (isDeclaredTrait(sub) && isAncestorTrait(base, sub));
+        }
+        // base is a struct: sub is-a base through the struct inheritance chain (strict).
+        return structAncestry(sub).contains(base);
+    }
+
     private static String bare(String name) {
         if (name == null) return null;
         int slash = name.lastIndexOf('/');

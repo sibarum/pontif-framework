@@ -423,17 +423,50 @@ public final class Refinements {
      * pre-compiled) and the compile passes (IR decls, sorts compiled by the
      * caller) alike.
      */
+    /** Whether nominal type {@code sub} is a strict subtype of {@code base} (struct is-a, struct-implements-trait, sub-trait). */
+    @FunctionalInterface
+    public interface NominalSubtyping {
+        boolean isSubtype(String sub, String base);
+        /** The empty relation — no nominal subtyping known (structural/refinement reasoning only). */
+        NominalSubtyping NONE = (sub, base) -> false;
+    }
+
     public static boolean atLeastAsSpecific(java.util.List<Sort> a, java.util.List<Sort> b, Simplifier simplifier) {
+        return atLeastAsSpecific(a, b, simplifier, NominalSubtyping.NONE);
+    }
+
+    /**
+     * As {@link #atLeastAsSpecific(java.util.List, java.util.List, Simplifier)} but
+     * a parameter position also counts as more specific when {@code a}'s nominal
+     * type is a subtype of {@code b}'s via {@code subtyping} — a {@code Sub} param
+     * dominates a {@code Base} param, and a struct param dominates a trait it
+     * implements. {@link #imply} deliberately refuses these (a value's nominal
+     * name is honest about itself only), so the is-a knowledge enters here, for
+     * ordering only. A refined {@code b} still requires an {@link #imply} proof —
+     * a nominal subtype does not license bypassing a predicate obligation.
+     */
+    public static boolean atLeastAsSpecific(java.util.List<Sort> a, java.util.List<Sort> b,
+                                            Simplifier simplifier, NominalSubtyping subtyping) {
         if (a.size() != b.size()) return false;
         for (int i = 0; i < a.size(); i++) {
-            if (!imply(a.get(i), b.get(i), simplifier).isPassed()) return false;
+            Sort x = a.get(i);
+            Sort y = b.get(i);
+            if (imply(x, y, simplifier).isPassed()) continue;
+            if (!y.isRefined() && subtyping.isSubtype(x.name(), y.name())) continue;
+            return false;
         }
         return true;
     }
 
     /** A is STRICTLY more specific than B: A ⪰ B and not B ⪰ A. The dispatch tiebreak. */
     public static boolean strictlyMoreSpecific(java.util.List<Sort> a, java.util.List<Sort> b, Simplifier simplifier) {
-        return atLeastAsSpecific(a, b, simplifier) && !atLeastAsSpecific(b, a, simplifier);
+        return strictlyMoreSpecific(a, b, simplifier, NominalSubtyping.NONE);
+    }
+
+    /** As {@link #strictlyMoreSpecific(java.util.List, java.util.List, Simplifier)} but honoring the nominal is-a chain. */
+    public static boolean strictlyMoreSpecific(java.util.List<Sort> a, java.util.List<Sort> b,
+                                               Simplifier simplifier, NominalSubtyping subtyping) {
+        return atLeastAsSpecific(a, b, simplifier, subtyping) && !atLeastAsSpecific(b, a, simplifier, subtyping);
     }
 
     private static ProofResult imply(Sort tighter, Sort looser, Simplifier simplifier,

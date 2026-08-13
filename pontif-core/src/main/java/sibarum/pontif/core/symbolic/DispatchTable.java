@@ -300,8 +300,9 @@ public final class DispatchTable {
         return null;
     }
 
-    private static boolean isStrictlyMoreSpecific(FunctionDecl a, FunctionDecl b, Simplifier simp) {
-        return Refinements.strictlyMoreSpecific(paramSorts(a), paramSorts(b), simp);
+    private boolean isStrictlyMoreSpecific(FunctionDecl a, FunctionDecl b, Simplifier simp) {
+        return Refinements.strictlyMoreSpecific(
+                paramSorts(a), paramSorts(b), simp, traitRegistry::isNominalSubtype);
     }
 
     private static List<Sort> paramSorts(FunctionDecl decl) {
