@@ -1,0 +1,41 @@
+module examples.struct_member_block
+
+# The struct member block (docs/struct-methods.md): a struct may carry a
+# `{ … }` block of compact-form method decls, and declare its is-a base as an
+# intersection `:[Super & Trait1 & Trait2]` naming at most one struct supertype
+# plus any number of traits the block must satisfy.
+#
+# Methods are declared ONCE in the block; each declared trait is then verified
+# against that one method set. A method may satisfy more than one trait (an
+# overlap), and a method that satisfies no trait is just a method on the struct.
+
+trait Named  { label:[Method():String] }
+trait Scored { score:[Method():Int] }
+
+# A base struct — the (single) struct supertype a card may extend.
+struct Card(points:Int)
+
+# `Ace` is-a `Card` AND satisfies both `Named` and `Scored`. Its block provides
+# `label` (for Named), `score` (for Scored), and `boosted` (untethered — no trait
+# needs it, it is simply a method on Ace). `score` reads the inherited base field.
+struct Ace:[Card & Named & Scored](points:Int) {
+  label():String  -> "Ace"
+  score():Int     -> this.points
+  boosted():Int   -> this.score() + 10
+}
+
+# `Joker` satisfies only `Named` — no struct super, no `Scored`.
+struct Joker:[Named](points:Int) {
+  label():String -> "Joker"
+}
+
+let ace   = Ace(11)
+let joker = Joker(0)
+
+# Use the values through their trait views and their own methods.
+let asCard:Card    = ace          # is-a widening to the struct super
+let asNamed:Named  = ace          # satisfies Named
+let asScored:Scored = ace          # satisfies Scored
+
+ace.label() + " scores " + ("" + ace.score()) + ", boosted " + ("" + ace.boosted())
+  + "; " + joker.label()

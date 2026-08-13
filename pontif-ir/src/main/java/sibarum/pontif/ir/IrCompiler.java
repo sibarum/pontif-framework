@@ -45,6 +45,13 @@ public final class IrCompiler {
         // function declarations and concrete sorts.
         IrModule resolved = AliasResolver.resolve(module);
 
+        // Split a struct's intersection is-a base `:[Super & T1 & T2]` into its
+        // single struct super (kept as the base) and its trait obligations (each an
+        // empty `assign trait` impl). Runs right after AliasResolver so base branches
+        // are resolved sorts (Trait vs nominal struct); idempotent on a single base,
+        // so this re-run over an already-lowered module is a no-op (docs/struct-methods.md).
+        resolved = StructTraitLowering.lower(resolved);
+
         // Concurrent runtime (cut 3c): prove the seated conductors form no emit cycle before compiling them —
         // a feedback loop across the hive is exactly what cut 3b's drive-to-quiescence cannot terminate. The
         // first consumer of EmitInterface's statically-extracted emits set (docs/orchestration.md, gap 1).

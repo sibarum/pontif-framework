@@ -51,11 +51,28 @@ public final class TraitDefaultExpansion {
         }
         if (traits.isEmpty()) return module;
 
+        // The methods each type declares directly (member block / standalone
+        // `method`), keyed by qualified type-name and its bare short name. A defaulted
+        // contract method the struct itself provides must NOT be re-synthesized here —
+        // that would collide with the struct's own `Type.method` decl. This mirrors
+        // the pool SortChecker verifies a struct-block trait obligation against.
+        Map<String, Set<String>> ownMethods = new HashMap<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.FunctionDecl fd) {
+                int dot = fd.name().lastIndexOf('.');
+                if (dot < 0) continue;
+                String typePart = fd.name().substring(0, dot);
+                String shortName = fd.name().substring(dot + 1);
+                ownMethods.computeIfAbsent(typePart, k -> new HashSet<>()).add(shortName);
+                ownMethods.computeIfAbsent(baseName(typePart), k -> new HashSet<>()).add(shortName);
+            }
+        }
+
         boolean changed = false;
         List<IrStmt> out = new ArrayList<>(module.statements().size());
         for (IrStmt s : module.statements()) {
             if (s instanceof IrStmt.TraitImpl ti) {
-                IrStmt.TraitImpl expanded = expandImpl(ti, traits);
+                IrStmt.TraitImpl expanded = expandImpl(ti, traits, ownMethods);
                 out.add(expanded);
                 if (expanded != ti) changed = true;
             } else {
@@ -66,7 +83,8 @@ public final class TraitDefaultExpansion {
     }
 
     private static IrStmt.TraitImpl expandImpl(
-            IrStmt.TraitImpl ti, Map<String, IrSort.Trait> traits) throws CompileException {
+            IrStmt.TraitImpl ti, Map<String, IrSort.Trait> traits,
+            Map<String, Set<String>> ownMethods) throws CompileException {
         IrSort.Trait trait = traits.get(ti.traitName());
         if (trait == null) trait = traits.get(baseName(ti.traitName()));
         if (trait == null) return ti;  // unknown trait — leave for SortChecker to report
@@ -78,9 +96,15 @@ public final class TraitDefaultExpansion {
         if (defaults.isEmpty() && shells.isEmpty() && argShells.isEmpty()) return ti;
 
         // Short names the impl already provides (overrides) — never synthesize those.
+        // Includes the struct's OWN methods (member block / standalone `method`): a
+        // struct-block trait obligation `struct S:[…&T]{ f() }` carries no impl
+        // methods, so the default for `f` would wrongly re-synthesize and collide
+        // with `S.f` without this.
         String prefix = ti.typeName() + ".";
         Set<String> provided = new HashSet<>();
         for (IrStmt.FunctionDecl m : ti.methods()) provided.add(shortName(m, prefix));
+        provided.addAll(ownMethods.getOrDefault(ti.typeName(),
+                ownMethods.getOrDefault(baseName(ti.typeName()), Set.of())));
 
         Map<String, IrSort> subst = buildSubst(ti, trait);
         IrSort selfSort = selfSort(ti);

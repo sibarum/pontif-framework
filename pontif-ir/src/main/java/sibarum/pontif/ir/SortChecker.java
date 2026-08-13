@@ -125,6 +125,28 @@ public final class SortChecker {
             }
         }
 
+        // The methods each struct declares directly — its OWN `Type.method` decls,
+        // whether written in a struct member block or as a standalone `method`. A
+        // struct's traits are verified against this pool (the some-method rule: a
+        // struct-block trait obligation `struct S:[…&T]{ … }` is discharged by the
+        // struct's own method of the same name, signature-checked against T's
+        // contract). Keyed by both the qualified type-name and its bare short name so
+        // the lookup is robust to the linker's module qualification, mirroring the
+        // short-name normalization the completeness check already uses.
+        Map<String, Map<String, IrStmt.FunctionDecl>> methodsByType = new HashMap<>();
+        for (IrStmt stmt : module.statements()) {
+            if (stmt instanceof IrStmt.FunctionDecl fd) {
+                int dot = fd.name().lastIndexOf('.');
+                if (dot < 0) continue;
+                String typePart = fd.name().substring(0, dot);
+                String shortName = fd.name().substring(dot + 1);
+                methodsByType.computeIfAbsent(typePart, k -> new HashMap<>())
+                        .putIfAbsent(shortName, fd);
+                methodsByType.computeIfAbsent(lastPathSegment(typePart), k -> new HashMap<>())
+                        .putIfAbsent(shortName, fd);
+            }
+        }
+
         // Struct is-a relationships (`struct Name:[Base:rel](fields)`): the base
         // must resolve, and a struct-base morphism must functionally pin every
         // base field. Validated once per declared struct.
@@ -158,7 +180,7 @@ public final class SortChecker {
                 // not at the call site's monomorphization.
                 checkOperatorBounds(fd, typeEnv, traitContracts, functionReturns);
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
-                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions, traitMethodsByType);
+                validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions, traitMethodsByType, methodsByType);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
                 // Validate a trait DECLARATION end-to-end: its member sorts must
                 // reference only known sorts — primitives, declared types, or the
@@ -443,7 +465,8 @@ public final class SortChecker {
             sibarum.pontif.core.symbolic.TraitRegistry satisfies,
             Map<String, List<IrStmt.FunctionDecl>> overloads,
             Set<String> algebraicFunctions,
-            Map<String, Map<String, Set<String>>> traitMethodsByType) throws CompileException {
+            Map<String, Map<String, Set<String>>> traitMethodsByType,
+            Map<String, Map<String, IrStmt.FunctionDecl>> methodsByType) throws CompileException {
         IrSort.Trait ownContract = traitContracts.get(ti.traitName());
         if (ownContract == null) {
             throw new CompileException(
@@ -558,6 +581,14 @@ public final class SortChecker {
             String shortName = m.name().substring(m.name().lastIndexOf('.') + 1);
             implByShortName.put(shortName, m);
         }
+        // The struct's OWN declared methods (its member block / standalone `method`
+        // decls) — the some-method pool a struct-block trait obligation is checked
+        // against. A synthesized `assign trait S:T {}` (from `struct S:[…&T]{ … }`)
+        // carries no methods of its own; each contract method is discharged by the
+        // struct's like-named method, run through the SAME signature check below.
+        Map<String, IrStmt.FunctionDecl> ownMethods = methodsByType.getOrDefault(
+                ti.typeName(),
+                methodsByType.getOrDefault(lastPathSegment(ti.typeName()), Map.of()));
 
         // The type variables to substitute when checking a dependent contract
         // method against this impl: the `type X` associated types (bound by the
@@ -583,6 +614,12 @@ public final class SortChecker {
             String methodName = e.getKey();
             IrSort.CallSig contractSig = e.getValue();
             IrStmt.FunctionDecl impl = implByShortName.get(methodName);
+            // Not in this impl block? The struct may still declare the method itself
+            // (a member block, or a standalone `method`). Resolve it from the pool so
+            // it rides the SAME arity/return signature check the contract demands —
+            // an incompatible signature is rejected, a true overlap (one method
+            // satisfying several traits) passes each trait's check independently.
+            if (impl == null) impl = ownMethods.get(methodName);
             if (impl == null) {
                 // A partial override: this impl omits the method, but a base struct
                 // in the is-a chain provides it (its signature already validated on

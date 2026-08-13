@@ -255,9 +255,14 @@ public final class PontifCompiler {
             // alias name and its methods silently detach from the struct — the
             // user then hits "No method 'm' on type 'P'". AliasResolver is
             // idempotent, so IrCompiler's own re-run stays a no-op.
+            // StructTraitLowering runs between alias resolution and default
+            // expansion: it turns a struct's intersection is-a base into a single
+            // struct super + empty `assign trait` impls, so those impls then pick up
+            // trait defaults here and are verified downstream (docs/struct-methods.md).
             module = sibarum.pontif.ir.MethodOperatorResolver.resolve(
                     sibarum.pontif.ir.TraitDefaultExpansion.expand(
-                            sibarum.pontif.ir.AliasResolver.resolve(rawModule)));
+                            sibarum.pontif.ir.StructTraitLowering.lower(
+                                    sibarum.pontif.ir.AliasResolver.resolve(rawModule))));
         } catch (CompileException ce) {
             return new CompileResult.Failed(
                     RunResult.error("Compile error: " + ce.getMessage(), ce.origin()));

@@ -2588,6 +2588,29 @@ public final class AltParser {
             first = false;
         }
         AltToken end = expect(AltToken.Kind.RPAREN);
+        // Optional member block `{ name(params):Ret -> body … }` — the struct
+        // member block (docs/struct-methods.md). It holds compact-form method
+        // decls only (no `method` keyword — that stays valid only for standalone
+        // `method Type.m` decls outside any block). Each method lowers to a
+        // standalone `Struct.m(this:Struct, …)` FunctionDecl on the pending
+        // channel — reusing the exact `assign trait` method desugar. The trait
+        // obligations named in the is-a base (`:[Super & T1 & T2]`) are split out
+        // of the intersection and verified against these methods downstream
+        // (StructTraitLowering + SortChecker), so a struct declares its methods
+        // once here and each declared trait is checked against that one set.
+        List<IrStmt.FunctionDecl> blockMethods = new ArrayList<>();
+        if (peek().kind() == AltToken.Kind.LBRACE) {
+            List<IrSort> selfArgs = new ArrayList<>(typeParams.size());
+            for (String tp : typeParams.keySet()) {
+                selfArgs.add(new IrSort.Named(tp, nameTok.origin()));
+            }
+            IrSort selfSort = new IrSort.Named(nameTok.text(), selfArgs, nameTok.origin());
+            consume();  // {
+            while (peek().kind() != AltToken.Kind.RBRACE) {
+                blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
+            }
+            end = expect(AltToken.Kind.RBRACE);
+        }
         Origin origin = start.spanTo(end);
         if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
             throw new ParseException(
@@ -2598,6 +2621,10 @@ public final class AltParser {
         IrSort.Structural structSort =
                 new IrSort.Structural(nameTok.text(), members, baseSort, typeParams, origin);
         types.register(nameTok.text(), new TypeInfo.Struct(structSort));
+        // The struct decl is returned as the statement; its block methods ride
+        // the pending-decl channel so they land right after it (drained by the
+        // top-level loop in declaration order).
+        pendingTopLevelDecls.addAll(blockMethods);
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
     }
 
