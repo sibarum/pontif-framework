@@ -493,8 +493,8 @@ public final class SortChecker {
             if (bound == null) continue;  // unbounded `type X`
             IrSort binding = ti.typeBindings().get(at.getKey());
             if (binding == null) continue;  // missing — already reported above
-            String boundType = boundName(binding);
-            String reqTrait = boundName(bound);
+            String boundType = sortBaseName(binding);
+            String reqTrait = sortBaseName(bound);
             if (reqTrait == null) continue;  // unknown bound shape — nothing to check
             boolean ok = boundType != null
                     && (boundType.equals(reqTrait)
@@ -865,7 +865,13 @@ public final class SortChecker {
         }
     }
 
-    /** Base sort name for an attribute/field sort (null if structureless). */
+    /**
+     * The single null-safe wrapper over {@link IrSort#baseName()} — the nominal
+     * head of a sort (Named/Refined/Structural/Trait/CallSig), or null for a
+     * null sort or a headless composite (Union/Intersection). Traits ARE named
+     * (via {@code baseName()}), so a trait bound or a trait branch of an
+     * intersection resolves here rather than being silently dropped.
+     */
     private static String sortBaseName(IrSort sort) {
         return sort == null ? null : sort.baseName();
     }
@@ -1780,7 +1786,7 @@ public final class SortChecker {
                         }
                     } else if (baseSort != null) {
                         // Native anatomies get the same typo coverage as structs.
-                        String base = matchBaseName(baseSort);
+                        String base = sortBaseName(baseSort);
                         if (base != null && NativeConstructors.has(base)
                                 && !NativeConstructors.get(base).shape().members()
                                         .containsKey(fa.fieldName())) {
@@ -2111,7 +2117,7 @@ public final class SortChecker {
      * {@code Ternion} scrutinee).
      */
     private static boolean hasCatchAllArm(IrExpr.Match m, IrSort scrutineeIr) {
-        String scrutineeBase = scrutineeIr == null ? null : matchBaseName(scrutineeIr);
+        String scrutineeBase = scrutineeIr == null ? null : sortBaseName(scrutineeIr);
         for (IrExpr.MatchBranch b : m.branches()) {
             if (b.pattern() instanceof IrSort.Named n) {
                 if (n.name().equals("_")) return true;
@@ -2132,7 +2138,7 @@ public final class SortChecker {
         if (!(scrutineeIr instanceof IrSort.Union u)) return false;
         for (IrSort branch : u.branches()) {
             if (branch instanceof IrSort.Refined) return false;
-            String base = matchBaseName(branch);
+            String base = sortBaseName(branch);
             if (base == null) return false;
             IrSort.Structural branchStruct = resolveNominal(branch, structDefs);
             boolean covered = false;
@@ -2154,16 +2160,6 @@ public final class SortChecker {
         return true;
     }
 
-    private static String matchBaseName(IrSort sort) {
-        return switch (sort) {
-            case IrSort.Named n -> n.name();
-            case IrSort.Refined r -> r.name();
-            case IrSort.Structural s -> s.name();
-            case IrSort.CallSig c -> c.typeName();   // a dispatch nominal's head is its base
-            default -> null;
-        };
-    }
-
     /**
      * Whether an overload is a homogeneous binary operator over {@code type}:
      * exactly two params, both of base sort {@code type}, returning base sort
@@ -2176,9 +2172,9 @@ public final class SortChecker {
         if (o.params().size() != 2) {
             return false;
         }
-        return type.equals(matchBaseName(o.params().get(0).sort()))
-                && type.equals(matchBaseName(o.params().get(1).sort()))
-                && type.equals(matchBaseName(o.returnSort()));
+        return type.equals(sortBaseName(o.params().get(0).sort()))
+                && type.equals(sortBaseName(o.params().get(1).sort()))
+                && type.equals(sortBaseName(o.returnSort()));
     }
 
     /** The overloadable operator symbols (mirrors the parser's OVERLOADABLE_OPS). */
@@ -2219,7 +2215,7 @@ public final class SortChecker {
         Map<String, IrSort.Trait> boundOf = new HashMap<>();
         for (Map.Entry<String, IrSort> tp : fd.typeParams().entrySet()) {
             IrSort bound = tp.getValue();
-            String boundName = bound == null ? null : matchBaseName(bound);
+            String boundName = bound == null ? null : sortBaseName(bound);
             boundOf.put(tp.getKey(), boundName == null ? null : traitContracts.get(boundName));
         }
         walkOperatorBounds(fd.body(), new HashMap<>(paramEnv), fd, boundOf, functionReturns);
@@ -2306,7 +2302,7 @@ public final class SortChecker {
             throws CompileException {
         String typeParam = null;
         for (IrSort s : argSorts) {
-            String base = s == null ? null : matchBaseName(s);
+            String base = s == null ? null : sortBaseName(s);
             if (base != null && fd.typeParams().containsKey(base)) {
                 typeParam = base;
                 break;
@@ -2319,8 +2315,8 @@ public final class SortChecker {
         // Licensed iff: BOTH operands are exactly this type parameter (the v1
         // homogeneous shape) AND its bound declares the operator.
         boolean homogeneous = argSorts.size() == 2
-                && typeParam.equals(matchBaseName(argSorts.get(0)))
-                && typeParam.equals(matchBaseName(argSorts.get(1)));
+                && typeParam.equals(sortBaseName(argSorts.get(0)))
+                && typeParam.equals(sortBaseName(argSorts.get(1)));
         if (homogeneous && bound != null && bound.operators().containsKey(opSym)) {
             return IrSort.named(typeParam);  // contract result is the self type
         }
@@ -2430,11 +2426,6 @@ public final class SortChecker {
         };
     }
 
-    /** Nominal name of a sort, including a trait (which {@link #matchBaseName} omits). */
-    private static String boundName(IrSort sort) {
-        return sort == null ? null : sort.baseName();
-    }
-
     /** The segment after the last {@code /} — strips a module qualifier ({@code mod/T} → {@code T}). */
     private static String lastPathSegment(String name) {
         return name == null ? null : name.substring(name.lastIndexOf('/') + 1);
@@ -2442,8 +2433,8 @@ public final class SortChecker {
 
     /** Conservative conformance: two sorts share a base name (both non-null). */
     private static boolean sameBaseSort(IrSort a, IrSort b) {
-        String an = matchBaseName(a);
-        String bn = matchBaseName(b);
+        String an = sortBaseName(a);
+        String bn = sortBaseName(b);
         return an != null && an.equals(bn);
     }
 
@@ -2581,7 +2572,7 @@ public final class SortChecker {
                 return true;
             }
         }
-        String base = matchBaseName(branch);
+        String base = sortBaseName(branch);
         if (base != null) {
             // A member contributed by a non-struct branch (e.g. a trait) — the
             // attribute producer is keyed by the branch's own name.
@@ -2612,7 +2603,7 @@ public final class SortChecker {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < inter.branches().size(); i++) {
             if (i > 0) sb.append(" & ");
-            String name = matchBaseName(inter.branches().get(i));
+            String name = sortBaseName(inter.branches().get(i));
             sb.append(name != null ? name : inter.branches().get(i));
         }
         return sb.append("]").toString();
