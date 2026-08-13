@@ -17,9 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Pins every {@code ```pontif } snippet in {@code README.md}: each block here is
- * the README's code verbatim (minus the {@code # → …} comments), and the README
- * compiles or this build fails. Blocks appear in README order.
+ * Pins every {@code ```pontif } snippet in {@code README.md} and the guide pages
+ * under {@code docs/guide/}: each block here is the docs' code verbatim (minus the
+ * {@code # → …} comments), and the docs compile or this build fails. The root
+ * README keeps a curated set of flagship snippets; the rest live in the guides
+ * (the type-system, proofs-and-ledgers, notation, streams, and effects pages).
+ * Blocks appear in guide-reading order. Illustrative fragments (streams control
+ * flow, and the window-opening / GPU snippets in the graphics guide) are not pinned
+ * here — their modules live outside {@code pontif-runtime}.
  *
  * <p>Two harnesses: {@link #run} drives the bare IR path (parse → simplify →
  * compile → interpret) for self-contained value snippets; {@link #runGated} drives
@@ -175,6 +180,24 @@ class ReadmeSnippetTest {
         assertEquals(11L, run(src));
     }
 
+    @Test
+    void readmeTupleNarrowBinderSnippet_evaluatesTo7() {
+        // The `name:Sort` tuple slot: tests the slot's sort AND binds the narrowed
+        // value whole. Gated — the `Type[...]` sort alias needs the linker.
+        assertEquals("7", runGated("""
+                struct Lit(value:Int)
+                struct Add(left:Int, right:Int)
+                let Expr:Type[Lit | Add]
+
+                function combine(x:Expr, y:Expr):Int -> match {x, y} {
+                  [{a:Lit, b:Lit}] -> a.value + b.value
+                  [_]              -> 0
+                }
+
+                combine(Lit(3), Lit(4))
+                """));
+    }
+
     // --- Traits: methods (the primary example) -------------------------------
 
     @Test
@@ -312,6 +335,26 @@ class ReadmeSnippetTest {
                 """);
         assertInstanceOf(StringValue.class, result);
         assertEquals("n=12", ((StringValue) result).content());
+    }
+
+    // --- Struct member blocks (methods + intersection is-a base) --------------
+
+    @Test
+    void readmeStructMemberBlockSnippet_evaluatesTo21() {
+        assertEquals("21", runGated("""
+                trait Named  { label:[Method():String] }
+                trait Scored { score:[Method():Int] }
+
+                struct Card(points:Int)
+
+                struct Ace:[Card & Named & Scored](points:Int) {
+                  label():String -> "Ace"
+                  score():Int    -> this.points
+                  boosted():Int  -> this.score() + 10
+                }
+
+                Ace(11).boosted()
+                """));
     }
 
     // --- Type parameters — generics without erasure --------------------------
