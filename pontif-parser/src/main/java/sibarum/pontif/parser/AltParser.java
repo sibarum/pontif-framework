@@ -2600,25 +2600,40 @@ public final class AltParser {
         // once here and each declared trait is checked against that one set.
         List<IrStmt.FunctionDecl> blockMethods = new ArrayList<>();
         Map<String, IrExpr> extensions = new LinkedHashMap<>();
-        if (peek().kind() == AltToken.Kind.LBRACE) {
-            List<IrSort> selfArgs = new ArrayList<>(typeParams.size());
-            for (String tp : typeParams.keySet()) {
-                selfArgs.add(new IrSort.Named(tp, nameTok.origin()));
+        List<IrSort> selfArgs = new ArrayList<>(typeParams.size());
+        for (String tp : typeParams.keySet()) {
+            selfArgs.add(new IrSort.Named(tp, nameTok.origin()));
+        }
+        IrSort selfSort = new IrSort.Named(nameTok.text(), selfArgs, nameTok.origin());
+        // Optional constructor-extension BODY: `struct Name(fields) -> <preamble>`.
+        // A function body in the ruled let-led member model — all-preamble, unit
+        // (no terminal expression), each line `let this.name(:Sort)? = expr`
+        // binding a NEW field. The default constructor always runs first; the
+        // body may only ADD fields (a `let this.<ctor-field>` reassignment is
+        // rejected), and each added field is materialized on every value at
+        // construction, so it can never be undefined. The `this.` target is the
+        // body's terminator: a following top-level `let x = …` doesn't continue it.
+        if (peek().kind() == AltToken.Kind.ARROW) {
+            AltToken arrow = consume();
+            boolean any = false;
+            while (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")
+                    && peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("this")
+                    && peek(2).kind() == AltToken.Kind.DOT) {
+                end = parseStructExtensionField(nameTok.text(), selfSort, members, extensions);
+                any = true;
             }
-            IrSort selfSort = new IrSort.Named(nameTok.text(), selfArgs, nameTok.origin());
+            if (!any) {
+                throw new ParseException(
+                        "A struct constructor body (`-> …`) must contain at least one "
+                                + "`let this.<name> = <expr>` extension line",
+                        arrow.origin());
+            }
+        }
+        // Optional member block `{ methods… }` (docs/struct-methods.md).
+        if (peek().kind() == AltToken.Kind.LBRACE) {
             consume();  // {
             while (peek().kind() != AltToken.Kind.RBRACE) {
-                // `let name:Sort = expr` — a constructor-extension field. The
-                // default constructor always runs first; the extension may only
-                // ADD fields (a name colliding with a constructor field is a
-                // reassignment and rejected), and each added field is
-                // materialized on every value at construction, so it can never
-                // be undefined.
-                if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
-                    parseStructExtensionField(nameTok.text(), selfSort, members, extensions);
-                } else {
-                    blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
-                }
+                blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
             }
             end = expect(AltToken.Kind.RBRACE);
         }
@@ -2640,32 +2655,38 @@ public final class AltParser {
     }
 
     /**
-     * Parses one constructor-extension field inside a struct member block:
-     * {@code let name:Sort = expr}. The default constructor is always executed
-     * first; the extension runs after it and may only ADD fields — a name that
-     * collides with a constructor field (a reassignment) is rejected here, and
-     * a collision with an inherited base field is rejected by SortChecker. The
-     * initializer is an expression over {@code this.<field>} (constructor
+     * Parses one line of a struct constructor body:
+     * {@code let this.name(:Sort)? = expr}. The default constructor is always
+     * executed first; the body runs after it and may only ADD fields — a name
+     * that collides with a constructor field (a reassignment) is rejected here,
+     * and a collision with an inherited base field is rejected by SortChecker.
+     * The initializer is an expression over {@code this.<field>} (constructor
      * fields and earlier extension fields), literals, and operators — a total
      * expression over already-bound fields, which is what makes the added
      * field guaranteed never-undefined. ConstructionGate materializes it into
      * every constructed value and judges it against the declared sort exactly
-     * like a constructor argument.
+     * like a constructor argument. Returns the line's last token (for the
+     * decl's origin span).
      */
-    private void parseStructExtensionField(
+    private AltToken parseStructExtensionField(
             String typeName, IrSort selfSort,
             Map<String, IrSort> members, Map<String, IrExpr> extensions) throws ParseException {
         expectKeyword("let");
+        expectKeyword("this");
+        expect(AltToken.Kind.DOT);
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         if (members.containsKey(nameTok.text())) {
             throw new ParseException(
                     "Extension field '" + nameTok.text() + "' reassigns a field the default "
-                            + "constructor of '" + typeName + "' already binds — an extension "
-                            + "may only ADD fields, never reassign constructor fields",
+                            + "constructor of '" + typeName + "' already binds — a constructor "
+                            + "body may only ADD fields, never reassign constructor fields",
                     nameTok.origin());
         }
-        expect(AltToken.Kind.COLON);
-        IrSort declaredSort = parseSort();
+        IrSort declaredSort = null;
+        if (peek().kind() == AltToken.Kind.COLON) {
+            consume();
+            declaredSort = parseSort();
+        }
         expect(AltToken.Kind.EQUALS);
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
@@ -2678,8 +2699,61 @@ public final class AltParser {
             currentScope.putAll(savedScope);
         }
         validateExtensionInit(init, typeName, nameTok.text(), members);
+        if (declaredSort == null) {
+            declaredSort = inferExtensionSort(init, members);
+            if (declaredSort == null) {
+                throw new ParseException(
+                        "Cannot infer the sort of extension field '" + nameTok.text() + "' of '"
+                                + typeName + "' — annotate it: `let this." + nameTok.text()
+                                + ":<Sort> = …`",
+                        nameTok.origin());
+            }
+        }
         members.put(nameTok.text(), declaredSort);
         extensions.put(nameTok.text(), init);
+        return nameTok;
+    }
+
+    /**
+     * Sort inference over the extension-initializer whitelist (closed grammar:
+     * literals, {@code this.<field>} reads, operators) — a field read carries
+     * the field's declared sort; arithmetic follows the primitive tower
+     * (String concat → String, any Decimal → Decimal, Int-on-Int → Int);
+     * comparisons/logic → Bool. {@code null} (annotate explicitly) for
+     * anything else — e.g. arithmetic over user-typed operands, whose result
+     * is an operator overload's business.
+     */
+    private static IrSort inferExtensionSort(IrExpr e, Map<String, IrSort> members) {
+        return switch (e) {
+            case IrExpr.Lit l -> new IrSort.Named("Int", l.origin());
+            case IrExpr.Dec d -> new IrSort.Named("Decimal", d.origin());
+            case IrExpr.Str s -> new IrSort.Named("String", s.origin());
+            case IrExpr.Bool b -> new IrSort.Named("Bool", b.origin());
+            case IrExpr.Chr c -> new IrSort.Named("Char", c.origin());
+            case IrExpr.FieldAccess fa when fa.base() instanceof IrExpr.Var v
+                    && v.name().equals("this") -> members.get(fa.fieldName());
+            case IrExpr.BinOp op -> switch (op.op()) {
+                case LT, LE, GT, GE, EQ, NE, APPROX, AND, OR ->
+                        new IrSort.Named("Bool", op.origin());
+                default -> {
+                    IrSort ls = inferExtensionSort(op.left(), members);
+                    IrSort rs = inferExtensionSort(op.right(), members);
+                    String lb = ls == null ? null : baseSortName(ls);
+                    String rb = rs == null ? null : baseSortName(rs);
+                    if (op.op() == IrExpr.Op.ADD && ("String".equals(lb) || "String".equals(rb))) {
+                        yield new IrSort.Named("String", op.origin());
+                    }
+                    if ("Decimal".equals(lb) || "Decimal".equals(rb)) {
+                        yield new IrSort.Named("Decimal", op.origin());
+                    }
+                    if ("Int".equals(lb) && "Int".equals(rb)) {
+                        yield new IrSort.Named("Int", op.origin());
+                    }
+                    yield null;
+                }
+            };
+            default -> null;
+        };
     }
 
     /**

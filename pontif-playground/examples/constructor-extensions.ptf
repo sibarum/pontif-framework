@@ -1,25 +1,24 @@
-# Constructor-extension fields (ruled 2026-08-19).
+# Struct constructor bodies (ruled 2026-08-19).
 #
-# The DEFAULT constructor always executes first. A `let` entry in the member
-# block extends it: it may only ADD fields (reassigning a constructor field or
-# an inherited field is a compile error), and every added field is guaranteed
-# never-undefined - materialized on the value at construction, computed from
-# the already-bound fields, and judged against its declared sort like any
+# The DEFAULT constructor always executes first. `-> <body>` extends it with a
+# let-led function body (all-preamble, unit): each `let this.name = expr` line
+# ADDS a field. Reassigning a constructor field or an inherited field is a
+# compile error, and every added field is guaranteed never-undefined -
+# materialized on the value at construction, computed from the already-bound
+# fields, and judged against its (declared or inferred) sort like any
 # constructor argument.
 
 struct Rect(
     w:Decimal
     h:Decimal
-) {
-    # Runs after the default constructor - `this.w` and `this.h` are bound.
-    let area:Decimal = this.w * this.h
-    # A later extension sees the earlier one.
-    let halfArea:Decimal = this.area / 2.0
-
+) ->
+    let this.area = this.w * this.h          # sort inferred (Decimal)
+    let this.halfArea:Decimal = this.area / 2.0
+{
     describe():Decimal -> this.area + this.halfArea
 }
 
-# Extensions are inherited: a Square gets `area`/`halfArea` materialized too.
+# Constructor bodies are inherited: a Square gets `area`/`halfArea` too.
 struct Square:[Rect:@.w==side & @.h==side](side:Decimal)
 
 # Constructors take ONLY the declared fields - `area` can never be supplied:
