@@ -133,7 +133,8 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      * later slice.
      */
     record Structural(String name, Map<String, IrSort> members, IrSort baseSort,
-                      Map<String, IrSort> typeParams, Origin origin) implements IrSort {
+                      Map<String, IrSort> typeParams, Map<String, IrExpr> extensions,
+                      Origin origin) implements IrSort {
         public Structural {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Structural sort name must be non-empty");
@@ -155,11 +156,40 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
             // null values permitted (so LinkedHashMap, not Map.copyOf), exactly
             // like {@link Trait#associatedTypes}.
             typeParams = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(typeParams));
+            // Constructor-extension fields (`let name:Sort = expr` in the member
+            // block): name → initializer. Each name is ALSO a key of `members`
+            // (appended after the constructor fields, carrying its declared
+            // sort); the default constructor never accepts it — ConstructionGate
+            // materializes the value into every constructed record.
+            if (extensions == null) {
+                throw new IllegalArgumentException("Structural sort extensions must be non-null");
+            }
+            extensions = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(extensions));
+        }
+
+        /** Back-compat: the pre-extension canonical shape (no extension fields). */
+        public Structural(String name, Map<String, IrSort> members, IrSort baseSort,
+                          Map<String, IrSort> typeParams, Origin origin) {
+            this(name, members, baseSort, typeParams, java.util.Map.of(), origin);
         }
 
         /** Back-compat: a struct with a declared base-sort but no type parameters. */
         public Structural(String name, Map<String, IrSort> members, IrSort baseSort, Origin origin) {
             this(name, members, baseSort, java.util.Map.of(), origin);
+        }
+
+        /**
+         * The constructor-facing field view: {@link #members()} minus the
+         * extension fields. Positional arity, by-name required-field checks,
+         * destructure slot mapping, and base-field determination all read this —
+         * an extension field exists on every VALUE but is never a constructor
+         * parameter.
+         */
+        public Map<String, IrSort> constructorMembers() {
+            if (extensions.isEmpty()) return members;
+            java.util.LinkedHashMap<String, IrSort> m = new java.util.LinkedHashMap<>(members);
+            m.keySet().removeAll(extensions.keySet());
+            return java.util.Collections.unmodifiableMap(m);
         }
 
         /** Back-compat: a plain struct with no declared base-sort (is-a) and no type parameters. */

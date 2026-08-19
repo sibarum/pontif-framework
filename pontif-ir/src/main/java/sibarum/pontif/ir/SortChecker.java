@@ -1271,9 +1271,12 @@ public final class SortChecker {
             if (base instanceof IrSort.Refined r) {
                 collectPinnedBaseFields(r.predicate(), pinned);
             }
-            List<String> childFields = new ArrayList<>(s.members().keySet());
+            List<String> childFields = new ArrayList<>(s.constructorMembers().keySet());
             int i = 0;
-            for (String field : baseStruct.members().keySet()) {
+            // Extension fields are computed at every construction (the child's
+            // included), never constructor-determined — they are not subject to
+            // the carried-or-pinned rule.
+            for (String field : baseStruct.constructorMembers().keySet()) {
                 boolean carried = i < childFields.size() && childFields.get(i).equals(field);
                 if (!pinned.contains(field) && !carried) {
                     throw new CompileException(
@@ -1286,6 +1289,18 @@ public final class SortChecker {
                             s.origin());
                 }
                 i++;
+            }
+        }
+        // A constructor-extension field may only ADD — a name any is-a ancestor
+        // already declares (constructor field or its own extension) would be a
+        // reassignment of a default-constructed value.
+        for (String ext : s.extensions().keySet()) {
+            if (inheritedFieldOnIsaChain(s, ext, structDefs)) {
+                throw new CompileException(
+                        "Extension field '" + ext + "' of '" + s.name() + "' reassigns a field "
+                                + "an is-a ancestor already binds — a constructor extension may "
+                                + "only ADD fields, never reassign inherited ones.",
+                        s.origin());
             }
         }
         enforceParametricBase(s, base, baseName, structDefs);
@@ -1330,7 +1345,7 @@ public final class SortChecker {
         Map<String, IrExpr> pins = new HashMap<>();
         if (base instanceof IrSort.Refined r) collectPinnedFieldExprs(r.predicate(), pins);
 
-        for (Map.Entry<String, IrSort> bf : baseStruct.members().entrySet()) {
+        for (Map.Entry<String, IrSort> bf : baseStruct.constructorMembers().entrySet()) {
             String field = bf.getKey();
             IrSort want = substituteTypeVars(bf.getValue(), binds);  // base field, concretized
             IrSort childSort;
@@ -1795,7 +1810,15 @@ public final class SortChecker {
                         // aggregates carry no producers, so this stays false for them.)
                         boolean isAttributeProjection =
                                 functionReturns.containsKey(sp.name() + "." + fa.fieldName());
+                        // An inferred effective sort may be a rebuilt Structural
+                        // carrying only the literal's constructor members — the
+                        // DECLARED shape is authoritative for extension fields
+                        // (materialized at construction, present on every value).
+                        IrSort.Structural declared = structDefs.get(sp.name());
+                        boolean isExtensionField = declared != null
+                                && declared.extensions().containsKey(fa.fieldName());
                         if (!sp.members().containsKey(fa.fieldName()) && !isAttributeProjection
+                                && !isExtensionField
                                 && !inheritedFieldOnIsaChain(sp, fa.fieldName(), structDefs)) {
                             String subject = sp.name().startsWith("_")
                                     ? "Anonymous " + (sp.name().equals("_tuple") ? "tuple" : "record")
@@ -2450,7 +2473,7 @@ public final class SortChecker {
                 yield new IrSort.Structural(
                         s.name(), mem,
                         s.baseSort() == null ? null : substituteTypeVars(s.baseSort(), bindings),
-                        s.origin());
+                        java.util.Map.of(), s.extensions(), s.origin());
             }
             // A Refined's name is its base, not a substitution site; but a
             // parametric base's type args (`[Literal[T]:…]`) are substituted.

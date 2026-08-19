@@ -451,7 +451,104 @@ final class ConstructionGate {
         }
         deriveAndCheckTypeParams(r, decl, members, ctx, structs);
         materializePinnedBaseFields(decl, members, structs);
+        materializeExtensionFields(r, decl, members, checks, ctx, structs, actx, lens);
         return new IrExpr.Record(r.typeName(), members, checks, r.origin());
+    }
+
+    /**
+     * Materialize the constructor-extension fields (`let name:Sort = expr` in a
+     * struct member block) — the default constructor has fully run by this point
+     * (all declared fields bound, pinned base fields materialized), so each
+     * extension initializer is rewritten into the constructor's scope
+     * (`this.f` → the argument expression bound to `f`) and ADDED to the value.
+     * Root-first over the is-a chain, in declaration order within each struct,
+     * so an initializer sees every field bound before it. The produced value is
+     * judged against the extension's declared sort exactly like a constructor
+     * argument — never-undefined is structural: the field exists on every value
+     * and provably satisfies its sort.
+     */
+    private static void materializeExtensionFields(
+            IrExpr.Record r, IrSort.Structural decl, Map<String, IrExpr> members,
+            Map<String, IrSort> checks, InferenceContext ctx,
+            Map<String, IrSort.Structural> structs, AssignabilityContext actx,
+            Map<Origin.Span, IrSort> lens) throws CompileException {
+        List<IrSort.Structural> chain =
+                new ArrayList<>(StructAncestry.selfAndAncestors(structs, decl));
+        java.util.Collections.reverse(chain);  // root first — supers' fields bind before subs'
+        for (IrSort.Structural node : chain) {
+            for (Map.Entry<String, IrExpr> ext : node.extensions().entrySet()) {
+                if (members.containsKey(ext.getKey())) continue;  // already materialized
+                IrExpr value = substituteThisFields(ext.getValue(), members);
+                if (mentionsSelf(value) || mentionsThis(value)) {
+                    throw new CompileException(
+                            "Extension field '" + ext.getKey() + "' of '" + node.name()
+                                    + "' references a field that is not bound at construction "
+                                    + "of '" + r.typeName() + "'",
+                            ext.getValue().origin());
+                }
+                IrSort fieldSort = node.members().get(ext.getKey());
+                if (fieldSort != null && gated(fieldSort, structs)) {
+                    IrSort arg = effectiveArg(value, lens, ctx, structs);
+                    switch (classify(arg, fieldSort, structs, actx)) {
+                        case FITS -> { }
+                        case DISJOINT -> throw new CompileException(
+                                "Extension field '" + ext.getKey() + "' of '" + node.name()
+                                        + "' can never satisfy its declared sort "
+                                        + render(fieldSort) + " — the initializer's sort is "
+                                        + render(arg) + ", which is disjoint",
+                                ext.getValue().origin());
+                        case UNKNOWN -> {
+                            if (isParametricStream(fieldSort)) {
+                                checks.put(ext.getKey(), fieldSort);
+                            } else {
+                                throw new CompileException(
+                                        "Extension field '" + ext.getKey() + "' of '" + node.name()
+                                                + "' cannot be proved to satisfy its declared sort "
+                                                + render(fieldSort) + " — the initializer's sort is "
+                                                + render(arg) + "; an extension field must be "
+                                                + "provably never-undefined AND provably in-sort.",
+                                        ext.getValue().origin());
+                            }
+                        }
+                    }
+                }
+                members.put(ext.getKey(), value);
+            }
+        }
+    }
+
+    /**
+     * Rewrite an extension initializer into the constructor's scope:
+     * {@code this.f} becomes the expression already bound to {@code f} (a
+     * constructor argument, a pinned base field, or an earlier extension).
+     * The parser's whitelist guarantees the initializer is built from exactly
+     * these node kinds.
+     */
+    private static IrExpr substituteThisFields(IrExpr e, Map<String, IrExpr> members) {
+        return switch (e) {
+            case IrExpr.FieldAccess fa when isThis(fa.base()) && members.containsKey(fa.fieldName()) ->
+                    members.get(fa.fieldName());
+            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
+                    substituteThisFields(fa.base(), members), fa.fieldName(), fa.origin());
+            case IrExpr.BinOp op -> new IrExpr.BinOp(op.op(),
+                    substituteThisFields(op.left(), members),
+                    substituteThisFields(op.right(), members), op.origin());
+            default -> e;
+        };
+    }
+
+    private static boolean isThis(IrExpr e) {
+        return e instanceof IrExpr.SelfRef
+                || (e instanceof IrExpr.Var v && v.name().equals("this"));
+    }
+
+    private static boolean mentionsThis(IrExpr e) {
+        return switch (e) {
+            case IrExpr.Var v -> v.name().equals("this");
+            case IrExpr.BinOp op -> mentionsThis(op.left()) || mentionsThis(op.right());
+            case IrExpr.FieldAccess fa -> mentionsThis(fa.base());
+            default -> false;
+        };
     }
 
     /**

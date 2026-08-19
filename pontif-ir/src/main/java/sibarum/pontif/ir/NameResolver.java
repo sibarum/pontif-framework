@@ -206,7 +206,7 @@ public final class NameResolver {
                         ? null : rewriteSort(s.baseSort(), m, table);
                 yield new IrSort.Structural(
                         resolveTypeName(s.name(), m, table, s.origin()), members, base,
-                        s.typeParams(), s.origin());
+                        s.typeParams(), s.extensions(), s.origin());
             }
             case IrSort.CallSig c -> {
                 List<IrSort> ps = new ArrayList<>(c.paramSorts().size());

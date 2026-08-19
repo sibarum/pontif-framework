@@ -1,0 +1,32 @@
+# Constructor-extension fields (ruled 2026-08-19).
+#
+# The DEFAULT constructor always executes first. A `let` entry in the member
+# block extends it: it may only ADD fields (reassigning a constructor field or
+# an inherited field is a compile error), and every added field is guaranteed
+# never-undefined - materialized on the value at construction, computed from
+# the already-bound fields, and judged against its declared sort like any
+# constructor argument.
+
+struct Rect(
+    w:Decimal
+    h:Decimal
+) {
+    # Runs after the default constructor - `this.w` and `this.h` are bound.
+    let area:Decimal = this.w * this.h
+    # A later extension sees the earlier one.
+    let halfArea:Decimal = this.area / 2.0
+
+    describe():Decimal -> this.area + this.halfArea
+}
+
+# Extensions are inherited: a Square gets `area`/`halfArea` materialized too.
+struct Square:[Rect:@.w==side & @.h==side](side:Decimal)
+
+# Constructors take ONLY the declared fields - `area` can never be supplied:
+#   Rect(3.0, 4.0, 12.0)          # compile error: expects 2 positional args
+#   Rect{w=3.0 h=4.0 area=9.9}    # compile error: constructor-extension field
+
+let r = Rect(3.0, 4.0)
+let s = Square(3.0)
+
+r.area + s.halfArea    # 12.0 + 4.5 = 16.5

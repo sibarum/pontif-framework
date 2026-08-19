@@ -199,7 +199,7 @@ public final class StructLiteralRewriter {
     private static IrExpr.Record asRecord(
             String typeName, IrSort.Structural decl, List<IrExpr> args, sibarum.pontif.core.Origin origin)
             throws CompileException {
-        List<String> fields = new ArrayList<>(decl.members().keySet());
+        List<String> fields = new ArrayList<>(decl.constructorMembers().keySet());
         if (args.size() != fields.size()) {
             throw new CompileException(
                     "Struct literal for '" + typeName + "' expects " + fields.size()
@@ -223,8 +223,14 @@ public final class StructLiteralRewriter {
     private static IrExpr.Record canonicalizeByName(
             String typeName, IrSort.Structural decl, Map<String, IrExpr> provided,
             sibarum.pontif.core.Origin origin) throws CompileException {
-        List<String> fields = new ArrayList<>(decl.members().keySet());
+        List<String> fields = new ArrayList<>(decl.constructorMembers().keySet());
         for (String name : provided.keySet()) {
+            if (decl.extensions().containsKey(name)) {
+                throw new CompileException(
+                        "Field '" + name + "' of '" + typeName + "' is a constructor-extension "
+                                + "field — it is computed at construction and can never be "
+                                + "supplied (or reassigned) by a literal", origin);
+            }
             if (!decl.members().containsKey(name)) {
                 throw new CompileException(
                         "Struct '" + typeName + "' has no field '" + name

@@ -120,7 +120,8 @@ public final class DestructureResolver {
                 // A positional struct param IS a destructure pattern — enforce the
                 // arity-total rule (verdict B) here, the cross-module half of the
                 // ONE place the rule lives (the parser's local path is the other).
-                String arityErr = arityTotalError(sp.name(), sp.members().size(), decl.members().size());
+                String arityErr = arityTotalError(sp.name(), sp.members().size(),
+                        decl.constructorMembers().size());
                 if (arityErr != null) throw new CompileException(arityErr, sp.origin());
                 paramBindings.add(new ParamBinding(p.name(), sp, decl));
                 params.add(new IrParam(p.name(), new IrSort.Named(sp.name(), sp.origin())));
@@ -274,10 +275,11 @@ public final class DestructureResolver {
                 members.put(e.getKey(), e.getValue() instanceof IrSort.Structural nested
                         ? resolvePattern(nested, structs) : e.getValue());
             }
-            return new IrSort.Structural(sp.name(), members, sp.baseSort(), sp.typeParams(), sp.origin());
+            return new IrSort.Structural(sp.name(), members, sp.baseSort(), sp.typeParams(),
+                    sp.extensions(), sp.origin());
         }
         IrSort.Structural decl = lookup(sp, structs);
-        List<String> fields = new ArrayList<>(decl.members().keySet());
+        List<String> fields = new ArrayList<>(decl.constructorMembers().keySet());
         String arityErr = arityTotalError(sp.name(), sp.members().size(), fields.size());
         if (arityErr != null) throw new CompileException(arityErr, sp.origin());
 
@@ -322,7 +324,7 @@ public final class DestructureResolver {
             Map<String, IrSort.Structural> structs) throws CompileException {
         boolean spDeferred = isDeferred(sp, structs);
         if (spDeferred && decl == null) decl = lookup(sp, structs);
-        List<String> fields = spDeferred ? new ArrayList<>(decl.members().keySet()) : null;
+        List<String> fields = spDeferred ? new ArrayList<>(decl.constructorMembers().keySet()) : null;
         List<Map.Entry<String, IrSort>> entries = new ArrayList<>(sp.members().entrySet());
         for (int i = entries.size() - 1; i >= 0; i--) {
             Map.Entry<String, IrSort> e = entries.get(i);

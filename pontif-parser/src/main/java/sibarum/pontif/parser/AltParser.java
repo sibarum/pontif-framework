@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Recursive-descent parser for the alt syntax — see {@code docs/alternative-syntax.ptf}.
+ * Recursive-descent parser for the alt syntax — see {@code docs/language-reference.ptf}.
  *
  * <p>Load-bearing principles the parser enforces:
  * <ol>
@@ -1591,7 +1591,7 @@ public final class AltParser {
                         // match form caught too-many but the param form caught
                         // neither too-few here).
                         requireArityTotal(sp.name(), sp.members().size(),
-                                decl.members().size(), sp.origin());
+                                decl.constructorMembers().size(), sp.origin());
                         sort = wirePositionalParamDestructure(name, sp, decl);
                     } else if (decl == null && isDeferredPattern(sp)) {
                         // Cross-module positional param destructure `v:[Vec(x, y)]`.
@@ -1783,7 +1783,7 @@ public final class AltParser {
         Map<String, IrExpr> pinValues = new LinkedHashMap<>();
         collectFieldPins(pin, pinValues);
         Map<String, IrExpr> members = new LinkedHashMap<>();
-        for (String f : target.members().keySet()) {
+        for (String f : target.constructorMembers().keySet()) {
             if (pinValues.containsKey(f)) {
                 members.put(f, pinValues.get(f));
             } else if (valueStruct != null && valueStruct.members().containsKey(f)) {
@@ -2599,6 +2599,7 @@ public final class AltParser {
         // (StructTraitLowering + SortChecker), so a struct declares its methods
         // once here and each declared trait is checked against that one set.
         List<IrStmt.FunctionDecl> blockMethods = new ArrayList<>();
+        Map<String, IrExpr> extensions = new LinkedHashMap<>();
         if (peek().kind() == AltToken.Kind.LBRACE) {
             List<IrSort> selfArgs = new ArrayList<>(typeParams.size());
             for (String tp : typeParams.keySet()) {
@@ -2607,7 +2608,17 @@ public final class AltParser {
             IrSort selfSort = new IrSort.Named(nameTok.text(), selfArgs, nameTok.origin());
             consume();  // {
             while (peek().kind() != AltToken.Kind.RBRACE) {
-                blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
+                // `let name:Sort = expr` — a constructor-extension field. The
+                // default constructor always runs first; the extension may only
+                // ADD fields (a name colliding with a constructor field is a
+                // reassignment and rejected), and each added field is
+                // materialized on every value at construction, so it can never
+                // be undefined.
+                if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+                    parseStructExtensionField(nameTok.text(), selfSort, members, extensions);
+                } else {
+                    blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
+                }
             }
             end = expect(AltToken.Kind.RBRACE);
         }
@@ -2618,14 +2629,101 @@ public final class AltParser {
                             + "is built in and cannot be redeclared",
                     nameTok.origin());
         }
-        IrSort.Structural structSort =
-                new IrSort.Structural(nameTok.text(), members, baseSort, typeParams, origin);
+        IrSort.Structural structSort = new IrSort.Structural(
+                nameTok.text(), members, baseSort, typeParams, extensions, origin);
         types.register(nameTok.text(), new TypeInfo.Struct(structSort));
         // The struct decl is returned as the statement; its block methods ride
         // the pending-decl channel so they land right after it (drained by the
         // top-level loop in declaration order).
         pendingTopLevelDecls.addAll(blockMethods);
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
+    }
+
+    /**
+     * Parses one constructor-extension field inside a struct member block:
+     * {@code let name:Sort = expr}. The default constructor is always executed
+     * first; the extension runs after it and may only ADD fields — a name that
+     * collides with a constructor field (a reassignment) is rejected here, and
+     * a collision with an inherited base field is rejected by SortChecker. The
+     * initializer is an expression over {@code this.<field>} (constructor
+     * fields and earlier extension fields), literals, and operators — a total
+     * expression over already-bound fields, which is what makes the added
+     * field guaranteed never-undefined. ConstructionGate materializes it into
+     * every constructed value and judges it against the declared sort exactly
+     * like a constructor argument.
+     */
+    private void parseStructExtensionField(
+            String typeName, IrSort selfSort,
+            Map<String, IrSort> members, Map<String, IrExpr> extensions) throws ParseException {
+        expectKeyword("let");
+        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        if (members.containsKey(nameTok.text())) {
+            throw new ParseException(
+                    "Extension field '" + nameTok.text() + "' reassigns a field the default "
+                            + "constructor of '" + typeName + "' already binds — an extension "
+                            + "may only ADD fields, never reassign constructor fields",
+                    nameTok.origin());
+        }
+        expect(AltToken.Kind.COLON);
+        IrSort declaredSort = parseSort();
+        expect(AltToken.Kind.EQUALS);
+        Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
+        currentScope.clear();
+        currentScope.put("this", selfSort);
+        IrExpr init;
+        try {
+            init = parseExpr();
+        } finally {
+            currentScope.clear();
+            currentScope.putAll(savedScope);
+        }
+        validateExtensionInit(init, typeName, nameTok.text(), members);
+        members.put(nameTok.text(), declaredSort);
+        extensions.put(nameTok.text(), init);
+    }
+
+    /**
+     * The extension-initializer whitelist: literals, {@code this.<field>}
+     * references to fields already bound at that point (constructor fields and
+     * earlier extension fields — so initializers are total by construction),
+     * field-access chains rooted there, and built-in operators over those.
+     * Anything else (a call, a match, a bare name) is rejected — the
+     * initializer must be provably defined at construction time.
+     */
+    private static void validateExtensionInit(
+            IrExpr e, String typeName, String extName, Map<String, IrSort> members)
+            throws ParseException {
+        switch (e) {
+            case IrExpr.Lit l -> { }
+            case IrExpr.Dec d -> { }
+            case IrExpr.Bool b -> { }
+            case IrExpr.Chr c -> { }
+            case IrExpr.Str s -> { }
+            case IrExpr.BinOp op -> {
+                validateExtensionInit(op.left(), typeName, extName, members);
+                validateExtensionInit(op.right(), typeName, extName, members);
+            }
+            case IrExpr.FieldAccess fa -> {
+                if (fa.base() instanceof IrExpr.Var v && v.name().equals("this")) {
+                    if (!members.containsKey(fa.fieldName())) {
+                        throw new ParseException(
+                                "Extension field '" + extName + "' of '" + typeName
+                                        + "' references 'this." + fa.fieldName() + "', which is "
+                                        + "not bound yet at construction — an initializer may "
+                                        + "only read constructor fields and extension fields "
+                                        + "declared above it; available: " + members.keySet(),
+                                fa.origin());
+                    }
+                } else {
+                    validateExtensionInit(fa.base(), typeName, extName, members);
+                }
+            }
+            default -> throw new ParseException(
+                    "Extension field '" + extName + "' of '" + typeName + "' has an "
+                            + "initializer form that cannot be proved defined at construction — "
+                            + "use literals, `this.<field>` reads, and operators",
+                    e.origin());
+        }
     }
 
     /**
@@ -2853,7 +2951,7 @@ public final class AltParser {
     private IrSort parseConstructionPinSort() throws ParseException {
         AltToken nameTok = expect(AltToken.Kind.IDENT);
         IrSort.Structural struct = declaredStructShape(nameTok.text());
-        List<String> fields = new ArrayList<>(struct.members().keySet());
+        List<String> fields = new ArrayList<>(struct.constructorMembers().keySet());
         expect(AltToken.Kind.LBRACE);
         List<IrExpr> values = new ArrayList<>();
         boolean first = true;
@@ -3914,7 +4012,7 @@ public final class AltParser {
                     "A positional pattern inside [" + typeName + "(...)] requires '"
                             + typeName + "' to be declared before this point", o);
         }
-        List<String> order = new ArrayList<>(decl.members().keySet());
+        List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
         if (clauseIndex >= order.size()) {
             throw new ParseException(
                     "Too many fields for struct '" + typeName + "' ("
@@ -3969,7 +4067,7 @@ public final class AltParser {
                                     + typeName + "' to be declared before this point",
                             t.origin());
                 }
-                List<String> order = new ArrayList<>(decl.members().keySet());
+                List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
                 if (clauseIndex >= order.size()) {
                     throw new ParseException(
                             "Too many fields for struct '" + typeName + "' ("
@@ -4057,7 +4155,7 @@ public final class AltParser {
                                     + typeName + "' to be declared before this point",
                             fieldName.origin());
                 }
-                List<String> order = new ArrayList<>(decl.members().keySet());
+                List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
                 if (clauseIndex >= order.size()) {
                     throw new ParseException(
                             "Too many fields for struct '" + typeName + "' ("
@@ -4107,7 +4205,7 @@ public final class AltParser {
                     // Not a field name → a positional RENAME binder: bind the
                     // field at this clause position under the given name
                     // ([Ternion(first, second, third)]).
-                    List<String> order = new ArrayList<>(decl.members().keySet());
+                    List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
                     if (clauseIndex >= order.size()) {
                         throw new ParseException(
                                 "Too many fields for struct '" + typeName + "' ("
@@ -4140,7 +4238,7 @@ public final class AltParser {
         // implemented inconsistently per form. The local path checks it now.
         IrSort.Structural decl = patternShapeFor(typeName);
         if (parsingTuplePattern && decl != null) {
-            requireArityTotal(typeName, members.size(), decl.members().size(), typeOrigin);
+            requireArityTotal(typeName, members.size(), decl.constructorMembers().size(), typeOrigin);
         }
         return members;
     }
@@ -4260,7 +4358,7 @@ public final class AltParser {
 
     /**
      * Implements the implicit {@code @==EXPR} sugar — see principle 5 in
-     * docs/alternative-syntax.ptf. Applied per-disjunct/conjunct so
+     * docs/language-reference.ptf. Applied per-disjunct/conjunct so
      * {@code [Int:0|1]} reads as {@code @==0 | @==1}, not {@code @==(0|1)}.
      */
     private static IrExpr applyPredicateSugar(IrExpr pred) {
@@ -4659,7 +4757,7 @@ public final class AltParser {
                     "`&` spread is only valid in a function/fragment call, not the struct "
                             + "literal '" + typeName + "'", openParen.origin());
         }
-        List<String> declaredFields = new ArrayList<>(decl.members().keySet());
+        List<String> declaredFields = new ArrayList<>(decl.constructorMembers().keySet());
         if (args.size() != declaredFields.size()) {
             throw new ParseException(
                     "Struct literal for '" + typeName + "' expects "
@@ -4692,10 +4790,17 @@ public final class AltParser {
             if (!first) expect(AltToken.Kind.COMMA);
             AltToken fieldTok = expect(AltToken.Kind.IDENT);
             String fieldName = fieldTok.text();
+            if (decl.extensions().containsKey(fieldName)) {
+                throw new ParseException(
+                        "Field '" + fieldName + "' of '" + typeName + "' is a constructor-"
+                                + "extension field — it is computed at construction and can "
+                                + "never be supplied (or reassigned) by a literal",
+                        fieldTok.origin());
+            }
             if (!decl.members().containsKey(fieldName)) {
                 throw new ParseException(
                         "Struct '" + typeName + "' has no field '" + fieldName
-                                + "'; declared fields: " + decl.members().keySet(),
+                                + "'; declared fields: " + decl.constructorMembers().keySet(),
                         fieldTok.origin());
             }
             if (provided.containsKey(fieldName)) {
@@ -4710,17 +4815,17 @@ public final class AltParser {
             first = false;
         }
         AltToken close = expect(AltToken.Kind.RBRACE);
-        for (String declaredField : decl.members().keySet()) {
+        for (String declaredField : decl.constructorMembers().keySet()) {
             if (!provided.containsKey(declaredField)) {
                 throw new ParseException(
                         "Struct literal for '" + typeName + "' is missing field '"
                                 + declaredField + "'; required fields: "
-                                + decl.members().keySet(),
+                                + decl.constructorMembers().keySet(),
                         openBrace.origin());
             }
         }
         Map<String, IrExpr> ordered = new LinkedHashMap<>();
-        for (String declaredField : decl.members().keySet()) {
+        for (String declaredField : decl.constructorMembers().keySet()) {
             ordered.put(declaredField, provided.get(declaredField));
         }
         return new IrExpr.Record(typeName, ordered, openBrace.spanTo(close));
