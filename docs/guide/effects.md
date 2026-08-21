@@ -15,8 +15,8 @@ builtin math modules. For the one-page overview, see the root
 Side effects enter through one door: **`emit`**. `emit E(…)` fires a value of an event
 type into a per-type conduit and *returns nothing* — it is write-only, and the emitter
 never observes what happens downstream. You react with an **`action`**: a consumer
-`action name(e:Sort) -> body` that runs — synchronously, in declaration order —
-whenever an `emit` produces an event its parameter *sort* accepts. The sort **is** the
+`action name(e:T) -> body` that runs — synchronously, in declaration order —
+whenever an `emit` produces an event its parameter *type* accepts. The type **is** the
 filter, so a refinement narrows which instances fire, and one event fans out to every
 matching action. `StdOut` / `StdErr` are the builtin sink events.
 
@@ -35,10 +35,10 @@ main ( emit Tick(42)  0 )       # prints "tick BIG"; main's own value is 0
 `log` fires for every `Tick`; `alarm` fires only when `@.n > 10`, so `Tick(42)`
 triggers both (in declaration order) while `Tick(3)` would trigger only `log`. An
 event with *no* consumer — neither a sink nor an action — is an error, not a silent
-drop: effects fail closed like everything else. `main ( … )` is the program's
-top-level effect block. This is the realized core of the effect model — the `emit`
-primitive the trait *sort-transform shells* were scaffolding for
-([docs/events.md](../events.md)).
+drop: effects fail closed like everything else. `main ( … )` is the program's explicit
+entrypoint block — see [the shape of a program](programs.md). This is the realized core
+of the effect model — the `emit` primitive the trait *transform shells* were scaffolding
+for ([docs/events.md](../events.md)).
 
 ## The math library
 

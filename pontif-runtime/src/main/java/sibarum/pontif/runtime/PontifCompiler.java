@@ -98,7 +98,7 @@ public final class PontifCompiler {
     }
 
     /**
-     * Compile the alt syntax (see {@code docs/alternative-syntax.ptf}) with no
+     * Compile the alt syntax (see {@code docs/language-reference.ptf}) with no
      * sibling-module resolution — only builtin {@code requires} are honored.
      * Equivalent to {@link #compileAlt(String, String, java.nio.file.Path)} with
      * a {@code null} directory; kept for callers (and tests) compiling a buffer

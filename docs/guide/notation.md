@@ -11,7 +11,7 @@ namable operation:
 | | on a **value** | on a **type** |
 | --- | --- | --- |
 | **name** (access / construct) | `@.{}` — destructure fields by name | `@{}` — a type's members (`Type{ ping:[Method():Int] }`) |
-| **refine** (restrict) | `@:[]` — narrow a value (`let x:[Int:@>0]`) | `@[]` — a reusable sort (`Type[[Int:@>0]]`) |
+| **refine** (restrict) | `@:[]` — narrow a value (`let x:[Int:@>0]`) | `@[]` — a reusable type (`Type[[Int:@>0]]`) |
 | **call** (compute) | `@:(…)` — a decision tree (`match`) | `@()` — apply / dispatch (`f(x)`, `v.m()`) |
 
 You have already seen most of them in the [type system](type-system.md):
@@ -30,9 +30,11 @@ placement" — the direction the conservation ledger uses to record where a valu
 [conservation receipts](proofs-and-ledgers.md#conservation-receipts--the-second-ledger)); as a general writing operator it is
 reserved for the forthcoming property-definition language.
 
-(Anonymous functions exist only as a vestigial form and are being retired; the
-first-class *callable* you reach for instead is the metareference, `$f[T]` — see
-the [proofs guide](proofs-and-ledgers.md#proofs-and-synthesis).)
+(Anonymous functions are obsolete here rather than absent — the constructs that
+would need them already cover the ground. The first-class *callable* you reach for
+is the metareference `$f[T]` (see the [proofs
+guide](proofs-and-ledgers.md#proofs-and-synthesis)), and the first-class *body* you
+pass around is the synthesis fragment (see the [streams guide](streams.md)).)
 
 ---
 

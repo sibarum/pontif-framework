@@ -21,10 +21,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * under {@code docs/guide/}: each block here is the docs' code verbatim (minus the
  * {@code # → …} comments), and the docs compile or this build fails. The root
  * README keeps a curated set of flagship snippets; the rest live in the guides
- * (the type-system, proofs-and-ledgers, notation, streams, and effects pages).
- * Blocks appear in guide-reading order. Illustrative fragments (streams control
- * flow, and the window-opening / GPU snippets in the graphics guide) are not pinned
- * here — their modules live outside {@code pontif-runtime}.
+ * (the programs, type-system, proofs-and-ledgers, notation, streams, and effects
+ * pages). Blocks appear in guide-reading order. Illustrative fragments (the
+ * multi-file examples in the programs guide, streams control flow, and the
+ * window-opening / GPU snippets in the graphics guide) are not pinned here — they
+ * need more than one source file, or their modules live outside
+ * {@code pontif-runtime}.
  *
  * <p>Two harnesses: {@link #run} drives the bare IR path (parse → simplify →
  * compile → interpret) for self-contained value snippets; {@link #runGated} drives
@@ -96,6 +98,68 @@ class ReadmeSnippetTest {
                 }
 
                 Account(0).deposit(totalIn(Txns(100, Txns(50, Done())))).balance
+                """));
+    }
+
+    // --- Programs, files, and modules (docs/guide/programs.md) --------------
+
+    @Test
+    void programsGuide_bareFileIsDeclarationsPlusAResult() {
+        assertEquals("42", runGated("""
+                function greet(n:Int):Int -> n + 1
+
+                greet(41)
+                """));
+    }
+
+    @Test
+    void programsGuide_mainBlockIsTheExplicitEntrypoint() {
+        StdoutRun r = runCapturingStdout("""
+                requires pontif.events.{StdOut}
+
+                struct Point(x:Int, y:Int)
+
+                main (
+                  let p = Point(3, 4)
+                  emit StdOut("built a point")
+                  p.x + p.y
+                )
+                """);
+        assertEquals("7", r.value());
+        assertTrue(r.stdout().contains("built a point"),
+                () -> "expected the emitted line; got: " + r.stdout());
+    }
+
+    @Test
+    void programsGuide_moduleHeaderNamesTheNamespace() {
+        assertEquals("25", runGated("""
+                module geometry.vectors
+
+                struct Vec(x:Int, y:Int)
+
+                method Vec.normSq():Int -> this.x * this.x + this.y * this.y
+
+                Vec(3, 4).normSq()
+                """));
+    }
+
+    @Test
+    void programsGuide_requiresNamesImportedMembers() {
+        assertEquals("8.0", runGated("""
+                requires pontif.math.{sqrt, clamp}
+
+                sqrt(9.0) + clamp(9.0, 0.0, 5.0)
+                """));
+    }
+
+    @Test
+    void programsGuide_declarationsAreNotOrdered() {
+        // The page claims a function may call one declared further down the file.
+        assertEquals("11", runGated("""
+                function a(n:Int):Int -> b(n) + 1
+                function b(n:Int):Int -> n * 2
+
+                a(5)
                 """));
     }
 

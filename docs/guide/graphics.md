@@ -5,12 +5,11 @@ compute extensions that ride on Pontif's trait-and-event machinery: the native G
 the plotting library, SDF shapes, and `on Gpu` compute kernels. For the one-page
 overview, see the root [README](../../README.md).*
 
-> **Heads-up:** the 3D graphics stack is being rebuilt from scratch on Vulkan and
-> will eventually move to its own repository. The `pontif.gui` / `pontif.plot` /
-> `pontif.shape` / `pontif.gpu` modules live in the `pontif-builtin-*` and
-> `pontif-gpu` packages, outside the core `pontif-runtime` — so the snippets here
-> open a real window / need a GPU classpath and are illustrative rather than pinned
-> by the snippet test.
+> **Heads-up:** the `pontif.gui` / `pontif.plot` / `pontif.shape` / `pontif.gpu`
+> modules live in the `pontif-builtin-*` and `pontif-gpu` packages, outside the core
+> `pontif-runtime` — so the snippets on this page open a real window or need a GPU on
+> the classpath, and are illustrative rather than pinned by the snippet test the way
+> the rest of the guide is.
 
 ## Contents
 

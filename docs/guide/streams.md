@@ -107,9 +107,13 @@ map[Int,String](s, $toString[Int])            # explicit  → {"1", "2", "3", "4
 map(s, $toString[Int])                         # inferred  (A, R recovered from the args)
 ```
 
-This is the **finite** half. Infinite / lazy streams — built by guarded infinite
-recursion and gated by *productivity* — are the next frontier and the substrate for the
-event system; see [docs/stream-war.md](../stream-war.md).
+Everything above is the **finite** half — a stream whose elements are all known up
+front. The other half is a **live source**: something the runtime pulls one element at
+a time, sealing when it runs dry, rather than materializing. `stdin` is the first, and
+the iteration engine drives it with a pull-loop, so laziness lives in the *iterator*
+and never in the data. The general form — an infinite stream built by guarded
+corecursion and gated by *productivity* (the coinductive dual of termination) — is
+still in design; see [docs/stream-war.md](../stream-war.md).
 
 ---
 

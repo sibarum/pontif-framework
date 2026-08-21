@@ -27,7 +27,7 @@ Two findings from recon reshape the work and are baked into the slices below:
 `SelfRef`/`SymExpr.Self` untouched (it's `@`); S-expr kept `self` as the
 test-stable legacy (`Parser.java`, `LanguageDef.selfReference` unchanged). Bare
 receiver refs (`match self`, `-> self`) needed a second pass beyond the dotted
-`self.`. Remaining: doc prose in `traits.md` / `alternative-syntax.ptf` still says
+`self.`. Remaining: doc prose in `traits.md` / `language-reference.ptf` still says
 `self` (cosmetic, non-blocking).
 
 **Disambiguation done (recon was wrong):** `IrExpr.SelfRef` / `SymExpr.Self` are

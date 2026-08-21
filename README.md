@@ -28,6 +28,8 @@ that already lowers to three backends (Truffle, GLSL, SPIR-V/Vulkan).
 ## Contents
 
 - [A quick example](#a-quick-example)
+- [Install it](#install-it) — build and run your first program
+- [The shape of a program](#the-shape-of-a-program)
 - [The pillars](#the-pillars) — dispatch · polymorphism · conservation · effects · stdlib
 - [You can read what the compiler concluded](#you-can-read-what-the-compiler-concluded)
 - [The guide](#the-guide) — the in-depth docs
@@ -80,11 +82,68 @@ The rest of the language is an elaboration of these moves. The [type-system
 guide](docs/guide/type-system.md) is the full tour; the pillars below are the
 highlights.
 
+## Install it
+
+You need **JDK 25** and **Maven 3.9+**. A [GraalVM
+JDK](https://www.graalvm.org/downloads/) is recommended — any JDK 25 runs Pontif,
+but GraalVM is what builds the native binaries. There is nothing else to install:
+the GUI, plotting, and math libraries are all in the build.
+
+```bash
+git clone https://github.com/sibarum/pontif-framework.git
+cd pontif-framework
+mvn -pl pontif-cli -am package
+```
+
+That produces `pontif-cli/target/pontif-cli.jar`. Scaffold a project and run it:
+
+```bash
+java -jar pontif-cli/target/pontif-cli.jar new my.app
+java -jar pontif-cli/target/pontif-cli.jar run my.app
+```
+
+`new` writes a `module.toml` and an `app.ptf`; `run` compiles it, passes it through
+the proof gates, and prints the program's value — `42`. `run` also takes a single
+file (`run app.ptf`), and `console` opens a REPL. To get a real `pontif` command on
+your `PATH`, build the native image (`mvn -Pnative -pl pontif-cli -am package`) and
+put the resulting binary somewhere on it; the rest of this README writes `pontif …`
+for brevity. Full command list: [the `pontif` CLI](#the-pontif-cli).
+
+## The shape of a program
+
+A `.ptf` file is a list of **declarations** followed by **the program's result** —
+that trailing expression is what the program evaluates to and what `pontif run`
+prints. Almost every snippet in this README is a complete, runnable program in
+exactly that form; there is no required header and no boilerplate.
+
+```pontif
+function greet(n:Int):Int -> n + 1
+
+greet(41)          # → 42
+```
+
+Three things layer on top, each only when you need it:
+
+- **`module a.b`** as the first line names the file's namespace, which is what lets
+  other files `requires` it. A single-file program can skip it. Every `.ptf` in the
+  project sharing a `module` header merges into **one** module (Go-package style,
+  folder-agnostic), so same-namespace files see each other with no `requires`.
+- **`main ( … )`** is an explicit entrypoint block, for when the result isn't a
+  single expression — a program that emits events, owns state, or opens a GUI window
+  writes its top-level statements there. Only the *entrypoint* file's `main` runs: a
+  `main` in a module you `requires` stays dormant, so a library can carry its own
+  demo without it firing inside your program.
+- **`module.toml`** turns a directory into a project (name, namespace, version, and
+  which module is the entry), which is what `pontif run <dir>` and `pontif pack`
+  read.
+
+→ [Programs, files, and modules](docs/guide/programs.md)
+
 ## The pillars
 
 ### Dispatch and proven returns
 
-Sorts narrow by predicate, overloads dispatch on the narrowing, and declared returns
+Types narrow by predicate, overloads dispatch on the narrowing, and declared returns
 are proof obligations the compiler discharges — or rejects:
 
 ```pontif
@@ -135,7 +194,7 @@ payroll(Hourly(20, 40)) + payroll(Commissioned(300, 10, 25))   # → 1350
 ```
 
 No inheritance, no vtable — the same module-coherent dispatch, keyed on the receiver.
-Traits also carry data attributes and *sort-transform shells* (logic the trait owns,
+Traits also carry data attributes and *transform shells* (logic the trait owns,
 wrapped around every impl); a struct can bundle its own methods, an is-a base, and the
 traits it satisfies in one block; generics never erase. → [The full type-system
 guide](docs/guide/type-system.md)
@@ -166,7 +225,7 @@ naming the untouched field. Dropping on purpose is fine, but *declared*. →
 ### Effects — one door in
 
 Side effects enter through `emit`, a write-only primitive; you react with an `action`
-whose parameter *sort is the filter*:
+whose parameter *type is the filter*:
 
 ```pontif
 requires pontif.events.{Event, StdOut}
@@ -219,7 +278,7 @@ function inc(x:[Int:(@ == 5)]):[Int:(@ == 6)]    # return was: Int
 `inc` was *declared* to return `Int`; entered via `inc(5)`, the engine pinned the
 argument to `5` and inferred the return as exactly `6` — it evaluated the call at the
 type level. One engine (`NarrowingInference`) answers "what is this value?" at every
-stage — parse, sort-check, return gate, dispatch — so no two stages can disagree. →
+stage — parse, type-check, return gate, dispatch — so no two stages can disagree. →
 [One inference engine, every stage](docs/guide/proofs-and-ledgers.md#one-inference-engine-every-stage)
 
 ## The guide
@@ -229,6 +288,7 @@ the dense design docs.
 
 | Guide | Covers |
 | --- | --- |
+| [Programs, files & modules](docs/guide/programs.md) | The shape of a `.ptf` file · `main` · namespaces across files · `requires` · projects and `module.toml` |
 | [Type system](docs/guide/type-system.md) | Refined dispatch · structs & methods · traits · type extension · the three polymorphism models · struct member blocks · generics · operator overloading |
 | [Proofs & ledgers](docs/guide/proofs-and-ledgers.md) | `assign proof` · synthesis `;` · algebraic reflection (`.ast`/`.eval`) · conservation receipts · the one inference engine |
 | [Notation](docs/guide/notation.md) | The braces/brackets/parens grid and the univocal `->` |
@@ -237,10 +297,11 @@ the dense design docs.
 | [Graphics](docs/guide/graphics.md) | Native GUI · plotting · SDF shapes · `on Gpu` compute kernels |
 | [Architecture & craft](docs/guide/architecture-and-craft.md) | The compiler pipeline · why GraalVM · the IR seam · the source-tree map · the details chosen on purpose |
 
-For the canonical language reference see [`docs/alternative-syntax.ptf`](docs/alternative-syntax.ptf),
-[`docs/glossary.md`](docs/glossary.md) for terms, and
-[`docs/backward-language-design.md`](docs/backward-language-design.md) for the method
-that produced all of this.
+Beyond the guide: [`docs/language-reference.ptf`](docs/language-reference.ptf) is the
+annotated syntax reference, [`docs/glossary.md`](docs/glossary.md) defines the terms,
+[`docs/backward-language-design.md`](docs/backward-language-design.md) describes the
+method that produced all of this, and [`docs/README.md`](docs/README.md) maps the rest
+of `docs/`.
 
 Every ` ```pontif ` snippet in this README and the guide pages — except the
 illustrative fragments in the [Streams](docs/guide/streams.md) and
@@ -249,58 +310,74 @@ illustrative fragments in the [Streams](docs/guide/streams.md) and
 
 ## Status
 
-Active experimental development. Public APIs are not yet stable — expect breaking
-changes while the version reads `1.0-SNAPSHOT`. (The 3D graphics stack is being
-rebuilt on Vulkan and will eventually move to its own repository.)
+Pontif is **pre-1.0 and still in design**. The language runs, and everything below
+works end-to-end in real programs — but nothing is frozen, and the syntax will change
+where the design says it should. Expect breaking changes while the version reads
+`1.0-SNAPSHOT`.
 
-Capabilities that work end-to-end in the Pontif surface syntax:
+### What works
 
-- Refinement sorts (`[Int:@>0]`, `[Int:0|1|2]`), union and intersection sorts, and
-  reusable sort aliases (`let Positive:Type[[Int:@>0]]`)
-- Three numeric primitives — `Int`, `Bool`, `Decimal` (BigDecimal-backed) — plus
-  `Char`, with implicit `Int → Decimal` coercion at value boundaries and explicit
-  `(Type:value)` casts everywhere else
-- Decimal narrows (sign, range, equality), proven by a dense-valid discharger kept
-  separate from integer-strict reasoning
-- Functions and overloads, methods, operator overloading guarded by the orphan rule
-- Pattern matching where **patterns are sorts** — refinements, destructure-with-rename,
-  per-field narrowing, positional literals, `_` discards, and the narrow-in-place tuple
-  binder `name:Sort`
-- **Three polymorphism models** — traits (data attributes, default methods, sort-transform
-  shells, free bidirectional struct↔trait coercion), module-coherent multi-dispatch, and
-  `struct Name:[Base:rel](fields)` type extension — plus **struct member blocks** (a struct's
-  own `{ method… }` block with an intersection is-a base `:[Super & T1 & T2]`)
-- Synthesis from the spec — the trailing `;` directive (value pins, construction pins,
-  in-type `let`-pipelines)
-- Metareferences (`$f[Sorts]`) and **algebraic reflection** (`assign proof f:Algebraic`
-  → a first-class `AlgExpr` AST via `$f[Decimal].ast`, inspectable with `match`, runnable
-  with `eval`)
-- Compile-time **match totality**, **return verification**, and **conservation receipts**
-  (`DataConservative`, `Reversible`, `NoDuplication`, `DataConservativeExcept`) — all gated,
-  with reviewable text reports
-- **One inference engine**, inspectable — every stage narrows through `NarrowingInference`;
-  the playground's Narrowings view reflects the inferred program
-- **Module system** — namespace-as-module (same-namespace files merge across the project),
-  FQN-keyed dispatch, import-by-association, the orphan rule, and cross-module struct literals
-- **Streams** — one iteration primitive (the synthesis fragment applied by spread `&`) from
-  which map / filter / fold / scan / fork / zip fall out; generators, finite ranges, first-class
-  fragments, and element-type-checked computed streams
-- **A builtin math library** (`pontif.math` + `pontif.math.ext`), an **effect substrate**
-  (`emit` + `action`), and a **GUI + plotting** stack, plus GPU compute via `on Gpu`
+**Types.** Refinement types (`[Int:@>0]`, `[Int:0|1|2]`), union and intersection types,
+and reusable type aliases (`let Positive:Type[[Int:@>0]]`). Three numeric primitives —
+`Int`, `Bool`, `Decimal` (BigDecimal-backed) — plus `Char`, with implicit
+`Int → Decimal` coercion at value boundaries and explicit `(Type:value)` casts
+everywhere else. Decimal narrowing (sign, range, equality) is proven by a dense-valid
+discharger kept separate from integer-strict reasoning.
 
-### What's next
+**Dispatch and polymorphism.** Functions and overloads, methods, operator overloading
+guarded by the orphan rule. Pattern matching where **patterns are types** —
+refinements, destructure-with-rename, per-field narrowing, positional literals, `_`
+discards, and the narrow-in-place tuple binder (`a:Lit`). All **three polymorphism
+models**: traits (data attributes, default methods, transform shells, free
+bidirectional struct↔trait coercion), module-coherent multi-dispatch, and
+`struct Name:[Base:rel](fields)` type extension — plus **struct member blocks** (a
+struct's own `{ method… }` block with an intersection is-a base `:[Super & T1 & T2]`)
+and generics that never erase.
 
-Two threads remain (see [`docs/stream-war.md`](docs/stream-war.md) and
-[`docs/TODO.md`](docs/TODO.md)):
+**Proof and metaprogramming.** Compile-time **match totality**, **return
+verification**, and **conservation receipts** (`DataConservative`, `Reversible`,
+`NoDuplication`, `DataConservativeExcept`) — all gated, with reviewable text reports.
+Synthesis from the spec via the trailing `;` directive (value pins, construction pins,
+in-type `let`-pipelines). Metareferences (`$f[Int]`) and **algebraic reflection**
+(`assign proof f:Algebraic` → a first-class `AlgExpr` AST via `$f[Decimal].ast`,
+inspectable with `match`, runnable with `eval`). **One inference engine** underneath
+all of it, inspectable through the editor's Narrowings view.
 
-1. **Infinite / lazy streams** — the substrate for the event/concurrency model and stateful
-   sources, built by guarded infinite recursion and gated by *productivity* (the coinductive
-   dual of termination).
-2. **Modular arithmetic in the discharge kernel** — `%` / `/` are rejected in refinement
-   predicates today (the kernel is linear), so divisibility filters like `@%2==0` can't yet be
-   written; unblocking them adds constant-modulus congruences plus a piecewise-linear case-split.
-3. **Concurrency** — `emit` + `action` ship; what remains is folding events into asynchronous
-   conduits and back-pressured receivers, which rides on the infinite-stream work.
+**Programs.** A **module system** — namespace-as-module (same-namespace files merge
+across the project), FQN-keyed dispatch, import-by-association, the orphan rule, and
+cross-module struct literals — with `module.toml` projects, `.ptfpkg` bundles, a CLI,
+and a REPL.
+
+**Streams, effects, and concurrency.** One iteration primitive (the synthesis fragment
+applied by spread `&`) from which map / filter / fold / scan / fork / zip fall out,
+plus generators, finite ranges, first-class fragments, and element-type-checked
+computed streams. Demand-driven **live sources** (`stdin`) drive iteration a pull at a
+time rather than materializing. The **effect substrate** (`emit` + `action`) carries
+**conductors** — `conductor` declares a long-lived owner of mutable state as an
+explicit clocked `Cell[T]`, `conduit` folds an event stream into it, `spawn` seats it,
+and writes latch on the clock edge so no pure call ever observes a mutation.
+
+**Libraries.** A builtin math library (`pontif.math` + `pontif.math.ext`), a native
+**GUI + plotting** stack, SDF **3D shapes**, and GPU compute via `on Gpu` (lowering to
+SPIR-V/Vulkan).
+
+### What doesn't work yet
+
+- **Modular arithmetic in refinement predicates.** `%` and `/` are rejected inside
+  predicates (the discharge kernel is linear), so divisibility filters like `@%2==0`
+  can't be written. Unblocking them needs constant-modulus congruences plus a
+  piecewise-linear case-split.
+- **General infinite streams.** Live sources cover pull-driven input; the general
+  guarded-corecursive form — gated by *productivity*, the coinductive dual of
+  termination — is still being designed ([`docs/stream-war.md`](docs/stream-war.md)).
+- **The wider orchestration model.** Conductors run in-process today. Back-pressured
+  receivers, the multi-transport tier matrix, and cross-process journalling are
+  designed but not built ([`docs/orchestration.md`](docs/orchestration.md)).
+- **Stable APIs.** Nothing is frozen before 1.0, and the proof kernel is deliberately
+  incomplete — see [Proofs & ledgers](docs/guide/proofs-and-ledgers.md) for what that
+  buys and what it costs.
+
+Running list: [`docs/TODO.md`](docs/TODO.md).
 
 ## The `pontif` CLI
 
@@ -322,22 +399,23 @@ A `.ptfpkg` artifact is a compressed **source bundle** (the `module.toml` marker
 the `.ptf` sources) — not compiled IR, so the full compile and proof gates re-run on
 execution and an artifact can never carry unproven code.
 
-Build it:
+Both the editor and the CLI also build as GraalVM native images — real executables,
+no JVM startup:
 
-```
-mvn -pl pontif-cli -am package                  # → pontif-cli/target/pontif-cli.jar
-java -jar pontif-cli/target/pontif-cli.jar run app.ptf
-mvn -Pnative -pl pontif-cli -am package         # → a native `pontif` binary (needs a GraalVM JDK)
+```bash
+mvn -Pnative -pl pontif-cli -am package         # → a native `pontif` binary
 mvn -Pnative -pl pontif-playground -am package  # → a native `pontif-editor` GUI binary
 ```
 
-Both the editor and the CLI ship as GraalVM native images. `pontif editor` launches
-the native `pontif-editor` binary when present (no JVM), otherwise falls back to the
-editor jar via `java -jar`. Overrides: `PONTIF_EDITOR_EXE` / `PONTIF_EDITOR_JAR`.
+`pontif editor` launches the native `pontif-editor` binary when present, otherwise
+falls back to the editor jar via `java -jar`. Overrides: `PONTIF_EDITOR_EXE` /
+`PONTIF_EDITOR_JAR`.
 
 ## Build and test
 
-```
+[Install it](#install-it) covers the short path. To build and test everything:
+
+```bash
 mvn clean install              # build all modules
 mvn test                       # run every test in the reactor
 mvn -pl pontif-demo test       # run the demo & integration tests

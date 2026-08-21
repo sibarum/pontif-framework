@@ -98,7 +98,7 @@ twice($inc[Int], 5)   # → 7
 ```
 
 **Metareferences** — `$inc[Int]` reifies the *dispatch* named `inc` keyed at
-`Int` (the `$` quotes the name; the `[...]` give the key sorts). It is not a
+`Int` (the `$` quotes the name; the `[...]` give the key types). It is not a
 function pointer: applying it re-runs dispatch with narrowings intact, and it can
 be passed as a first-class `[Dispatch(Int):Int]` value.
 
@@ -110,7 +110,7 @@ function step(n:Positive):Positive -> n + 1
 step(5)   # → 6
 ```
 
-**Reusable sort aliases** — `Type[...]` names a refinement (or a union of them)
+**Reusable type aliases** — `Type[...]` names a refinement (or a union of them)
 once and reuses it wherever a type annotation goes. It is the bracketed sibling of
 the `Type{...}` trait form.
 
@@ -237,7 +237,7 @@ let [{x, y}] = swap({1, true}) y   # → 1
 Everything above — refinement, dispatch, match, the return gate — rests on one
 question: *what is this value, exactly?* A type system is only as honest as the
 thing that answers it, and Pontif has exactly **one** answerer: `NarrowingInference`.
-It runs while parsing, while sort-checking, at the return-refinement gate, and
+It runs while parsing, while type-checking, at the return-refinement gate, and
 during dispatch. The stages differ only in **what is known** — a parser hasn't
 linked imports yet; the gate has the whole module — never in **how the reasoning
 works**. There is no second typer to drift out of agreement with the first, which

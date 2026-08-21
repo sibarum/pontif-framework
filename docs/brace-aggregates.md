@@ -95,7 +95,7 @@ non-brace mechanism.
 
 ## Blast radius (inventory 2026-06-22)
 
-- `.ptf` files with paren-aggregates: ~6 examples + `docs/alternative-syntax.ptf`.
+- `.ptf` files with paren-aggregates: ~6 examples + `docs/language-reference.ptf`.
 - Java tests embedding alt-syntax with paren-tuples: ~12 tuple-heavy (`TupleTest`,
   `NestedDestructureTest`, `ConservationGateTest`, `PositionalParamDestructureTest`,
   `CastAltTest`, `ReadmeSnippetTest`, …) of 71 `compileAlt` users.

@@ -11,6 +11,13 @@ types are claims the compiler proves or rejects, and a single symbolic-predicate
 engine drives refinement, dispatch, traits, pattern matching, and type extension.
 This page walks each in turn.
 
+One piece of vocabulary first, because everything below leans on it. A **refined
+type** — or *narrow type* — is an ordinary type plus a predicate that its values
+must satisfy, written `[Base:predicate]`: `[Int:@>0]` is the type of positive
+integers. Wherever this guide says a type *narrows*, it means exactly that — the
+predicate got tighter, and the set of values it admits got smaller. A plain `Int` is
+just the widest case, the refined type with no predicate at all.
+
 ## Contents
 
 - [Function dispatching with refined types](#function-dispatching-with-refined-types)
@@ -24,7 +31,7 @@ This page walks each in turn.
 
 ## Function dispatching with refined types
 
-Sorts narrow by predicate, dispatch selects on the narrowing, and declared
+Types narrow by predicate, dispatch selects on the narrowing, and declared
 returns are proof obligations:
 
 ```pontif
@@ -43,7 +50,7 @@ factorial(5) + inc(4) + sign(-7)   # → 124
 ```
 
 - **Overloads dispatch on the narrowing.** `factorial`'s two clauses are selected
-  by which sort the argument satisfies (`[Int:0]` vs `[Int:@>0]`), and *provable
+  by which type the argument satisfies (`[Int:0]` vs `[Int:@>0]`), and *provable
   overlap is rejected at registration* — multi-dispatch is unordered and
   unambiguous. (Contrast `match`, which is ordered top-to-bottom with overlap
   allowed; the two are deliberately different tools.)
@@ -56,7 +63,7 @@ factorial(5) + inc(4) + sign(-7)   # → 124
   for — rejects the program. Both `factorial` clauses carry the same claim,
   `[Int:@>=1]`, and it closes *inductively*: the recursive call's own
   `[Int:@>=1]` is taken as the induction hypothesis, so `n > 0` (from the
-  parameter sort) and `factorial(n-1) >= 1` together discharge
+  parameter type) and `factorial(n-1) >= 1` together discharge
   `n * factorial(n-1) >= 1`.
 - **Match totality is enforced as a conservation rule.** A non-exhaustive match
   is a compile error *with the uncovered witness*; undecidable coverage demands a
@@ -77,7 +84,7 @@ grow(acct) ~= 105.0   # → true
 
 `~=` is approximate equality done right — equal within one ulp at the working
 precision (DECIMAL128), a tolerance *derived from the division policy*, never
-configured — and it is rejected in sort position: the proof layer never forgives.
+configured — and it is rejected in type position: the proof layer never forgives.
 
 ## Structs and methods
 
@@ -113,7 +120,7 @@ function area(s:[Circle|Rect]):Decimal -> match s {
 area(Rect(3.0, 4.0))   # → 12.00
 ```
 
-Match patterns *are sorts*, so destructuring (`[Rect(w, h)]`), narrowing
+Match patterns *are types*, so destructuring (`[Rect(w, h)]`), narrowing
 (`[@>0]`), and literal-pinning (`[Rect(3.0, h)]`) all compose in one form — there
 is no separate pattern DSL. A positional pattern wears the constructor's clothes
 and must account for *every* slot (discard with `_`); a subset is lying by
@@ -137,11 +144,11 @@ match, the pattern `[{…}]`. The `[` makes it unambiguously a pattern (`[` is n
 postfix in Pontif — arrays index by application), while the bare `{…}` is the value.
 
 A tuple slot has a **third** form, filling in the gap the first two leave. A bare
-name (`a`) binds the whole slot but tests nothing; a bare sort (`Lit`) tests the
-slot but binds nothing; **`name:Sort`** does *both* — it tests the slot against the
-sort *and* binds the narrowed value under that name. It is the conditional-cast slot:
-the arm fires only when the slot fits, and inside it the binder is already narrowed,
-so its members resolve without opening the value up into fields:
+name (`a`) binds the whole slot but tests nothing; a bare type (`Lit`) tests the
+slot but binds nothing; **`name:T`** does *both* — it tests the slot against the
+type `T` *and* binds the narrowed value under that name. It is the conditional-cast
+slot: the arm fires only when the slot fits, and inside it the binder is already
+narrowed, so its members resolve without opening the value up into fields:
 
 ```pontif
 struct Lit(value:Int)
@@ -157,7 +164,7 @@ combine(Lit(3), Lit(4))   # → 7
 ```
 
 Without it you'd have to destructure — `[{Lit(av), Lit(bv)}]` — even when you want
-the value whole; `name:Sort` keeps the value intact while still guarding on its sort.
+the value whole; `name:T` keeps the value intact while still guarding on its type.
 
 ## Traits — alternative interfaces
 
@@ -267,9 +274,9 @@ alternative interface *with a guaranteed return path* to the original. (A downca
 to the *wrong* concrete type — one that merely also satisfies the trait — is
 rejected: the value cannot masquerade as something it isn't.)
 
-### Logic in the sorts — a shell the trait owns
+### Logic in the types — a shell the trait owns
 
-A method's argument and return *sorts* need not be mere membership predicates —
+A method's argument and return *types* need not be mere membership predicates —
 they may be **transform-chains**. `[A -> … -> B]` takes an `A`, threads it through
 each `->` stage (`@` is the value in flight), and yields a `B`. Placed in a trait
 method's **return**, such a chain is a *shell* the trait owns: every satisfier's
@@ -293,7 +300,7 @@ insists everything be booked in cents. The kernel `Plan` writes returns the shel
 *domain* (`Int` dollars, here `18`); the trait's return shell maps it to the
 *terminus* the caller sees (`1800` cents) — so the dollars→cents conversion belongs
 to the contract, not to `Plan`. No satisfier of `Billed` can hand back a raw dollar
-figure by mistake. This is how a trait injects behaviour through a *sort* rather than
+figure by mistake. This is how a trait injects behaviour through a *type* rather than
 a body: the satisfier supplies the core, the trait wraps the edges.
 
 The **argument** side is symmetric, and a trait can own **both** shells at once — so
@@ -319,7 +326,7 @@ units — and `Int` dollars out); the trait owns the dozens→units expansion on
 in and the dollars→cents conversion on the way out, and no satisfier can opt out.
 (The same `[A -> B]` shells work on an ordinary function's parameters and return —
 there they are the author's own, not a contract's. See
-[docs/sort-transforms.md](../sort-transforms.md).)
+[transform chains](../sort-transforms.md).)
 
 Two receivers to keep distinct: **`this`** is a method's injected instance
 (`this.area`); **`@`** is the value in flight inside a `[...]` — the one under a
@@ -376,7 +383,7 @@ for the closed primitive tower (`Int → Decimal`, a lossless embedding you can'
 extend or shadow); everything open is explicit. Because the target is named, nothing
 is searched (so nothing is incomplete) and nothing is ambiguous — and a coercion that
 can't be performed fails closed rather than fabricating. A cast is a dispatch feature:
-it resolves `(source sort → target sort)` on the one shared engine. Today the built-in
+it resolves `(source type → target type)` on the one shared engine. Today the built-in
 renders to `String` ship; user-defined `Type → Type` coercions register and resolve
 the same way.
 
@@ -473,7 +480,7 @@ assign trait Box[type T]:Container[T] {
 Box(42).get()                            # T = Int from the field → 42
 ```
 
-The same parametric sort is honest in an **is-a** base, where the type argument is
+The same parametric type is honest in an **is-a** base, where the type argument is
 *invariant*: a struct that claims it is-a `Literal[Int]` must really hold an `Int`
 — not a refinement of one, and not a `Bool`.
 
@@ -504,7 +511,7 @@ redefine `+` on types it doesn't own, so global multi-dispatch stays sane.
 
 ---
 
-**Full design notes:** [dependent-sorts](../dependent-sorts.md) ·
+**Full design notes:** [refined types](../dependent-sorts.md) ·
 [traits](../traits.md) · [subtypes](../subtypes.md) ·
-[struct-methods](../struct-methods.md) · [type-parameters](../type-parameters.md) ·
-[sort-transforms](../sort-transforms.md) · [cross-module-dispatch](../cross-module-dispatch.md)
+[struct methods](../struct-methods.md) · [type parameters](../type-parameters.md) ·
+[transform chains](../sort-transforms.md) · [cross-module dispatch](../cross-module-dispatch.md)

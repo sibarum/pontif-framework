@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * End-to-end coverage for the alt syntax frontend: source text → AltParser →
  * IrModule → IrCompiler → IrInterpreter. Verifies that the alt-syntax frontend
  * produces the same IR as the S-expression frontend for the example programs
- * in {@code docs/alternative-syntax.ptf}.
+ * in {@code docs/language-reference.ptf}.
  */
 class AltParserIntegrationTest {
 
@@ -49,7 +49,7 @@ class AltParserIntegrationTest {
     @Test
     void requires_and_exports_useDotBraceForm() throws Exception {
         // `.{...}` is the dictionary-decomposition syntax — see principle 7 in
-        // docs/alternative-syntax.ptf. Brackets are reserved for sorts.
+        // docs/language-reference.ptf. Brackets are reserved for sorts.
         String src = """
                 module m
 

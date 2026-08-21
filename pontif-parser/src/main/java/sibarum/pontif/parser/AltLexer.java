@@ -14,7 +14,7 @@ import java.util.Set;
  *
  * <p>Logical operators are single-character — {@code &} for and, {@code |} for
  * or, {@code !} for not. There are no {@code &&} or {@code ||} (see
- * {@code docs/alternative-syntax.ptf} principle 4: bitwise ops do not exist
+ * {@code docs/language-reference.ptf} principle 4: bitwise ops do not exist
  * in Pontif, so the logical ops get the short forms).
  *
  * <p>Identifier characters: letters, digits, underscore, dollar. Identifier

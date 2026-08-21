@@ -54,7 +54,7 @@ class AltLexerTest {
     @Test
     void pipe_isLogicalOrOperator() throws Exception {
         // `|` is the OR operator at every level (union of sorts, logical-or of bools).
-        // See docs/alternative-syntax.ptf principle 4.
+        // See docs/language-reference.ptf principle 4.
         assertEquals("LBRACKET:[ INTEGER:0 OP:| INTEGER:1 RBRACKET:]",
                 shape(tokenize("[0|1]")));
         assertEquals("LBRACKET:[ INTEGER:-1 OP:| INTEGER:0 OP:| INTEGER:1 RBRACKET:]",

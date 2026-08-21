@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 
 /**
  * Token type for {@link AltLexer} / {@link AltParser} — the alt syntax
- * frontend described in {@code docs/alternative-syntax.ptf}. Distinct from
+ * frontend described in {@code docs/language-reference.ptf}. Distinct from
  * the S-expression {@link Token} because the alt syntax tokenizes operator
  * characters as their own tokens (so {@code Int>0} splits into three).
  */

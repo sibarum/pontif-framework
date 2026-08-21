@@ -7,7 +7,7 @@ deliberately different from the conventional one, the entry says why.
 
 **`@`** — Principal subject of the enclosing refinement: the value being
 refined (in `[Sort:pred]`) or the scrutinee (in a match arm). Each refinement
-binds its own `@`; nested refinements shadow. See `alternative-syntax.ptf`
+binds its own `@`; nested refinements shadow. See `language-reference.ptf`
 principle 3.
 
 **`~=`** — Approximate equality. Equal within one unit in the last place at
@@ -238,7 +238,7 @@ the noun for the artifact is just "receipt-graph."
 **implicit `@==EXPR` sugar** — When a refinement predicate is a plain
 expression with no top-level comparison, an implicit `@==` is inserted.
 Applied per-disjunct/conjunct: `[Int:0|1]` ≡ `[Int:@==0 | @==1]`. See
-`alternative-syntax.ptf` principle 5.
+`language-reference.ptf` principle 5.
 
 **issuer** — The role that *produces closing receipts about* a
 receipt-graph. Issuers don't change the graph — they produce *separate*
@@ -379,7 +379,7 @@ for the worked example.
 decl. Distinct from `@`, which stays the value-under-refinement of the enclosing
 bracket-form — the IR node `IrExpr.SelfRef` / `SymExpr.Self` is `@`, despite the
 legacy name. Renamed from `self` (2026-06-08): `this` is the implicit-receiver
-convention; `self`-as-explicit-arg is Python's. See `alternative-syntax.ptf`
+convention; `self`-as-explicit-arg is Python's. See `language-reference.ptf`
 principle 3.
 
 **snake oil** — A closing receipt the notary can't refute (so it's
