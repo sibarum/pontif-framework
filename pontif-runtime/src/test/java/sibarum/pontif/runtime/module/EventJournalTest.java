@@ -64,7 +64,7 @@ class EventJournalTest {
         IrInterpreter.installEventListener(journal);
         try {
             System.setOut(new PrintStream(sink, true, StandardCharsets.UTF_8));
-            PontifCompiler.CompileResult program = new PontifCompiler().compileAlt("""
+            PontifCompiler.CompileResult program = new PontifCompiler().compile("""
                     requires pontif.events.{Event, StdOut}
                     struct Ping(n:Int)
                     assign trait Ping:Event{}

@@ -41,7 +41,7 @@ class CrossModuleOperatorTest {
                 """);
 
         String src = Files.readString(dir.resolve("blend.ptf"));
-        var r = new PontifCompiler().compileAlt(src, "blend.ptf", dir);
+        var r = new PontifCompiler().compile(src, "blend.ptf", dir);
         var run = new PontifRunner().run(r, Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "expected success; got: " + run.text());
         // a*b = (3,8); b*a = (3,8); sum.x = 6.
@@ -65,7 +65,7 @@ class CrossModuleOperatorTest {
                 (Vec(8, 9) / Vec(2, 3)).sum()
                 """);
 
-        var r = new PontifCompiler().compileAlt(
+        var r = new PontifCompiler().compile(
                 Files.readString(dir.resolve("vec.ptf")), "vec.ptf", dir);
         var run = new PontifRunner().run(r, Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "expected success; got: " + run.text());

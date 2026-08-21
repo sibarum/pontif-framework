@@ -49,7 +49,7 @@ public final class ModuleLinker {
      * Links a single parsed module <b>iff</b> it declares any {@code requires}
      * (so builtin modules are injected and names FQN-resolved); otherwise
      * returns it unchanged — the bare single-file path. This is the one shared
-     * "was this file linked?" rule, used by both the compiler ({@code compileAlt})
+     * "was this file linked?" rule, used by both the compiler ({@code compile})
      * and the receipt-graph report, so Run and the Receipts view can never
      * disagree about whether a file went through linking.
      */

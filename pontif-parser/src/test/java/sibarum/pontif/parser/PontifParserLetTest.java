@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for top-level {@code let} in {@link AltParser}. Three shapes are
+ * Tests for top-level {@code let} in {@link PontifParser}. Three shapes are
  * supported:
  * <ul>
  *   <li>{@code let X = value}        — sort inferred maximally from value.
@@ -26,12 +26,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Bound names lower to 0-arg {@link IrStmt.FunctionDecl}. Bare references
  * to a let name in expression position are rewritten to {@code Call(name, [])}
- * by {@link AltParser#parsePrimary} so the dispatch table resolves them.
+ * by {@link PontifParser#parsePrimary} so the dispatch table resolves them.
  */
-class AltParserLetTest {
+class PontifParserLetTest {
 
     private static IrStmt firstStmt(String src) throws ParseException {
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         return m.statements().get(0);
     }
 
@@ -70,7 +70,7 @@ class AltParserLetTest {
     @Test
     void let_recordLiteral_infersStructuralSortWithFieldSingletons() throws Exception {
         String src = "struct Point(x:Int, y:Int)\nlet origin = Point(0, 0)";
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = assertInstanceOf(
                 IrStmt.FunctionDecl.class, m.statements().get(1));
         IrSort.Structural s = assertInstanceOf(IrSort.Structural.class, fd.returnSort());
@@ -89,7 +89,7 @@ class AltParserLetTest {
                 struct Outer(inner:Inner, n:Int)
                 let o = Outer(Inner(7), 9)
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = assertInstanceOf(
                 IrStmt.FunctionDecl.class, m.statements().get(2));
         IrSort.Structural outer = assertInstanceOf(IrSort.Structural.class, fd.returnSort());
@@ -141,7 +141,7 @@ class AltParserLetTest {
         // not the retired CoercionResolver; the diagnostic is unchanged).
         String src = "struct Point(x:Int, y:Int)\nlet p:Int = Point(0, 0)";
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule(src, "t"));
+                PontifParser.parseModule(src, "t"));
         assertTrue(ex.getMessage().toLowerCase().contains("different types"),
                 () -> "Unexpected: " + ex.getMessage());
     }
@@ -154,7 +154,7 @@ class AltParserLetTest {
         // value attempts synthesis, and since `Int` pins no unique witness it fails
         // with the honest "doesn't pin a synthesizable value" — never a silent NoOp.
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("let f:Int", "t"));
+                PontifParser.parseModule("let f:Int", "t"));
         assertTrue(ex.getMessage().contains("does not pin a synthesizable value"),
                 () -> "Unexpected: " + ex.getMessage());
     }
@@ -164,7 +164,7 @@ class AltParserLetTest {
         // `;` given but the sort pins no unique witness (Int:@>0 is a range) —
         // an honest "can't synthesize" error, not a NoOp.
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("let f:[Int:@>0];", "t"));
+                PontifParser.parseModule("let f:[Int:@>0];", "t"));
         assertTrue(ex.getMessage().contains("does not pin a synthesizable value"),
                 () -> "Unexpected: " + ex.getMessage());
     }
@@ -172,7 +172,7 @@ class AltParserLetTest {
     @Test
     void let_noSort_noValue_throws() {
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("let x", "t"));
+                PontifParser.parseModule("let x", "t"));
         assertTrue(ex.getMessage().contains("needs either a sort annotation"),
                 () -> "Unexpected: " + ex.getMessage());
     }
@@ -183,7 +183,7 @@ class AltParserLetTest {
     void bareReferenceToLet_rewritesToZeroArgCall() throws Exception {
         // `n` in expression position lowers to Call("n", []).
         String src = "let n = 5\nn + 1";
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrExpr.BinOp body = assertInstanceOf(IrExpr.BinOp.class, m.main());
         IrExpr.Call left = assertInstanceOf(IrExpr.Call.class, body.left());
         assertEquals("n", left.functionName());
@@ -199,7 +199,7 @@ class AltParserLetTest {
                 let origin = Point(0, 0)
                 origin.x
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrExpr.FieldAccess fa = assertInstanceOf(IrExpr.FieldAccess.class, m.main());
         IrExpr.Call base = assertInstanceOf(IrExpr.Call.class, fa.base());
         assertEquals("origin", base.functionName());
@@ -214,7 +214,7 @@ class AltParserLetTest {
                 let n = 99
                 function f(n:Int):Int -> n + 1
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = assertInstanceOf(
                 IrStmt.FunctionDecl.class, m.statements().get(1));
         IrExpr.BinOp body = assertInstanceOf(IrExpr.BinOp.class, fd.body());
@@ -233,7 +233,7 @@ class AltParserLetTest {
                 let origin = Point(0, 0)
                 origin()
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrExpr.Call call = assertInstanceOf(IrExpr.Call.class, m.main());
         assertEquals("origin", call.functionName());
         assertTrue(call.args().isEmpty());
@@ -247,7 +247,7 @@ class AltParserLetTest {
                 let n = 5
                 let m = n + 1
                 """;
-        IrModule mod = AltParser.parseModule(src, "t");
+        IrModule mod = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl mDecl = assertInstanceOf(
                 IrStmt.FunctionDecl.class, mod.statements().get(1));
         // m's body is Call("n", []) + 1
@@ -275,7 +275,7 @@ class AltParserLetTest {
     @Test
     void letDiscard_bareCall_lowersToDiscardLetIn() throws Exception {
         // `notify(1)` is discarded; `42` is the block's value.
-        IrModule m = AltParser.parseModule("main ( let notify(1)  42 )", "t");
+        IrModule m = PontifParser.parseModule("main ( let notify(1)  42 )", "t");
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
         assertTrue(let.name().startsWith("#discard#"),
                 "discard binds a synthetic name, got: " + let.name());
@@ -287,7 +287,7 @@ class AltParserLetTest {
     /** A method-call discard: {@code let obj.step(1)} — the head IDENT is not a binding head. */
     @Test
     void letDiscard_methodCall_isDiscardNotBinding() throws Exception {
-        IrModule m = AltParser.parseModule("main ( let obj.step(1)  0 )", "t");
+        IrModule m = PontifParser.parseModule("main ( let obj.step(1)  0 )", "t");
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
         assertTrue(let.name().startsWith("#discard#"));
     }
@@ -295,7 +295,7 @@ class AltParserLetTest {
     /** The explicit throwaway {@code let _ = EXPR} is a normal binding to {@code _}, not a discard. */
     @Test
     void letUnderscore_isBindingNotDiscard() throws Exception {
-        IrModule m = AltParser.parseModule("main ( let _ = notify(1)  42 )", "t");
+        IrModule m = PontifParser.parseModule("main ( let _ = notify(1)  42 )", "t");
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
         assertEquals("_", let.name());
     }
@@ -303,7 +303,7 @@ class AltParserLetTest {
     /** A named binding is untouched by the discard branch. */
     @Test
     void letNamed_stillBinds() throws Exception {
-        IrModule m = AltParser.parseModule("main ( let x = notify(1)  x )", "t");
+        IrModule m = PontifParser.parseModule("main ( let x = notify(1)  x )", "t");
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
         assertEquals("x", let.name());
     }

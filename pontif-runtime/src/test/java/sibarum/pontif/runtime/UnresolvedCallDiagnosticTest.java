@@ -2,7 +2,7 @@ package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 
@@ -25,7 +25,7 @@ class UnresolvedCallDiagnosticTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String compileError(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         return r instanceof CompileResult.Failed f ? f.error().text() : null;
     }
 
@@ -62,7 +62,7 @@ class UnresolvedCallDiagnosticTest {
                 """);   // Bar is imported from nowhere
         Map<String, IrModule> mods = new LinkedHashMap<>();
         src.forEach((n, s) -> {
-            try { mods.put(n, AltParser.parseModule(s, n + ".ptf")); }
+            try { mods.put(n, PontifParser.parseModule(s, n + ".ptf")); }
             catch (Exception e) { throw new RuntimeException(e); }
         });
         CompileResult r = compiler.compileProject(mods, "app");
@@ -100,7 +100,7 @@ class UnresolvedCallDiagnosticTest {
     @Test
     void paramCallable_invokedAsCall_isNotFlagged() {
         // d is a callable parameter, invoked d(d(x)) — a local binding, not a free function.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 function inc(x:Int):Int -> x + 1
                 function twice(d:[Dispatch(Int):Int], x:Int):Int -> d(d(x))
                 twice($inc[Int], 5)""", "t.ptf");
@@ -113,7 +113,7 @@ class UnresolvedCallDiagnosticTest {
     @Test
     void operatorAndMethodOnUserType_compile() {
         // A user operator result fed to a user method — both resolve; no false positive.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 struct T(v:Decimal)
                 function T.of(x:Decimal):T -> T(x)
                 function /(a:T, b:T):T -> T(a.v / b.v)

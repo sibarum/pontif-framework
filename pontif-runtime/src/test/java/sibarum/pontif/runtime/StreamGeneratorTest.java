@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 
@@ -28,7 +28,7 @@ class StreamGeneratorTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "m.ptf");
+        IrModule module = PontifParser.parseModule(src, "m.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);
@@ -36,7 +36,7 @@ class StreamGeneratorTest {
 
     /** Runs through the full editor pipeline (link + compile), like the playground. */
     private Object runLinked(String src) {
-        CompileResult r = compiler.compileAlt(src, "streams.ptf");
+        CompileResult r = compiler.compile(src, "streams.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "should compile through the editor path; got " + r);
         return new IrInterpreter(c.program().simplifier()).eval(c.program().module());

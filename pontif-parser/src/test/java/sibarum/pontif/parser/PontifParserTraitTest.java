@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for alt-syntax trait surface:
+ * Tests for Pontif-syntax trait surface:
  * <ul>
  *   <li>{@code trait Duck{methodName:[Method(...):Ret], ...}} — trait
  *       declaration, lowers to {@link IrStmt.TypeAlias} with
@@ -22,10 +22,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       {@code Donald.methodName}.</li>
  * </ul>
  */
-class AltParserTraitTest {
+class PontifParserTraitTest {
 
     private static IrModule parse(String src) throws ParseException {
-        return AltParser.parseModule(src, "t");
+        return PontifParser.parseModule(src, "t");
     }
 
     // --- trait X{...} ----------------------------------------------------

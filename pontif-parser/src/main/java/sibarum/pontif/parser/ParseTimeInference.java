@@ -23,7 +23,7 @@ import static sibarum.pontif.parser.IrQueries.describeSort;
  * This is the one place the recursive-descent parser reasons with the type
  * system: it runs the core inference floor over the parser's live scope and
  * composes it with the nominal Assignability engine to decide a binding's
- * sort. Holding it here keeps AltParser free of the TypeSystem and
+ * sort. Holding it here keeps PontifParser free of the TypeSystem and
  * Assignability engines - the parser owns the scope maps and the shared type
  * catalog, and this collaborator reads them live to answer inference queries.
  */

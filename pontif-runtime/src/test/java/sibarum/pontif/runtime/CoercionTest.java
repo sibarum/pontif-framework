@@ -28,14 +28,14 @@ class CoercionTest {
     Path dir;
 
     private String run(String src) throws Exception {
-        var r = new PontifCompiler().compileAlt(src, "t.ptf", dir);
+        var r = new PontifCompiler().compile(src, "t.ptf", dir);
         var run = new PontifRunner().run(r, Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "expected success; got: " + run.text());
         return run.text();
     }
 
     private String compileError(String src) throws Exception {
-        var r = new PontifCompiler().compileAlt(src, "t.ptf", dir);
+        var r = new PontifCompiler().compile(src, "t.ptf", dir);
         CompileResult.Failed f = assertInstanceOf(CompileResult.Failed.class, r,
                 () -> "expected a compile error");
         return f.error().text();
@@ -126,7 +126,7 @@ class CoercionTest {
                 requires sci.temp.{Celsius, Kelvin}
                 (Kelvin: Celsius(100)).deg
                 """);
-        var r = new PontifCompiler().compileAlt(
+        var r = new PontifCompiler().compile(
                 Files.readString(dir.resolve("app.ptf")), "app.ptf", dir);
         var run = new PontifRunner().run(r, Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "expected success; got: " + run.text());
@@ -153,7 +153,7 @@ class CoercionTest {
                 cast B:(a:A) -> B(a.v)
                 (B: A(1)).v
                 """);
-        var r = new PontifCompiler().compileAlt(
+        var r = new PontifCompiler().compile(
                 Files.readString(dir.resolve("c.ptf")), "c.ptf", dir);
         CompileResult.Failed f = assertInstanceOf(CompileResult.Failed.class, r,
                 () -> "expected an orphan-coercion compile error");

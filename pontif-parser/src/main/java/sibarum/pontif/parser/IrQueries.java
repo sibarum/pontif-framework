@@ -11,7 +11,7 @@ import java.util.List;
  *
  * These classify or derive information from IrSort, IrExpr, IrExpr.Op and
  * tokens without consuming any input, so they belong with the syntax model
- * rather than the recursive-descent parser. Keeping them here lets AltParser
+ * rather than the recursive-descent parser. Keeping them here lets PontifParser
  * stay focused on token consumption and lets the queries be tested in
  * isolation.
  */
@@ -95,8 +95,8 @@ final class IrQueries {
         };
     }
 
-    static boolean isStar(AltToken t) {
-        return t.kind() == AltToken.Kind.OP && "*".equals(t.text());
+    static boolean isStar(PontifToken t) {
+        return t.kind() == PontifToken.Kind.OP && "*".equals(t.text());
     }
 
     static boolean isSelfType(IrSort sort) {

@@ -59,7 +59,7 @@ public final class GpuKernels {
 
     /**
      * The {@code Iterate} for {@code (&a, &b):[(x, y) -> x + y]} — one STREAM output, one wildcard
-     * arm, body {@code element._0 + element._1}. Matches what {@code AltParser.lowerZip} emits, so
+     * arm, body {@code element._0 + element._1}. Matches what {@code PontifParser.lowerZip} emits, so
      * the real {@code KernelLowering} path is exercised (the source var names are placeholders —
      * data is supplied positionally as columns at {@code run}).
      */

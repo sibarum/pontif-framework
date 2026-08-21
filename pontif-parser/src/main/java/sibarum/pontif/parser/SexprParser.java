@@ -52,19 +52,19 @@ import java.util.Map;
  *       is evaluated, must produce a closure, and that closure is invoked.</li>
  * </ul>
  */
-public final class Parser {
+public final class SexprParser {
 
-    private final List<Token> tokens;
+    private final List<SexprToken> tokens;
     private final LanguageDef language;
     private int pos;
     /** Counter for synthesizing unique names during desugaring (match destructuring, etc.). */
     private int syntheticNameCounter = 0;
 
-    public Parser(List<Token> tokens) {
+    public SexprParser(List<SexprToken> tokens) {
         this(tokens, LanguageDef.defaults());
     }
 
-    public Parser(List<Token> tokens, LanguageDef language) {
+    public SexprParser(List<SexprToken> tokens, LanguageDef language) {
         if (language == null) {
             throw new IllegalArgumentException("LanguageDef must be non-null");
         }
@@ -77,9 +77,9 @@ public final class Parser {
     }
 
     public static IrExpr parseExpr(String src, String source, LanguageDef language) throws ParseException {
-        Parser p = new Parser(new Lexer(src, source).tokenize(), language);
+        SexprParser p = new SexprParser(new SexprLexer(src, source).tokenize(), language);
         IrExpr expr = p.parseExpr();
-        p.expect(Token.Kind.EOF);
+        p.expect(SexprToken.Kind.EOF);
         return expr;
     }
 
@@ -88,9 +88,9 @@ public final class Parser {
     }
 
     public static IrSort parseSort(String src, String source, LanguageDef language) throws ParseException {
-        Parser p = new Parser(new Lexer(src, source).tokenize(), language);
+        SexprParser p = new SexprParser(new SexprLexer(src, source).tokenize(), language);
         IrSort sort = p.parseSort();
-        p.expect(Token.Kind.EOF);
+        p.expect(SexprToken.Kind.EOF);
         return sort;
     }
 
@@ -99,24 +99,24 @@ public final class Parser {
     }
 
     public static IrModule parseModule(String src, String source, LanguageDef language) throws ParseException {
-        Parser p = new Parser(new Lexer(src, source).tokenize(), language);
+        SexprParser p = new SexprParser(new SexprLexer(src, source).tokenize(), language);
         IrModule module = p.parseModule();
-        p.expect(Token.Kind.EOF);
+        p.expect(SexprToken.Kind.EOF);
         return module;
     }
 
-    // --- Token cursor helpers ---
+    // --- SexprToken cursor helpers ---
 
-    private Token peek() {
+    private SexprToken peek() {
         return tokens.get(pos);
     }
 
-    private Token consume() {
+    private SexprToken consume() {
         return tokens.get(pos++);
     }
 
-    private Token expect(Token.Kind kind) throws ParseException {
-        Token t = peek();
+    private SexprToken expect(SexprToken.Kind kind) throws ParseException {
+        SexprToken t = peek();
         if (t.kind() != kind) {
             throw new ParseException(
                     "Expected " + kind + " but got " + t.kind() + " ('" + t.text() + "')",
@@ -125,8 +125,8 @@ public final class Parser {
         return consume();
     }
 
-    private Token expectSymbol(String text) throws ParseException {
-        Token t = expect(Token.Kind.SYMBOL);
+    private SexprToken expectSymbol(String text) throws ParseException {
+        SexprToken t = expect(SexprToken.Kind.SYMBOL);
         if (!t.text().equals(text)) {
             throw new ParseException(
                     "Expected '" + text + "' but got '" + t.text() + "'",
@@ -138,17 +138,17 @@ public final class Parser {
     // --- Top-level parsers ---
 
     public IrModule parseModule() throws ParseException {
-        expect(Token.Kind.LPAREN);
+        expect(SexprToken.Kind.LPAREN);
         expectSymbol(language.moduleKeyword());
-        Token nameTok = expect(Token.Kind.SYMBOL);
-        expect(Token.Kind.LPAREN);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
+        expect(SexprToken.Kind.LPAREN);
         List<IrStmt> decls = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
             decls.add(parseTopLevelDecl());
         }
-        expect(Token.Kind.RPAREN);
+        expect(SexprToken.Kind.RPAREN);
         IrExpr main = parseExpr();
-        expect(Token.Kind.RPAREN);
+        expect(SexprToken.Kind.RPAREN);
         return new IrModule(nameTok.text(), decls, main);
     }
 
@@ -158,13 +158,13 @@ public final class Parser {
      */
     private IrStmt parseTopLevelDecl() throws ParseException {
         // Need two tokens of lookahead: LPAREN then the head SYMBOL.
-        if (peek().kind() != Token.Kind.LPAREN) {
+        if (peek().kind() != SexprToken.Kind.LPAREN) {
             throw new ParseException(
                     "Expected '(' starting a top-level declaration; got " + peek().kind(),
                     peek().origin());
         }
-        Token headSymbol = tokens.get(pos + 1);
-        if (headSymbol.kind() == Token.Kind.SYMBOL) {
+        SexprToken headSymbol = tokens.get(pos + 1);
+        if (headSymbol.kind() == SexprToken.Kind.SYMBOL) {
             String head = headSymbol.text();
             if (head.equals(language.typeAliasKeyword())) {
                 return parseTypeAlias();
@@ -186,25 +186,25 @@ public final class Parser {
      * implicit {@code self} — SortChecker prepends it per implementor.
      */
     public IrStmt.TypeAlias parseInterface() throws ParseException {
-        Token open = expect(Token.Kind.LPAREN);
+        SexprToken open = expect(SexprToken.Kind.LPAREN);
         expectSymbol(language.interfaceKeyword());
-        Token nameTok = expect(Token.Kind.SYMBOL);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
         java.util.LinkedHashMap<String, IrSort.CallSig> methods = new java.util.LinkedHashMap<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
-            expect(Token.Kind.LPAREN);
-            Token methodName = expect(Token.Kind.SYMBOL);
-            expect(Token.Kind.LPAREN);
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
+            expect(SexprToken.Kind.LPAREN);
+            SexprToken methodName = expect(SexprToken.Kind.SYMBOL);
+            expect(SexprToken.Kind.LPAREN);
             List<IrSort> paramSorts = new ArrayList<>();
-            while (peek().kind() != Token.Kind.RPAREN) {
+            while (peek().kind() != SexprToken.Kind.RPAREN) {
                 paramSorts.add(parseSort());
             }
-            expect(Token.Kind.RPAREN);
+            expect(SexprToken.Kind.RPAREN);
             IrSort returnSort = parseSort();
-            expect(Token.Kind.RPAREN);
+            expect(SexprToken.Kind.RPAREN);
             methods.put(methodName.text(),
                     new IrSort.CallSig(IrSort.CallSig.METHOD, paramSorts, returnSort, methodName.origin()));
         }
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         Origin origin = open.spanTo(close);
         return new IrStmt.TypeAlias(
                 nameTok.text(),
@@ -223,15 +223,15 @@ public final class Parser {
      * Lowers to {@link IrStmt.TraitImpl}.
      */
     public IrStmt.TraitImpl parseImpl() throws ParseException {
-        Token open = expect(Token.Kind.LPAREN);
+        SexprToken open = expect(SexprToken.Kind.LPAREN);
         expectSymbol(language.implKeyword());
-        Token typeNameTok = expect(Token.Kind.SYMBOL);
-        Token traitNameTok = expect(Token.Kind.SYMBOL);
+        SexprToken typeNameTok = expect(SexprToken.Kind.SYMBOL);
+        SexprToken traitNameTok = expect(SexprToken.Kind.SYMBOL);
         String typeName = typeNameTok.text();
         IrSort selfSort = new IrSort.Named(typeName, typeNameTok.origin());
 
         List<IrStmt.FunctionDecl> methods = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
             IrStmt.FunctionDecl raw = parseFunctionDecl();
             // Prepend (self : TypeName) and qualify the name.
             List<IrParam> params = new ArrayList<>(raw.params().size() + 1);
@@ -244,83 +244,83 @@ public final class Parser {
                     raw.body(),
                     raw.origin()));
         }
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrStmt.TraitImpl(
                 typeName, traitNameTok.text(), methods, open.spanTo(close));
     }
 
     public IrStmt.TypeAlias parseTypeAlias() throws ParseException {
-        Token open = expect(Token.Kind.LPAREN);
+        SexprToken open = expect(SexprToken.Kind.LPAREN);
         expectSymbol(language.typeAliasKeyword());
-        Token nameTok = expect(Token.Kind.SYMBOL);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
         IrSort sort = parseSort();
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrStmt.TypeAlias(nameTok.text(), sort, open.spanTo(close));
     }
 
     public IrStmt.FunctionDecl parseFunctionDecl() throws ParseException {
-        Token open = expect(Token.Kind.LPAREN);
+        SexprToken open = expect(SexprToken.Kind.LPAREN);
         expectSymbol(language.functionDeclKeyword());
-        Token nameTok = expect(Token.Kind.SYMBOL);
-        expect(Token.Kind.LPAREN);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
+        expect(SexprToken.Kind.LPAREN);
         List<IrParam> params = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
             params.add(parseParam());
         }
-        expect(Token.Kind.RPAREN);
+        expect(SexprToken.Kind.RPAREN);
         IrSort returnSort = parseSort();
         IrExpr body = parseExpr();
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrStmt.FunctionDecl(nameTok.text(), params, returnSort, body, open.spanTo(close));
     }
 
     private IrParam parseParam() throws ParseException {
-        expect(Token.Kind.LPAREN);
-        Token nameTok = expect(Token.Kind.SYMBOL);
+        expect(SexprToken.Kind.LPAREN);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
         IrSort sort = parseSort();
-        expect(Token.Kind.RPAREN);
+        expect(SexprToken.Kind.RPAREN);
         return new IrParam(nameTok.text(), sort);
     }
 
     public IrSort parseSort() throws ParseException {
-        Token t = peek();
-        if (t.kind() == Token.Kind.SYMBOL) {
+        SexprToken t = peek();
+        if (t.kind() == SexprToken.Kind.SYMBOL) {
             consume();
             return new IrSort.Named(t.text(), t.origin());
         }
-        if (t.kind() == Token.Kind.LPAREN) {
-            Token open = consume();
-            Token head = expect(Token.Kind.SYMBOL);
+        if (t.kind() == SexprToken.Kind.LPAREN) {
+            SexprToken open = consume();
+            SexprToken head = expect(SexprToken.Kind.SYMBOL);
             if (head.text().equals(language.refinedSortKeyword())) {
-                Token sortNameTok = expect(Token.Kind.SYMBOL);
+                SexprToken sortNameTok = expect(SexprToken.Kind.SYMBOL);
                 IrExpr predicate = parseExpr();
-                Token close = expect(Token.Kind.RPAREN);
+                SexprToken close = expect(SexprToken.Kind.RPAREN);
                 return new IrSort.Refined(sortNameTok.text(), predicate, open.spanTo(close));
             }
             if (head.text().equals(language.functionSortKeyword())) {
                 // (function (paramSort1 paramSort2 ...) returnSort)
-                expect(Token.Kind.LPAREN);
+                expect(SexprToken.Kind.LPAREN);
                 List<IrSort> paramSorts = new ArrayList<>();
-                while (peek().kind() != Token.Kind.RPAREN) {
+                while (peek().kind() != SexprToken.Kind.RPAREN) {
                     paramSorts.add(parseSort());
                 }
-                expect(Token.Kind.RPAREN);
+                expect(SexprToken.Kind.RPAREN);
                 IrSort returnSort = parseSort();
-                Token close = expect(Token.Kind.RPAREN);
+                SexprToken close = expect(SexprToken.Kind.RPAREN);
                 return new IrSort.CallSig(IrSort.CallSig.METHOD, paramSorts, returnSort, open.spanTo(close));
             }
             if (head.text().equals(language.structSortKeyword())) {
                 // (struct Name (field1 sort1) (field2 sort2) ...)
-                Token sortNameTok = expect(Token.Kind.SYMBOL);
+                SexprToken sortNameTok = expect(SexprToken.Kind.SYMBOL);
                 java.util.Map<String, IrSort> members = new java.util.LinkedHashMap<>();
-                while (peek().kind() != Token.Kind.RPAREN) {
-                    expect(Token.Kind.LPAREN);
-                    Token memberNameTok = expect(Token.Kind.SYMBOL);
+                while (peek().kind() != SexprToken.Kind.RPAREN) {
+                    expect(SexprToken.Kind.LPAREN);
+                    SexprToken memberNameTok = expect(SexprToken.Kind.SYMBOL);
                     IrSort memberSort = parseSort();
-                    expect(Token.Kind.RPAREN);
+                    expect(SexprToken.Kind.RPAREN);
                     members.put(memberNameTok.text(), memberSort);
                 }
-                Token close = expect(Token.Kind.RPAREN);
+                SexprToken close = expect(SexprToken.Kind.RPAREN);
                 return new IrSort.Structural(sortNameTok.text(), members, open.spanTo(close));
             }
             throw new ParseException(
@@ -339,7 +339,7 @@ public final class Parser {
     // --- Expression parser ---
 
     public IrExpr parseExpr() throws ParseException {
-        Token t = peek();
+        SexprToken t = peek();
         return switch (t.kind()) {
             case INTEGER -> {
                 consume();
@@ -372,13 +372,13 @@ public final class Parser {
     }
 
     private IrExpr parseCompoundExpr() throws ParseException {
-        Token open = expect(Token.Kind.LPAREN);
-        Token head = expect(Token.Kind.SYMBOL);
+        SexprToken open = expect(SexprToken.Kind.LPAREN);
+        SexprToken head = expect(SexprToken.Kind.SYMBOL);
         String h = head.text();
         if (language.isBinaryOp(h)) {
             IrExpr left = parseExpr();
             IrExpr right = parseExpr();
-            Token close = expect(Token.Kind.RPAREN);
+            SexprToken close = expect(SexprToken.Kind.RPAREN);
             return new IrExpr.BinOp(language.binaryOpFor(h).orElseThrow(), left, right, open.spanTo(close));
         }
         if (h.equals(language.letKeyword()))    return parseLet(open);
@@ -392,50 +392,50 @@ public final class Parser {
                 head.origin());
     }
 
-    private IrExpr parseLet(Token open) throws ParseException {
-        Token nameTok = expect(Token.Kind.SYMBOL);
+    private IrExpr parseLet(SexprToken open) throws ParseException {
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
         IrSort sort = parseSort();
         IrExpr value = parseExpr();
         IrExpr body = parseExpr();
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrExpr.LetIn(nameTok.text(), sort, value, body, open.spanTo(close));
     }
 
-    private IrExpr parseCall(Token open) throws ParseException {
+    private IrExpr parseCall(SexprToken open) throws ParseException {
         // The head can be either a bare SYMBOL (looked up first in the local
         // scope, then in the dispatch table) or a compound form (an inline
         // lambda, a (call ...) that returns a closure, etc.). The two shapes
         // map to the IR's Call vs Apply variants respectively.
-        Token head = peek();
-        if (head.kind() == Token.Kind.SYMBOL) {
-            Token nameTok = consume();
+        SexprToken head = peek();
+        if (head.kind() == SexprToken.Kind.SYMBOL) {
+            SexprToken nameTok = consume();
             List<IrExpr> args = new ArrayList<>();
-            while (peek().kind() != Token.Kind.RPAREN) {
+            while (peek().kind() != SexprToken.Kind.RPAREN) {
                 args.add(parseExpr());
             }
-            Token close = expect(Token.Kind.RPAREN);
+            SexprToken close = expect(SexprToken.Kind.RPAREN);
             return new IrExpr.Call(nameTok.text(), args, open.spanTo(close));
         }
         IrExpr fn = parseExpr();
         List<IrExpr> args = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
             args.add(parseExpr());
         }
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrExpr.Apply(fn, args, open.spanTo(close));
     }
 
-    private IrExpr parseMatch(Token open) throws ParseException {
+    private IrExpr parseMatch(SexprToken open) throws ParseException {
         IrExpr scrutinee = parseExpr();
         List<IrExpr.MatchBranch> branches = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
-            expect(Token.Kind.LPAREN);
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
+            expect(SexprToken.Kind.LPAREN);
             IrSort pattern = parseSort();
             IrExpr result = parseExpr();
-            expect(Token.Kind.RPAREN);
+            expect(SexprToken.Kind.RPAREN);
             branches.add(new IrExpr.MatchBranch(pattern, result));
         }
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         if (branches.isEmpty()) {
             throw new ParseException(
                     "Match form must have at least one branch",
@@ -497,39 +497,39 @@ public final class Parser {
         return new IrExpr.LetIn(outerLetName, IrSort.named("_"), scrutinee, match, matchOrigin);
     }
 
-    private IrExpr parseRecord(Token open) throws ParseException {
+    private IrExpr parseRecord(SexprToken open) throws ParseException {
         // (record (field1 value1) (field2 value2) ...)
         java.util.Map<String, IrExpr> members = new java.util.LinkedHashMap<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
-            expect(Token.Kind.LPAREN);
-            Token nameTok = expect(Token.Kind.SYMBOL);
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
+            expect(SexprToken.Kind.LPAREN);
+            SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
             IrExpr value = parseExpr();
-            expect(Token.Kind.RPAREN);
+            expect(SexprToken.Kind.RPAREN);
             members.put(nameTok.text(), value);
         }
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrExpr.Record(members, open.spanTo(close));
     }
 
-    private IrExpr parseFieldAccess(Token open) throws ParseException {
+    private IrExpr parseFieldAccess(SexprToken open) throws ParseException {
         // (field base fieldName)
         IrExpr base = parseExpr();
-        Token nameTok = expect(Token.Kind.SYMBOL);
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken nameTok = expect(SexprToken.Kind.SYMBOL);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrExpr.FieldAccess(base, nameTok.text(), open.spanTo(close));
     }
 
-    private IrExpr parseLambda(Token open) throws ParseException {
+    private IrExpr parseLambda(SexprToken open) throws ParseException {
         // Same shape as a defn body: '(' params ')' sort body, sans name.
-        expect(Token.Kind.LPAREN);
+        expect(SexprToken.Kind.LPAREN);
         List<IrParam> params = new ArrayList<>();
-        while (peek().kind() != Token.Kind.RPAREN) {
+        while (peek().kind() != SexprToken.Kind.RPAREN) {
             params.add(parseParam());
         }
-        expect(Token.Kind.RPAREN);
+        expect(SexprToken.Kind.RPAREN);
         IrSort returnSort = parseSort();
         IrExpr body = parseExpr();
-        Token close = expect(Token.Kind.RPAREN);
+        SexprToken close = expect(SexprToken.Kind.RPAREN);
         return new IrExpr.Lambda(params, returnSort, body, open.spanTo(close));
     }
 }

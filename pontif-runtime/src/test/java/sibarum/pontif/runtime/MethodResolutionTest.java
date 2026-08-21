@@ -18,7 +18,7 @@ class MethodResolutionTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "method.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "method.ptf");
         PontifCompiler.CompileResult.Compiled c = assertInstanceOf(
                 PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
@@ -28,7 +28,7 @@ class MethodResolutionTest {
 
     private PontifCompiler.CompileResult.Failed reject(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "method.ptf"), "expected a compile rejection");
+                compiler.compile(src, "method.ptf"), "expected a compile rejection");
     }
 
     @Test

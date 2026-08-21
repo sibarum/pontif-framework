@@ -58,12 +58,12 @@ class LanguageDefTest {
     @Test
     void renamedLambdaKeyword_parsesWithNewSpelling() throws Exception {
         LanguageDef def = LanguageDef.defaults().withLambdaKeyword("fn");
-        IrExpr e = Parser.parseExpr("(call (fn ((x Int)) Int (+ x 1)) 5)", "t.ptf", def);
+        IrExpr e = SexprParser.parseExpr("(call (fn ((x Int)) Int (+ x 1)) 5)", "t.ptf", def);
         IrExpr.Apply app = (IrExpr.Apply) e;
         assertInstanceOf(IrExpr.Lambda.class, app.fn());
         assertEquals(1, app.args().size());
         // The old spelling "lambda" is now free; it parses as a Var ref.
-        IrExpr free = Parser.parseExpr("lambda", "t.ptf", def);
+        IrExpr free = SexprParser.parseExpr("lambda", "t.ptf", def);
         assertInstanceOf(IrExpr.Var.class, free);
     }
 
@@ -88,12 +88,12 @@ class LanguageDefTest {
                 () -> LanguageDef.defaults().withRenamedBinaryOp("nope", "x"));
     }
 
-    // --- Parser with a customized LanguageDef parses the new spelling ---
+    // --- SexprParser with a customized LanguageDef parses the new spelling ---
 
     @Test
     void customLetKeyword_parsesWithNewWord() throws Exception {
         LanguageDef def = LanguageDef.defaults().withLetKeyword("bind");
-        IrExpr e = Parser.parseExpr("(bind x Int 5 (+ x 3))", "t.ptf", def);
+        IrExpr e = SexprParser.parseExpr("(bind x Int 5 (+ x 3))", "t.ptf", def);
         IrExpr.LetIn let = (IrExpr.LetIn) e;
         assertEquals("x", let.name());
         assertEquals(5L, ((IrExpr.Lit) let.value()).value());
@@ -105,7 +105,7 @@ class LanguageDefTest {
         // "let" is no longer a form keyword under this config, so it falls through
         // to "Unknown form" inside parseCompoundExpr.
         ParseException ex = assertThrows(ParseException.class,
-                () -> Parser.parseExpr("(let x Int 5 x)", "t.ptf", def));
+                () -> SexprParser.parseExpr("(let x Int 5 x)", "t.ptf", def));
         assertTrue(ex.getMessage().contains("Unknown form")
                         && ex.getMessage().contains("let"),
                 "expected Unknown form 'let'; got: " + ex.getMessage());
@@ -115,7 +115,7 @@ class LanguageDefTest {
     void customLetKeyword_oldSpellingNowAvailableAsAVariable() throws Exception {
         // Because "let" is no longer reserved, it can be used as a free variable name.
         LanguageDef def = LanguageDef.defaults().withLetKeyword("bind");
-        IrExpr e = Parser.parseExpr("let", "t.ptf", def);
+        IrExpr e = SexprParser.parseExpr("let", "t.ptf", def);
         assertInstanceOf(IrExpr.Var.class, e);
         assertEquals("let", ((IrExpr.Var) e).name());
     }
@@ -123,7 +123,7 @@ class LanguageDefTest {
     @Test
     void renamedBinaryOp_parsesNewSpelling() throws Exception {
         LanguageDef def = LanguageDef.defaults().withRenamedBinaryOp("+", "plus");
-        IrExpr e = Parser.parseExpr("(plus 1 2)", "t.ptf", def);
+        IrExpr e = SexprParser.parseExpr("(plus 1 2)", "t.ptf", def);
         IrExpr.BinOp op = (IrExpr.BinOp) e;
         assertEquals(IrExpr.Op.ADD, op.op());
     }
@@ -134,9 +134,9 @@ class LanguageDefTest {
                 .withTrueLiteral("yes")
                 .withFalseLiteral("no")
                 .withSelfReference("it");
-        assertInstanceOf(IrExpr.Bool.class, Parser.parseExpr("yes", "t.ptf", def));
-        assertEquals(false, ((IrExpr.Bool) Parser.parseExpr("no", "t.ptf", def)).value());
-        assertInstanceOf(IrExpr.SelfRef.class, Parser.parseExpr("it", "t.ptf", def));
+        assertInstanceOf(IrExpr.Bool.class, SexprParser.parseExpr("yes", "t.ptf", def));
+        assertEquals(false, ((IrExpr.Bool) SexprParser.parseExpr("no", "t.ptf", def)).value());
+        assertInstanceOf(IrExpr.SelfRef.class, SexprParser.parseExpr("it", "t.ptf", def));
     }
 
     // --- End-to-end runtime behavior (rebranded factorial actually executes) lives in
@@ -151,7 +151,7 @@ class LanguageDefTest {
                 .withCallKeyword("invoke");
 
         String src = "(program demo ((fn id ((n Int)) Int n)) (invoke id 5))";
-        sibarum.pontif.ir.IrModule m = Parser.parseModule(src, "t.ptf", rebranded);
+        sibarum.pontif.ir.IrModule m = SexprParser.parseModule(src, "t.ptf", rebranded);
         assertEquals("demo", m.name());
         assertEquals(1, m.statements().size());
         assertInstanceOf(IrExpr.Call.class, m.main());
@@ -165,7 +165,7 @@ class LanguageDefTest {
         wordOps.put("times", IrExpr.Op.MUL);
         LanguageDef def = LanguageDef.defaults().withBinaryOps(wordOps);
 
-        IrExpr e = Parser.parseExpr("(plus (times 2 3) 1)", "t.ptf", def);
+        IrExpr e = SexprParser.parseExpr("(plus (times 2 3) 1)", "t.ptf", def);
         IrExpr.BinOp top = (IrExpr.BinOp) e;
         assertEquals(IrExpr.Op.ADD, top.op());
         assertEquals(IrExpr.Op.MUL, ((IrExpr.BinOp) top.left()).op());
@@ -175,7 +175,7 @@ class LanguageDefTest {
 
     @Test
     void defaultStaticEntryPoints_stillWork_withoutLanguageDefArg() throws Exception {
-        IrExpr e = Parser.parseExpr("(+ 1 2)", "t.ptf");
+        IrExpr e = SexprParser.parseExpr("(+ 1 2)", "t.ptf");
         assertInstanceOf(IrExpr.BinOp.class, e);
         assertEquals(IrExpr.Op.ADD, ((IrExpr.BinOp) e).op());
     }

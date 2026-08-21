@@ -25,14 +25,14 @@ class SpecOnlySynthesisTest {
 
         // Body synthesized → ackermann(0,4) evaluates to 5.
         PontifRunner.RunResult run = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "ack.ptf"),
+                new PontifCompiler().compile(src, "ack.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertTrue(!run.isError(), () -> "Expected synthesis to run; got " + run.text());
         assertEquals("5", run.text());
 
         // And the obligation r_0 == y_0+1 discharges against the synthesized
         // body (reflexive, after the return-sort param rename).
-        ReceiptGraphReport.Result rep = ReceiptGraphReport.fromAltSource(src, "ack.ptf");
+        ReceiptGraphReport.Result rep = ReceiptGraphReport.fromPontifSource(src, "ack.ptf");
         assertInstanceOf(ReceiptGraphReport.Result.Generated.class, rep);
         String text = ((ReceiptGraphReport.Result.Generated) rep).text();
         System.out.println(text);

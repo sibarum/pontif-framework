@@ -116,7 +116,7 @@
 #
 # ============================================================================
 
-module alt.syntax
+module demo.syntax
 
 requires math.{min, max, avg, floor}
 exports  @.{factorial, isEven, isOdd, sign}

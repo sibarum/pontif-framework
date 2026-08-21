@@ -9,7 +9,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,15 +18,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end coverage for the alt syntax frontend: source text → AltParser →
- * IrModule → IrCompiler → IrInterpreter. Verifies that the alt-syntax frontend
+ * End-to-end coverage for the Pontif surface syntax frontend: source text → PontifParser →
+ * IrModule → IrCompiler → IrInterpreter. Verifies that the Pontif-syntax frontend
  * produces the same IR as the S-expression frontend for the example programs
  * in {@code docs/language-reference.ptf}.
  */
-class AltParserIntegrationTest {
+class PontifParserIntegrationTest {
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "t.ptf");
+        IrModule module = PontifParser.parseModule(src, "t.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -35,8 +35,8 @@ class AltParserIntegrationTest {
 
     @Test
     void module_decl_aloneIsValid() throws Exception {
-        IrModule m = AltParser.parseModule("module alt.syntax", "t.ptf");
-        assertEquals("alt.syntax", m.name());
+        IrModule m = PontifParser.parseModule("module demo.syntax", "t.ptf");
+        assertEquals("demo.syntax", m.name());
         assertEquals(0, m.statements().size());
     }
 
@@ -58,7 +58,7 @@ class AltParserIntegrationTest {
 
                 42
                 """;
-        IrModule m = AltParser.parseModule(src, "t.ptf");
+        IrModule m = PontifParser.parseModule(src, "t.ptf");
         assertEquals("m", m.name());
         assertEquals(2, m.statements().size());
         assertTrue(m.statements().get(0) instanceof sibarum.pontif.ir.IrStmt.Requires);
@@ -182,7 +182,7 @@ class AltParserIntegrationTest {
         // `function alwaysFalse():[Bool:false]` — spec-only, but the return sort
         // sugars to `Refined(Bool, @==false)`, so the body is derived as `false`
         // and the decl becomes a normal FunctionDecl.
-        IrModule m = AltParser.parseModule(
+        IrModule m = PontifParser.parseModule(
                 "module m\nfunction alwaysFalse():[Bool:false];",
                 "t.ptf");
         sibarum.pontif.ir.IrStmt.FunctionDecl fd =
@@ -234,7 +234,7 @@ class AltParserIntegrationTest {
         // error now, rather than a silently-dropped NoOp that looked defined
         // but failed later with "Unknown function".
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("module m\nfunction f():[Int:@>=0];", "t.ptf"));
+                PontifParser.parseModule("module m\nfunction f():[Int:@>=0];", "t.ptf"));
         assertTrue(ex.getMessage().contains("has no body"),
                 () -> "Unexpected message: " + ex.getMessage());
     }
@@ -253,7 +253,7 @@ class AltParserIntegrationTest {
 
     @Test
     void struct_decl_creates_typeAlias() throws Exception {
-        IrModule m = AltParser.parseModule(
+        IrModule m = PontifParser.parseModule(
                 "module m\nstruct Point(x:Int, y:Int)",
                 "t.ptf");
         assertEquals(1, m.statements().size());
@@ -699,7 +699,7 @@ class AltParserIntegrationTest {
 
                 42
                 """;
-        IrModule m = AltParser.parseModule(src, "t.ptf");
+        IrModule m = PontifParser.parseModule(src, "t.ptf");
         // struct + function decls
         assertEquals(2, m.statements().size());
         sibarum.pontif.ir.IrStmt.FunctionDecl fd =
@@ -757,7 +757,7 @@ class AltParserIntegrationTest {
 
                 42
                 """;
-        IrModule m = AltParser.parseModule(src, "t.ptf");
+        IrModule m = PontifParser.parseModule(src, "t.ptf");
         // requires/exports lower to structured IrStmt.Requires/Exports — no NoOp
         // placeholders remain. (Spec-only functions/methods/lets now require the
         // `;` synthesis directive; non-synthesizable ones are hard errors — see
@@ -781,7 +781,7 @@ class AltParserIntegrationTest {
         //   ⇒ function Box.bump(self:Box, by:Int):Int -> this.value + by
         // (Note: the user writes `self` directly under the new design. The
         // old @-as-receiver substitution magic is gone.)
-        IrModule m = AltParser.parseModule(
+        IrModule m = PontifParser.parseModule(
                 "module m\nmethod Box.bump(by:Int):Int -> this.value + by",
                 "t.ptf");
         assertEquals(1, m.statements().size());
@@ -824,7 +824,7 @@ class AltParserIntegrationTest {
     void method_without_receiver_qualification_is_parse_error() {
         ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 ParseException.class,
-                () -> AltParser.parseModule("module m\nmethod foo(x:Int):Int -> x", "t.ptf"));
+                () -> PontifParser.parseModule("module m\nmethod foo(x:Int):Int -> x", "t.ptf"));
         assertTrue(ex.getMessage().contains("must be qualified"),
                 "Got: " + ex.getMessage());
     }
@@ -833,7 +833,7 @@ class AltParserIntegrationTest {
     void method_param_named_this_is_parse_error() {
         ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 ParseException.class,
-                () -> AltParser.parseModule(
+                () -> PontifParser.parseModule(
                         "module m\nmethod T.f(this:Int):Int -> this",
                         "t.ptf"));
         assertTrue(ex.getMessage().contains("'this'"),
@@ -847,7 +847,7 @@ class AltParserIntegrationTest {
         // function form (and unlike `let Point.origin:Point`, which stays NoOp
         // on the separate let path).
         ParseException ex = assertThrows(ParseException.class, () ->
-                AltParser.parseModule("module m\nmethod Point.add(p:Point):Point;", "t.ptf"));
+                PontifParser.parseModule("module m\nmethod Point.add(p:Point):Point;", "t.ptf"));
         assertTrue(ex.getMessage().contains("has no body"),
                 () -> "Unexpected message: " + ex.getMessage());
     }
@@ -882,7 +882,7 @@ class AltParserIntegrationTest {
     void function_qualified_name_mangles_to_dispatch_identifier() throws Exception {
         // function Point.manhattan(p:Int):Int -> p
         // produces IrStmt.FunctionDecl with name = "Point.manhattan"
-        IrModule m = AltParser.parseModule(
+        IrModule m = PontifParser.parseModule(
                 "module m\nfunction Point.manhattan(p:Int):Int -> p",
                 "t.ptf");
         sibarum.pontif.ir.IrStmt.FunctionDecl fd =

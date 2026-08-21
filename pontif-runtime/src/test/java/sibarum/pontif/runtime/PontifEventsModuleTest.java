@@ -19,7 +19,7 @@ class PontifEventsModuleTest {
 
     @Test
     void eventTraits_importable() {
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.events.{Event, EventConduit, EventStream}
                 main ( 0 )""", "e.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
@@ -31,7 +31,7 @@ class PontifEventsModuleTest {
         // `emit` is a statement keyword (slice 1b), not an imported function — an
         // event struct can be emitted. Routing to a conduit is a runtime concern
         // (this only compiles; the builtin StdOut/StdErr conduits run in EventEmitTest).
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.events.{Event}
                 struct Ping(n:Int)
                 assign trait Ping:Event{}
@@ -42,7 +42,7 @@ class PontifEventsModuleTest {
 
     @Test
     void struct_canAssignEventConduit() {
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.events.{EventConduit}
                 struct Counter(total:Int)
                 assign trait Counter:EventConduit[Int, Int, Int]{}

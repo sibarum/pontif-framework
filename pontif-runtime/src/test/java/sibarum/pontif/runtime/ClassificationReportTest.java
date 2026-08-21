@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ClassificationReportTest {
 
     private static ClassificationReport.Result.Generated gen(String src, String name) {
-        ClassificationReport.Result r = ClassificationReport.fromAltSource(src, name);
+        ClassificationReport.Result r = ClassificationReport.fromPontifSource(src, name);
         return assertInstanceOf(ClassificationReport.Result.Generated.class, r,
                 () -> "expected a generated classification; got " + r);
     }

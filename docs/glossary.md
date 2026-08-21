@@ -48,7 +48,7 @@ substitutes its own function's converged summary by reference.
 
 **backward language design** — Pontif's construction method
 (`docs/backward-language-design.md`): implement from the execution layer
-upward — Truffle AST → IR → reference language → alt syntax — each layer
+upward — Truffle AST → IR → reference language → Pontif syntax — each layer
 testable via the one below; the primary syntax is sugar over what already
 executes. **Generalized (2026-06-02):** the theory (information conservation,
 the algebraic kernel) is layer zero, beneath the execution AST. Design
@@ -417,7 +417,7 @@ name: `[Interval:@.lo <= @.hi]`), not anonymous data.
 **`Type`** — Pontif's kind name for the sort-of-sorts. A trait sort
 has kind `Type`. The syntactic form `Type{methodName:FunctionSort, ...}`
 constructs a trait contract; combined with `trait X{...}` it
-declares a named trait. *Reserved keyword in the alt parser.*
+declares a named trait. *Reserved keyword in the Pontif parser.*
 
 **spec-only function** — A function declaration with no body, where the
 return refinement pins a single value (e.g.,
@@ -426,7 +426,7 @@ return refinement's `@==EXPR` form. A return that *doesn't* pin a value
 (a plain base/struct sort like `:Vec2`, or a range like `[Int:@>0]`) has
 no body to synthesize and is a **hard error** at the declaration — real
 synthesis from such a spec is deferred program-search work. See TODO
-under "Alt syntax — surface forms that parse but produce `IrStmt.NoOp`."
+under "Pontif syntax — surface forms that parse but produce `IrStmt.NoOp`."
 
 **univocal** — Pontif's organizing principle (`docs/univocal-language-design.md`):
 one algebra *said in one sense of many subjects* — refinements, coercions,

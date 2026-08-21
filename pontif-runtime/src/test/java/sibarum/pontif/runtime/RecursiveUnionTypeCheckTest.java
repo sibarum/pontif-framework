@@ -63,7 +63,7 @@ class RecursiveUnionTypeCheckTest {
         // Pre-fix: an unterminating (~19-minute) hang at arity 12. Post-fix: tens of ms.
         // The budget is generous on purpose — it is a curve-bend detector, not a microbenchmark.
         assertTimeoutPreemptively(Duration.ofSeconds(15), () -> {
-            PontifCompiler.CompileResult r = compiler.compileAlt(sameOverArity(12), "recursive-union.ptf");
+            PontifCompiler.CompileResult r = compiler.compile(sameOverArity(12), "recursive-union.ptf");
             assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                     () -> "arity-12 recursive union should type-check; got " + r);
         });
@@ -92,7 +92,7 @@ class RecursiveUnionTypeCheckTest {
     }
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "recursive-union.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "recursive-union.ptf");
         PontifCompiler.CompileResult.Compiled compiled =
                 assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                         () -> "should compile; got " + r);

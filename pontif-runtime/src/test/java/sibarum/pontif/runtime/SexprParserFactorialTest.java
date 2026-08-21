@@ -9,25 +9,25 @@ import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.TruffleLowering;
 import sibarum.pontif.ir.TruffleProgram;
-import sibarum.pontif.parser.Parser;
+import sibarum.pontif.parser.SexprParser;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class ParserFactorialTest {
+class SexprParserFactorialTest {
 
     private static Simplifier simplifier() throws Exception {
         return new Simplifier(DefaultRules.production());
     }
 
     private static Object runInterpreter(String src) throws Exception {
-        IrModule module = Parser.parseModule(src, "factorial.ptf");
+        IrModule module = SexprParser.parseModule(src, "factorial.ptf");
         Simplifier simp = simplifier();
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);
     }
 
     private static Object runTruffle(String src) throws Exception {
-        IrModule module = Parser.parseModule(src, "factorial.ptf");
+        IrModule module = SexprParser.parseModule(src, "factorial.ptf");
         Simplifier simp = simplifier();
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);

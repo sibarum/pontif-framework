@@ -19,7 +19,7 @@ class TypeParameterFunctionTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tpf.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tpf.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -28,7 +28,7 @@ class TypeParameterFunctionTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "tpf.ptf"), "expected a compile rejection");
+                compiler.compile(src, "tpf.ptf"), "expected a compile rejection");
     }
 
     @Test

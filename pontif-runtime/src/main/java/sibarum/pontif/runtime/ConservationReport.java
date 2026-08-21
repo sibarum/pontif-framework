@@ -6,7 +6,7 @@ import sibarum.pontif.conservation.ConservationLedgerPrinter;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.module.ModuleResolver;
 
@@ -30,17 +30,17 @@ public final class ConservationReport {
         record Failed(String error) implements Result {}
     }
 
-    /** Drafts and renders the conservation report for alt-syntax source. Never throws. */
-    public static Result fromAltSource(String source, String sourceName) {
-        return fromAltSource(source, sourceName, null);
+    /** Drafts and renders the conservation report for Pontif-syntax source. Never throws. */
+    public static Result fromPontifSource(String source, String sourceName) {
+        return fromPontifSource(source, sourceName, null);
     }
 
-    /** As {@link #fromAltSource(String, String)} but resolving sibling
+    /** As {@link #fromPontifSource(String, String)} but resolving sibling
      *  {@code requires} from {@code resolveDir} — mirrors the Run path. */
-    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
+    public static Result fromPontifSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule parsed;
         try {
-            parsed = AltParser.parseModule(source, sourceName);
+            parsed = PontifParser.parseModule(source, sourceName);
         } catch (ParseException | RuntimeException e) {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
@@ -65,7 +65,7 @@ public final class ConservationReport {
      */
     public static Path writeReport(Path dir, String baseName, String source, String sourceName)
             throws IOException {
-        String body = switch (fromAltSource(source, sourceName)) {
+        String body = switch (fromPontifSource(source, sourceName)) {
             case Result.Generated g -> g.text();
             case Result.Failed f -> "# Conservation ledger: " + sourceName + "\n\n"
                     + f.error() + "\n";

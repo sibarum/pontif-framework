@@ -521,7 +521,7 @@ boundary, conceptually identical, swapped for the promotion path later.
 
 **Slice (figurative) — LANDED.** `Stream` is a recognized parametric type
 (SortChecker `BUILTIN_PARAMETRIC_TYPES`); a `let x:Stream[T] = (…)` claim where the
-value is a tuple autoboxes (AltParser `requireStreamElements`: base-level element
+value is a tuple autoboxes (PontifParser `requireStreamElements`: base-level element
 gate, plus the lossless Int→Decimal embedding), one-way only (no `Stream[T]` →
 tuple). The runtime value stays the native positional record; the claim is the
 parse-time gate (no separate runtime `Stream` check). `iter` accepts a `Stream[T]`
@@ -585,7 +585,7 @@ single case per site).
 - **Drafter / ConservationDrafter / ConservationProofs** **[REVISIT]** — throw
   "Iterate: not yet"; the return/conservation gates don't reason about the
   construct yet (§5 work item).
-- **Parser (AltParser)** — **map+filter slice LANDED** (`iter(src).{value, accept,
+- **Parser (PontifParser)** — **map+filter slice LANDED** (`iter(src).{value, accept,
   reject} { match value … }` → the node; `accept(e)`/`reject(e)`/bool/bare-value
   dispositions lower to writes; `IterationParseTest`). **[REVISIT]**: `index`,
   fold (`current`/`next`), group-by (`put`); the completed-iterator result

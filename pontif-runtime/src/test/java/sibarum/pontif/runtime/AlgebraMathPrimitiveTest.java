@@ -20,7 +20,7 @@ class AlgebraMathPrimitiveTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "mathprim.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "mathprim.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test
@@ -106,7 +106,7 @@ class AlgebraMathPrimitiveTest {
     void nonAlgebraicNativeCall_stillRejected() {
         // A pontif.math function NOT in the primitive registry is still rejected at the claim —
         // the whitelist is closed, not "any native is fine".
-        var r = compiler.compileAlt("""
+        var r = compiler.compile("""
                 requires pontif.math.{floor}
                 function f(x:Decimal):Decimal -> floor(x)
                 assign proof f:Algebraic

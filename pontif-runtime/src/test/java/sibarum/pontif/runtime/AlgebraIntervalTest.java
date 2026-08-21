@@ -19,7 +19,7 @@ class AlgebraIntervalTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "interval.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "interval.ptf"), Engine.INTERPRETER).text();
     }
 
     /** Classify the three outcomes — used by the domain/pole tests. */

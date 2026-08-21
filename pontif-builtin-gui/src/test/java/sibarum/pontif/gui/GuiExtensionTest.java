@@ -32,7 +32,7 @@ class GuiExtensionTest {
         Extensions.install(new GuiExtension());
 
         // Capitalized, directly-constructed elements + a clickable widget subtype.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{Label, Button, Column, window, Clickable}
                 requires pontif.events.{StdOut}
                 struct PushButton:[Button](id:String, text:String)
@@ -62,7 +62,7 @@ class GuiExtensionTest {
         // widgets, the conduit, the SetText command); the actual click→increment repaint is verified
         // manually (needs GLFW): exec:exec -Dptf=examples/reactive-counter.ptf. Kept in sync with
         // examples/reactive-counter.ptf.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{Label, Button, Column, window, GuiEvent, Clicked, SetText}
                 struct Model(count:Int)
                 conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
@@ -90,7 +90,7 @@ class GuiExtensionTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-            var compiled = new PontifCompiler().compileAlt("""
+            var compiled = new PontifCompiler().compile("""
                     requires pontif.gui.{GuiEvent, Clicked}
                     requires pontif.events.{StdOut}
                     struct Model(count:Int)
@@ -123,7 +123,7 @@ class GuiExtensionTest {
         // compiles + links (the TextField/TextChanged shapes, the two-field notification, the
         // conduit); the actual type→echo repaint is verified manually (needs GLFW):
         // exec:exec -Dptf=examples/reactive-textfield.ptf. Kept in sync with that example.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{Label, TextField, Column, window, GuiEvent, TextChanged, SetText}
                 struct Model(text:String)
                 conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
@@ -151,7 +151,7 @@ class GuiExtensionTest {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-            var compiled = new PontifCompiler().compileAlt("""
+            var compiled = new PontifCompiler().compile("""
                     requires pontif.gui.{GuiEvent, TextChanged}
                     requires pontif.events.{StdOut}
                     struct Model(text:String)
@@ -183,7 +183,7 @@ class GuiExtensionTest {
         // in place, never rebuilt). This only compiles + links (the ExprPlot/SetPlot shapes, the
         // conduit, the SetPlot sink); the live type→plot reframe is verified manually (needs GLFW):
         // exec:exec -Dptf=examples/reactive-plotter.ptf. Kept in sync with that example.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{TextField, ExprPlot, window, GuiEvent, TextChanged, SetPlot}
                 struct Model(expr:String)
                 conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4") -> (
@@ -208,7 +208,7 @@ class GuiExtensionTest {
         // expressions, which the bridge composites into one plot. Only compiles + links (the multi
         // SetPlot payload, the per-id fold); the live multi-curve plot is verified manually (needs
         // GLFW): exec:exec -Dptf=examples/calculator-multi.ptf. Kept in sync with that example.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{TextField, ExprPlot, Column, window, GuiEvent, TextChanged, SetPlot}
                 struct Model(f0:String, f1:String, f2:String)
                 conduit app(e:GuiEvent, s:Model):Model from Model("x^2 - 4", "sin(x)", "1 / x") -> (
@@ -240,7 +240,7 @@ class GuiExtensionTest {
     void reactiveStatusCommand_typeChecks() {
         Extensions.install(new GuiExtension());
         // The reactive Status command (docs/status.md) links + folds via the GuiEvent conduit.
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{GuiEvent, Clicked, Status}
                 struct Model(n:Int)
                 conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
@@ -259,7 +259,7 @@ class GuiExtensionTest {
         // A 2D line chart over two number aggregates (the dasum-vis plotting slice). This only
         // compiles + links; the chart render itself is verified manually (needs GLFW):
         // mvn -pl pontif-builtin-gui -am exec:exec -Dptf=examples/line-plot.ptf
-        CompileResult result = new PontifCompiler().compileAlt("""
+        CompileResult result = new PontifCompiler().compile("""
                 requires pontif.gui.{LinePlot, window}
                 main (
                   let xs = {0.0, 1.0, 2.0, 3.0}

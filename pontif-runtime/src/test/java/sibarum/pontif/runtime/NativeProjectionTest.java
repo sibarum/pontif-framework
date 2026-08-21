@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.conservation.ConservationDrafter;
 import sibarum.pontif.conservation.ConservationGraph;
 import sibarum.pontif.conservation.ConservationQueries;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
@@ -29,7 +29,7 @@ class NativeProjectionTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src, Engine engine) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+        return runner.run(compiler.compile(src, "t.ptf"), engine);
     }
 
     private void assertBothEngines(String src, String expected) {
@@ -76,7 +76,7 @@ class NativeProjectionTest {
 
     @Test
     void unknownField_isCompileError() {
-        CompileResult result = compiler.compileAlt(
+        CompileResult result = compiler.compile(
                 "function f(d:Decimal):Int -> d.scael\nf(2.5)", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected the anatomy typo to be caught");
@@ -169,7 +169,7 @@ class NativeProjectionTest {
         // STANCE FLAGGED FOR RED-PEN: anatomy projection drafts as a DEGRADED
         // ARITHMETIC computation; (unscaled, scale) jointly recoverable is a
         // later cross-node fact.
-        var module = AltParser.parseModule("""
+        var module = PontifParser.parseModule("""
                 function f(d:Decimal):Int -> d.scale
                 f(2.50)
                 """, "t.ptf");

@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrInterpreter;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import java.math.BigDecimal;
@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DecimalAltTest {
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "t.ptf");
+        IrModule module = PontifParser.parseModule(src, "t.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);

@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Recursive-descent parser for the alt syntax — see {@code docs/language-reference.ptf}.
+ * Recursive-descent parser for the Pontif surface syntax — see {@code docs/language-reference.ptf}.
  *
  * <p>Load-bearing principles the parser enforces:
  * <ol>
@@ -59,7 +59,7 @@ import java.util.Set;
  * <p>Built in stages (vertical slices). The current slice's scope is documented
  * at each method.
  */
-public final class AltParser {
+public final class PontifParser {
 
     /**
      * Reserved sentinel name for anonymous positional aggregates (tuples) —
@@ -120,7 +120,7 @@ public final class AltParser {
     }
 
 
-    private final List<AltToken> tokens;
+    private final List<PontifToken> tokens;
     private int pos;
     /** Counter for synthesizing fresh names — used by the structural-destructure desugar. */
     private int syntheticCounter = 0;
@@ -272,33 +272,33 @@ public final class AltParser {
     private final ParseTimeInference inference =
             new ParseTimeInference(types, currentScope, declaredTopLevelLets, declaredFunctionReturns);
 
-    public AltParser(List<AltToken> tokens) {
+    public PontifParser(List<PontifToken> tokens) {
         this.tokens = List.copyOf(tokens);
     }
 
     public static IrModule parseModule(String src, String source) throws ParseException {
-        AltParser p = new AltParser(new AltLexer(src, source).tokenize());
+        PontifParser p = new PontifParser(new PontifLexer(src, source).tokenize());
         return p.parseModule();
     }
 
-    // --- Token cursor ---
+    // --- SexprToken cursor ---
 
-    private AltToken peek() {
+    private PontifToken peek() {
         return tokens.get(pos);
     }
 
-    private AltToken peek(int offset) {
+    private PontifToken peek(int offset) {
         int idx = pos + offset;
         if (idx >= tokens.size()) return tokens.get(tokens.size() - 1);
         return tokens.get(idx);
     }
 
-    private AltToken consume() {
+    private PontifToken consume() {
         return tokens.get(pos++);
     }
 
-    private AltToken expect(AltToken.Kind kind) throws ParseException {
-        AltToken t = peek();
+    private PontifToken expect(PontifToken.Kind kind) throws ParseException {
+        PontifToken t = peek();
         if (t.kind() != kind) {
             throw new ParseException(
                     "Expected " + kind + " but got " + t.kind() + " ('" + t.text() + "')",
@@ -307,8 +307,8 @@ public final class AltParser {
         return consume();
     }
 
-    private AltToken expectKeyword(String text) throws ParseException {
-        AltToken t = expect(AltToken.Kind.IDENT);
+    private PontifToken expectKeyword(String text) throws ParseException {
+        PontifToken t = expect(PontifToken.Kind.IDENT);
         if (!t.text().equals(text)) {
             throw new ParseException(
                     "Expected keyword '" + text + "' but got '" + t.text() + "'",
@@ -318,8 +318,8 @@ public final class AltParser {
     }
 
     private boolean checkKeyword(String text) {
-        AltToken t = peek();
-        return t.kind() == AltToken.Kind.IDENT && t.text().equals(text);
+        PontifToken t = peek();
+        return t.kind() == PontifToken.Kind.IDENT && t.text().equals(text);
     }
 
     /**
@@ -346,10 +346,10 @@ public final class AltParser {
      *              {@code RPAREN} for struct fields)
      * @return {@code true} to parse another member, {@code false} when the block is over
      */
-    private boolean atMemberBoundary(boolean first, AltToken.Kind close) throws ParseException {
+    private boolean atMemberBoundary(boolean first, PontifToken.Kind close) throws ParseException {
         if (peek().kind() == close) return false;
         if (first) return true;
-        if (peek().kind() == AltToken.Kind.SEMICOLON || peek().kind() == AltToken.Kind.COMMA) {
+        if (peek().kind() == PontifToken.Kind.SEMICOLON || peek().kind() == PontifToken.Kind.COMMA) {
             consume();                                   // explicit terminator (`,` = transitional alias)
             return peek().kind() != close;               // a trailing terminator before the close is fine
         }
@@ -372,7 +372,7 @@ public final class AltParser {
             moduleName = parseDottedName();
         }
         List<IrStmt> stmts = new ArrayList<>();
-        while (peek().kind() != AltToken.Kind.EOF
+        while (peek().kind() != PontifToken.Kind.EOF
                 && !checkKeyword("main")
                 && !isMainExpressionStart()) {
             stmts.add(parseTopLevelDecl());
@@ -393,12 +393,12 @@ public final class AltParser {
         IrExpr main;
         if (hadMain) {
             main = parseMainStatement();
-        } else if (peek().kind() != AltToken.Kind.EOF) {
+        } else if (peek().kind() != PontifToken.Kind.EOF) {
             main = parseExpr();  // legacy trailing-expression main (migration window)
         } else {
             main = new IrExpr.Lit(0, Origin.NONE);
         }
-        if (peek().kind() != AltToken.Kind.EOF) {
+        if (peek().kind() != PontifToken.Kind.EOF) {
             throw new ParseException(
                     "Trailing tokens after " + (hadMain ? "main statement" : "main expression")
                             + "; got " + peek().kind() + " '" + peek().text() + "'",
@@ -432,7 +432,7 @@ public final class AltParser {
      * the body. {@code emit} is a reserved keyword, so it never collides with a name.
      */
     private IrExpr parseEmitStatement() throws ParseException {
-        AltToken start = expectKeyword("emit");
+        PontifToken start = expectKeyword("emit");
         IrExpr event = parseExpr();
         IrExpr body = parseExpr();
         return new IrExpr.Emit(event, body, start.origin());
@@ -447,10 +447,10 @@ public final class AltParser {
      * before the continuation via a discard {@code let}. Precondition: {@link #inConductorHandler}.
      */
     private IrExpr parseSelfAssignment() throws ParseException {
-        AltToken self = expect(AltToken.Kind.IDENT);          // `this`
-        expect(AltToken.Kind.DOT);
-        AltToken field = expect(AltToken.Kind.IDENT);
-        expect(AltToken.Kind.EQUALS);
+        PontifToken self = expect(PontifToken.Kind.IDENT);          // `this`
+        expect(PontifToken.Kind.DOT);
+        PontifToken field = expect(PontifToken.Kind.IDENT);
+        expect(PontifToken.Kind.EQUALS);
         IrExpr value = parseExpr();
         IrExpr cont = parseExpr();
         IrExpr write = new IrExpr.Call("#assign-self#",
@@ -513,13 +513,13 @@ public final class AltParser {
     private boolean typeApplicationAhead() {
         int depth = 0;
         for (int i = 0; ; i++) {
-            AltToken.Kind k = peek(i).kind();
-            if (k == AltToken.Kind.EOF) return false;
-            if (k == AltToken.Kind.LBRACKET) {
+            PontifToken.Kind k = peek(i).kind();
+            if (k == PontifToken.Kind.EOF) return false;
+            if (k == PontifToken.Kind.LBRACKET) {
                 depth++;
-            } else if (k == AltToken.Kind.RBRACKET) {
+            } else if (k == PontifToken.Kind.RBRACKET) {
                 depth--;
-                if (depth == 0) return peek(i + 1).kind() == AltToken.Kind.LPAREN;
+                if (depth == 0) return peek(i + 1).kind() == PontifToken.Kind.LPAREN;
             }
         }
     }
@@ -532,9 +532,9 @@ public final class AltParser {
      * by-name form.
      */
     private boolean byNameAggregateAhead() {
-        return peek().kind() == AltToken.Kind.LBRACE
-                && peek(1).kind() == AltToken.Kind.IDENT
-                && peek(2).kind() == AltToken.Kind.EQUALS;
+        return peek().kind() == PontifToken.Kind.LBRACE
+                && peek(1).kind() == PontifToken.Kind.IDENT
+                && peek(2).kind() == PontifToken.Kind.EQUALS;
     }
 
     /**
@@ -646,17 +646,17 @@ public final class AltParser {
 
     /** Heuristic: a top-level construct starts with a known decl keyword. */
     private boolean isMainExpressionStart() {
-        AltToken t = peek();
-        if (t.kind() != AltToken.Kind.IDENT) return true;
+        PontifToken t = peek();
+        if (t.kind() != PontifToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
                 "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
                 "action", "conduit", "conductor", "spawn").contains(t.text());
     }
 
     private String parseDottedName() throws ParseException {
-        AltToken first = expect(AltToken.Kind.IDENT);
+        PontifToken first = expect(PontifToken.Kind.IDENT);
         StringBuilder sb = new StringBuilder(first.text());
-        while (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
+        while (peek().kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.IDENT) {
             consume();  // DOT
             sb.append('.').append(consume().text());
         }
@@ -677,8 +677,8 @@ public final class AltParser {
      * </ul>
      */
     private String parseDeclarationName() throws ParseException {
-        if (peek().kind() == AltToken.Kind.OP) {
-            AltToken opTok = consume();
+        if (peek().kind() == PontifToken.Kind.OP) {
+            PontifToken opTok = consume();
             if (!OVERLOADABLE_OPS.contains(opTok.text())) {
                 throw new ParseException(
                         "'" + opTok.text() + "' is not an overloadable operator "
@@ -688,17 +688,17 @@ public final class AltParser {
             return opTok.text();
         }
         String name = parseDottedName();
-        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.OP) {
+        if (peek().kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.OP) {
             consume();  // DOT
-            AltToken opTok = consume();
+            PontifToken opTok = consume();
             return name + "." + opTok.text();
         }
         return name;
     }
 
     private IrStmt parseTopLevelDecl() throws ParseException {
-        AltToken head = peek();
-        if (head.kind() != AltToken.Kind.IDENT) {
+        PontifToken head = peek();
+        if (head.kind() != PontifToken.Kind.IDENT) {
             throw new ParseException(
                     "Expected a top-level declaration (function / struct / let / requires / "
                             + "exports / method); got " + head.kind() + " '" + head.text() + "'",
@@ -734,8 +734,8 @@ public final class AltParser {
     // name resolver consume them. Inert when a single file compiles on its own.
 
     private IrStmt parseRequires() throws ParseException {
-        AltToken start = expectKeyword("requires");
-        if (peek().kind() == AltToken.Kind.DOLLAR) {
+        PontifToken start = expectKeyword("requires");
+        if (peek().kind() == PontifToken.Kind.DOLLAR) {
             // Data require: `requires $a.b.c` imports the terminal VALUE of the
             // data file `$a.b.c.ptf` (a bare object literal) under the local
             // name of its last FQN segment. There is no `.{…}` entry list — the
@@ -743,16 +743,16 @@ public final class AltParser {
             // so ModuleResolver resolves it by literal filename rather than the
             // module-header sibling scan (a data file has no `module` header).
             consume();                                       // DOLLAR
-            AltToken firstName = expect(AltToken.Kind.IDENT);
+            PontifToken firstName = expect(PontifToken.Kind.IDENT);
             StringBuilder fqn = new StringBuilder(firstName.text());
             String lastSeg = firstName.text();
-            while (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
+            while (peek().kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.IDENT) {
                 consume();                                   // DOT
-                AltToken seg = consume();                    // IDENT
+                PontifToken seg = consume();                    // IDENT
                 fqn.append('.').append(seg.text());
                 lastSeg = seg.text();
             }
-            AltToken end = tokens.get(pos - 1);
+            PontifToken end = tokens.get(pos - 1);
             return new IrStmt.Requires(
                     "$" + fqn,
                     List.of(new IrStmt.RequireEntry(lastSeg, lastSeg)),
@@ -760,14 +760,14 @@ public final class AltParser {
         }
         String target = parseDottedName();
         List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
-        AltToken last = tokens.get(pos - 1);
+        PontifToken last = tokens.get(pos - 1);
         return new IrStmt.Requires(target, entries, start.spanTo(last));
     }
 
     private IrStmt parseExports() throws ParseException {
-        AltToken start = expectKeyword("exports");
+        PontifToken start = expectKeyword("exports");
         boolean self = false;
-        if (peek().kind() == AltToken.Kind.AT) {
+        if (peek().kind() == PontifToken.Kind.AT) {
             consume();
             self = true;
         } else {
@@ -789,7 +789,7 @@ public final class AltParser {
             }
             names.add(entry.localName());
         }
-        AltToken last = tokens.get(pos - 1);
+        PontifToken last = tokens.get(pos - 1);
         return new IrStmt.Exports(names, self, start.spanTo(last));
     }
 
@@ -801,24 +801,24 @@ public final class AltParser {
      * match arms and function bodies).
      */
     private List<IrStmt.RequireEntry> parseDotBraceEntryList() throws ParseException {
-        expect(AltToken.Kind.DOT);
-        expect(AltToken.Kind.LBRACE);
+        expect(PontifToken.Kind.DOT);
+        expect(PontifToken.Kind.LBRACE);
         List<IrStmt.RequireEntry> entries = new ArrayList<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
             if (!first) {
-                expect(AltToken.Kind.COMMA);
+                expect(PontifToken.Kind.COMMA);
             }
-            String remote = expect(AltToken.Kind.IDENT).text();
+            String remote = expect(PontifToken.Kind.IDENT).text();
             String local = remote;
-            if (peek().kind() == AltToken.Kind.ARROW) {
+            if (peek().kind() == PontifToken.Kind.ARROW) {
                 consume();
-                local = expect(AltToken.Kind.IDENT).text();
+                local = expect(PontifToken.Kind.IDENT).text();
             }
             entries.add(new IrStmt.RequireEntry(remote, local));
             first = false;
         }
-        expect(AltToken.Kind.RBRACE);
+        expect(PontifToken.Kind.RBRACE);
         return entries;
     }
 
@@ -833,7 +833,7 @@ public final class AltParser {
      * source's sort is statically known. Positional keys ({@code _0 …}) are
      * rejected: tuples are destructure-only.
      */
-    private IrExpr parseDictDecompositionLetExpr(AltToken start, AltToken sourceTok)
+    private IrExpr parseDictDecompositionLetExpr(PontifToken start, PontifToken sourceTok)
             throws ParseException {
         List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
         if (entries.isEmpty()) {
@@ -902,7 +902,7 @@ public final class AltParser {
      * needed — a by-name projection is honest-partial, and key existence is the
      * only obligation, checked statically when the source's sort is known).
      */
-    private IrStmt parseDictDecompositionLetTop(AltToken start, String source)
+    private IrStmt parseDictDecompositionLetTop(PontifToken start, String source)
             throws ParseException {
         List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
         if (entries.isEmpty()) {
@@ -953,7 +953,7 @@ public final class AltParser {
      * collide.
      */
     private void validateDecompositionEntries(
-            List<IrStmt.RequireEntry> entries, IrSort sourceSort, String source, AltToken start)
+            List<IrStmt.RequireEntry> entries, IrSort sourceSort, String source, PontifToken start)
             throws ParseException {
         boolean tupleSource = sourceSort instanceof IrSort.Structural ss
                 && TUPLE_SENTINEL.equals(ss.name());
@@ -995,17 +995,17 @@ public final class AltParser {
     //     hard error at the declaration — see specOnlyWithoutSynthesis.
 
     private IrStmt parseFunction() throws ParseException {
-        AltToken start = expectKeyword("function");
+        PontifToken start = expectKeyword("function");
         String name = parseDeclarationName();
         // Optional `[type E, …]` type-parameter slot (docs/type-parameters.md
         // §2.1), after the name and before the value params. A bare `[` here is
         // the slot; value params follow in `(…)`.
-        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+        Map<String, IrSort> typeParams = peek().kind() == PontifToken.Kind.LBRACKET
                 ? parseTypeParamSlot()
                 : new LinkedHashMap<>();
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         List<ParamConversion> convs = drainParamConversions();
         // Inline destructuring (docs/type-parameters.md §2.4): a bare unknown name
@@ -1023,11 +1023,11 @@ public final class AltParser {
                             + params.size(),
                     start.origin());
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         ReturnClause rc = parseReturnClause();
         IrSort returnSort = rc.sort();
 
-        if (peek().kind() == AltToken.Kind.ARROW) {
+        if (peek().kind() == PontifToken.Kind.ARROW) {
             consume();
             // Push function params into scope so match arms can infer contextual
             // base from `match paramName`. Body parses inside this scope.
@@ -1057,7 +1057,7 @@ public final class AltParser {
         // No body: a function terminated without a `-> body` IS a synthesis request
         // when its return sort pins a value — synthesis is a consequence of the
         // definition, not a separate directive. `;` is now just an optional terminator.
-        if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+        if (peek().kind() == PontifToken.Kind.SEMICOLON) consume();
         IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
         if (derived != null) {
             // The synthesized body references destructured params (S4) and
@@ -1091,11 +1091,11 @@ public final class AltParser {
      * {@code _} — the reaction body is unconstrained.
      */
     private IrStmt parseAction() throws ParseException {
-        AltToken start = expectKeyword("action");
+        PontifToken start = expectKeyword("action");
         String name = parseDeclarationName();
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         List<ParamConversion> convs = drainParamConversions();
         if (params.size() != 1) {
@@ -1108,7 +1108,7 @@ public final class AltParser {
             throw new ParseException(
                     "an action's event parameter cannot be a conversion", start.origin());
         }
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
         // Scope the event parameter into the body, mirroring parseFunction.
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
@@ -1160,11 +1160,11 @@ public final class AltParser {
      * CompiledConduit keyed by the event type's bare name.
      */
     private IrStmt parseConduit() throws ParseException {
-        AltToken start = expectKeyword("conduit");
+        PontifToken start = expectKeyword("conduit");
         String name = parseDeclarationName();
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         List<ParamConversion> convs = drainParamConversions();
         if (params.size() != 2) {
@@ -1177,12 +1177,12 @@ public final class AltParser {
             throw new ParseException(
                     "a conduit's parameters cannot be conversions", start.origin());
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         IrSort returnSort = parseSort();
         // `from` is a CONTEXTUAL keyword (an IDENT whose text is "from"), not a globally
         // reserved word — so it never collides with a user identifier used elsewhere.
-        AltToken fromTok = peek();
-        if (fromTok.kind() != AltToken.Kind.IDENT || !fromTok.text().equals("from")) {
+        PontifToken fromTok = peek();
+        if (fromTok.kind() != PontifToken.Kind.IDENT || !fromTok.text().equals("from")) {
             throw new ParseException(
                     "a conduit needs a seed — `:{R, S} from INIT -> BODY`; expected `from`, got "
                             + fromTok.kind() + " '" + fromTok.text() + "'",
@@ -1195,7 +1195,7 @@ public final class AltParser {
         // A constructor-call / struct-literal seed (the common case) parses cleanly; a truly
         // complex seed can be parenthesised.
         IrExpr init = parseExpr();
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
 
         boolean explicit = returnSort instanceof IrSort.Structural st
                 && TUPLE_SENTINEL.equals(st.name())
@@ -1259,20 +1259,20 @@ public final class AltParser {
      * ({@code cast [Int:@>0]:(n:Int) -> …}).
      */
     private IrStmt parseCoercion() throws ParseException {
-        AltToken start = expectKeyword("cast");
+        PontifToken start = expectKeyword("cast");
         IrSort targetSort = parseSort();
-        expect(AltToken.Kind.COLON);
-        expect(AltToken.Kind.LPAREN);
-        AltToken paramName = expect(AltToken.Kind.IDENT);
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
+        expect(PontifToken.Kind.LPAREN);
+        PontifToken paramName = expect(PontifToken.Kind.IDENT);
+        expect(PontifToken.Kind.COLON);
         IrSort sourceSort = parseSort();
-        if (peek().kind() == AltToken.Kind.COMMA) {
+        if (peek().kind() == PontifToken.Kind.COMMA) {
             throw new ParseException(
                     "a coercion takes exactly one source binder — `cast Target:(name:Source) -> …`",
                     peek().origin());
         }
-        expect(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.ARROW);
         // The source binder scopes the body — a closed clause, like a fragment.
         IrExpr body = parseClauseBody(
                 List.of(new IrParam(paramName.text(), sourceSort)), null, true);
@@ -1364,7 +1364,7 @@ public final class AltParser {
      * and receivers are named explicitly to keep that meaning unambiguous.
      */
     private IrStmt parseMethod() throws ParseException {
-        AltToken start = expectKeyword("method");
+        PontifToken start = expectKeyword("method");
         String name = parseDeclarationName();
         int dotIdx = name.indexOf('.');
         if (dotIdx < 0) {
@@ -1388,12 +1388,12 @@ public final class AltParser {
                     start.origin());
         }
 
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         List<ParamConversion> convs = drainParamConversions();
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         ReturnClause rc = parseReturnClause();
         IrSort returnSort = rc.sort();
 
@@ -1412,10 +1412,10 @@ public final class AltParser {
         desugaredParams.add(new IrParam("this", receiverSort));
         desugaredParams.addAll(params);
 
-        if (peek().kind() != AltToken.Kind.ARROW) {
+        if (peek().kind() != PontifToken.Kind.ARROW) {
             // Spec-only: a bodyless method synthesizes from its return sort when that
             // sort pins a value. `;` is an optional terminator, no longer a directive.
-            if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+            if (peek().kind() == PontifToken.Kind.SEMICOLON) consume();
             IrExpr derived = tryDeriveBodyFromReturnSort(returnSort);
             if (derived != null) {
                 IrExpr body = wrapParamConversions(wrapParamDestructures(derived, destrs), convs);
@@ -1524,13 +1524,13 @@ public final class AltParser {
         return out;
     }
 
-    private List<IrParam> parseParamList(AltToken.Kind terminator) throws ParseException {
+    private List<IrParam> parseParamList(PontifToken.Kind terminator) throws ParseException {
         List<IrParam> params = new ArrayList<>();
         boolean first = true;
         while (peek().kind() != terminator) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken name = expect(AltToken.Kind.IDENT);
-            expect(AltToken.Kind.COLON);
+            if (!first) expect(PontifToken.Kind.COMMA);
+            PontifToken name = expect(PontifToken.Kind.IDENT);
+            expect(PontifToken.Kind.COLON);
             IrSort sort;
             // Param-side conversion clause: `bar:[A -> B]` (or `[A.{a,b} -> B]`) — the
             // caller passes the DOMAIN A (the contract sort, what dispatch keys on);
@@ -1554,14 +1554,14 @@ public final class AltParser {
             }
             // Param-sort `.{}` destructure: `point:[Point.{x, y}]` — the param
             // keeps base sort [Point]; x, y bind to point.x, point.y in the body.
-            if (peek().kind() == AltToken.Kind.LBRACKET
-                    && peek(1).kind() == AltToken.Kind.IDENT
-                    && peek(2).kind() == AltToken.Kind.DOT
-                    && peek(3).kind() == AltToken.Kind.LBRACE) {
+            if (peek().kind() == PontifToken.Kind.LBRACKET
+                    && peek(1).kind() == PontifToken.Kind.IDENT
+                    && peek(2).kind() == PontifToken.Kind.DOT
+                    && peek(3).kind() == PontifToken.Kind.LBRACE) {
                 consume();  // [
-                AltToken baseTok = expect(AltToken.Kind.IDENT);
+                PontifToken baseTok = expect(PontifToken.Kind.IDENT);
                 List<IrStmt.RequireEntry> entries = parseDotBraceEntryList();
-                expect(AltToken.Kind.RBRACKET);
+                expect(PontifToken.Kind.RBRACKET);
                 sort = new IrSort.Named(baseTok.text(), baseTok.origin());
                 IrSort.Structural baseStruct = declaredStructShape(baseTok.text());
                 for (IrStmt.RequireEntry e : entries) {
@@ -1641,7 +1641,7 @@ public final class AltParser {
      * {@link #isPureBinderParamPattern}.
      */
     private IrSort wirePositionalParamDestructure(
-            AltToken paramName, IrSort.Structural sp, IrSort.Structural decl) {
+            PontifToken paramName, IrSort.Structural sp, IrSort.Structural decl) {
         Map<String, String> renames = destructureRenames.getOrDefault(sp, Map.of());
         for (Map.Entry<String, IrSort> m : sp.members().entrySet()) {
             String binder = renames.getOrDefault(m.getKey(), m.getKey());
@@ -1837,16 +1837,16 @@ public final class AltParser {
             case IrExpr.DispatchRef d -> false;
             case IrExpr.BinOp op -> containsSelfRef(op.left()) || containsSelfRef(op.right());
             case IrExpr.LetIn l -> containsSelfRef(l.value()) || containsSelfRef(l.body());
-            case IrExpr.Call c -> c.args().stream().anyMatch(AltParser::containsSelfRef);
+            case IrExpr.Call c -> c.args().stream().anyMatch(PontifParser::containsSelfRef);
             case IrExpr.Lambda lam -> containsSelfRef(lam.body());
             case IrExpr.Apply app -> containsSelfRef(app.fn())
-                    || app.args().stream().anyMatch(AltParser::containsSelfRef);
+                    || app.args().stream().anyMatch(PontifParser::containsSelfRef);
             case IrExpr.Match m -> containsSelfRef(m.scrutinee())
                     || m.branches().stream().anyMatch(b -> containsSelfRef(b.result()));
-            case IrExpr.Record r -> r.members().values().stream().anyMatch(AltParser::containsSelfRef);
+            case IrExpr.Record r -> r.members().values().stream().anyMatch(PontifParser::containsSelfRef);
             case IrExpr.FieldAccess fa -> containsSelfRef(fa.base());
             case IrExpr.MethodCall mc -> containsSelfRef(mc.receiver())
-                    || mc.args().stream().anyMatch(AltParser::containsSelfRef);
+                    || mc.args().stream().anyMatch(PontifParser::containsSelfRef);
             case IrExpr.Iterate it -> containsSelfRef(it.source())
                     || it.outputs().stream().anyMatch(o -> o.init() != null && containsSelfRef(o.init()))
                     || it.arms().stream().anyMatch(a -> a.writes().stream().anyMatch(
@@ -1938,8 +1938,8 @@ public final class AltParser {
     // have to write {@code origin()} everywhere.
 
     private IrStmt parseLet() throws ParseException {
-        AltToken start = expectKeyword("let");
-        if (peek().kind() == AltToken.Kind.LBRACKET) {
+        PontifToken start = expectKeyword("let");
+        if (peek().kind() == PontifToken.Kind.LBRACKET) {
             return parseDestructuringLetTop(start);
         }
         String name = parseDottedName();
@@ -1947,13 +1947,13 @@ public final class AltParser {
         // slot so the `:Type{` below reaches the trait-migration error (in
         // parseSort) rather than a generic one. Traits are now declared with the
         // `trait` keyword (parseTrait); `let` no longer declares them.
-        if (peek().kind() == AltToken.Kind.LBRACKET) parseTypeParamSlot();
-        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
+        if (peek().kind() == PontifToken.Kind.LBRACKET) parseTypeParamSlot();
+        if (peek().kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.LBRACE) {
             return parseDictDecompositionLetTop(start, name);
         }
         IrSort declaredSort = null;
         IrExpr value = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             // A clause after `:` — a fragment / conversion chain (docs/arrows.md).
             // Unified ascription: with a `= rhs` SUBJECT the clause is APPLIED to it
@@ -1964,7 +1964,7 @@ public final class AltParser {
             // ordinary `[…]` sort by a top-level `->` or a named-param head.
             if (looksLikeClause()) {
                 IrExpr.Lambda frag = parseClause();
-                if (peek().kind() == AltToken.Kind.EQUALS) {
+                if (peek().kind() == PontifToken.Kind.EQUALS) {
                     consume();
                     value = applyReturnClause(parseExpr(), frag);
                     declaredSort = frag.returnSort();
@@ -1979,20 +1979,20 @@ public final class AltParser {
                             IrSort.CallSig.METHOD, paramSorts, paramNames,
                             frag.returnSort(), start.origin());
                     declaredTopLevelLets.put(name, methodSort);
-                    if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+                    if (peek().kind() == PontifToken.Kind.SEMICOLON) consume();
                     return new IrStmt.FunctionDecl(
                             name, List.of(), methodSort, frag, start.origin(), true);
                 }
-            } else if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACKET) {
+            } else if (checkKeyword("Type") && peek(1).kind() == PontifToken.Kind.LBRACKET) {
                 // `let NAME:Type[sortExpr]` — a reusable sort alias (refinements,
                 // unions of refined bases, named sorts): a type-level declaration with
                 // no value, lowered to a TypeAlias the AliasResolver inlines.
                 consume();  // `Type`
                 IrSort aliased = parseBracketSort();  // the `[...]` (unions/refinements)
-                if (peek().kind() == AltToken.Kind.SEMICOLON) {
+                if (peek().kind() == PontifToken.Kind.SEMICOLON) {
                     consume();  // optional declaration terminator
                 }
-                if (peek().kind() == AltToken.Kind.EQUALS) {
+                if (peek().kind() == PontifToken.Kind.EQUALS) {
                     throw new ParseException(
                             "let '" + name + "' is a Type[...] sort alias — it declares a "
                                     + "sort, not a value, so it can't have '= EXPR'",
@@ -2000,7 +2000,7 @@ public final class AltParser {
                 }
                 types.register(name, new TypeInfo.Alias(aliased));
                 return new IrStmt.TypeAlias(name, aliased, start.origin());
-            } else if (checkKeyword("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+            } else if (checkKeyword("Type") && peek(1).kind() == PontifToken.Kind.LBRACE) {
                 // A NAMED trait uses the `trait` declarator, not `let`.
                 throw new ParseException(
                         "Declare a named trait with `trait " + name + "{ … }` — `let` is a "
@@ -2010,14 +2010,14 @@ public final class AltParser {
                 declaredSort = parseSort();
             }
         }
-        if (value == null && peek().kind() == AltToken.Kind.EQUALS) {
+        if (value == null && peek().kind() == PontifToken.Kind.EQUALS) {
             consume();
             value = parseExpr();
         }
         // `;` is now just an optional definition terminator — never a synthesis
         // directive. Synthesis is a CONSEQUENCE of terminating without a value when
         // the sort pins one (below), not something `;` requests.
-        if (peek().kind() == AltToken.Kind.SEMICOLON) consume();
+        if (peek().kind() == PontifToken.Kind.SEMICOLON) consume();
         if (declaredSort == null && value == null) {
             throw new ParseException(
                     "let '" + name + "' needs either a sort annotation (':Sort') "
@@ -2240,15 +2240,15 @@ public final class AltParser {
     private int indexSeq = 0;
 
     private IrStmt parseAssign() throws ParseException {
-        AltToken next = peek(1);  // the token after "assign"
-        if (next.kind() == AltToken.Kind.IDENT && next.text().equals("proof")) {
+        PontifToken next = peek(1);  // the token after "assign"
+        if (next.kind() == PontifToken.Kind.IDENT && next.text().equals("proof")) {
             return parseAssignProof();
         }
         // `assign <unique|ordinal|cardinal> index NAME:[ (n:T) -> key ]` — a standing index
         // declaration (docs/stream-queries.md §3, docs/keyed.md). The kind word and `index`
         // are contextual (not reserved), disambiguated by `<kind> index` appearing together.
-        if (next.kind() == AltToken.Kind.IDENT && INDEX_KINDS.contains(next.text())
-                && peek(2).kind() == AltToken.Kind.IDENT && peek(2).text().equals("index")) {
+        if (next.kind() == PontifToken.Kind.IDENT && INDEX_KINDS.contains(next.text())
+                && peek(2).kind() == PontifToken.Kind.IDENT && peek(2).text().equals("index")) {
             return parseAssignIndex();
         }
         return parseAssignTrait();
@@ -2270,11 +2270,11 @@ public final class AltParser {
      * drives no structure and enforces no uniqueness constraint — the kind is a hint only.
      */
     private IrStmt parseAssignIndex() throws ParseException {
-        AltToken start = expectKeyword("assign");
-        String kind = expect(AltToken.Kind.IDENT).text();   // unique | ordinal | cardinal
-        expect(AltToken.Kind.IDENT);                         // "index" (guaranteed by dispatch)
+        PontifToken start = expectKeyword("assign");
+        String kind = expect(PontifToken.Kind.IDENT).text();   // unique | ordinal | cardinal
+        expect(PontifToken.Kind.IDENT);                         // "index" (guaranteed by dispatch)
         String name = parseDeclarationName();
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         if (!looksLikeClause()) {
             throw new ParseException(
                     "an index declaration expects a key-transform fragment `[ (n:T) -> keyExpr ]` "
@@ -2300,7 +2300,7 @@ public final class AltParser {
      * function declares only a base return.
      */
     private IrStmt parseAssignProof() throws ParseException {
-        AltToken start = expectKeyword("assign");
+        PontifToken start = expectKeyword("assign");
         expectKeyword("proof");
         String functionName = parseDottedName();
         // `assign proof f:Property` — a whole-function property CLAIM (no `=`, no
@@ -2310,27 +2310,27 @@ public final class AltParser {
         // algebraic gate; `Reversible`/`DataConservative`/… → the conservation gate).
         // Discriminates against the `(params):PIN` return-proof form by the `:` that
         // follows the name directly (that form always has `(` there instead).
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();  // ':'
-            AltToken head = expect(AltToken.Kind.IDENT);
+            PontifToken head = expect(PontifToken.Kind.IDENT);
             Origin origin = start.spanTo(head);
-            if (peek().kind() == AltToken.Kind.LPAREN) {
-                expect(AltToken.Kind.LPAREN);
-                AltToken close = expect(AltToken.Kind.RPAREN);  // v1: no-argument properties
+            if (peek().kind() == PontifToken.Kind.LPAREN) {
+                expect(PontifToken.Kind.LPAREN);
+                PontifToken close = expect(PontifToken.Kind.RPAREN);  // v1: no-argument properties
                 origin = start.spanTo(close);
             }
             IrExpr tree = new IrExpr.Call(head.text(), java.util.List.of(), origin);
             return new IrStmt.Proof(functionName, tree, origin);
         }
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         drainParamDestructures();  // proof params don't use `.{}`; keep the buffer clean
         if (!drainParamConversions().isEmpty()) {
             throw new ParseException("a conversion-clause param `[A -> B]` is not supported on a "
                     + "proof — proof params are inert", start.origin());
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
 
         // Push proof params into scope so the case-function's `[@…]` arms infer
         // the subject's base sort, exactly as a function body's match arms do.
@@ -2341,14 +2341,14 @@ public final class AltParser {
             // Case-function pin `[ (match s …) -> [Sort] ]`: the `[` is followed by
             // `(`. A bare sort (any other token after `[`, or no `[`) is a bodyless
             // proof.
-            if (peek().kind() == AltToken.Kind.LBRACKET && peek(1).kind() == AltToken.Kind.LPAREN) {
+            if (peek().kind() == PontifToken.Kind.LBRACKET && peek(1).kind() == PontifToken.Kind.LPAREN) {
                 consume();  // the pin's opening '['
-                expect(AltToken.Kind.LPAREN);
+                expect(PontifToken.Kind.LPAREN);
                 IrExpr body = parseMatch();
-                expect(AltToken.Kind.RPAREN);
-                expect(AltToken.Kind.ARROW);
+                expect(PontifToken.Kind.RPAREN);
+                expect(PontifToken.Kind.ARROW);
                 IrSort grantedReturn = parseSort();
-                AltToken close = expect(AltToken.Kind.RBRACKET);
+                PontifToken close = expect(PontifToken.Kind.RBRACKET);
                 return new IrStmt.ReturnProof(
                         functionName, params, grantedReturn, body, start.spanTo(close));
             }
@@ -2361,33 +2361,33 @@ public final class AltParser {
     }
 
     private IrStmt parseAssignTrait() throws ParseException {
-        AltToken start = expectKeyword("assign");
+        PontifToken start = expectKeyword("assign");
         expectKeyword("trait");
-        AltToken typeNameTok = expect(AltToken.Kind.IDENT);
+        PontifToken typeNameTok = expect(PontifToken.Kind.IDENT);
         // The impl's own `[type T]` binder (`assign trait Element[type T]:…`,
         // docs/type-parameters.md §2.1): it INTRODUCES T as a variable into the
         // impl's scope — the toggle that tells `Stream[T]` apart from a concrete
         // `Stream[SomeType]`. Reuses the decl-site slot parser.
-        Map<String, IrSort> implTypeParams = peek().kind() == AltToken.Kind.LBRACKET
+        Map<String, IrSort> implTypeParams = peek().kind() == PontifToken.Kind.LBRACKET
                 ? parseTypeParamSlot()
                 : new LinkedHashMap<>();
-        expect(AltToken.Kind.COLON);
-        AltToken traitNameTok = expect(AltToken.Kind.IDENT);
+        expect(PontifToken.Kind.COLON);
+        PontifToken traitNameTok = expect(PontifToken.Kind.IDENT);
         // Type arguments applied to the trait (`…:Stream[T]` / `…:Stream[Int]`):
         // a plain sort list, not a binder — the `[T]` here is a USE of the
         // variable bound by the slot above (or a concrete type).
         List<IrSort> traitTypeArgs = new ArrayList<>();
-        if (peek().kind() == AltToken.Kind.LBRACKET) {
-            expect(AltToken.Kind.LBRACKET);
+        if (peek().kind() == PontifToken.Kind.LBRACKET) {
+            expect(PontifToken.Kind.LBRACKET);
             boolean firstArg = true;
-            while (peek().kind() != AltToken.Kind.RBRACKET) {
-                if (!firstArg) expect(AltToken.Kind.COMMA);
+            while (peek().kind() != PontifToken.Kind.RBRACKET) {
+                if (!firstArg) expect(PontifToken.Kind.COMMA);
                 traitTypeArgs.add(parseSort());
                 firstArg = false;
             }
-            expect(AltToken.Kind.RBRACKET);
+            expect(PontifToken.Kind.RBRACKET);
         }
-        expect(AltToken.Kind.LBRACE);
+        expect(PontifToken.Kind.LBRACE);
 
         String typeName = typeNameTok.text();
         // `this` is the (possibly parametric) subject — `Element[T]` when the
@@ -2404,11 +2404,11 @@ public final class AltParser {
         // type for the trait's `type X` member. Bound with `=` (a type, not a
         // `->` producer value).
         Map<String, IrSort> typeBindings = new LinkedHashMap<>();
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("type")) {
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("type")) {
                 consume();  // `type`
-                AltToken varName = expect(AltToken.Kind.IDENT);
-                expect(AltToken.Kind.EQUALS);   // `=`
+                PontifToken varName = expect(PontifToken.Kind.IDENT);
+                expect(PontifToken.Kind.EQUALS);   // `=`
                 IrSort boundType = parseSort();  // the supplied type (`[Int]`)
                 if (typeBindings.containsKey(varName.text())) {
                     throw new ParseException(
@@ -2422,14 +2422,14 @@ public final class AltParser {
             // A member is a METHOD if `(` follows its name (`ping():Int -> …`)
             // and an ATTRIBUTE producer if `:` does (`weight:Int -> …`). Both
             // are `member <- producer` arrows; only the `()` differs.
-            if (peek(1).kind() == AltToken.Kind.COLON) {
+            if (peek(1).kind() == PontifToken.Kind.COLON) {
                 attributeProducers.add(
                         parseTraitImplAttribute(typeName, traitNameTok.text(), selfSort));
             } else {
                 methods.add(parseTraitImplMethod(typeName, selfSort));
             }
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         return new IrStmt.TraitImpl(
                 typeName, traitNameTok.text(), methods, attributeProducers,
                 typeBindings, implTypeParams, traitTypeArgs, start.spanTo(close));
@@ -2446,15 +2446,15 @@ public final class AltParser {
      */
     private IrStmt.FunctionDecl parseTraitImplAttribute(
             String typeName, String traitName, IrSort selfSort) throws ParseException {
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         if (KEYWORDS.contains(nameTok.text())) {
             throw new ParseException(
                     "Cannot use keyword '" + nameTok.text() + "' as an attribute name",
                     nameTok.origin());
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         IrSort declaredSort = parseSort();
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
 
         // The impl states the base type; the trait CONTRACT supplies the
         // refinement (`weight:Int -> 1` is checked against the contract's
@@ -2491,22 +2491,22 @@ public final class AltParser {
      */
     private IrStmt.FunctionDecl parseTraitImplMethod(String typeName, IrSort selfSort)
             throws ParseException {
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         if (KEYWORDS.contains(nameTok.text())) {
             throw new ParseException(
                     "Cannot use keyword '" + nameTok.text() + "' as a method name",
                     nameTok.origin());
         }
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> userParams = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         if (!drainParamConversions().isEmpty()) {
             throw new ParseException("an argument shell `[A -> B]` belongs on the TRAIT method, "
                     + "not the impl — the impl writes only the kernel parameter (its codomain "
                     + "type); the trait owns the shell", nameTok.origin());
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         IrSort returnSort = parseSort();
         // The impl method's return is a plain VALUE sort — never a `[Method(...)]` /
         // `[Action(...)]` / `[Conduit(...)]` call-signature. `name():[Method():Ret]`
@@ -2520,7 +2520,7 @@ public final class AltParser {
                             + "(...)]` wrapper: write `" + nameTok.text() + "(...):Ret`.",
                     nameTok.origin());
         }
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
 
         List<IrParam> allParams = new ArrayList<>(userParams.size() + 1);
         allParams.add(new IrParam("this", selfSort));
@@ -2552,20 +2552,20 @@ public final class AltParser {
      * parses through the struct-literal path into an {@link IrExpr.Record}.
      */
     private IrStmt parseProof() throws ParseException {
-        AltToken start = expectKeyword("proof");
+        PontifToken start = expectKeyword("proof");
         String functionName = parseDottedName();
-        expect(AltToken.Kind.EQUALS);
+        expect(PontifToken.Kind.EQUALS);
         IrExpr tree = parseExpr();
         return new IrStmt.Proof(functionName, tree, start.origin());
     }
 
     private IrStmt parseStruct() throws ParseException {
-        AltToken start = expectKeyword("struct");
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken start = expectKeyword("struct");
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         // Optional `[type T, …]` — the type-parameter slot (docs/type-parameters.md
         // §2.1), directly after the name and before the is-a/fields. A bare `[`
         // here is unambiguous: the is-a uses `:[…]` (colon), fields use `(…)`.
-        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+        Map<String, IrSort> typeParams = peek().kind() == PontifToken.Kind.LBRACKET
                 ? parseTypeParamSlot()
                 : new LinkedHashMap<>();
         // Optional `:[Base:rel]` — the is-a relationship (S2). The parsed sort
@@ -2573,21 +2573,21 @@ public final class AltParser {
         // refinement predicate, if any, is the demotion morphism. SortChecker
         // validates that the base resolves and the morphism is total.
         IrSort baseSort = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             baseSort = parseSort();
         }
-        expect(AltToken.Kind.LPAREN);
+        expect(PontifToken.Kind.LPAREN);
         Map<String, IrSort> members = new LinkedHashMap<>();
         boolean first = true;
-        while (atMemberBoundary(first, AltToken.Kind.RPAREN)) {
-            AltToken fieldName = expect(AltToken.Kind.IDENT);
-            expect(AltToken.Kind.COLON);
+        while (atMemberBoundary(first, PontifToken.Kind.RPAREN)) {
+            PontifToken fieldName = expect(PontifToken.Kind.IDENT);
+            expect(PontifToken.Kind.COLON);
             IrSort fieldSort = parseSort();
             members.put(fieldName.text(), fieldSort);
             first = false;
         }
-        AltToken end = expect(AltToken.Kind.RPAREN);
+        PontifToken end = expect(PontifToken.Kind.RPAREN);
         // Optional member block `{ name(params):Ret -> body … }` — the struct
         // member block (docs/struct-methods.md). It holds compact-form method
         // decls only (no `method` keyword — that stays valid only for standalone
@@ -2613,12 +2613,12 @@ public final class AltParser {
         // rejected), and each added field is materialized on every value at
         // construction, so it can never be undefined. The `this.` target is the
         // body's terminator: a following top-level `let x = …` doesn't continue it.
-        if (peek().kind() == AltToken.Kind.ARROW) {
-            AltToken arrow = consume();
+        if (peek().kind() == PontifToken.Kind.ARROW) {
+            PontifToken arrow = consume();
             boolean any = false;
-            while (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")
-                    && peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("this")
-                    && peek(2).kind() == AltToken.Kind.DOT) {
+            while (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("let")
+                    && peek(1).kind() == PontifToken.Kind.IDENT && peek(1).text().equals("this")
+                    && peek(2).kind() == PontifToken.Kind.DOT) {
                 end = parseStructExtensionField(nameTok.text(), selfSort, members, extensions);
                 any = true;
             }
@@ -2630,12 +2630,12 @@ public final class AltParser {
             }
         }
         // Optional member block `{ methods… }` (docs/struct-methods.md).
-        if (peek().kind() == AltToken.Kind.LBRACE) {
+        if (peek().kind() == PontifToken.Kind.LBRACE) {
             consume();  // {
-            while (peek().kind() != AltToken.Kind.RBRACE) {
+            while (peek().kind() != PontifToken.Kind.RBRACE) {
                 blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
             }
-            end = expect(AltToken.Kind.RBRACE);
+            end = expect(PontifToken.Kind.RBRACE);
         }
         Origin origin = start.spanTo(end);
         if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
@@ -2668,13 +2668,13 @@ public final class AltParser {
      * like a constructor argument. Returns the line's last token (for the
      * decl's origin span).
      */
-    private AltToken parseStructExtensionField(
+    private PontifToken parseStructExtensionField(
             String typeName, IrSort selfSort,
             Map<String, IrSort> members, Map<String, IrExpr> extensions) throws ParseException {
         expectKeyword("let");
         expectKeyword("this");
-        expect(AltToken.Kind.DOT);
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        expect(PontifToken.Kind.DOT);
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         if (members.containsKey(nameTok.text())) {
             throw new ParseException(
                     "Extension field '" + nameTok.text() + "' reassigns a field the default "
@@ -2683,11 +2683,11 @@ public final class AltParser {
                     nameTok.origin());
         }
         IrSort declaredSort = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             declaredSort = parseSort();
         }
-        expect(AltToken.Kind.EQUALS);
+        expect(PontifToken.Kind.EQUALS);
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         currentScope.put("this", selfSort);
@@ -2831,20 +2831,20 @@ public final class AltParser {
     }
 
     private Map<String, IrSort> parseTypeParamSlot() throws ParseException {
-        expect(AltToken.Kind.LBRACKET);
+        expect(PontifToken.Kind.LBRACKET);
         Map<String, IrSort> params = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACKET) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            if (peek().kind() != AltToken.Kind.IDENT || !peek().text().equals("type")) {
+        while (peek().kind() != PontifToken.Kind.RBRACKET) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            if (peek().kind() != PontifToken.Kind.IDENT || !peek().text().equals("type")) {
                 throw new ParseException(
                         "type-parameter slot expects `type NAME`; got '" + peek().text() + "'",
                         peek().origin());
             }
             consume();  // `type`
-            AltToken nameTok = expect(AltToken.Kind.IDENT);
+            PontifToken nameTok = expect(PontifToken.Kind.IDENT);
             IrSort bound = null;
-            if (peek().kind() == AltToken.Kind.COLON) {
+            if (peek().kind() == PontifToken.Kind.COLON) {
                 consume();  // `:`
                 bound = parseSort();   // the bound — `[type T:R]`
             }
@@ -2855,7 +2855,7 @@ public final class AltParser {
             params.put(nameTok.text(), bound);
             first = false;
         }
-        expect(AltToken.Kind.RBRACKET);
+        expect(PontifToken.Kind.RBRACKET);
         return params;
     }
 
@@ -2884,9 +2884,9 @@ public final class AltParser {
      * lowercase binder name — this keeps `(x : …)` from ever reading as a cast.
      */
     private IrSort tryParseCastTarget() {
-        AltToken t = peek();
-        boolean plausible = t.kind() == AltToken.Kind.LBRACKET
-                || (t.kind() == AltToken.Kind.IDENT
+        PontifToken t = peek();
+        boolean plausible = t.kind() == PontifToken.Kind.LBRACKET
+                || (t.kind() == PontifToken.Kind.IDENT
                         && !t.text().isEmpty()
                         && Character.isUpperCase(t.text().charAt(0)));
         if (!plausible) {
@@ -2895,7 +2895,7 @@ public final class AltParser {
         int save = pos;
         try {
             IrSort sort = parseSort();
-            if (peek().kind() == AltToken.Kind.COLON) {
+            if (peek().kind() == PontifToken.Kind.COLON) {
                 consume();   // the cast colon
                 return sort;
             }
@@ -2907,7 +2907,7 @@ public final class AltParser {
     }
 
     public IrSort parseSort() throws ParseException {
-        AltToken t = peek();
+        PontifToken t = peek();
         // Bare tuple sort `{S0, S1, …}` — the bracket-free spelling of `[{…}]`.
         // A param type `t:{Inner, Int}` (or a tuple PATTERN `{i, k}` in a
         // braceless match arm) starts at `{`; `parseBracketSort` only reaches the
@@ -2915,10 +2915,10 @@ public final class AltParser {
         // body grammar (type elements vs positional binders) is governed by
         // parsingTuplePattern, exactly as in the bracketed path. (BRACE-AGGREGATES
         // WAR: the paren form `(S0, S1)` is retired — parens are grouping/calls.)
-        if (t.kind() == AltToken.Kind.LBRACE) {
+        if (t.kind() == PontifToken.Kind.LBRACE) {
             return parseTupleSortBody(t);
         }
-        if (t.kind() == AltToken.Kind.LBRACKET) {
+        if (t.kind() == PontifToken.Kind.LBRACKET) {
             // Unified clause-chain (docs/arrows.md): a bracketed `[ stage -> … ]`
             // threads `@`. Output kind is read from the FIRST stage, and the split
             // is by POSITION (a sort method can only return a sort, never a value):
@@ -2930,24 +2930,24 @@ public final class AltParser {
             //     dispatched from VALUE positions via parseClause — they are not
             //     sorts, so they cannot be hosted by parseSort.
             // The leading `let` is unambiguous (no sort starts with that keyword).
-            if (peek(1).kind() == AltToken.Kind.IDENT && peek(1).text().equals("let")) {
+            if (peek(1).kind() == PontifToken.Kind.IDENT && peek(1).text().equals("let")) {
                 return asRefinedSort(parseClauseStages());
             }
             return parseBracketSort();
         }
-        if (t.kind() == AltToken.Kind.IDENT) {
+        if (t.kind() == PontifToken.Kind.IDENT) {
             // `this.type` — the self-type (the receiver's runtime-actual concrete
             // type; docs/associated-types.md §7.3). A reserved sentinel sort:
             // `this` is the instance, `.type` projects its type. Meaningful only
             // in a trait contract's member sorts (scoped there by SortChecker);
             // elsewhere it validates as an unknown sort.
             if (t.text().equals("this")
-                    && peek(1).kind() == AltToken.Kind.DOT
-                    && peek(2).kind() == AltToken.Kind.IDENT
+                    && peek(1).kind() == PontifToken.Kind.DOT
+                    && peek(2).kind() == PontifToken.Kind.IDENT
                     && peek(2).text().equals("type")) {
                 consume();              // this
                 consume();              // .
-                AltToken typeTok = consume();   // type
+                PontifToken typeTok = consume();   // type
                 return new IrSort.Named(IrSort.SELF_TYPE, t.spanTo(typeTok));
             }
             // `Type{...}` — an anonymous trait sort literal, usable in ANY sort
@@ -2956,14 +2956,14 @@ public final class AltParser {
             // `trait NAME{…}` declarator (parseTrait) names one; this is the
             // anonymous form. (Naming a trait via `let NAME:Type{…}` is redirected
             // to `trait` in parseLet, but the anonymous sort stays first-class.)
-            if (t.text().equals("Type") && peek(1).kind() == AltToken.Kind.LBRACE) {
+            if (t.text().equals("Type") && peek(1).kind() == PontifToken.Kind.LBRACE) {
                 consume();  // "Type"
                 return parseTraitMembers(t);
             }
             // `Name{e1, e2, …}` — a construction-pin return sort over a declared
             // struct (S5): desugars to `[Name:@ == Name(e1, …)]`, so spec-only
             // synthesis derives the body `Name(e1, …)` via the @==EXPR path.
-            if (peek(1).kind() == AltToken.Kind.LBRACE && types.isStruct(t.text())) {
+            if (peek(1).kind() == PontifToken.Kind.LBRACE && types.isStruct(t.text())) {
                 return parseConstructionPinSort();
             }
             // `Name[arg, …]` — a parametric type application
@@ -2972,21 +2972,21 @@ public final class AltParser {
             // metareferences are `$`-prefixed. Distinct from the `[type T]`
             // declaration slot, which is parsed by parseTypeParamSlot at decl
             // sites, never inside a sort.
-            if (peek(1).kind() == AltToken.Kind.LBRACKET) {
-                AltToken nameTok = consume();      // the head name
-                expect(AltToken.Kind.LBRACKET);
+            if (peek(1).kind() == PontifToken.Kind.LBRACKET) {
+                PontifToken nameTok = consume();      // the head name
+                expect(PontifToken.Kind.LBRACKET);
                 List<IrSort> typeArgs = new ArrayList<>();
                 boolean first = true;
-                while (peek().kind() != AltToken.Kind.RBRACKET) {
-                    if (!first) expect(AltToken.Kind.COMMA);
+                while (peek().kind() != PontifToken.Kind.RBRACKET) {
+                    if (!first) expect(PontifToken.Kind.COMMA);
                     typeArgs.add(parseTypeArg());
                     first = false;
                 }
-                AltToken close = expect(AltToken.Kind.RBRACKET);
+                PontifToken close = expect(PontifToken.Kind.RBRACKET);
                 return new IrSort.Named(nameTok.text(), typeArgs, nameTok.spanTo(close));
             }
             // Bare-ident sugar: `Int` ≡ `[Int]`.
-            AltToken nameTok = consume();
+            PontifToken nameTok = consume();
             return new IrSort.Named(nameTok.text(), nameTok.origin());
         }
         throw new ParseException(
@@ -3005,7 +3005,7 @@ public final class AltParser {
      */
     private IrSort parseTypeArg() throws ParseException {
         IrSort base = parseSort();
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             IrExpr pred = parseExpr();
             IrExpr cooked = applyPredicateSugar(pred);
@@ -3023,18 +3023,18 @@ public final class AltParser {
      * path — how {@code function promote(…):Point3D{x,y,z};} gets its body.
      */
     private IrSort parseConstructionPinSort() throws ParseException {
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         IrSort.Structural struct = declaredStructShape(nameTok.text());
         List<String> fields = new ArrayList<>(struct.constructorMembers().keySet());
-        expect(AltToken.Kind.LBRACE);
+        expect(PontifToken.Kind.LBRACE);
         List<IrExpr> values = new ArrayList<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (!first) expect(PontifToken.Kind.COMMA);
             values.add(parseExpr());
             first = false;
         }
-        expect(AltToken.Kind.RBRACE);
+        expect(PontifToken.Kind.RBRACE);
         if (values.size() != fields.size()) {
             throw new ParseException(
                     "construction pin '" + nameTok.text() + "{…}' has " + values.size()
@@ -3061,12 +3061,12 @@ public final class AltParser {
      * {@code d:Duck}) finds them.
      */
     private IrStmt parseTrait() throws ParseException {
-        AltToken start = expectKeyword("trait");
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken start = expectKeyword("trait");
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         String name = nameTok.text();
         // Optional `[type T, …]` parametric slot — directly after the name, before
         // the `{` body. Unambiguous: a trait body is `{…}`, the slot is `[…]`.
-        Map<String, IrSort> typeParams = peek().kind() == AltToken.Kind.LBRACKET
+        Map<String, IrSort> typeParams = peek().kind() == PontifToken.Kind.LBRACKET
                 ? parseTypeParamSlot()
                 : new LinkedHashMap<>();
         // Optional `: BaseTrait` — trait extension (WAR(stream)). `trait B : A {…}`
@@ -3074,12 +3074,12 @@ public final class AltParser {
         // (validated/registered by SortChecker + the trait registry, where every trait
         // is visible — the base may be forward-declared or imported, so not checked here).
         String baseTrait = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
-            expect(AltToken.Kind.COLON);
-            baseTrait = expect(AltToken.Kind.IDENT).text();
+        if (peek().kind() == PontifToken.Kind.COLON) {
+            expect(PontifToken.Kind.COLON);
+            baseTrait = expect(PontifToken.Kind.IDENT).text();
         }
         IrSort.Trait body = parseTraitMembers(start);
-        if (peek().kind() == AltToken.Kind.EQUALS) {
+        if (peek().kind() == PontifToken.Kind.EQUALS) {
             throw new ParseException(
                     "A `trait` declaration is type-level only and cannot have a value "
                             + "(`= …`).", peek().origin());
@@ -3119,23 +3119,23 @@ public final class AltParser {
      * here.
      */
     private IrStmt parseConductor() throws ParseException {
-        AltToken start = expectKeyword("conductor");
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken start = expectKeyword("conductor");
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         String name = nameTok.text();
-        expect(AltToken.Kind.LBRACE);
+        expect(PontifToken.Kind.LBRACE);
         List<IrStmt.ConductorDecl.StateField> state = new ArrayList<>();
         Map<String, IrSort.CallSig> handlers = new LinkedHashMap<>();
         List<IrStmt.FunctionDecl> reactions = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
         boolean first = true;
-        while (atMemberBoundary(first, AltToken.Kind.RBRACE)) {
-            AltToken memberName = expect(AltToken.Kind.IDENT);
+        while (atMemberBoundary(first, PontifToken.Kind.RBRACE)) {
+            PontifToken memberName = expect(PontifToken.Kind.IDENT);
             if (!seen.add(memberName.text())) {
                 throw new ParseException(
                         "Duplicate member '" + memberName.text() + "' in conductor body",
                         memberName.origin());
             }
-            if (peek().kind() == AltToken.Kind.LPAREN) {
+            if (peek().kind() == PontifToken.Kind.LPAREN) {
                 // CONCRETE handler in method-body form: `onTick(e:E) -> body` — a body-bearing event
                 // reaction. Lowered exactly like the top-level `action` keyword to a #action#-keyed
                 // FunctionDecl (event param, return `_`, body), but held on the conductor: inert
@@ -3144,9 +3144,9 @@ public final class AltParser {
                 first = false;
                 continue;
             }
-            expect(AltToken.Kind.COLON);
+            expect(PontifToken.Kind.COLON);
             IrSort memberSort = parseSort();
-            if (isCellSort(memberSort) && peek().kind() == AltToken.Kind.LPAREN) {
+            if (isCellSort(memberSort) && peek().kind() == PontifToken.Kind.LPAREN) {
                 // Explicit clocked state: `name: Cell[T](init)` (docs/orchestration.md, §"State is a
                 // clocked cell"). The one field kind that can change; the `(init)` seeds it. Stored as a
                 // StateField whose sort is `Cell[T]` — state is named in the type, not a body-position
@@ -3154,9 +3154,9 @@ public final class AltParser {
                 // is parse + represent.)
                 consume();  // `(`
                 IrExpr init = parseExpr();
-                expect(AltToken.Kind.RPAREN);
+                expect(PontifToken.Kind.RPAREN);
                 state.add(new IrStmt.ConductorDecl.StateField(memberName.text(), memberSort, init));
-            } else if (peek().kind() == AltToken.Kind.EQUALS) {
+            } else if (peek().kind() == PontifToken.Kind.EQUALS) {
                 // A field with an initializer: `name:Sort = init`. Under the Mutable model a plain field
                 // is immutable (final); only a `Mutable[T]` field changes.
                 consume();
@@ -3175,7 +3175,7 @@ public final class AltParser {
             }
             first = false;
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         // Inject `this` — the conductor's state as a record sort — as a second parameter of every
         // handler reaction, so `this` and `this.field` are in scope for the static checker (bound
         // param) and field access type-checks against the real state fields. The event stays the
@@ -3201,11 +3201,11 @@ public final class AltParser {
      * lowers it to a {@code #action#}-keyed reaction {@link IrStmt.FunctionDecl}, mirroring
      * {@link #parseAction}. Exactly one event parameter; the body is scoped with it.
      */
-    private IrStmt.FunctionDecl parseConductorReaction(String conductorName, AltToken nameTok)
+    private IrStmt.FunctionDecl parseConductorReaction(String conductorName, PontifToken nameTok)
             throws ParseException {
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> params = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> params = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         if (!drainParamConversions().isEmpty()) {
             throw new ParseException("a conductor handler's event parameter cannot be a conversion",
@@ -3215,7 +3215,7 @@ public final class AltParser {
             throw new ParseException("a conductor handler reacts to exactly one event — declare a "
                     + "single parameter; got " + params.size(), nameTok.origin());
         }
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         currentScope.clear();
         for (IrParam p : params) currentScope.put(p.name(), p.sort());
@@ -3246,13 +3246,13 @@ public final class AltParser {
      * never collides with a user name. Tiers beyond {@code thread} (process / host) are rejected until built.
      */
     private IrStmt parseSpawn() throws ParseException {
-        AltToken start = expectKeyword("spawn");
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
-        AltToken end = nameTok;
+        PontifToken start = expectKeyword("spawn");
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
+        PontifToken end = nameTok;
         IrStmt.Spawn.Placement placement = IrStmt.Spawn.Placement.MAIN_LANE;
-        if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("over")) {
+        if (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("over")) {
             consume();  // `over`
-            AltToken tier = expect(AltToken.Kind.IDENT);
+            PontifToken tier = expect(PontifToken.Kind.IDENT);
             placement = switch (tier.text()) {
                 case "thread" -> IrStmt.Spawn.Placement.THREAD;
                 default -> throw new ParseException(
@@ -3274,8 +3274,8 @@ public final class AltParser {
      * {@code type X[:Bound]} (an associated type). The returned
      * {@link IrSort.Trait} has a placeholder name until a declaration patches it.
      */
-    private IrSort.Trait parseTraitMembers(AltToken headTok) throws ParseException {
-        expect(AltToken.Kind.LBRACE);
+    private IrSort.Trait parseTraitMembers(PontifToken headTok) throws ParseException {
+        expect(PontifToken.Kind.LBRACE);
         Map<String, IrSort.CallSig> methods = new LinkedHashMap<>();
         Map<String, IrSort> attributes = new LinkedHashMap<>();
         // Default method bodies — member name → a body-bearing FunctionDecl, present
@@ -3296,19 +3296,19 @@ public final class AltParser {
         // (dispatch-unification B1). Keyed by the operator symbol.
         Map<String, IrSort.CallSig> operators = new LinkedHashMap<>();
         boolean first = true;
-        while (atMemberBoundary(first, AltToken.Kind.RBRACE)) {
+        while (atMemberBoundary(first, PontifToken.Kind.RBRACE)) {
             // An OPERATOR member key — `+:[Dispatch(this.type, this.type):this.type]`.
             // The key is an operator symbol (not an identifier); the sort must be a
             // homogeneous self-typed Dispatch (the v1 bound). This is a mechanism-1
             // bound the compiler verifies at `assign trait`, not a hosted method.
-            if (peek().kind() == AltToken.Kind.OP) {
-                AltToken opTok = consume();
+            if (peek().kind() == PontifToken.Kind.OP) {
+                PontifToken opTok = consume();
                 if (!OVERLOADABLE_OPS.contains(opTok.text())) {
                     throw new ParseException(
                             "'" + opTok.text() + "' is not an overloadable operator, so it "
                                     + "cannot be a trait contract member", opTok.origin());
                 }
-                expect(AltToken.Kind.COLON);
+                expect(PontifToken.Kind.COLON);
                 IrSort opSort = parseSort();
                 if (!(opSort instanceof IrSort.CallSig dispatch)
                         || CallKinds.builtin(dispatch.typeName()) != CallKinds.Kind.DISPATCH) {
@@ -3333,9 +3333,9 @@ public final class AltParser {
             }
             // `type X` / `type X:Bound` — an associated type declared with the
             // `type` declarator (a type-level member, not a value member).
-            if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("type")) {
+            if (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("type")) {
                 consume();  // `type`
-                AltToken varName = expect(AltToken.Kind.IDENT);
+                PontifToken varName = expect(PontifToken.Kind.IDENT);
                 if (methods.containsKey(varName.text())
                         || attributes.containsKey(varName.text())
                         || associatedTypes.containsKey(varName.text())
@@ -3345,7 +3345,7 @@ public final class AltParser {
                             varName.origin());
                 }
                 IrSort bound = null;
-                if (peek().kind() == AltToken.Kind.COLON) {
+                if (peek().kind() == PontifToken.Kind.COLON) {
                     consume();  // `:`
                     bound = parseSort();   // the bound — `type X:R`
                 }
@@ -3353,7 +3353,7 @@ public final class AltParser {
                 first = false;
                 continue;
             }
-            AltToken memberName = expect(AltToken.Kind.IDENT);
+            PontifToken memberName = expect(PontifToken.Kind.IDENT);
             if (methods.containsKey(memberName.text())
                     || attributes.containsKey(memberName.text())
                     || associatedTypes.containsKey(memberName.text())
@@ -3366,12 +3366,12 @@ public final class AltParser {
             // A `(` after the name marks it (an abstract `:[Method…]` member or a data
             // attribute uses `:` instead). The return may be a clause-chain SHELL, the
             // body is optional (its presence = a default kernel; absence = abstract).
-            if (peek().kind() == AltToken.Kind.LPAREN) {
+            if (peek().kind() == PontifToken.Kind.LPAREN) {
                 parseTraitMethodMember(memberName, methods, methodDefaults, returnShells, argShells);
                 first = false;
                 continue;
             }
-            expect(AltToken.Kind.COLON);
+            expect(PontifToken.Kind.COLON);
             IrSort memberSort = parseSort();
             // A member's KIND is read from its sort's call-kind capability, not a keyword:
             //   - a call signature ([Method(...):Ret], and the effectful [Action(...)] /
@@ -3390,7 +3390,7 @@ public final class AltParser {
             }
             first = false;
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         // Placeholder name; parseTrait patches it with the declared name.
         return new IrSort.Trait(
                 "_pending", methods, attributes, associatedTypes, Map.of(), operators,
@@ -3433,7 +3433,7 @@ public final class AltParser {
      * substitutes it to each satisfier's concrete type and qualifies the name.
      */
     private void parseTraitMethodMember(
-            AltToken nameTok,
+            PontifToken nameTok,
             Map<String, IrSort.CallSig> methods,
             Map<String, IrStmt.FunctionDecl> methodDefaults,
             Map<String, IrExpr.Lambda> returnShells,
@@ -3443,9 +3443,9 @@ public final class AltParser {
                     "Cannot use keyword '" + nameTok.text() + "' as a method name",
                     nameTok.origin());
         }
-        expect(AltToken.Kind.LPAREN);
-        List<IrParam> userParams = parseParamList(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        List<IrParam> userParams = parseParamList(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         List<ParamDestructure> destrs = drainParamDestructures();
         // Argument shells: a conversion-clause param `p:[A -> B]` keeps the contract sort
         // at the DOMAIN A (parseParamList already set it) — the trait owns the transform.
@@ -3466,7 +3466,7 @@ public final class AltParser {
         if (!shellsByPos.isEmpty()) {
             argShells.put(nameTok.text(), shellsByPos);
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         // The return may be a clause-chain SHELL `[C -> … -> D]`: the contract return
         // (what callers/dispatch see) is the terminus D; the kernel returns the domain C.
         ReturnClause rc = parseReturnClause();
@@ -3509,10 +3509,10 @@ public final class AltParser {
 
         // Body OPTIONAL: `-> expr` is a default kernel (returning the inner face C);
         // its absence leaves the method abstract (the impl supplies the kernel).
-        if (peek().kind() != AltToken.Kind.ARROW) {
+        if (peek().kind() != PontifToken.Kind.ARROW) {
             return;
         }
-        expect(AltToken.Kind.ARROW);
+        expect(PontifToken.Kind.ARROW);
 
         // The default kernel sees the INNER faces: shelled params at their codomain B
         // (not the domain A the contract carries), the return at the shell's domain C.
@@ -3550,7 +3550,7 @@ public final class AltParser {
      * later slice; until then they fail here with a clear error rather than being
      * silently stored and ignored (no verifier consumes them yet).
      */
-    private void requireHomogeneousSelfOperatorContract(AltToken opTok, IrSort.CallSig d)
+    private void requireHomogeneousSelfOperatorContract(PontifToken opTok, IrSort.CallSig d)
             throws ParseException {
         boolean homogeneous = d.paramSorts().size() == 2
                 && isSelfType(d.paramSorts().get(0))
@@ -3566,24 +3566,24 @@ public final class AltParser {
     }
 
     private IrSort parseBracketSort() throws ParseException {
-        AltToken open = expect(AltToken.Kind.LBRACKET);
-        AltToken first = peek();
+        PontifToken open = expect(PontifToken.Kind.LBRACKET);
+        PontifToken first = peek();
 
         // Tuple sort: `[{S0, S1, ...}]` — an anonymous positional aggregate.
         // A leading `{` is unambiguous (the contextual `[pred]` form below never
         // starts with it). Lowers onto the record substrate as a structural sort
         // named "_tuple" with positional keys _0.._n. (BRACE-AGGREGATES WAR: the
         // paren form `[(S0, S1)]` is retired.)
-        if (first.kind() == AltToken.Kind.LBRACE) {
+        if (first.kind() == PontifToken.Kind.LBRACE) {
             IrSort tuple = parseTupleSortBody(open);
-            expect(AltToken.Kind.RBRACKET);
+            expect(PontifToken.Kind.RBRACKET);
             return tuple;
         }
 
         // Contextual form: `[pred]` — no base, take from contextualBaseStack
         // (pushed by parseMatch when the scrutinee has an inferable sort).
-        if (first.kind() != AltToken.Kind.IDENT
-                && first.kind() != AltToken.Kind.LBRACKET) {
+        if (first.kind() != PontifToken.Kind.IDENT
+                && first.kind() != PontifToken.Kind.LBRACKET) {
             String inferredBase = contextualBaseStack.isEmpty()
                     ? null
                     : contextualBaseStack.peek();
@@ -3594,7 +3594,7 @@ public final class AltParser {
                         first.origin());
             }
             IrExpr pred = parseExpr();
-            AltToken close = expect(AltToken.Kind.RBRACKET);
+            PontifToken close = expect(PontifToken.Kind.RBRACKET);
             IrExpr cooked = applyPredicateSugar(pred);
             return new IrSort.Refined(inferredBase, cooked, open.spanTo(close));
         }
@@ -3604,21 +3604,21 @@ public final class AltParser {
         IrSort firstBranch = parseBracketBranch();
 
         // Sort-level `|` or `&` between branches?
-        if (peek().kind() == AltToken.Kind.OP
+        if (peek().kind() == PontifToken.Kind.OP
                 && (peek().text().equals("|") || peek().text().equals("&"))) {
             String op = consume().text();
             List<IrSort> branches = new ArrayList<>();
             branches.add(firstBranch);
             branches.add(parseBracketBranch());
-            while (peek().kind() == AltToken.Kind.OP && peek().text().equals(op)) {
+            while (peek().kind() == PontifToken.Kind.OP && peek().text().equals(op)) {
                 consume();
                 branches.add(parseBracketBranch());
             }
-            AltToken close = expect(AltToken.Kind.RBRACKET);
+            PontifToken close = expect(PontifToken.Kind.RBRACKET);
             return normalizeMultiBranch(branches, op, open.spanTo(close));
         }
 
-        AltToken close = expect(AltToken.Kind.RBRACKET);
+        PontifToken close = expect(PontifToken.Kind.RBRACKET);
         return firstBranch;
     }
 
@@ -3629,10 +3629,10 @@ public final class AltParser {
      * refinement, struct-fields, or function-sort tail.
      */
     private IrSort parseBracketBranch() throws ParseException {
-        if (peek().kind() == AltToken.Kind.LBRACKET) {
+        if (peek().kind() == PontifToken.Kind.LBRACKET) {
             return parseBracketSort();
         }
-        AltToken baseTok = expect(AltToken.Kind.IDENT);
+        PontifToken baseTok = expect(PontifToken.Kind.IDENT);
 
         // Optional parametric application on the base — `Literal[Int]` inside a
         // bracket sort (docs/type-parameters.md §2.3): an is-a base
@@ -3643,25 +3643,25 @@ public final class AltParser {
         // Without it, a refined Stream type-arg only parsed at the top level, so
         // wrapping it in any bracket sort (`[Stream[Int:pred]|Nothing]`) failed.
         List<IrSort> typeArgs = new ArrayList<>();
-        if (peek().kind() == AltToken.Kind.LBRACKET) {
-            expect(AltToken.Kind.LBRACKET);
+        if (peek().kind() == PontifToken.Kind.LBRACKET) {
+            expect(PontifToken.Kind.LBRACKET);
             boolean firstArg = true;
-            while (peek().kind() != AltToken.Kind.RBRACKET) {
-                if (!firstArg) expect(AltToken.Kind.COMMA);
+            while (peek().kind() != PontifToken.Kind.RBRACKET) {
+                if (!firstArg) expect(PontifToken.Kind.COMMA);
                 typeArgs.add(parseTypeArg());
                 firstArg = false;
             }
-            expect(AltToken.Kind.RBRACKET);
+            expect(PontifToken.Kind.RBRACKET);
         }
 
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             IrExpr pred = parseExpr();
             IrExpr cooked = applyPredicateSugar(pred);
             return new IrSort.Refined(baseTok.text(), typeArgs, cooked, baseTok.origin());
         }
 
-        if (typeArgs.isEmpty() && peek().kind() == AltToken.Kind.LPAREN) {
+        if (typeArgs.isEmpty() && peek().kind() == PontifToken.Kind.LPAREN) {
             // Call-signature vs struct is PURELY SYNTACTIC (docs/dispatch-method-elimination.md
             // §2): `Name(…):Return` (a `:` after the matching `)`) is a call signature whose
             // head name is DATA; `Name(…)` with no trailing `:` is a struct. No `Method`/
@@ -3675,7 +3675,7 @@ public final class AltParser {
             Map<String, String> renames = new LinkedHashMap<>();
             Map<String, IrSort> members =
                     parseStructFields(baseTok.text(), baseTok.origin(), literalFields, renames);
-            expect(AltToken.Kind.RPAREN);
+            expect(PontifToken.Kind.RPAREN);
             IrSort.Structural structural = new IrSort.Structural(baseTok.text(), members, baseTok.origin());
             if (!literalFields.isEmpty()) {
                 literalConstrainedFields.put(structural, literalFields);
@@ -3750,15 +3750,15 @@ public final class AltParser {
         }
     }
 
-    private IrSort parseTupleSortBody(AltToken open) throws ParseException {
+    private IrSort parseTupleSortBody(PontifToken open) throws ParseException {
         // BRACE-AGGREGATES WAR: a tuple sort/pattern is delimited by braces
         // (`{Int, Int}`, `{a, b}`) — the paren form (`(Int, Int)`) is still
         // accepted during migration. The delimiter is read from the actual open
         // token (the `open` param is the enclosing `[` at the bracket-sort call
         // site, so it can't be used here — peek() is the real `(`/`{`).
-        AltToken.Kind openKind = peek().kind();
-        AltToken.Kind closeKind = openKind == AltToken.Kind.LBRACE
-                ? AltToken.Kind.RBRACE : AltToken.Kind.RPAREN;
+        PontifToken.Kind openKind = peek().kind();
+        PontifToken.Kind closeKind = openKind == PontifToken.Kind.LBRACE
+                ? PontifToken.Kind.RBRACE : PontifToken.Kind.RPAREN;
         expect(openKind);
         Map<String, IrSort> members = new LinkedHashMap<>();
         java.util.Set<String> discards = new java.util.LinkedHashSet<>();
@@ -3766,7 +3766,7 @@ public final class AltParser {
         int index = 0;
         boolean first = true;
         while (peek().kind() != closeKind) {
-            if (!first) expect(AltToken.Kind.COMMA);
+            if (!first) expect(PontifToken.Kind.COMMA);
             String key = "_" + index;
             // Narrow-in-place binder `name:Sort` — the third cell of the
             // tuple-component grid, valid in BOTH match/type position (a match
@@ -3779,10 +3779,10 @@ public final class AltParser {
             // bare `a`, which binds whole but tests nothing. A leading `IDENT :`
             // is unambiguous here — no other tuple-component form starts that way.
             // The sort after `:` is a type, so read it with the pattern flag off.
-            if (peek().kind() == AltToken.Kind.IDENT
+            if (peek().kind() == PontifToken.Kind.IDENT
                     && !peek().text().equals("_")
-                    && peek(1).kind() == AltToken.Kind.COLON) {
-                AltToken binder = consume();
+                    && peek(1).kind() == PontifToken.Kind.COLON) {
+                PontifToken binder = consume();
                 consume();  // ':'
                 boolean prevPat = parsingTuplePattern;
                 parsingTuplePattern = false;
@@ -3799,11 +3799,11 @@ public final class AltParser {
                 continue;
             }
             if (parsingTuplePattern) {
-                AltToken t = peek();
-                boolean literalClause = t.kind() == AltToken.Kind.INTEGER
-                        || t.kind() == AltToken.Kind.DECIMAL
-                        || t.kind() == AltToken.Kind.CHAR
-                        || (t.kind() == AltToken.Kind.IDENT
+                PontifToken t = peek();
+                boolean literalClause = t.kind() == PontifToken.Kind.INTEGER
+                        || t.kind() == PontifToken.Kind.DECIMAL
+                        || t.kind() == PontifToken.Kind.CHAR
+                        || (t.kind() == PontifToken.Kind.IDENT
                                 && (t.text().equals("true") || t.text().equals("false")));
                 if (literalClause) {
                     // A value constraint in place ([(0.0, 0.0)], [(0, y)]) — like a
@@ -3827,8 +3827,8 @@ public final class AltParser {
                             new IrExpr.BinOp(IrExpr.Op.EQ, new IrExpr.SelfRef(t.origin()), lit, t.origin()),
                             t.origin()));
                     discards.add(key);
-                } else if (t.kind() == AltToken.Kind.IDENT
-                        && peek(1).kind() == AltToken.Kind.LPAREN) {
+                } else if (t.kind() == PontifToken.Kind.IDENT
+                        && peek(1).kind() == PontifToken.Kind.LPAREN) {
                     // A constructor/struct destructure as a tuple element
                     // ([(Traction(n, z), Traction(0.0, 0.0))]) — reuse the
                     // bracket-branch struct-pattern machinery. The slot is
@@ -3836,13 +3836,13 @@ public final class AltParser {
                     // bind via the recursive destructure desugar (the renames /
                     // literal constraints are recorded against the inner sort).
                     // NOT a tuple-level discard — the nested pattern binds.
-                    AltToken baseTok = consume();
-                    expect(AltToken.Kind.LPAREN);
+                    PontifToken baseTok = consume();
+                    expect(PontifToken.Kind.LPAREN);
                     java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
                     Map<String, String> innerRenames = new LinkedHashMap<>();
                     Map<String, IrSort> innerMembers = parseStructFields(
                             baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
-                    expect(AltToken.Kind.RPAREN);
+                    expect(PontifToken.Kind.RPAREN);
                     IrSort.Structural inner = new IrSort.Structural(
                             baseTok.text(), innerMembers, baseTok.origin());
                     if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
@@ -3851,17 +3851,17 @@ public final class AltParser {
                     // like any other — its slots are positional until link time.
                     if (patternShapeFor(baseTok.text()) == null) deferredStructPatterns.add(inner);
                     members.put(key, inner);
-                } else if (t.kind() == AltToken.Kind.LBRACKET) {
+                } else if (t.kind() == PontifToken.Kind.LBRACKET) {
                     // An explicit refinement-sort constraint ([Decimal:0.0],
                     // [Int:@>0]) — occupies the slot, binds nothing.
                     members.put(key, parseSort());
                     discards.add(key);
-                } else if (t.kind() == AltToken.Kind.LBRACE) {
+                } else if (t.kind() == PontifToken.Kind.LBRACE) {
                     // A nested tuple ([{{a, b}, c}]) — binds its components via
                     // the recursive destructure desugar; NOT a discard.
                     members.put(key, parseTupleSortBody(t));
                 } else {
-                    AltToken binder = expect(AltToken.Kind.IDENT);
+                    PontifToken binder = expect(PontifToken.Kind.IDENT);
                     members.put(key, IrSort.named("_"));  // sort resolved from scrutinee
                     if (binder.text().equals("_")) {
                         discards.add(key);                // verdict C: explicit discard
@@ -3875,13 +3875,13 @@ public final class AltParser {
                 // count is whichever operand is the integer, so the order is free and unambiguous.
                 int repeat = 1;
                 IrSort memberSort;
-                if (peek().kind() == AltToken.Kind.INTEGER && isStar(peek(1))) {
+                if (peek().kind() == PontifToken.Kind.INTEGER && isStar(peek(1))) {
                     repeat = repeatCount(consume());
                     consume();  // '*'
                     memberSort = memberSort();
                 } else {
                     memberSort = memberSort();
-                    if (isStar(peek()) && peek(1).kind() == AltToken.Kind.INTEGER) {
+                    if (isStar(peek()) && peek(1).kind() == PontifToken.Kind.INTEGER) {
                         consume();  // '*'
                         repeat = repeatCount(consume());
                     }
@@ -3897,7 +3897,7 @@ public final class AltParser {
             first = false;
         }
         expect(closeKind);
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             // A tuple takes no whole-aggregate predicate — by design, not by
             // omission. An independent per-component constraint belongs in
             // place ([([Int:@>0], Bool)]). A constraint that *relates* two
@@ -3932,12 +3932,12 @@ public final class AltParser {
 
     /** A tuple member sort in type position: a nested tuple ({@code {…}}) or any other sort. */
     private IrSort memberSort() throws ParseException {
-        return peek().kind() == AltToken.Kind.LBRACE ? parseTupleSortBody(peek()) : parseSort();
+        return peek().kind() == PontifToken.Kind.LBRACE ? parseTupleSortBody(peek()) : parseSort();
     }
 
     /** Whether {@code t} is the {@code *} operator (the tuple-repetition marker). */
     /** Parses a tuple-repetition count ({@code N} in {@code {T*N}}) — an integer literal ≥ 1. */
-    private int repeatCount(AltToken intTok) throws ParseException {
+    private int repeatCount(PontifToken intTok) throws ParseException {
         int n;
         try {
             n = Integer.parseInt(intTok.text());
@@ -3995,15 +3995,15 @@ public final class AltParser {
     private boolean callSigColonFollows() {
         int depth = 0;
         for (int i = 0; ; i++) {
-            AltToken.Kind k = peek(i).kind();
-            if (k == AltToken.Kind.EOF) return false;
-            if (k == AltToken.Kind.LPAREN || k == AltToken.Kind.LBRACKET
-                    || k == AltToken.Kind.LBRACE) {
+            PontifToken.Kind k = peek(i).kind();
+            if (k == PontifToken.Kind.EOF) return false;
+            if (k == PontifToken.Kind.LPAREN || k == PontifToken.Kind.LBRACKET
+                    || k == PontifToken.Kind.LBRACE) {
                 depth++;
-            } else if (k == AltToken.Kind.RPAREN || k == AltToken.Kind.RBRACKET
-                    || k == AltToken.Kind.RBRACE) {
+            } else if (k == PontifToken.Kind.RPAREN || k == PontifToken.Kind.RBRACKET
+                    || k == PontifToken.Kind.RBRACE) {
                 depth--;
-                if (depth == 0) return peek(i + 1).kind() == AltToken.Kind.COLON;
+                if (depth == 0) return peek(i + 1).kind() == PontifToken.Kind.COLON;
             }
         }
     }
@@ -4017,18 +4017,18 @@ public final class AltParser {
      * or all-positional (mixing is an error). Named parameters are the binders a dependent
      * return/param sort references (WAR(dependent-sorts)).
      */
-    private IrSort.CallSig parseCallSigBody(AltToken headTok) throws ParseException {
-        expect(AltToken.Kind.LPAREN);
+    private IrSort.CallSig parseCallSigBody(PontifToken headTok) throws ParseException {
+        expect(PontifToken.Kind.LPAREN);
         List<IrSort> paramSorts = new ArrayList<>();
         List<String> paramNames = new ArrayList<>();
         int named = 0;
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RPAREN) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            if (peek().kind() == AltToken.Kind.IDENT
-                    && peek(1).kind() == AltToken.Kind.COLON) {
-                paramNames.add(expect(AltToken.Kind.IDENT).text());
-                expect(AltToken.Kind.COLON);
+        while (peek().kind() != PontifToken.Kind.RPAREN) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            if (peek().kind() == PontifToken.Kind.IDENT
+                    && peek(1).kind() == PontifToken.Kind.COLON) {
+                paramNames.add(expect(PontifToken.Kind.IDENT).text());
+                expect(PontifToken.Kind.COLON);
                 named++;
             } else {
                 paramNames.add("");  // positional placeholder (dropped unless all named)
@@ -4036,8 +4036,8 @@ public final class AltParser {
             paramSorts.add(parseSort());
             first = false;
         }
-        expect(AltToken.Kind.RPAREN);
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.RPAREN);
+        expect(PontifToken.Kind.COLON);
         IrSort returnSort = parseSort();
         if (named != 0 && named != paramSorts.size()) {
             throw new ParseException(
@@ -4118,13 +4118,13 @@ public final class AltParser {
         // the slot ORDER positional forms need. The local (struct-known) path is
         // unchanged below.
         boolean deferred = patternShapeFor(typeName) == null;
-        while (atMemberBoundary(first, AltToken.Kind.RPAREN)) {
+        while (atMemberBoundary(first, PontifToken.Kind.RPAREN)) {
             clauseIndex++;
-            AltToken t = peek();
-            boolean literalClause = t.kind() == AltToken.Kind.INTEGER
-                    || t.kind() == AltToken.Kind.DECIMAL
-                    || t.kind() == AltToken.Kind.CHAR
-                    || (t.kind() == AltToken.Kind.IDENT
+            PontifToken t = peek();
+            boolean literalClause = t.kind() == PontifToken.Kind.INTEGER
+                    || t.kind() == PontifToken.Kind.DECIMAL
+                    || t.kind() == PontifToken.Kind.CHAR
+                    || (t.kind() == PontifToken.Kind.IDENT
                             && (t.text().equals("true") || t.text().equals("false")));
             if (deferred) {
                 parseDeferredStructFieldClause(
@@ -4180,15 +4180,15 @@ public final class AltParser {
             // fields bind via the recursive destructure desugar (renames /
             // literal constraints recorded against the inner sort). NOT a
             // struct-level literal/discard. Parity with tuple components.
-            if (t.kind() == AltToken.Kind.IDENT && peek(1).kind() == AltToken.Kind.LPAREN) {
+            if (t.kind() == PontifToken.Kind.IDENT && peek(1).kind() == PontifToken.Kind.LPAREN) {
                 String posField = positionalField(typeName, clauseIndex, members, t.origin());
-                AltToken baseTok = consume();
-                expect(AltToken.Kind.LPAREN);
+                PontifToken baseTok = consume();
+                expect(PontifToken.Kind.LPAREN);
                 java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
                 Map<String, String> innerRenames = new LinkedHashMap<>();
                 Map<String, IrSort> innerMembers = parseStructFields(
                         baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
-                expect(AltToken.Kind.RPAREN);
+                expect(PontifToken.Kind.RPAREN);
                 IrSort.Structural inner = new IrSort.Structural(
                         baseTok.text(), innerMembers, baseTok.origin());
                 if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
@@ -4199,7 +4199,7 @@ public final class AltParser {
             }
             // A nested tuple pattern as a field ([Pair({a, b}, c)]) — binds its
             // components via the recursive desugar. NOT a struct-level discard.
-            if (t.kind() == AltToken.Kind.LBRACE) {
+            if (t.kind() == PontifToken.Kind.LBRACE) {
                 String posField = positionalField(typeName, clauseIndex, members, t.origin());
                 members.put(posField, parseTupleSortBody(t));
                 first = false;
@@ -4209,14 +4209,14 @@ public final class AltParser {
             // constrains the slot, binds nothing (like a literal); parity with a
             // tuple's [Int:@>0] component. (A by-name `field:[…]` narrowing is the
             // separate COLON path below, ruled honest narrowing not a pattern.)
-            if (t.kind() == AltToken.Kind.LBRACKET) {
+            if (t.kind() == PontifToken.Kind.LBRACKET) {
                 String posField = positionalField(typeName, clauseIndex, members, t.origin());
                 members.put(posField, parseSort());
                 literalFieldsOut.add(posField);
                 first = false;
                 continue;
             }
-            AltToken fieldName = expect(AltToken.Kind.IDENT);
+            PontifToken fieldName = expect(PontifToken.Kind.IDENT);
             if (fieldName.text().equals("_")) {
                 // Verdict C: positional discard — occupies the slot (so the
                 // pattern stays arity-total) but binds nothing. Recorded in
@@ -4247,7 +4247,7 @@ public final class AltParser {
                 continue;
             }
             IrSort fieldSort;
-            if (peek().kind() == AltToken.Kind.COLON) {
+            if (peek().kind() == PontifToken.Kind.COLON) {
                 consume();  // COLON
                 fieldSort = parseSort();
                 // By-name narrowing `field:Sort` must name a REAL field of the
@@ -4362,7 +4362,7 @@ public final class AltParser {
             java.util.Set<String> literalFieldsOut, Map<String, String> renamesOut,
             boolean literalClause) throws ParseException {
         String slot = "_" + clauseIndex;
-        AltToken t = peek();
+        PontifToken t = peek();
         if (literalClause) {
             consume();
             String base = switch (t.kind()) {
@@ -4383,15 +4383,15 @@ public final class AltParser {
             literalFieldsOut.add(slot);
             return;
         }
-        if (t.kind() == AltToken.Kind.IDENT && peek(1).kind() == AltToken.Kind.LPAREN) {
+        if (t.kind() == PontifToken.Kind.IDENT && peek(1).kind() == PontifToken.Kind.LPAREN) {
             // Nested constructor pattern as a slot ([Outer(Inner(x, y), c)]).
-            AltToken baseTok = consume();
-            expect(AltToken.Kind.LPAREN);
+            PontifToken baseTok = consume();
+            expect(PontifToken.Kind.LPAREN);
             java.util.Set<String> innerLiterals = new java.util.LinkedHashSet<>();
             Map<String, String> innerRenames = new LinkedHashMap<>();
             Map<String, IrSort> innerMembers = parseStructFields(
                     baseTok.text(), baseTok.origin(), innerLiterals, innerRenames);
-            expect(AltToken.Kind.RPAREN);
+            expect(PontifToken.Kind.RPAREN);
             IrSort.Structural inner = new IrSort.Structural(
                     baseTok.text(), innerMembers, baseTok.origin());
             if (!innerLiterals.isEmpty()) literalConstrainedFields.put(inner, innerLiterals);
@@ -4400,19 +4400,19 @@ public final class AltParser {
             members.put(slot, inner);
             return;
         }
-        if (t.kind() == AltToken.Kind.LBRACE) {
+        if (t.kind() == PontifToken.Kind.LBRACE) {
             // Nested tuple pattern as a slot ([Pair({a, b}, c)]).
             members.put(slot, parseTupleSortBody(t));
             return;
         }
-        if (t.kind() == AltToken.Kind.LBRACKET) {
+        if (t.kind() == PontifToken.Kind.LBRACKET) {
             // Positional refinement constraint as a slot ([P([Int:@>0], y)]).
             members.put(slot, parseSort());
             literalFieldsOut.add(slot);
             return;
         }
-        AltToken binder = expect(AltToken.Kind.IDENT);
-        if (peek().kind() == AltToken.Kind.COLON) {
+        PontifToken binder = expect(PontifToken.Kind.IDENT);
+        if (peek().kind() == PontifToken.Kind.COLON) {
             throw new ParseException(
                     "Pattern [" + typeName + "(...)] narrows field '" + binder.text()
                             + "' by name, but '" + typeName + "' is imported and its fields "
@@ -4481,8 +4481,8 @@ public final class AltParser {
     private IrExpr parseExpr(int minPrec) throws ParseException {
         IrExpr left = parsePrimaryWithPostfix();
         while (true) {
-            AltToken t = peek();
-            if (t.kind() != AltToken.Kind.OP) break;
+            PontifToken t = peek();
+            if (t.kind() != PontifToken.Kind.OP) break;
             // A line-leading `&` is the spread prefix (`&s:[…]` as its own
             // statement), not infix conjunction — disambiguate by position, the
             // same same-line rule the postfix chain uses. Without this, a prior
@@ -4524,7 +4524,7 @@ public final class AltParser {
      * CALL of the body, the module lost its main, and the placeholder main 0
      * "ran". Dot-chains may still continue across lines (fluent style).
      */
-    private boolean postfixOpensOnSameLine(AltToken t) {
+    private boolean postfixOpensOnSameLine(PontifToken t) {
         return pos > 0 && tokens.get(pos - 1).line() == t.line();
     }
 
@@ -4537,22 +4537,22 @@ public final class AltParser {
      * complete <em>of</em>). Duplicate keys are rejected.
      */
     private IrExpr parseDictLiteral() throws ParseException {
-        AltToken open = expect(AltToken.Kind.LBRACE);
+        PontifToken open = expect(PontifToken.Kind.LBRACE);
         Map<String, IrExpr> members = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken key = expect(AltToken.Kind.IDENT);
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            PontifToken key = expect(PontifToken.Kind.IDENT);
             if (members.containsKey(key.text())) {
                 throw new ParseException(
                         "Duplicate key '" + key.text() + "' in dictionary literal",
                         key.origin());
             }
-            expect(AltToken.Kind.EQUALS);
+            expect(PontifToken.Kind.EQUALS);
             members.put(key.text(), parseExpr());
             first = false;
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         return new IrExpr.Record(null, members, open.spanTo(close));
     }
 
@@ -4562,17 +4562,17 @@ public final class AltParser {
         // a transform per element over a stream (docs/stream-war.md §3). `&a:[x]` ≡
         // `x(&a)`; this is the lambda-to-its-named-function counterpart. A leading
         // `&` is unambiguous (binary `&` is handled by the infix loop in parseExpr).
-        if ((peek().kind() == AltToken.Kind.OP && "&".equals(peek().text()))
-                || (peek().kind() == AltToken.Kind.LPAREN
-                        && peek(1).kind() == AltToken.Kind.OP && "&".equals(peek(1).text()))) {
+        if ((peek().kind() == PontifToken.Kind.OP && "&".equals(peek().text()))
+                || (peek().kind() == PontifToken.Kind.LPAREN
+                        && peek(1).kind() == PontifToken.Kind.OP && "&".equals(peek(1).text()))) {
             return parseSpreadAscription();
         }
         IrExpr expr = parsePrimary();
         // Postfix: .IDENT (field access), (args) (positional call or struct
         // literal), {x=val,...} (by-name struct literal) — left-to-right.
         while (true) {
-            AltToken t = peek();
-            if (t.kind() == AltToken.Kind.LBRACKET
+            PontifToken t = peek();
+            if (t.kind() == PontifToken.Kind.LBRACKET
                     && expr instanceof IrExpr.Var fnVar
                     && postfixOpensOnSameLine(t)
                     && !types.isStruct(fnVar.name())
@@ -4589,33 +4589,33 @@ public final class AltParser {
                 consume();  // [
                 List<IrSort> typeArgs = new ArrayList<>();
                 boolean firstArg = true;
-                while (peek().kind() != AltToken.Kind.RBRACKET) {
-                    if (!firstArg) expect(AltToken.Kind.COMMA);
+                while (peek().kind() != PontifToken.Kind.RBRACKET) {
+                    if (!firstArg) expect(PontifToken.Kind.COMMA);
                     typeArgs.add(parseSort());
                     firstArg = false;
                 }
-                expect(AltToken.Kind.RBRACKET);
+                expect(PontifToken.Kind.RBRACKET);
                 String mangled = mangleInstantiation(fnVar.name(), typeArgs);
                 pendingTypeInstantiations.putIfAbsent(
                         mangled, new PendingInstantiation(fnVar.name(), typeArgs));
-                AltToken open = expect(AltToken.Kind.LPAREN);
+                PontifToken open = expect(PontifToken.Kind.LPAREN);
                 List<IrExpr> args = parseArgList();
-                AltToken close = expect(AltToken.Kind.RPAREN);
+                PontifToken close = expect(PontifToken.Kind.RPAREN);
                 Origin callOrigin = open.spanTo(close);
                 expr = lowerSpreadCall(args, a -> new IrExpr.Call(mangled, a, callOrigin), callOrigin);
                 continue;
             }
-            if (t.kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.IDENT) {
+            if (t.kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.IDENT) {
                 consume();  // DOT
-                AltToken name = consume();
+                PontifToken name = consume();
                 // Positional projection `value._N` reads a tuple component, the
                 // read-access sibling of destructuring (`let [(a, b)] = …`) — every
                 // other aggregate has both a read and a destructure form, and tuples
                 // are no exception (RULED 2026-06-21, James). `@._N` in a refinement
                 // predicate (base is the SelfRef `@`) is the same projection.
                 expr = new IrExpr.FieldAccess(expr, name.text(), t.origin());
-            } else if (t.kind() == AltToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
-                AltToken open = consume();
+            } else if (t.kind() == PontifToken.Kind.LPAREN && postfixOpensOnSameLine(t)) {
+                PontifToken open = consume();
                 // Struct-literal shortcut: a bare ident matching a declared
                 // struct constructs a record (positional), not a Call. Native
                 // constructors (Decimal(unscaled, scale)) route the same way —
@@ -4633,7 +4633,7 @@ public final class AltParser {
                     continue;
                 }
                 List<IrExpr> args = parseArgList();
-                AltToken close = expect(AltToken.Kind.RPAREN);
+                PontifToken close = expect(PontifToken.Kind.RPAREN);
                 Origin callOrigin = open.spanTo(close);
 
                 // Instance-method call: `receiver.method(args)` on a VALUE
@@ -4676,7 +4676,7 @@ public final class AltParser {
                     expr = lowerSpreadCall(args, a -> new IrExpr.Apply(fn, a, callOrigin),
                             callOrigin);
                 }
-            } else if (t.kind() == AltToken.Kind.LBRACE
+            } else if (t.kind() == PontifToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
                     && expr instanceof IrExpr.Var v
                     && types.shapeOf(v.name()).isPresent()) {
@@ -4684,10 +4684,10 @@ public final class AltParser {
                 // reserved for declared-struct construction in this slice;
                 // anonymous and dotted-name forms are deferred. Native
                 // constructors (their shape answered by the catalog too) take it as well.
-                AltToken open = consume();
+                PontifToken open = consume();
                 IrSort.Structural shape = types.shapeOf(v.name()).orElseThrow();
                 expr = parseByNameStructLiteral(shape, v.name(), open);
-            } else if (t.kind() == AltToken.Kind.LBRACE
+            } else if (t.kind() == PontifToken.Kind.LBRACE
                     && postfixOpensOnSameLine(t)
                     && expr instanceof IrExpr.Var v
                     && isCapitalizedName(v.name())
@@ -4698,7 +4698,7 @@ public final class AltParser {
                 // Record(typeName, source-order members). The linker's
                 // StructLiteralRewriter validates the field set and reorders to
                 // declared order once every struct is FQN'd and visible.
-                AltToken open = consume();
+                PontifToken open = consume();
                 expr = parseDeferredByNameStructLiteral(v.name(), open);
             } else {
                 break;
@@ -4822,10 +4822,10 @@ public final class AltParser {
      * how the call was written.
      */
     private IrExpr.Record parsePositionalStructLiteral(
-            IrSort.Structural decl, String typeName, AltToken openParen)
+            IrSort.Structural decl, String typeName, PontifToken openParen)
             throws ParseException {
         List<IrExpr> args = parseArgList();
-        AltToken close = expect(AltToken.Kind.RPAREN);
+        PontifToken close = expect(PontifToken.Kind.RPAREN);
         if (anySpread(args)) {
             throw new ParseException(
                     "`&` spread is only valid in a function/fragment call, not the struct "
@@ -4856,13 +4856,13 @@ public final class AltParser {
      * so the IR is canonical regardless of source order.
      */
     private IrExpr.Record parseByNameStructLiteral(
-            IrSort.Structural decl, String typeName, AltToken openBrace)
+            IrSort.Structural decl, String typeName, PontifToken openBrace)
             throws ParseException {
         Map<String, IrExpr> provided = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken fieldTok = expect(AltToken.Kind.IDENT);
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            PontifToken fieldTok = expect(PontifToken.Kind.IDENT);
             String fieldName = fieldTok.text();
             if (decl.extensions().containsKey(fieldName)) {
                 throw new ParseException(
@@ -4883,12 +4883,12 @@ public final class AltParser {
                                 + "literal for '" + typeName + "'",
                         fieldTok.origin());
             }
-            expect(AltToken.Kind.EQUALS);
+            expect(PontifToken.Kind.EQUALS);
             IrExpr value = parseExpr();
             provided.put(fieldName, value);
             first = false;
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         for (String declaredField : decl.constructorMembers().keySet()) {
             if (!provided.containsKey(declaredField)) {
                 throw new ParseException(
@@ -4915,13 +4915,13 @@ public final class AltParser {
      * duplicate keys — a purely syntactic error knowable without the declaration —
      * are rejected here.
      */
-    private IrExpr.Record parseDeferredByNameStructLiteral(String typeName, AltToken openBrace)
+    private IrExpr.Record parseDeferredByNameStructLiteral(String typeName, PontifToken openBrace)
             throws ParseException {
         Map<String, IrExpr> provided = new LinkedHashMap<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken fieldTok = expect(AltToken.Kind.IDENT);
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            PontifToken fieldTok = expect(PontifToken.Kind.IDENT);
             String fieldName = fieldTok.text();
             if (provided.containsKey(fieldName)) {
                 throw new ParseException(
@@ -4929,11 +4929,11 @@ public final class AltParser {
                                 + "literal for '" + typeName + "'",
                         fieldTok.origin());
             }
-            expect(AltToken.Kind.EQUALS);
+            expect(PontifToken.Kind.EQUALS);
             provided.put(fieldName, parseExpr());
             first = false;
         }
-        AltToken close = expect(AltToken.Kind.RBRACE);
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
         return new IrExpr.Record(typeName, provided, openBrace.spanTo(close));
     }
 
@@ -4958,9 +4958,9 @@ public final class AltParser {
      * (a provable narrowing) — otherwise it's a refutable pattern and the
      * compile fails, directing the user to a real match.
      */
-    private IrExpr parseDestructuringLetExpr(AltToken start) throws ParseException {
+    private IrExpr parseDestructuringLetExpr(PontifToken start) throws ParseException {
         IrSort pattern = parsePattern();
-        expect(AltToken.Kind.EQUALS);
+        expect(PontifToken.Kind.EQUALS);
         IrExpr value = parseExpr();
         checkTupleArity(value, pattern);
         IrExpr body = parseExpr();
@@ -4979,7 +4979,7 @@ public final class AltParser {
      * lowering target differs (declarations instead of a scoped expression,
      * exactly like plain lets).
      */
-    private IrStmt parseDestructuringLetTop(AltToken start) throws ParseException {
+    private IrStmt parseDestructuringLetTop(PontifToken start) throws ParseException {
         IrSort pattern = parsePattern();
         if (!(pattern instanceof IrSort.Structural sp)) {
             throw new ParseException(
@@ -4987,7 +4987,7 @@ public final class AltParser {
                             + "e.g. let [Ternion(a, b, c)] = …",
                     start.origin());
         }
-        expect(AltToken.Kind.EQUALS);
+        expect(PontifToken.Kind.EQUALS);
         IrExpr value = parseExpr();
         checkTupleArity(value, sp);
         String synthetic = "__destructure$" + (syntheticCounter++);
@@ -5084,16 +5084,16 @@ public final class AltParser {
      * expression later, pointing the author at {@code let x = …} or {@code let _ = …}.
      */
     private boolean isLetBindingHead() {
-        if (peek().kind() != AltToken.Kind.IDENT) return false;
-        AltToken.Kind next = peek(1).kind();
-        return next == AltToken.Kind.EQUALS
-                || next == AltToken.Kind.COLON
-                || (next == AltToken.Kind.DOT && peek(2).kind() == AltToken.Kind.LBRACE);
+        if (peek().kind() != PontifToken.Kind.IDENT) return false;
+        PontifToken.Kind next = peek(1).kind();
+        return next == PontifToken.Kind.EQUALS
+                || next == PontifToken.Kind.COLON
+                || (next == PontifToken.Kind.DOT && peek(2).kind() == PontifToken.Kind.LBRACE);
     }
 
     private IrExpr parseLetExpr() throws ParseException {
-        AltToken start = expectKeyword("let");
-        if (peek().kind() == AltToken.Kind.LBRACKET) {
+        PontifToken start = expectKeyword("let");
+        if (peek().kind() == PontifToken.Kind.LBRACKET) {
             return parseDestructuringLetExpr(start);
         }
         if (!isLetBindingHead()) {
@@ -5103,19 +5103,19 @@ public final class AltParser {
             return new IrExpr.LetIn("#discard#" + (discardSeq++), IrSort.named("_"),
                     discarded, cont, start.origin());
         }
-        AltToken nameTok = expect(AltToken.Kind.IDENT);
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
         String name = nameTok.text();
         if (KEYWORDS.contains(name)) {
             throw new ParseException(
                     "Cannot bind keyword '" + name + "' as a let-name",
                     nameTok.origin());
         }
-        if (peek().kind() == AltToken.Kind.DOT && peek(1).kind() == AltToken.Kind.LBRACE) {
+        if (peek().kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.LBRACE) {
             return parseDictDecompositionLetExpr(start, nameTok);
         }
         IrSort declaredSort = null;
         IrExpr value = null;
-        if (peek().kind() == AltToken.Kind.COLON) {
+        if (peek().kind() == PontifToken.Kind.COLON) {
             consume();
             // A clause after `:` in a nested let — the same unified ascription rule as
             // top level (docs/arrows.md): with a `= rhs` SUBJECT the clause is APPLIED
@@ -5124,7 +5124,7 @@ public final class AltParser {
             // block is the let-in body.
             if (looksLikeClause()) {
                 IrExpr.Lambda frag = parseClause();
-                if (peek().kind() == AltToken.Kind.EQUALS) {
+                if (peek().kind() == PontifToken.Kind.EQUALS) {
                     consume();
                     value = applyReturnClause(parseExpr(), frag);
                     declaredSort = frag.returnSort();
@@ -5154,7 +5154,7 @@ public final class AltParser {
             }
         }
         if (value == null) {
-            expect(AltToken.Kind.EQUALS);
+            expect(PontifToken.Kind.EQUALS);
             value = parseExpr();
         }
         IrSort inferred = inference.maximalSort(value);
@@ -5206,7 +5206,7 @@ public final class AltParser {
      * inherits the param's base sort for the pattern's {@link IrSort.Refined}.
      */
     private IrExpr parseMatch() throws ParseException {
-        AltToken start = expectKeyword("match");
+        PontifToken start = expectKeyword("match");
         IrExpr scrutinee = parseExpr();
 
         // Determine contextual base from scrutinee, if possible.
@@ -5214,7 +5214,7 @@ public final class AltParser {
         contextualBaseStack.push(inferredBase == null ? "" : inferredBase);
 
         try {
-            boolean braced = peek().kind() == AltToken.Kind.LBRACE;
+            boolean braced = peek().kind() == PontifToken.Kind.LBRACE;
             if (braced) consume();
 
             List<IrExpr.MatchBranch> branches = new ArrayList<>();
@@ -5229,8 +5229,8 @@ public final class AltParser {
                             peek().origin());
                 }
                 if (isUnderscoreArm()) {
-                    AltToken underscore = consume();
-                    expect(AltToken.Kind.ARROW);
+                    PontifToken underscore = consume();
+                    expect(PontifToken.Kind.ARROW);
                     IrExpr result = parseExpr();
                     defaultArmIndex = branches.size();
                     defaultArmOrigin = underscore.origin();
@@ -5242,7 +5242,7 @@ public final class AltParser {
                             result));
                 } else {
                     IrSort pattern = parsePattern();
-                    expect(AltToken.Kind.ARROW);
+                    expect(PontifToken.Kind.ARROW);
                     // The arm body is a clause: the pattern's leaf binders (the
                     // destructure) scope the result (the production). Open clause —
                     // the body also sees the enclosing scope; binders are saved/
@@ -5271,7 +5271,7 @@ public final class AltParser {
                 // or literal (`A(v) -> ...`) instead of the required bracket-sort
                 // (`[A(v)] -> ...`). The arm loop stops at the unbracketed token,
                 // so without this the user sees a bewildering "Expected RBRACE".
-                if (peek().kind() != AltToken.Kind.RBRACE && looksLikeUnbracketedArm()) {
+                if (peek().kind() != PontifToken.Kind.RBRACE && looksLikeUnbracketedArm()) {
                     throw new ParseException(
                             "Match arm patterns must be written as bracket-sorts: '["
                             + peek().text() + " ...] -> ...', not a bare '" + peek().text()
@@ -5279,7 +5279,7 @@ public final class AltParser {
                             + " `[@>0] -> ...`, or `_` for the default arm).",
                             peek().origin());
                 }
-                expect(AltToken.Kind.RBRACE);
+                expect(PontifToken.Kind.RBRACE);
             }
 
             if (branches.isEmpty()) {
@@ -5324,7 +5324,7 @@ public final class AltParser {
      * out for free — the else-branch is any expression, including another {@code if}.
      */
     private IrExpr parseConditional() throws ParseException {
-        AltToken start = expectKeyword("if");
+        PontifToken start = expectKeyword("if");
         IrExpr cond = parseExpr();
         expectKeyword("then");
         IrExpr thenExpr = parseExpr();
@@ -5367,17 +5367,17 @@ public final class AltParser {
      * fragment literal; named/coercion transforms in the {@code [..]} are slice 2d-3.
      */
     private IrExpr parseSpreadAscription() throws ParseException {
-        AltToken start = peek();
+        PontifToken start = peek();
         Origin o = start.origin();
         // Subject: a single `&stream`, or a parenthesized tuple of them `(&a, &b)` —
         // the zip / fan-in form (docs/stream-war.md §3).
         List<IrExpr> sources = new ArrayList<>();
-        if (peek().kind() == AltToken.Kind.LPAREN) {
+        if (peek().kind() == PontifToken.Kind.LPAREN) {
             consume();  // `(`
             boolean first = true;
-            while (peek().kind() != AltToken.Kind.RPAREN) {
-                if (!first) expect(AltToken.Kind.COMMA);
-                if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
+            while (peek().kind() != PontifToken.Kind.RPAREN) {
+                if (!first) expect(PontifToken.Kind.COMMA);
+                if (peek().kind() == PontifToken.Kind.OP && "&".equals(peek().text())) {
                     consume();  // `&`
                 } else {
                     throw new ParseException(
@@ -5387,19 +5387,19 @@ public final class AltParser {
                 sources.add(parseExpr());  // stops at COMMA / RPAREN (neither is an OP)
                 first = false;
             }
-            expect(AltToken.Kind.RPAREN);
+            expect(PontifToken.Kind.RPAREN);
         } else {
             consume();  // `&`
             sources.add(parseExpr());  // stops at the COLON (not an OP)
         }
-        expect(AltToken.Kind.COLON);
+        expect(PontifToken.Kind.COLON);
         if (!looksLikeClause()) {
             // The bracket is not a transform arrow/fragment — it is a bare TYPE-SORT,
             // which makes `&s:[…]` a QUERY, not a per-element map (the membership /
             // identity-transform branch of the spectrum; docs/stream-queries.md §1). A
             // query is described-not-run; a terminal op chooses cardinality. Slice A
             // supports `.first()` → [Present(T)|Absent] (docs/stream-queries.md §2.1).
-            if (peek().kind() == AltToken.Kind.LBRACKET) {
+            if (peek().kind() == PontifToken.Kind.LBRACKET) {
                 if (sources.size() > 1) {
                     throw new ParseException(
                             "A stream query `&s:[T:pred]` takes a single stream — a "
@@ -5479,8 +5479,8 @@ public final class AltParser {
      * kernel is lowered at dispatch, failing closed with a LoweringError, never a silent CPU run.)
      */
     private IrExpr maybeOnGpu(IrExpr result, Origin o) throws ParseException {
-        if (peek().kind() == AltToken.Kind.IDENT && "on".equals(peek().text())
-                && peek(1).kind() == AltToken.Kind.IDENT && "Gpu".equals(peek(1).text())) {
+        if (peek().kind() == PontifToken.Kind.IDENT && "on".equals(peek().text())
+                && peek(1).kind() == PontifToken.Kind.IDENT && "Gpu".equals(peek(1).text())) {
             consume();  // `on`
             consume();  // `Gpu`
             if (!(result instanceof IrExpr.Iterate it)) {
@@ -5514,19 +5514,19 @@ public final class AltParser {
      */
     private IrExpr parseQueryTerminal(IrExpr source, Origin o) throws ParseException {
         IrSort elemSort = parseSort();   // the `[T:pred]` membership sort
-        if (peek().kind() != AltToken.Kind.DOT || peek(1).kind() != AltToken.Kind.IDENT) {
+        if (peek().kind() != PontifToken.Kind.DOT || peek(1).kind() != PontifToken.Kind.IDENT) {
             throw new ParseException(
                     "A stream query `&s:[T:pred]` must be terminated with a terminal op — "
                             + "e.g. `.first()` (0-or-1) or `.all()` (0-or-many); a standalone "
                             + "Query value is not yet supported (docs/stream-queries.md §2)",
                     peek().origin());
         }
-        AltToken termTok = peek(1);
+        PontifToken termTok = peek(1);
         String terminal = termTok.text();
         consume();  // `.`
         consume();  // the terminal name
-        expect(AltToken.Kind.LPAREN);
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.LPAREN);
+        expect(PontifToken.Kind.RPAREN);
         // The terminal chooses cardinality (docs/stream-queries.md §2.2): `.first()` →
         // 0-or-1 `[Present(T)|Absent]`; `.all()` → 0-or-many `Stream[T]` (the keyed.md
         // "Restrict" face, materialized).
@@ -5599,10 +5599,10 @@ public final class AltParser {
 
     /** Whether {@code let NAME:} is followed by a fragment literal {@code [ (name: …) -> … ]}. */
     private boolean looksLikeFragmentLiteral() {
-        return peek().kind() == AltToken.Kind.LBRACKET
-                && peek(1).kind() == AltToken.Kind.LPAREN
-                && peek(2).kind() == AltToken.Kind.IDENT
-                && peek(3).kind() == AltToken.Kind.COLON;
+        return peek().kind() == PontifToken.Kind.LBRACKET
+                && peek(1).kind() == PontifToken.Kind.LPAREN
+                && peek(2).kind() == PontifToken.Kind.IDENT
+                && peek(3).kind() == PontifToken.Kind.COLON;
     }
 
     /**
@@ -5618,14 +5618,14 @@ public final class AltParser {
      * sort or fragment (minimal blast radius — slice S1).
      */
     private boolean looksLikeClauseChain() {
-        if (peek().kind() != AltToken.Kind.LBRACKET) return false;
+        if (peek().kind() != PontifToken.Kind.LBRACKET) return false;
         if (looksLikeFragmentLiteral()) return false;                 // [ (x:T) -> …
-        if (peek(1).kind() == AltToken.Kind.LBRACE) return false;     // [{…}] tuple
-        if (peek(1).kind() == AltToken.Kind.IDENT
+        if (peek(1).kind() == PontifToken.Kind.LBRACE) return false;     // [{…}] tuple
+        if (peek(1).kind() == PontifToken.Kind.IDENT
                 && peek(1).text().equals("let")) return false;        // [let …] pipeline
         // Leading stage must look like a type checkpoint (bare ident or `[T]`).
-        if (peek(1).kind() != AltToken.Kind.IDENT
-                && peek(1).kind() != AltToken.Kind.LBRACKET) return false;
+        if (peek(1).kind() != PontifToken.Kind.IDENT
+                && peek(1).kind() != PontifToken.Kind.LBRACKET) return false;
         return chainHasTopLevelArrow();
     }
 
@@ -5638,7 +5638,7 @@ public final class AltParser {
     private boolean chainHasTopLevelArrow() {
         int bracket = 0, paren = 0, brace = 0;
         for (int i = 0; ; i++) {
-            AltToken.Kind k = peek(i).kind();
+            PontifToken.Kind k = peek(i).kind();
             switch (k) {
                 case EOF -> { return false; }
                 case LBRACKET -> bracket++;
@@ -5732,7 +5732,7 @@ public final class AltParser {
      * </ul>
      */
     private ParsedClause parseClauseStages() throws ParseException {
-        AltToken open = expect(AltToken.Kind.LBRACKET);
+        PontifToken open = expect(PontifToken.Kind.LBRACKET);
 
         // ---- HEAD: establish the input (if any). @ is the running value. ----
         List<IrParam> params = new ArrayList<>();   // input params; empty ⇒ closed
@@ -5744,32 +5744,32 @@ public final class AltParser {
         boolean freshScope = false;
         List<IrStmt.RequireEntry> headDestr = null; // anonymous destructuring input
         IrSort.Structural headDestrBase = null;
-        if (peek().kind() == AltToken.Kind.LPAREN) {
+        if (peek().kind() == PontifToken.Kind.LPAREN) {
             // Named-binder fragment head `(x:A, …) (:Codomain)? -> …`.
-            expect(AltToken.Kind.LPAREN);
-            params = parseParamList(AltToken.Kind.RPAREN);
-            expect(AltToken.Kind.RPAREN);
+            expect(PontifToken.Kind.LPAREN);
+            params = parseParamList(PontifToken.Kind.RPAREN);
+            expect(PontifToken.Kind.RPAREN);
             destrs = drainParamDestructures();
             if (!drainParamConversions().isEmpty()) {
                 throw new ParseException("a conversion-clause param `(x:[A -> B])` inside a "
                         + "fragment binder is not supported yet — use it on a function/method "
                         + "param", open.origin());
             }
-            if (peek().kind() == AltToken.Kind.COLON) { consume(); declaredCodomain = parseSort(); }
-            expect(AltToken.Kind.ARROW);
+            if (peek().kind() == PontifToken.Kind.COLON) { consume(); declaredCodomain = parseSort(); }
+            expect(PontifToken.Kind.ARROW);
             freshScope = true;                       // a fragment is a closed clause over its binders
             if (params.size() == 1) {                // a single binder IS the named @
                 atVar = params.get(0).name();
                 cur = new IrExpr.Var(atVar, open.origin());
                 currentType = params.get(0).sort();
             }
-        } else if (peek().kind() == AltToken.Kind.IDENT
-                && peek(1).kind() == AltToken.Kind.DOT
-                && peek(2).kind() == AltToken.Kind.LBRACE) {
+        } else if (peek().kind() == PontifToken.Kind.IDENT
+                && peek(1).kind() == PontifToken.Kind.DOT
+                && peek(2).kind() == PontifToken.Kind.LBRACE) {
             // Destructuring anonymous input `[Base.{a, b} -> conv]`: @ is a Base whose
             // fields are extracted into scope for the conversion body (the param-
             // destructure shape, made a clause input — destructure/conversion duality).
-            AltToken baseTok = expect(AltToken.Kind.IDENT);
+            PontifToken baseTok = expect(PontifToken.Kind.IDENT);
             headDestr = parseDotBraceEntryList();
             IrSort inputSort = new IrSort.Named(baseTok.text(), baseTok.origin());
             headDestrBase = declaredStructShape(baseTok.text());
@@ -5777,8 +5777,8 @@ public final class AltParser {
             params = List.of(new IrParam(atVar, inputSort));
             cur = new IrExpr.Var(atVar, open.origin());
             currentType = inputSort;
-            expect(AltToken.Kind.ARROW);
-        } else if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+            expect(PontifToken.Kind.ARROW);
+        } else if (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("let")) {
             // Closed `let`-led pipeline — no input head; the fold consumes the lets and
             // the sort projection pins @. (`let` is the one head that is neither a sort
             // nor a destructure.)
@@ -5793,7 +5793,7 @@ public final class AltParser {
             params = List.of(new IrParam(atVar, inputSort));
             cur = new IrExpr.Var(atVar, open.origin());
             currentType = inputSort;
-            expect(AltToken.Kind.ARROW);
+            expect(PontifToken.Kind.ARROW);
         }
         boolean hasInput = !params.isEmpty();
 
@@ -5825,13 +5825,13 @@ public final class AltParser {
             }
             boolean done = false;
             while (!done) {
-                if (peek().kind() == AltToken.Kind.IDENT && peek().text().equals("let")) {
+                if (peek().kind() == PontifToken.Kind.IDENT && peek().text().equals("let")) {
                     // binding stage: names only, @ unchanged.
                     consume();
-                    AltToken n = expect(AltToken.Kind.IDENT);
+                    PontifToken n = expect(PontifToken.Kind.IDENT);
                     IrSort s = null;
-                    if (peek().kind() == AltToken.Kind.COLON) { consume(); s = parseSort(); }
-                    expect(AltToken.Kind.EQUALS);
+                    if (peek().kind() == PontifToken.Kind.COLON) { consume(); s = parseSort(); }
+                    expect(PontifToken.Kind.EQUALS);
                     IrExpr e = cur != null ? substituteSelf(parseExpr(), cur) : parseExpr();
                     IrSort bindSort = s != null ? s : inference.maximalSort(e);
                     bn.add(n.text());
@@ -5864,14 +5864,14 @@ public final class AltParser {
                     currentType = inference.maximalSort(cur);
                 }
                 if (atVar != null) currentScope.put(atVar, currentType);
-                if (peek().kind() == AltToken.Kind.ARROW) consume();
+                if (peek().kind() == PontifToken.Kind.ARROW) consume();
                 else done = true;
             }
         } finally {
             currentScope.clear();
             currentScope.putAll(savedScope);
         }
-        AltToken close = expect(AltToken.Kind.RBRACKET);
+        PontifToken close = expect(PontifToken.Kind.RBRACKET);
 
         // A clause must establish @ — an input head, a production, or a pin. Only
         // bindings (`[let r = 5]`, no terminus) leaves it unset: a clean error, not an
@@ -5921,31 +5921,31 @@ public final class AltParser {
      * the bracket is the unambiguous form (docs/arrows.md).
      */
     private boolean chainStageIsSort() {
-        if (peek().kind() == AltToken.Kind.LBRACKET) return true;
-        if (peek().kind() == AltToken.Kind.IDENT) {
+        if (peek().kind() == PontifToken.Kind.LBRACKET) return true;
+        if (peek().kind() == PontifToken.Kind.IDENT) {
             String t = peek().text();
             // A capitalized name that is NOT a constructor call `Name(…)` nor a
             // construction literal `Name{…}` (both are value productions).
             return !t.isEmpty() && Character.isUpperCase(t.charAt(0))
-                    && peek(1).kind() != AltToken.Kind.LPAREN
-                    && peek(1).kind() != AltToken.Kind.LBRACE;
+                    && peek(1).kind() != PontifToken.Kind.LPAREN
+                    && peek(1).kind() != PontifToken.Kind.LBRACE;
         }
         return false;
     }
 
     private IrExpr parseIter() throws ParseException {
-        AltToken start = consume();  // `iter`
-        expect(AltToken.Kind.LPAREN);
+        PontifToken start = consume();  // `iter`
+        expect(PontifToken.Kind.LPAREN);
         IrExpr source = parseExpr();
-        expect(AltToken.Kind.RPAREN);
+        expect(PontifToken.Kind.RPAREN);
         // `.{ members }` — the capability set (slice 1: value / accept / reject).
-        expect(AltToken.Kind.DOT);
-        expect(AltToken.Kind.LBRACE);
+        expect(PontifToken.Kind.DOT);
+        expect(PontifToken.Kind.LBRACE);
         java.util.LinkedHashSet<String> members = new java.util.LinkedHashSet<>();
         boolean first = true;
-        while (peek().kind() != AltToken.Kind.RBRACE) {
-            if (!first) expect(AltToken.Kind.COMMA);
-            AltToken m = expect(AltToken.Kind.IDENT);
+        while (peek().kind() != PontifToken.Kind.RBRACE) {
+            if (!first) expect(PontifToken.Kind.COMMA);
+            PontifToken m = expect(PontifToken.Kind.IDENT);
             if (!java.util.Set.of("value", "accept", "reject").contains(m.text())) {
                 throw new ParseException(
                         "Iterator member '" + m.text() + "' is not supported yet — slice 1 "
@@ -5955,7 +5955,7 @@ public final class AltParser {
             members.add(m.text());
             first = false;
         }
-        expect(AltToken.Kind.RBRACE);
+        expect(PontifToken.Kind.RBRACE);
         if (!members.contains("value")) {
             throw new ParseException(
                     "Iterator block must destructure `value` (the current element)", start.origin());
@@ -5979,11 +5979,11 @@ public final class AltParser {
         Map<String, IrSort> savedScope = new LinkedHashMap<>(currentScope);
         if (valueSort != null) currentScope.put("value", valueSort);
         IrExpr body;
-        AltToken end;
+        PontifToken end;
         try {
-            expect(AltToken.Kind.LBRACE);
+            expect(PontifToken.Kind.LBRACE);
             body = parseMatch();
-            end = expect(AltToken.Kind.RBRACE);
+            end = expect(PontifToken.Kind.RBRACE);
         } finally {
             currentScope.clear();
             currentScope.putAll(savedScope);
@@ -6045,7 +6045,7 @@ public final class AltParser {
 
     /** True if the next token starts a match arm — either `[` or the `_` default. */
     private boolean isMatchArmStart() {
-        return peek().kind() == AltToken.Kind.LBRACKET || isUnderscoreArm();
+        return peek().kind() == PontifToken.Kind.LBRACKET || isUnderscoreArm();
     }
 
     /**
@@ -6056,7 +6056,7 @@ public final class AltParser {
      * Bounded lookahead so a genuinely broken tail doesn't scan forever.
      */
     private boolean looksLikeUnbracketedArm() {
-        AltToken t = peek();
+        PontifToken t = peek();
         boolean patternish = switch (t.kind()) {
             case IDENT, LPAREN, INTEGER, DECIMAL, STRING, CHAR -> true;
             case OP -> t.text().equals("-"); // a negative-literal pattern like -1
@@ -6064,17 +6064,17 @@ public final class AltParser {
         };
         if (!patternish) return false;
         for (int i = 0; i < 32; i++) {
-            AltToken.Kind k = peek(i).kind();
-            if (k == AltToken.Kind.ARROW) return true;
-            if (k == AltToken.Kind.RBRACE || k == AltToken.Kind.EOF) return false;
+            PontifToken.Kind k = peek(i).kind();
+            if (k == PontifToken.Kind.ARROW) return true;
+            if (k == PontifToken.Kind.RBRACE || k == PontifToken.Kind.EOF) return false;
         }
         return false;
     }
 
     /** True if the next token is the `_` default-arm marker (an IDENT with text "_"). */
     private boolean isUnderscoreArm() {
-        AltToken t = peek();
-        return t.kind() == AltToken.Kind.IDENT && t.text().equals("_");
+        PontifToken t = peek();
+        return t.kind() == PontifToken.Kind.IDENT && t.text().equals("_");
     }
 
     /** Returns the scrutinee's IrSort if it's a known in-scope Var; null otherwise. */
@@ -6234,9 +6234,9 @@ public final class AltParser {
 
     private List<IrExpr> parseArgList() throws ParseException {
         List<IrExpr> args = new ArrayList<>();
-        if (peek().kind() == AltToken.Kind.RPAREN) return args;
+        if (peek().kind() == PontifToken.Kind.RPAREN) return args;
         args.add(parseArg());
-        while (peek().kind() == AltToken.Kind.COMMA) {
+        while (peek().kind() == PontifToken.Kind.COMMA) {
             consume();
             args.add(parseArg());
         }
@@ -6261,8 +6261,8 @@ public final class AltParser {
      * a per-element spread over a stream. Anything else is an ordinary argument.
      */
     private IrExpr parseArg() throws ParseException {
-        if (peek().kind() == AltToken.Kind.OP && "&".equals(peek().text())) {
-            AltToken amp = consume();
+        if (peek().kind() == PontifToken.Kind.OP && "&".equals(peek().text())) {
+            PontifToken amp = consume();
             IrExpr source = parseExpr();
             return new IrExpr.Call(SPREAD_SENTINEL, List.of(source), amp.origin());
         }
@@ -6274,7 +6274,7 @@ public final class AltParser {
     }
 
     private static boolean anySpread(List<IrExpr> args) {
-        return args.stream().anyMatch(AltParser::isSpread);
+        return args.stream().anyMatch(PontifParser::isSpread);
     }
 
     /**
@@ -6422,7 +6422,7 @@ public final class AltParser {
     }
 
     private IrExpr parsePrimary() throws ParseException {
-        AltToken t = peek();
+        PontifToken t = peek();
         // A fragment literal `[(x:T) -> body]` in value position is a lambda — usable as any argument
         // (e.g. `cell.apply([(x:Int) -> x + 1])`), not only as a `:`-clause ascription.
         if (looksLikeFragmentLiteral()) {
@@ -6470,9 +6470,9 @@ public final class AltParser {
                 // conductor handler body. The single `=` (EQUALS, not `==`/EQ) after `this.field`
                 // is the discriminator: `this.count + 1` and `this.count == x` are ordinary reads.
                 if (inConductorHandler && t.text().equals("this")
-                        && peek(1).kind() == AltToken.Kind.DOT
-                        && peek(2).kind() == AltToken.Kind.IDENT
-                        && peek(3).kind() == AltToken.Kind.EQUALS) {
+                        && peek(1).kind() == PontifToken.Kind.DOT
+                        && peek(2).kind() == PontifToken.Kind.IDENT
+                        && peek(3).kind() == PontifToken.Kind.EQUALS) {
                     yield parseSelfAssignment();
                 }
                 if (t.text().equals("iter")) {
@@ -6489,11 +6489,11 @@ public final class AltParser {
                 // read) is decided when we see (or don't see) a trailing `(`.
                 // Top-level-let access (bare or dotted) is rewritten to a
                 // 0-arg Call at the end of parsePrimaryWithPostfix.
-                AltToken nameTok = consume();
+                PontifToken nameTok = consume();
                 yield new IrExpr.Var(nameTok.text(), nameTok.origin());
             }
             case LPAREN -> {
-                AltToken lp = consume();
+                PontifToken lp = consume();
                 // Value-space cast `(Type:value)` — explicit coercion, the
                 // sibling of the type-space refinement `[Base:pred]`
                 // (docs/dispatch-unification.md → "Coercion"). A complete sort
@@ -6507,11 +6507,11 @@ public final class AltParser {
                 IrSort castTarget = tryParseCastTarget();
                 if (castTarget != null) {
                     IrExpr value = parseExpr();
-                    AltToken close = expect(AltToken.Kind.RPAREN);
+                    PontifToken close = expect(PontifToken.Kind.RPAREN);
                     yield new IrExpr.Cast(castTarget, value, lp.spanTo(close));
                 }
                 IrExpr inner = parseExpr();
-                if (peek().kind() == AltToken.Kind.COMMA) {
+                if (peek().kind() == PontifToken.Kind.COMMA) {
                     // BRACE-AGGREGATES WAR: paren-tuples are RETIRED. Parens are
                     // grouping / calls / param lists only; a positional aggregate
                     // is written with braces `{e0, e1, …}`.
@@ -6520,7 +6520,7 @@ public final class AltParser {
                                     + "`{e0, e1, …}`. Parentheses are for grouping, calls, and "
                                     + "parameter lists.", peek().origin());
                 }
-                expect(AltToken.Kind.RPAREN);
+                expect(PontifToken.Kind.RPAREN);
                 yield inner;
             }
             case LBRACE -> {
@@ -6531,23 +6531,23 @@ public final class AltParser {
                 // parens: `( let y = 5  y + 1 )` already binds a let-chain to its
                 // closing `)`, so braces never group. An `IDENT =` head is the
                 // dict (`=` isn't an expression operator, so one token decides).
-                if (peek(1).kind() == AltToken.Kind.IDENT
-                        && peek(2).kind() == AltToken.Kind.EQUALS) {
+                if (peek(1).kind() == PontifToken.Kind.IDENT
+                        && peek(2).kind() == PontifToken.Kind.EQUALS) {
                     yield parseDictLiteral();
                 }
                 // Positional aggregate — the brace-delimited sibling of the paren
                 // tuple, lowering to the SAME `_tuple` Record (no new IR node).
                 // `{}` is empty, `{e}` a singleton, `{e0, e1, …}` n-ary.
-                AltToken open = consume();
+                PontifToken open = consume();
                 List<IrExpr> elems = new ArrayList<>();
-                if (peek().kind() != AltToken.Kind.RBRACE) {
+                if (peek().kind() != PontifToken.Kind.RBRACE) {
                     elems.add(parseExpr());
-                    while (peek().kind() == AltToken.Kind.COMMA) {
+                    while (peek().kind() == PontifToken.Kind.COMMA) {
                         consume();
                         elems.add(parseExpr());
                     }
                 }
-                expect(AltToken.Kind.RBRACE);
+                expect(PontifToken.Kind.RBRACE);
                 yield buildTupleLiteral(elems, open.origin());
             }
             case AT -> {
@@ -6564,32 +6564,32 @@ public final class AltParser {
                 // $fqn literal; its one implemented case is the dispatch
                 // reference `$name[Sorts]`, which reifies the dispatch keyed at
                 // those sorts (sort `[Dispatch(...):...]`).
-                AltToken dollar = consume();
-                AltToken firstName = expect(AltToken.Kind.IDENT);
+                PontifToken dollar = consume();
+                PontifToken firstName = expect(PontifToken.Kind.IDENT);
                 StringBuilder name = new StringBuilder(firstName.text());
-                AltToken lastName = firstName;
-                while (peek().kind() == AltToken.Kind.DOT
-                        && peek(1).kind() == AltToken.Kind.IDENT) {
+                PontifToken lastName = firstName;
+                while (peek().kind() == PontifToken.Kind.DOT
+                        && peek(1).kind() == PontifToken.Kind.IDENT) {
                     consume();                       // DOT
-                    AltToken seg = consume();        // IDENT
+                    PontifToken seg = consume();        // IDENT
                     name.append('.').append(seg.text());
                     lastName = seg;
                 }
                 String dottedName = name.toString();
-                AltToken next = peek();
-                boolean adjacentBracket = next.kind() == AltToken.Kind.LBRACKET
+                PontifToken next = peek();
+                boolean adjacentBracket = next.kind() == PontifToken.Kind.LBRACKET
                         && next.line() == lastName.line()
                         && next.column() == lastName.column() + lastName.text().length();
                 if (adjacentBracket) {
                     consume();                       // LBRACKET
                     List<IrSort> keys = new ArrayList<>();
                     boolean firstKey = true;
-                    while (peek().kind() != AltToken.Kind.RBRACKET) {
-                        if (!firstKey) expect(AltToken.Kind.COMMA);
+                    while (peek().kind() != PontifToken.Kind.RBRACKET) {
+                        if (!firstKey) expect(PontifToken.Kind.COMMA);
                         keys.add(parseSort());
                         firstKey = false;
                     }
-                    AltToken close = expect(AltToken.Kind.RBRACKET);
+                    PontifToken close = expect(PontifToken.Kind.RBRACKET);
                     yield new IrExpr.DispatchRef(dottedName, keys, dollar.spanTo(close));
                 }
                 throw new ParseException(

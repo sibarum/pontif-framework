@@ -159,7 +159,7 @@ assign unique index byBoth:[ (n:User) -> {n.id, n.name} ]   # compound key (tupl
   changes performance, never results.
 
 **Implementation (Slice B1+B2, LANDED 2026-07-30).** Mirrors `action`/`conduit`: the parser
-(`AltParser.parseAssignIndex`) lowers the declaration to an ordinary `IrStmt.FunctionDecl`
+(`PontifParser.parseAssignIndex`) lowers the declaration to an ordinary `IrStmt.FunctionDecl`
 under a reserved, non-lexable `#index#SEQ#KIND#NAME` key with params `(n:T)` and body the
 key-projection — so **the projection is type-checked for free** (a bad field is a compile
 error, `AssignIndexTest`). `IrCompiler` recognizes the `#index#` prefix and registers a
@@ -215,7 +215,7 @@ Prerequisites: `keyed.md` **Slice 0** (nested-path refinements in `SortChecker`)
 
 - **Slice A — `.first()` over a bare-type-sort query (scan-correct) — LANDED (2026-07-28).**
   `&s:[T:pred]` with a bare type-sort (no transform arrow) is recognized as a query in
-  `AltParser.parseSpreadAscription` (the `!looksLikeClause()` branch); `.first()` is parsed
+  `PontifParser.parseSpreadAscription` (the `!looksLikeClause()` branch); `.first()` is parsed
   by `parseQueryTerminal` and lowered by `lowerQueryFirst` to a **stop-at-first-hit scan**:
   an `Iterate` with a single `ACCUMULATOR` seeded to `Absent()`, a guard arm on the
   membership sort that writes the **bare matching element** then a `STOP` write (writes

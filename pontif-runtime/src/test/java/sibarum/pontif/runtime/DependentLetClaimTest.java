@@ -31,14 +31,14 @@ class DependentLetClaimTest {
 
     private void assertRuns(String src, String expected) {
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals(expected, r.text(), engine.toString());
         }
     }
 
     private String assertCompileError(String src) {
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError() && r.text().startsWith("Compile error"),
                 () -> "expected a compile error; got: " + r.text());
         return r.text();

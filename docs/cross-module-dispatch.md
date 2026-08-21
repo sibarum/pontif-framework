@@ -350,7 +350,7 @@ threaded in:
   → `resolveOverload`.
 - **`ModuleSymbolTable`** — built in `combine` (line 79) but **not currently passed** to
   the compile. Thread it: `combine` returns it (new `LinkResult` or overload) →
-  `PontifCompiler.compileModule`/`compileProject` and the `compileAlt`/`ModuleResolver`
+  `PontifCompiler.compileModule`/`compileProject` and the `compile`/`ModuleResolver`
   path pass it to `MethodOperatorResolver.resolve(module, table)`. **Nullable** — a bare
   single-file compile passes `null` and gates nothing (backward-compatible).
 

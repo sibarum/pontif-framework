@@ -448,7 +448,7 @@ public final class App {
     /** Recompute and publish both style axes for the editor: token colors
      *  (foreground) and bracket-block tints (background, outermost-first). */
     private static void applyHighlight(String content) {
-        AltHighlighter.Styles styles = AltHighlighter.highlight(content);
+        PontifHighlighter.Styles styles = PontifHighlighter.highlight(content);
         TextStyleStates.setForeground(codeText, styles.foreground());
         TextStyleStates.setBackground(codeText, styles.background());
     }
@@ -857,7 +857,7 @@ public final class App {
     private static void regenerateIrAst() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
-        String text = switch (IrAstReport.fromAltSource(code, sourceName, resolveDir())) {
+        String text = switch (IrAstReport.fromPontifSource(code, sourceName, resolveDir())) {
             case IrAstReport.Result.Generated g -> g.text();
             case IrAstReport.Result.Failed f -> f.error();
         };
@@ -871,7 +871,7 @@ public final class App {
     private static void regenerateNarrowings() {
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
-        String text = switch (ReflectionReport.fromAltSource(code, sourceName, resolveDir(), narrowingsEntry)) {
+        String text = switch (ReflectionReport.fromPontifSource(code, sourceName, resolveDir(), narrowingsEntry)) {
             case ReflectionReport.Result.Generated g -> g.text();
             case ReflectionReport.Result.Failed f -> f.error();
         };
@@ -960,12 +960,12 @@ public final class App {
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "<editor>";
         Path resolveDir = resolveDir();
 
-        String receipts = switch (ReceiptGraphReport.fromAltSource(code, sourceName, resolveDir)) {
+        String receipts = switch (ReceiptGraphReport.fromPontifSource(code, sourceName, resolveDir)) {
             case ReceiptGraphReport.Result.Generated g -> g.text();
             case ReceiptGraphReport.Result.Failed f ->
                     "# Receipt-graph report: " + sourceName + "\n\n" + f.error() + "\n";
         };
-        String conservation = switch (ConservationReport.fromAltSource(code, sourceName, resolveDir)) {
+        String conservation = switch (ConservationReport.fromPontifSource(code, sourceName, resolveDir)) {
             case ConservationReport.Result.Generated g -> g.text();
             case ConservationReport.Result.Failed f ->
                     "# Conservation ledger: " + sourceName + "\n\n" + f.error() + "\n";
@@ -1954,7 +1954,7 @@ public final class App {
         TextStates.setContent(definitionText, def.sourceText());
         // Same token syntax coloring as the editor (foreground only — the
         // background axis carries the reference highlights below).
-        TextStyleStates.setForeground(definitionText, AltHighlighter.foreground(def.sourceText()));
+        TextStyleStates.setForeground(definitionText, PontifHighlighter.foreground(def.sourceText()));
         // Highlight EVERY occurrence of the name — the declaration strongly, its
         // other references faintly. Background spans render whether or not the text
         // is focused (unlike a selection highlight), so they're the reliable marker;
@@ -2086,7 +2086,7 @@ public final class App {
      *  no longer current): a newer pass already owns the marks. */
     private static void runLiveCompile(String content, String sourceName, Path resolveDir,
                                        Path file, long version) {
-        PontifCompiler.CompileResult result = COMPILER.compileAlt(content, sourceName, resolveDir);
+        PontifCompiler.CompileResult result = COMPILER.compile(content, sourceName, resolveDir);
         if (version != editVersion) return;   // superseded by a newer edit
         settledVersion = version;             // buffer is stable at this version — hints may recompute
         if (result instanceof PontifCompiler.CompileResult.Failed failed) {

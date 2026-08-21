@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LocalRecordFieldSafetyTest {
 
     private static PontifCompiler.CompileResult compile(String src) {
-        return new PontifCompiler().compileAlt(src, "t.ptf");
+        return new PontifCompiler().compile(src, "t.ptf");
     }
 
     @Test

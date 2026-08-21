@@ -26,7 +26,7 @@ class EventEmitTest {
 
     private record Output(String out, String err, RunResult result) {}
 
-    /** Runs an alt-syntax program with the process streams captured. */
+    /** Runs a Pontif-syntax program with the process streams captured. */
     private Output run(String src) {
         PrintStream origOut = System.out;
         PrintStream origErr = System.err;
@@ -35,7 +35,7 @@ class EventEmitTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "events.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "events.ptf"), Engine.INTERPRETER);
             return new Output(out.toString(StandardCharsets.UTF_8),
                     err.toString(StandardCharsets.UTF_8), r);
         } finally {

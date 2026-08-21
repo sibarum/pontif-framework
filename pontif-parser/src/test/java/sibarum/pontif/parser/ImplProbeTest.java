@@ -12,7 +12,7 @@ class ImplProbeTest {
             + "  ast:AlgExpr -> Const(0.0)\n"
             + "  evalAt(x:Decimal):Decimal -> x\n"
             + "}\n0\n";
-        IrModule m = AltParser.parseModule(src, "probe.ptf");
+        IrModule m = PontifParser.parseModule(src, "probe.ptf");
         for (IrStmt s : m.statements()) {
             if (s instanceof IrStmt.TraitImpl ti) {
                 System.out.println(">>> IMPL " + ti.typeName() + ":" + ti.traitName()

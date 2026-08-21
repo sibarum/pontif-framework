@@ -18,7 +18,7 @@ class ProofAuthoringAdversarialTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private CompileResult compile(String src) {
-        return compiler.compileAlt(src, "adv.ptf");
+        return compiler.compile(src, "adv.ptf");
     }
 
     private void assertCompiles(String src) {

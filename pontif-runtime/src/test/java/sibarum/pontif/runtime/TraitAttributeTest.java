@@ -27,13 +27,13 @@ class TraitAttributeTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        var r = runner.run(compiler.compileAlt(src, "trait-attr.ptf"), Engine.INTERPRETER);
+        var r = runner.run(compiler.compile(src, "trait-attr.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "expected success; got: " + r.text());
         return r.text();
     }
 
     private String reject(String src) {
-        CompileResult r = compiler.compileAlt(src, "trait-attr.ptf");
+        CompileResult r = compiler.compile(src, "trait-attr.ptf");
         assertInstanceOf(CompileResult.Failed.class, r, "expected compile failure");
         return ((CompileResult.Failed) r).error().text();
     }
@@ -107,7 +107,7 @@ class TraitAttributeTest {
         // No-lie: h is really an Ipsum, so downcasting it to Other (a different
         // satisfier) must be rejected — the value can't masquerade as a type it
         // isn't.
-        var r = runner.run(compiler.compileAlt("""
+        var r = runner.run(compiler.compile("""
                 trait Heavyish{ weight:[Int:@>0] }
                 struct Ipsum(name:Int)
                 struct Other(name:Int)

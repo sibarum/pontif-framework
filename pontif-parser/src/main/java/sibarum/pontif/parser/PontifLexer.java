@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Tokenizer for the alt syntax. Skips whitespace and {@code #}-to-end-of-line
+ * Tokenizer for the Pontif surface syntax. Skips whitespace and {@code #}-to-end-of-line
  * comments, tokenizes operator characters as their own tokens (so {@code Int>0}
  * splits into {@code Int}, {@code >}, {@code 0}), and recognizes multi-char
  * operators ({@code ->}, {@code <=}, {@code >=}, {@code ==}, {@code !=}) greedily.
@@ -21,7 +21,7 @@ import java.util.Set;
  * must start with a letter or underscore. Keywords are not recognized here —
  * they're just identifiers; the parser decides by text.
  */
-public final class AltLexer {
+public final class PontifLexer {
 
     private static final Set<String> MULTI_CHAR_OPS = Set.of(
             "<=", ">=", "==", "!=", "~=");
@@ -36,7 +36,7 @@ public final class AltLexer {
     private int line = 1;
     private int column = 1;
 
-    public AltLexer(String src, String source) {
+    public PontifLexer(String src, String source) {
         if (src == null) {
             throw new IllegalArgumentException("Source string must be non-null");
         }
@@ -44,12 +44,12 @@ public final class AltLexer {
         this.source = source == null ? "<input>" : source;
     }
 
-    public List<AltToken> tokenize() throws ParseException {
-        List<AltToken> tokens = new ArrayList<>();
+    public List<PontifToken> tokenize() throws ParseException {
+        List<PontifToken> tokens = new ArrayList<>();
         while (true) {
             skipWhitespaceAndComments();
             if (pos >= src.length()) {
-                tokens.add(new AltToken(AltToken.Kind.EOF, "", source, line, column));
+                tokens.add(new PontifToken(PontifToken.Kind.EOF, "", source, line, column));
                 return tokens;
             }
             int startLine = line;
@@ -58,17 +58,17 @@ public final class AltLexer {
 
             // Single-char punctuation (no overlap with operators)
             switch (c) {
-                case '(' -> { advance(); tokens.add(new AltToken(AltToken.Kind.LPAREN, "(", source, startLine, startCol)); continue; }
-                case ')' -> { advance(); tokens.add(new AltToken(AltToken.Kind.RPAREN, ")", source, startLine, startCol)); continue; }
-                case '[' -> { advance(); tokens.add(new AltToken(AltToken.Kind.LBRACKET, "[", source, startLine, startCol)); continue; }
-                case ']' -> { advance(); tokens.add(new AltToken(AltToken.Kind.RBRACKET, "]", source, startLine, startCol)); continue; }
-                case '{' -> { advance(); tokens.add(new AltToken(AltToken.Kind.LBRACE, "{", source, startLine, startCol)); continue; }
-                case '}' -> { advance(); tokens.add(new AltToken(AltToken.Kind.RBRACE, "}", source, startLine, startCol)); continue; }
-                case ',' -> { advance(); tokens.add(new AltToken(AltToken.Kind.COMMA, ",", source, startLine, startCol)); continue; }
-                case ':' -> { advance(); tokens.add(new AltToken(AltToken.Kind.COLON, ":", source, startLine, startCol)); continue; }
-                case ';' -> { advance(); tokens.add(new AltToken(AltToken.Kind.SEMICOLON, ";", source, startLine, startCol)); continue; }
-                case '.' -> { advance(); tokens.add(new AltToken(AltToken.Kind.DOT, ".", source, startLine, startCol)); continue; }
-                case '@' -> { advance(); tokens.add(new AltToken(AltToken.Kind.AT, "@", source, startLine, startCol)); continue; }
+                case '(' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.LPAREN, "(", source, startLine, startCol)); continue; }
+                case ')' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.RPAREN, ")", source, startLine, startCol)); continue; }
+                case '[' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.LBRACKET, "[", source, startLine, startCol)); continue; }
+                case ']' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.RBRACKET, "]", source, startLine, startCol)); continue; }
+                case '{' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.LBRACE, "{", source, startLine, startCol)); continue; }
+                case '}' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.RBRACE, "}", source, startLine, startCol)); continue; }
+                case ',' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.COMMA, ",", source, startLine, startCol)); continue; }
+                case ':' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.COLON, ":", source, startLine, startCol)); continue; }
+                case ';' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.SEMICOLON, ";", source, startLine, startCol)); continue; }
+                case '.' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.DOT, ".", source, startLine, startCol)); continue; }
+                case '@' -> { advance(); tokens.add(new PontifToken(PontifToken.Kind.AT, "@", source, startLine, startCol)); continue; }
                 default -> { /* fall through */ }
             }
 
@@ -124,7 +124,7 @@ public final class AltLexer {
             // IDENT) — only a token-start '$' becomes DOLLAR.
             if (c == '$') {
                 advance();
-                tokens.add(new AltToken(AltToken.Kind.DOLLAR, "$", source, startLine, startCol));
+                tokens.add(new PontifToken(PontifToken.Kind.DOLLAR, "$", source, startLine, startCol));
                 continue;
             }
 
@@ -144,9 +144,9 @@ public final class AltLexer {
      * Returns true if the previous emitted token could be the left operand of
      * a binary operator — meaning the next '-' is the operator, not a sign.
      */
-    private static boolean isOperandTerminator(List<AltToken> tokens) {
+    private static boolean isOperandTerminator(List<PontifToken> tokens) {
         if (tokens.isEmpty()) return false;
-        AltToken last = tokens.get(tokens.size() - 1);
+        PontifToken last = tokens.get(tokens.size() - 1);
         return switch (last.kind()) {
             case INTEGER, DECIMAL, CHAR, STRING, REGEX, IDENT, RPAREN, RBRACKET, RBRACE, AT -> true;
             default -> false;
@@ -159,7 +159,7 @@ public final class AltLexer {
      * set ({@code \n \t \' \\}) between single quotes. The token text is the
      * RESOLVED character, so the parser just reads {@code codePointAt(0)}.
      */
-    private AltToken readChar(int startLine, int startCol) throws ParseException {
+    private PontifToken readChar(int startLine, int startCol) throws ParseException {
         advance(); // opening quote
         if (pos >= src.length()) {
             throw new ParseException("Unterminated character literal",
@@ -204,7 +204,7 @@ public final class AltLexer {
                     Origin.at(source, startLine, startCol));
         }
         advance(); // closing quote
-        return new AltToken(AltToken.Kind.CHAR, resolved, source, startLine, startCol);
+        return new PontifToken(PontifToken.Kind.CHAR, resolved, source, startLine, startCol);
     }
 
     /**
@@ -213,7 +213,7 @@ public final class AltLexer {
      * ({@code \n \t \" \\}). The token text is the RESOLVED content (escapes
      * decoded), so the parser reads it verbatim.
      */
-    private AltToken readString(int startLine, int startCol) throws ParseException {
+    private PontifToken readString(int startLine, int startCol) throws ParseException {
         advance(); // opening quote
         StringBuilder sb = new StringBuilder();
         while (true) {
@@ -225,7 +225,7 @@ public final class AltLexer {
             char c = src.charAt(pos);
             if (c == '"') {
                 advance(); // closing quote
-                return new AltToken(AltToken.Kind.STRING, sb.toString(), source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.STRING, sb.toString(), source, startLine, startCol);
             }
             if (c == '\\') {
                 advance();
@@ -265,7 +265,7 @@ public final class AltLexer {
      * otherwise end the literal); the resolved text holds a bare {@code `} there.
      * The token text is the regex source, ready to hand to the compiler.
      */
-    private AltToken readRegex(int startLine, int startCol) throws ParseException {
+    private PontifToken readRegex(int startLine, int startCol) throws ParseException {
         advance(); // opening backtick
         StringBuilder sb = new StringBuilder();
         while (true) {
@@ -277,7 +277,7 @@ public final class AltLexer {
             char c = src.charAt(pos);
             if (c == '`') {
                 advance(); // closing backtick
-                return new AltToken(AltToken.Kind.REGEX, sb.toString(), source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.REGEX, sb.toString(), source, startLine, startCol);
             }
             if (c == '\\' && pos + 1 < src.length() && src.charAt(pos + 1) == '`') {
                 // \` escapes a literal backtick — the sole escape; the backslash
@@ -305,7 +305,7 @@ public final class AltLexer {
      * field access ({@code p.x}) and {@code 3.foo} still tokenize correctly.
      * Single decimal point only — scientific notation is not yet supported.
      */
-    private AltToken readNumber(int startLine, int startCol) {
+    private PontifToken readNumber(int startLine, int startCol) {
         int start = pos;
         if (src.charAt(pos) == '-') {
             advance();
@@ -322,29 +322,29 @@ public final class AltLexer {
                 advance();
             }
         }
-        AltToken.Kind kind = isDecimal ? AltToken.Kind.DECIMAL : AltToken.Kind.INTEGER;
-        return new AltToken(kind, src.substring(start, pos), source, startLine, startCol);
+        PontifToken.Kind kind = isDecimal ? PontifToken.Kind.DECIMAL : PontifToken.Kind.INTEGER;
+        return new PontifToken(kind, src.substring(start, pos), source, startLine, startCol);
     }
 
-    private AltToken readIdent(int startLine, int startCol) {
+    private PontifToken readIdent(int startLine, int startCol) {
         int start = pos;
         while (pos < src.length() && isIdentPart(src.charAt(pos))) {
             advance();
         }
-        return new AltToken(AltToken.Kind.IDENT, src.substring(start, pos), source, startLine, startCol);
+        return new PontifToken(PontifToken.Kind.IDENT, src.substring(start, pos), source, startLine, startCol);
     }
 
-    private AltToken readOperator(int startLine, int startCol) throws ParseException {
+    private PontifToken readOperator(int startLine, int startCol) throws ParseException {
         // Try multi-char first (greedy 2-char lookahead).
         if (pos + 1 < src.length()) {
             String two = src.substring(pos, pos + 2);
             if (two.equals("->")) {
                 advance(); advance();
-                return new AltToken(AltToken.Kind.ARROW, "->", source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.ARROW, "->", source, startLine, startCol);
             }
             if (MULTI_CHAR_OPS.contains(two)) {
                 advance(); advance();
-                return new AltToken(AltToken.Kind.OP, two, source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.OP, two, source, startLine, startCol);
             }
         }
         // Single-char fallbacks
@@ -352,11 +352,11 @@ public final class AltLexer {
         switch (c) {
             case '=' -> {
                 advance();
-                return new AltToken(AltToken.Kind.EQUALS, "=", source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.EQUALS, "=", source, startLine, startCol);
             }
             case '+', '-', '*', '/', '%', '^', '<', '>', '!', '&', '|' -> {
                 advance();
-                return new AltToken(AltToken.Kind.OP, String.valueOf(c), source, startLine, startCol);
+                return new PontifToken(PontifToken.Kind.OP, String.valueOf(c), source, startLine, startCol);
             }
             case '~' -> throw new ParseException(
                     "Bare '~' is not an operator — did you mean '~=' (approximate equality)?",

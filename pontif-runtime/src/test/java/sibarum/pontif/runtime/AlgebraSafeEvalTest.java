@@ -19,7 +19,7 @@ class AlgebraSafeEvalTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "safeeval.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "safeeval.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test

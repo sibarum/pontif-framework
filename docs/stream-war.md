@@ -248,7 +248,7 @@ is a **consumer** semantic (per-element admittance on a passing stream). The gen
 They look alike but play opposite roles; there is nothing to unify. The generator keeps
 its refinement-as-base-case (slice 2f, unchanged).
 
-**`Break` / filter LANDED (2026-07-04).** The guard-filter (`AltParser.lowerGuardFilter`):
+**`Break` / filter LANDED (2026-07-04).** The guard-filter (`PontifParser.lowerGuardFilter`):
 a domain-refined element binder lowers to a guard arm (in-domain → emit) plus a catch-all
 arm with **no writes** — a bare drop, allowed because the default stream accounts for the
 channel (`SortChecker.checkIterationConservation`), needing no `Nothing` value and hence no
@@ -326,7 +326,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
 
 1. **Stream literal** — a tuple coerced to `Stream[T]`, the compiler verifying every
    element conforms to `T` (the acceptor's element type). A one-way autobox **partly
-   exists** today (`AltParser`, element-checked) but currently *forgets* the tuple to
+   exists** today (`PontifParser`, element-checked) but currently *forgets* the tuple to
    a tuple-at-runtime; this war makes it produce a **real (immutable-array-backed)
    `Stream`**. Literals are concatenable.
 2. **A builtin API** — file read, webservice-response parse, GPU data formatting,
@@ -382,7 +382,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
      (`StreamMapTest`). `&` is detected at the head of a call argument (unambiguous —
      binary `&` only occurs inside a refinement bracket); multiple spreads (zip) are
      rejected with a slice-2c pointer. Wired through `Call`/`Apply`/`MethodCall` via
-     `AltParser.lowerSpreadCall`; the spread rides a transient `&spread` call sentinel
+     `PontifParser.lowerSpreadCall`; the spread rides a transient `&spread` call sentinel
      (no new IR variant). The `Iterate` engine already did `STREAM`/`ACCUMULATOR`, so
      this was pure parser/IR.
    - **Slice 2b LANDED** (the lossy `filter` semantics, ordinary-fn first again —
@@ -401,7 +401,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
    - **Slice 2c LANDED** (the fragment literal — James ruled **first-class value**,
      the lambda replacement, over desugar-to-function). `let f:[ (el:Int) -> body ]`
      parses to an `IrExpr.Lambda` (a `Closure` at runtime) bound as a 0-arg let sorted
-     `[Method(el:Int):Ret]` (`AltParser.parseFragmentLiteral`, detected by a NAMED
+     `[Method(el:Int):Ret]` (`PontifParser.parseFragmentLiteral`, detected by a NAMED
      param head `( IDENT :` — no tuple/Method sort starts that way). A fragment is a
      callable value: `double(3)` applies it directly, `double(&s)` spreads it (map),
      and the canonical `filter(&s)` over `(1,2,3,4)` → `(3,4)` (`StreamFragmentTest`).
@@ -413,7 +413,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
      application form is now **`&s:[transform]`** (ascription, `[…]` in sort
      position), NOT `fragment(&s)`. Sub-cuts, ordinary-shapes-first as before:
      - **2d-1 LANDED (the ascription face).** `&s:[ (el:Int) -> … ]` parses
-       (`AltParser.parseSpreadAscription`, hooked at the head of
+       (`PontifParser.parseSpreadAscription`, hooked at the head of
        `parsePrimaryWithPostfix`) and lowers through the *same* `lowerSpreadCall` as
        the call form — `&a:[frag]` ≡ `frag(&a)`. Both map and filter work in the
        ruled syntax (`StreamFragmentTest.spreadAscription_*`). **Both forms stay**
@@ -431,7 +431,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        ACCUMULATOR), so **no codomain annotation needed**. The fragment returns a
        tuple, **fan-distributed** to the channels: `IrExpr.Write.FAN` (`"*"`) is a
        reserved write evaluated once per element and routed positionally
-       (`IrInterpreter.routeWrite`); `AltParser.lowerSpreadCall` builds the
+       (`IrInterpreter.routeWrite`); `PontifParser.lowerSpreadCall` builds the
        multi-output `Iterate`; `SortChecker` accepts the fan write (it accounts for
        all channels by construction). `fold(&s, 0)` → `(emptyStream, total)`,
        `scan(&s, 0)` → `(runningTotals, total)` (`StreamFragmentTest`). Multi-output
@@ -446,7 +446,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        each element to one of several output streams (`null` drops the others — the
        conservative split). `parseFragmentLiteral` now parses an optional
        `(params):Codomain -> body` (mirrors a function decl, stored in the Lambda's
-       returnSort); `AltParser.lowerSpreadFanout` builds the multi-stream Iterate via
+       returnSort); `PontifParser.lowerSpreadFanout` builds the multi-stream Iterate via
        the FAN write. **The codomain is the disambiguator**: a tuple body *with* a
        stream-channel codomain is fork (tuple-of-streams); *without* one it's a plain
        map producing a stream-of-tuples — both tested (`StreamFragmentTest.fork_*`,
@@ -460,7 +460,7 @@ anonymous-function story now (`Lambda`/`Apply` were already headed for deprecati
        `._N`. `coSources` threaded through the passes that rewrite/visit `Iterate`
        (IrFreeVars, IrCompiler sort-reg, AliasResolver, NameResolver,
        MethodOperatorResolver). `parseSpreadAscription` parses the `(&a, &b)` spread
-       tuple → `AltParser.lowerZip`. Vector-add `(&a, &b):[ (x, y) -> x + y ]` →
+       tuple → `PontifParser.lowerZip`. Vector-add `(&a, &b):[ (x, y) -> x + y ]` →
        `(11, 22, 33)`, ragged stops at shortest (`StreamFragmentTest.zip_*`) —
        **unblocks the supirvast GPU kernel** (`project_supirvast`).
      - **2d-3 (the spectrum proper, beyond streams):** non-spread ascription as
@@ -561,7 +561,7 @@ A refinement `[Int:P]` denotes a **set**; a scalar guard *tests membership* in i
 `Stream` over it *enumerates* it. Same predicate, two consumers — and **the prover does
 the synthesis; no synthesis logic lives in the parser**.
 
-**Before:** `AltParser` carried a whole mini constraint-solver for the range case
+**Before:** `PontifParser` carried a whole mini constraint-solver for the range case
 (`synthesizeFiniteRange` + `asBound`/`flipOrder`/`filtersHold`/`evalBool`/`evalNum` +
 `flattenConjuncts`/`RangeBound`) — a **second, weaker predicate evaluator** parallel to
 `Refinements.satisfies` (it couldn't reuse `IntegerDischarge`, etc.). The Int point-pin
@@ -584,7 +584,7 @@ implementations of one concept.
   `IrSort → Sort` and calls the prover; a predicate outside the linear fragment (`%`/`/`/`^`)
   fails `compileSort` and is honestly **not synthesizable** — the *same* gate that bounds
   guards now bounds synthesis (no separate de-scoping).
-- **The parser** (`AltParser.synthesizeFromSort`) only turns the returned `List<Long>` into
+- **The parser** (`PontifParser.synthesizeFromSort`) only turns the returned `List<Long>` into
   IR: a `Stream[Int:P]` → the whole extension (tuple → autobox); a scalar `[Int:P]` → its
   **unique** survivor (the pinned witness = the size-1 case). The lone purely-syntactic pin
   `@ == EXPR` (witness *is* the RHS expression, no proving) legitimately stays as
@@ -767,7 +767,7 @@ but not first-class *types*** (James, 2026-06-22), three gaps clustered:
 
 - `BuiltinModules.STD_STREAM` / `STD_STREAM_SOURCE` — the `Element|Leaf` source to
   delete / repurpose; `stdCommon`'s `Leaf` re-export.
-- `AltParser` tuple→`Stream` autobox (`streamAutobox`, `requireStreamElements`) — make
+- `PontifParser` tuple→`Stream` autobox (`streamAutobox`, `requireStreamElements`) — make
   it produce a real Stream; add `&` spread parsing and `expr:[Shape]` ascription.
 - The trait machinery (`assign trait` / `AliasResolver` parametric-trait resolution) —
   add trait-extends-trait.

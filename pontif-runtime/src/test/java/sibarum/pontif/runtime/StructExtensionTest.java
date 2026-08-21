@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 
@@ -28,7 +28,7 @@ class StructExtensionTest {
 
     @Test
     void structExtension_parsesAndStoresBaseSort() throws Exception {
-        IrModule m = AltParser.parseModule("""
+        IrModule m = PontifParser.parseModule("""
                 module m
                 struct Point(x:Int, y:Int)
                 struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
@@ -55,7 +55,7 @@ class StructExtensionTest {
                 struct Point3D:[Point:@.x==x & @.y==y](x:Int, y:Int, z:Int)
                 42""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("42", r.text(), engine.toString());
         }
@@ -68,7 +68,7 @@ class StructExtensionTest {
                 struct Point(x:Int, y:Int)
                 struct Point3D:[Point(x, y)](x:Int, y:Int, z:Int)
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "got: " + r.text());
         assertEquals("42", r.text());
     }
@@ -82,7 +82,7 @@ class StructExtensionTest {
                 struct Point(x:Int, y:Int)
                 struct Point3D:[Point:@.x==x](x:Int, z:Int, y:Int)
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "a non-total morphism should be rejected");
         assertTrue(r.text().contains("is not determined"),
                 () -> "got: " + r.text());
@@ -97,7 +97,7 @@ class StructExtensionTest {
                 struct Point(x:Int, y:Int)
                 struct Point3D:Point(x:Int, y:Int, z:Int)
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "carried base fields need no pin; got: " + r.text());
         assertEquals("42", r.text());
     }
@@ -111,7 +111,7 @@ class StructExtensionTest {
                 struct BiOp:Expr(left:Expr, right:Expr, op:Int)
                 struct Exp:BiOp(left:Expr, right:Expr)
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "dropping base field op must be rejected");
         assertTrue(r.text().contains("is not determined") && r.text().contains("op"),
                 () -> "got: " + r.text());
@@ -129,7 +129,7 @@ class StructExtensionTest {
                 struct BiOp:Expr(left:Expr, right:Expr, op:Operation)
                 struct Exp:[BiOp:@.op=="+"](left:Expr, right:Expr)
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "pinned discriminant should compile; got: " + r.text());
         assertEquals("42", r.text());
     }
@@ -142,7 +142,7 @@ class StructExtensionTest {
         String src = """
                 struct Complex:[Decimal:@==r](r:Decimal, i:Decimal)
                 Complex(3.0, 4.0).r""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "a struct can't be-a a primitive");
         assertTrue(r.text().contains("can only be encapsulated"), () -> "got: " + r.text());
     }
@@ -163,7 +163,7 @@ class StructExtensionTest {
                 let b:BiOp = e
                 b.op""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("\"+\"", r.text(), engine.toString());
         }
@@ -183,17 +183,17 @@ class StructExtensionTest {
                 let leaf = Expr()
                 """;
         for (Engine engine : Engine.values()) {
-            RunResult e = runner.run(compiler.compileAlt(
+            RunResult e = runner.run(compiler.compile(
                     prelude + "let e:Exp = Exp(leaf, leaf)\ne.op", "t.ptf"), engine);
             assertFalse(e.isError(), () -> engine + " got: " + e.text());
             assertEquals("\"+\"", e.text(), engine.toString());
-            RunResult l = runner.run(compiler.compileAlt(
+            RunResult l = runner.run(compiler.compile(
                     prelude + "let l:Log = Log(leaf, leaf)\nl.op", "t.ptf"), engine);
             assertEquals("\"-\"", l.text(), engine.toString());
         }
         // A field on neither Exp nor its base chain is still a compile error (typo
         // coverage is preserved — the walk widens, it doesn't wave through).
-        RunResult bogus = runner.run(compiler.compileAlt(
+        RunResult bogus = runner.run(compiler.compile(
                 prelude + "let e:Exp = Exp(leaf, leaf)\ne.nope", "t.ptf"), Engine.INTERPRETER);
         assertTrue(bogus.isError() && bogus.text().contains("has no field 'nope'"),
                 () -> "got: " + bogus.text());
@@ -212,7 +212,7 @@ class StructExtensionTest {
                 let b:Base = x
                 b.tag""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("0", r.text(), engine.toString());
         }
@@ -228,7 +228,7 @@ class StructExtensionTest {
                 let b:Point = a
                 b.x + b.y""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("5", r.text(), engine.toString());
         }
@@ -250,7 +250,7 @@ class StructExtensionTest {
                     b.x + b.y
                 proj()""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("5", r.text(), engine.toString());
         }
@@ -265,7 +265,7 @@ class StructExtensionTest {
                 let a = Point3D(2, 3, 5)
                 let b:Point = a
                 b.z""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "b.z should error — z was dropped by the demotion");
     }
 
@@ -279,7 +279,7 @@ class StructExtensionTest {
                 let b:Point = a
                 let c:Point3D = b
                 42""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "promotion by assignment can't synthesize z — must be rejected");
     }
 
@@ -293,7 +293,7 @@ class StructExtensionTest {
                 function sumXY(point:[Point.{x, y}]):Int -> x + y
                 sumXY(Point(2, 3))""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("5", r.text(), engine.toString());
         }
@@ -306,7 +306,7 @@ class StructExtensionTest {
                 struct Point(x:Int, y:Int)
                 function getX(point:[Point.{x -> px}]):Int -> px
                 getX(Point(7, 9))""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "got: " + r.text());
         assertEquals("7", r.text());
     }
@@ -325,7 +325,7 @@ class StructExtensionTest {
                 let p = promote(Point(2, 3), 7)
                 p.x + p.y + p.z""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("12", r.text(), engine.toString());
         }
@@ -342,7 +342,7 @@ class StructExtensionTest {
                 let b = Point(2, 3)
                 let p = b.promote(11)
                 p.x + p.y + p.z""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "got: " + r.text());
         assertEquals("16", r.text());
     }
@@ -360,7 +360,7 @@ class StructExtensionTest {
                 let p:[Point3D:@.z==0] = b;
                 p.x + p.y + p.z""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("5", r.text(), engine.toString());
         }
@@ -376,7 +376,7 @@ class StructExtensionTest {
                 let b = Point(2, 3)
                 let p:[Point3D:@.x==9] = b;
                 p.x""";
-        RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
         assertTrue(r.isError(), "z is unspecified — the merge must reject");
         assertTrue(r.text().contains("unspecified"), () -> "got: " + r.text());
     }
@@ -397,7 +397,7 @@ class StructExtensionTest {
                 ];
                 combine(Point(2, 3))""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("5", r.text(), engine.toString());
         }
@@ -415,7 +415,7 @@ class StructExtensionTest {
                 ];
                 f(10)""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("21", r.text(), engine.toString());
         }
@@ -432,7 +432,7 @@ class StructExtensionTest {
                 function factorial(n:[Int:@>0]):[let r:Int = n*factorial(n-1) -> [Int:@==r & @>0]];
                 factorial(5)""";
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals("120", r.text(), engine.toString());
         }

@@ -37,7 +37,7 @@ class MathRenderTest {
         NativeCalls.register("exportMathSvg", stub);
         NativeCalls.register("pontif.plot/exportMathSvg", stub);
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.algebra.{Algebraic}
                         requires pontif.plot.{exportMathSvg}
                         function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)

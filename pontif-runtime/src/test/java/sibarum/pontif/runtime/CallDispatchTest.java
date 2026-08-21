@@ -18,7 +18,7 @@ class CallDispatchTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private Object run(String src) {
-        CompileResult r = compiler.compileAlt(src, "m.ptf");
+        CompileResult r = compiler.compile(src, "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "should compile; got " + (r instanceof CompileResult.Failed f ? f.error().text() : r));
         return new IrInterpreter(c.program().simplifier()).eval(c.program().module());
@@ -51,7 +51,7 @@ class CallDispatchTest {
     @Test void wrongElementType_tupleDoesNotMatchStreamParam() {
         // A String tuple must NOT match a Stream[Int] param (the §8.6 element check runs
         // in dispatch too) — so this fails to dispatch rather than silently matching.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream}
                 function len(s:Stream[Int]):Int -> 3
                 len({"a", "b"})""", "m.ptf");

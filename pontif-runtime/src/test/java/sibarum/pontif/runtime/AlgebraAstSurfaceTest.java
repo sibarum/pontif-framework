@@ -22,7 +22,7 @@ class AlgebraAstSurfaceTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "algebra.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "algebra.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test
@@ -81,7 +81,7 @@ class AlgebraAstSurfaceTest {
     void astOnNonAlgebraicReference_isACompileError() {
         // `inc` carries no `assign proof inc:Algebraic`, so `$inc[Int]` narrows to the plain
         // Dispatch nominal — which has no `.ast` member. Statically rejected.
-        var r = compiler.compileAlt("""
+        var r = compiler.compile("""
                 function inc(x:Int):Int -> x + 1
                 $inc[Int].ast
                 """, "algebra.ptf");
@@ -92,7 +92,7 @@ class AlgebraAstSurfaceTest {
     @Test
     void astOf_isNotExported() {
         // The reflection primitive is hidden — `$f[Decimal].ast` is the only surface.
-        var r = compiler.compileAlt("""
+        var r = compiler.compile("""
                 requires pontif.algebra.{astOf}
                 0
                 """, "algebra.ptf");

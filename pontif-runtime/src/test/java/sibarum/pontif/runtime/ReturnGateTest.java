@@ -21,7 +21,7 @@ class ReturnGateTest {
     void rejectsUnprovableReturn() {
         // bad(x:Int):[Int:@>0] -> x is false for x<=0; the engine can't prove
         // it and no proof is supplied → the gate rejects at compile time.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 "module m\nfunction bad(x:Int):[Int:@>0] -> x\nbad(5)", "bad.ptf");
         CompileResult.Failed f =
                 assertInstanceOf(CompileResult.Failed.class, r, "expected a compile rejection");
@@ -34,7 +34,7 @@ class ReturnGateTest {
     @Test
     void acceptsProvableThresholdReturn() {
         // inc raises x>=1 to x>1 — provable; the gate lets it through.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 "module m\nfunction inc(x:[Int:@>=1]):[Int:@>1] -> x + 1\ninc(5)", "inc.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "provable return should compile; got " + r);
@@ -43,7 +43,7 @@ class ReturnGateTest {
     @Test
     void acceptsProvableInductiveReturn() {
         // factorial's [Int:@>=1] closes inductively via the back-reference.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 module m
                 function factorial(n:[Int:@>=0]):[Int:@>=1] -> match n {
                   [@==0] -> 1
@@ -60,7 +60,7 @@ class ReturnGateTest {
         // h is a BARE struct (no param-level refinement), so the proof comes
         // from the FIELD's declared refinement: the field-fact `h_0.n > 0`
         // discharges the `r_0 > 0` obligation (r_0 = h_0.n). (Probe inference__21.)
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 module m
                 struct Holder(n:[Int:@>0])
                 function get(h:Holder):[Int:@>0] -> h.n
@@ -72,7 +72,7 @@ class ReturnGateTest {
     @Test
     void acceptsBareReturnUnaffected() {
         // No refined return → nothing to prove → unaffected by the gate.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 "module m\nfunction add(a:Int, b:Int):Int -> a + b\nadd(2, 3)", "add.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r);
     }
@@ -82,7 +82,7 @@ class ReturnGateTest {
         // Division hoists as an operator call (unrefined result var) instead
         // of refusing to draft — a body that divides is ordinary code; the
         // receipts simply claim nothing about the divided value.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 "module m\nfunction half(x:Int):Int -> x / 2\nhalf(8)", "half.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "division in a bare-return body must compile; got " + r);
@@ -96,7 +96,7 @@ class ReturnGateTest {
         // Now the body drafts, the divided value is unconstrained, and the
         // gate rejects the unprovable claim — the no-lie law applied: weaken
         // the declared return or drop the narrowing.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 "module m\nfunction f(x:[Int:@>=0]):[Int:@>=0] -> x / 2\nf(8)", "div-gate.ptf");
         CompileResult.Failed f =
                 assertInstanceOf(CompileResult.Failed.class, r, "expected a compile rejection");

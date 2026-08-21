@@ -148,7 +148,7 @@ public final class BuiltinModules {
      */
     private static IrModule pontifCore() {
         try {
-            IrModule parsed = sibarum.pontif.parser.AltParser.parseModule(PONTIF_CORE_SOURCE, PONTIF_CORE);
+            IrModule parsed = sibarum.pontif.parser.PontifParser.parseModule(PONTIF_CORE_SOURCE, PONTIF_CORE);
             return new IrModule(PONTIF_CORE, parsed.statements(), parsed.main());
         } catch (sibarum.pontif.parser.ParseException pe) {
             throw new IllegalStateException(

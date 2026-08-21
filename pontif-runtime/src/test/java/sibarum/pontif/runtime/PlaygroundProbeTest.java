@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import java.util.List;
@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exploratory pre-flight battery: realistic alt-syntax programs of the kind
- * you'd write doing serious work, run end-to-end (AltParser → IrCompiler →
+ * Exploratory pre-flight battery: realistic Pontif-syntax programs of the kind
+ * you'd write doing serious work, run end-to-end (PontifParser → IrCompiler →
  * IrInterpreter). The Group A tests have hand-computed expected values, so a
  * failure is a real bug. The Group B tests are behavior <em>probes</em> for
  * uncertain corners — each documents the prediction; a failure pins down the
@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PlaygroundProbeTest {
 
     private static Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "probe.ptf");
+        IrModule module = PontifParser.parseModule(src, "probe.ptf");
         Simplifier simp = new Simplifier(List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -175,7 +175,7 @@ class PlaygroundProbeTest {
                   [@>0]  -> n * factorial(n-1)
                 }
                 factorial(5)""";
-        ReceiptGraphReport.Result r = ReceiptGraphReport.fromAltSource(src, "factorial.ptf");
+        ReceiptGraphReport.Result r = ReceiptGraphReport.fromPontifSource(src, "factorial.ptf");
         ReceiptGraphReport.Result.Generated g =
                 assertInstanceOf(ReceiptGraphReport.Result.Generated.class, r,
                         () -> "report failed: " + r);
@@ -217,7 +217,7 @@ class PlaygroundProbeTest {
 
     @Test
     void finding_inlineLambdaNotSupported() {
-        // FINDING (known TODO): inline alt-syntax lambda `(x:Int) -> ...` isn't
+        // FINDING (known TODO): inline Pontif-syntax lambda `(x:Int) -> ...` isn't
         // parseable; S-expr `(lambda ...)` is the only lambda surface today.
         assertThrows(ParseException.class, () -> run("let inc = (x:Int) -> x + 1\ninc(5)"));
     }
@@ -236,7 +236,7 @@ class PlaygroundProbeTest {
     void directIrCompilerPathRemainsUngated() throws Exception {
         // The return-refinement gate now lives in PontifCompiler (the playground
         // path) and rejects this — see ReturnGateTest.rejectsUnprovableReturn.
-        // But THIS harness compiles via AltParser → IrCompiler directly, which
+        // But THIS harness compiles via PontifParser → IrCompiler directly, which
         // sits below pontif-receipts and so can't run the receipt-graph gate
         // (dependency cycle). So the direct IrCompiler path stays ungated: bad
         // compiles and bad(-1) returns -1. Documents the layer boundary — the

@@ -3,7 +3,7 @@ package sibarum.pontif.runtime;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.Drafter;
 import sibarum.pontif.receipts.Node;
@@ -40,8 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  */
 class ReturnVerificationMeasurementTest {
 
-    private static Map<String, String> classify(String altSource) throws Exception {
-        IrModule resolved = AliasResolver.resolve(AltParser.parseModule(altSource, "m.ptf"));
+    private static Map<String, String> classify(String pontifSource) throws Exception {
+        IrModule resolved = AliasResolver.resolve(PontifParser.parseModule(pontifSource, "m.ptf"));
         ReceiptGraph graph = Drafter.draft(resolved);
         List<BuiltinIssuer.Attempt> attempts = BuiltinIssuer.attemptAll(graph);
         List<Node> nodes = graph.roots();

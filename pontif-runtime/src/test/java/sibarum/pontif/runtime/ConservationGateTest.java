@@ -21,13 +21,13 @@ class ConservationGateTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String compileError(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         assertInstanceOf(CompileResult.Failed.class, r, "expected the gate to reject");
         return ((CompileResult.Failed) r).error().text();
     }
 
     private String runOk(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile success; got: " + ((CompileResult.Failed) r).error().text());
         return runner.run(r, Engine.INTERPRETER).text();

@@ -28,7 +28,7 @@ class FireEventTest {
 
     @Test
     void fireEvent_runsMatchingActionsOutsideEmit() {
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.events.{Event, StdOut}
                 struct Ping(n:Int)
                 assign trait Ping:Event{}

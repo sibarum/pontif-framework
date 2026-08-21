@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 class RoutingTableTest {
 
     private CompiledModule compile(String src) {
-        var result = new PontifCompiler().compileAlt(src, "routing.ptf");
+        var result = new PontifCompiler().compile(src, "routing.ptf");
         assertNotNull(result);
         if (result instanceof PontifCompiler.CompileResult.Compiled c) {
             return c.program().module();

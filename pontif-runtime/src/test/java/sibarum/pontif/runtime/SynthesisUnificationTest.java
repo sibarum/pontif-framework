@@ -28,7 +28,7 @@ class SynthesisUnificationTest {
 
     private PontifRunner.RunResult run(String src) {
         return new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "synth.ptf"), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(src, "synth.ptf"), PontifRunner.Engine.INTERPRETER);
     }
 
     private String value(String src) {

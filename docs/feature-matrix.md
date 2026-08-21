@@ -155,7 +155,7 @@ flow is OPEN · Synth: `StreamRangeSynthesisTest` (finite range `Stream[Int:0<=@
 `pontif.core`, importable, tuple autoboxes with element check). See N6.
 
 **iter** — Iter/Struct/Refine: `IterationConstructTest`, `IterationParseTest`
-(hand-built `IrExpr.Iterate` + alt-syntax `iter(src).{…}` parse) · Infer:
+(hand-built `IrExpr.Iterate` + Pontif-syntax `iter(src).{…}` parse) · Infer:
 `NarrowingInferenceTest.iterate_map_narrowsToStreamOfTransformedElement`,
 `iterate_filter_narrowsToRecordOfRefinedStreams`, `iterate_unknownElement_narrowsToBareStream`.
 See N7.
@@ -195,7 +195,7 @@ the receipt-graph report). So `@`/`let`/`function`/`;` get `/`. What is **not** 
 field's value** (`f(x:Int, i:[Int:@<x])`, `struct Window(n, data:[Indexed:@.count==n])`);
 **receiver-relative** bounds (`at(i:[Int:@<this.count])`); **value-indexed struct
 sorts** (`OutOfRange(i)`); and **named-parameter method sorts** in contracts
-(`[Method(i:Int):…i…]`, currently rejected at `AltParser`). **Update (2026-07-21):** the
+(`[Method(i:Int):…i…]`, currently rejected at `PontifParser`). **Update (2026-07-21):** the
 **sibling-parameter** case at a *call* site is now landed and tested — `StaticDispatch.substituteSiblings`
 + `StaticDispatchTest`/`CallGateTest` (e.g. `g(5,7)` provable-fail), and the dependent-`let` claim via
 `ConstructionGate.gateClaim`/`dischargesUnderScope` + `DependentLetClaimTest`. The "zero tests"
@@ -218,7 +218,7 @@ Naming a *complete* sort is built (`let P:Type[Int:@>0]`, `ReusableSortTest`,
 `TypeAliasIntegrationTest`, inlined by `AliasResolver`). Naming a **baseless predicate
 fragment** (`let gtz:Type = [@>0]`, applied as `[Int:gtz]`) is unbuilt — the
 **named-fragments** task (`?`/`/`). The anonymous `Type{…}` sort literal now parses in
-any sort position (`AltParserTraitTest.anonymousTypeSort_usableInAnySortPosition_parses`)
+any sort position (`PontifParserTraitTest.anonymousTypeSort_usableInAnySortPosition_parses`)
 but see N2 for its dispatch gap.
 
 **N4 — `Indexed` does not exist (`!` across the row).** No tests, no IR. It's a
@@ -246,7 +246,7 @@ hardcoded `BUILTIN_PARAMETRIC_TYPES = {"Stream"}` still admits `Stream[T]` as a 
 *incompleteness*, not a lie. Still upstream of `Indexed` (N4) and parametric streams
 (`Stream × Generic` = `/`).
 
-**N7 — `iter` is partial (`/`).** The `Iterate` IR node and alt-syntax parse are
+**N7 — `iter` is partial (`/`).** The `Iterate` IR node and Pontif-syntax parse are
 tested (`IterationConstructTest`, `IterationParseTest`), but the surface design is a
 DRAFT (`docs/iteration.md`) and the full foreach/conservation-ledger semantics are not
 complete. `struct × Iter = ^` (structs are intentionally not iterable — iteration is

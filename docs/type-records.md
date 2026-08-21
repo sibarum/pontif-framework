@@ -237,7 +237,7 @@ The Value Type stays where it is — the runtime `DispatchTable` on concrete `Sy
    §"Declared Sort" and roadmap §6.5/§6.6 require. Methods-on-aliases (`let v:Vec3 = {…}`) still resolve.
 3. ✅ **Done.** The `parseLet` `None → inferredSort` rule no longer *discards* the Declared Sort: the
    binding sort is the Inferred record, the annotation rides `LetIn.claim` — both records are carried
-   ([AltParser.java:1923-1928] / `:4632`). (Field-naming caveat: `LetIn.declaredSort` actually holds
+   ([PontifSexprParser.java:1923-1928] / `:4632`). (Field-naming caveat: `LetIn.declaredSort` actually holds
    the *inferred binding* sort; `LetIn.claim` holds the *declared* annotation — a rename would prevent
    misreadings.)
 4. ✅ **Done.** Methods-on-aliases resolve (via item 2's `_tuple` fallback); concrete-receiver method

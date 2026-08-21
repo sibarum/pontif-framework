@@ -19,7 +19,7 @@ class TuplePatternConstraintTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tup.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tup.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());

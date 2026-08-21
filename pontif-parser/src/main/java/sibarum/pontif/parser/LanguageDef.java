@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Surface-syntax configuration for {@link Parser}. Every keyword and operator
+ * Surface-syntax configuration for {@link SexprParser}. Every keyword and operator
  * symbol the parser recognizes lives here. Construct the standard set via
  * {@link #defaults()} and override individual fields with the {@code with*}
  * helpers to spell-the-language differently without touching the parser itself.

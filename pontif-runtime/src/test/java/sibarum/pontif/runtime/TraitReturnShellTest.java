@@ -27,7 +27,7 @@ class TraitReturnShellTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        CompileResult r = compiler.compileAlt(src, "trait-shell.ptf");
+        CompileResult r = compiler.compile(src, "trait-shell.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
         PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
@@ -36,7 +36,7 @@ class TraitReturnShellTest {
     }
 
     private String reject(String src) {
-        CompileResult r = compiler.compileAlt(src, "trait-shell.ptf");
+        CompileResult r = compiler.compile(src, "trait-shell.ptf");
         return ((CompileResult.Failed) assertInstanceOf(
                 CompileResult.Failed.class, r, "expected a compile rejection")).error().text();
     }

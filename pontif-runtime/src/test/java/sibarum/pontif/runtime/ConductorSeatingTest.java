@@ -34,7 +34,7 @@ class ConductorSeatingTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "seating.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "seating.ptf"), Engine.INTERPRETER);
             assertFalse(r.isError(), "program should compile and run: " + r);
             return new Output(out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
         } finally {
@@ -91,8 +91,8 @@ class ConductorSeatingTest {
                 """;
         String bare = threaded.replace("spawn Meter over thread", "spawn Meter");
 
-        var threadedResult = compiler.compileAlt(threaded, "seating.ptf");
-        var bareResult = compiler.compileAlt(bare, "seating.ptf");
+        var threadedResult = compiler.compile(threaded, "seating.ptf");
+        var bareResult = compiler.compile(bare, "seating.ptf");
         assertTrue(threadedResult instanceof PontifCompiler.CompileResult.Compiled, "threaded seat compiles");
         assertTrue(bareResult instanceof PontifCompiler.CompileResult.Compiled, "bare seat compiles");
 
@@ -183,7 +183,7 @@ class ConductorSeatingTest {
         try {
             System.setOut(new PrintStream(new ByteArrayOutputStream()));
             System.setErr(new PrintStream(new ByteArrayOutputStream()));
-            r = runner.run(compiler.compileAlt("""
+            r = runner.run(compiler.compile("""
                     requires pontif.events.{Event}
                     struct Ping(n:Int)
                     struct Pong(n:Int)
@@ -212,7 +212,7 @@ class ConductorSeatingTest {
         try {
             System.setOut(new PrintStream(new ByteArrayOutputStream()));
             System.setErr(new PrintStream(new ByteArrayOutputStream()));
-            r = runner.run(compiler.compileAlt("""
+            r = runner.run(compiler.compile("""
                     requires pontif.events.{Event}
                     struct Tick(n:Int)
                     assign trait Tick:Event{}
@@ -235,7 +235,7 @@ class ConductorSeatingTest {
         try {
             System.setOut(new PrintStream(new ByteArrayOutputStream()));
             System.setErr(new PrintStream(new ByteArrayOutputStream()));
-            r = runner.run(compiler.compileAlt("spawn Ghost\nmain ( 0 )", "seating.ptf"), Engine.INTERPRETER);
+            r = runner.run(compiler.compile("spawn Ghost\nmain ( 0 )", "seating.ptf"), Engine.INTERPRETER);
         } finally {
             System.setOut(oo);
             System.setErr(oe);

@@ -18,10 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the member lands in {@link IrSort.Trait#operators()}, keyed by the operator
  * symbol, and the v1 homogeneity scope is enforced with a clear error.
  */
-class AltParserOperatorTraitTest {
+class PontifParserOperatorTraitTest {
 
     private static IrModule parse(String src) throws ParseException {
-        return AltParser.parseModule(src, "t");
+        return PontifParser.parseModule(src, "t");
     }
 
     private static IrSort.Trait traitOf(String src) throws ParseException {

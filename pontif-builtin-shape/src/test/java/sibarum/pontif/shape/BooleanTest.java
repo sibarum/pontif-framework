@@ -23,7 +23,7 @@ class BooleanTest {
 
     private static String eval(String expr) {
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(IMPORTS + expr, "csg.ptf"),
+                new PontifCompiler().compile(IMPORTS + expr, "csg.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());
         return r.text();

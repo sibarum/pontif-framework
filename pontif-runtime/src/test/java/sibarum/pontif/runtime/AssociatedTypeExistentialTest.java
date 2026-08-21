@@ -29,7 +29,7 @@ class AssociatedTypeExistentialTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "exist.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "exist.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -38,7 +38,7 @@ class AssociatedTypeExistentialTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "exist.ptf"), "expected a compile rejection");
+                compiler.compile(src, "exist.ptf"), "expected a compile rejection");
     }
 
     /** A trait `Box` whose associated type `T` is bounded by `Showable`. */

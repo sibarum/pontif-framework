@@ -17,7 +17,7 @@ class TernionReproTest {
         // Dev harness for whatever's currently in the playground example —
         // prints the outcome; never fails the suite.
         try {
-            PontifCompiler.CompileResult r = new PontifCompiler().compileAlt(src, "ternion.ptf");
+            PontifCompiler.CompileResult r = new PontifCompiler().compile(src, "ternion.ptf");
             PontifRunner.RunResult run = new PontifRunner().run(r, PontifRunner.Engine.INTERPRETER);
             System.out.println("isError=" + run.isError());
             System.out.println("origin=" + run.origin());
@@ -26,13 +26,13 @@ class TernionReproTest {
             System.out.println("THREW: " + e.getClass().getName() + ": " + e.getMessage());
         }
         // The playground's Receipts tab exercises BOTH report paths — test them too.
-        switch (ReceiptGraphReport.fromAltSource(src, "ternion.ptf")) {
+        switch (ReceiptGraphReport.fromPontifSource(src, "ternion.ptf")) {
             case ReceiptGraphReport.Result.Generated g ->
                     System.out.println("receiptGraph=OK");
             case ReceiptGraphReport.Result.Failed f ->
                     System.out.println("receiptGraph FAILED: " + f.error());
         }
-        switch (ConservationReport.fromAltSource(src, "ternion.ptf")) {
+        switch (ConservationReport.fromPontifSource(src, "ternion.ptf")) {
             case ConservationReport.Result.Generated g ->
                     System.out.println("conservation=OK");
             case ConservationReport.Result.Failed f ->

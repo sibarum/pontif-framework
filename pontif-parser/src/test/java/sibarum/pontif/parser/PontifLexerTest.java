@@ -9,16 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class AltLexerTest {
+class PontifLexerTest {
 
-    private static List<AltToken> tokenize(String src) throws Exception {
-        return new AltLexer(src, "t.ptf").tokenize();
+    private static List<PontifToken> tokenize(String src) throws Exception {
+        return new PontifLexer(src, "t.ptf").tokenize();
     }
 
     /** Compact stringification for asserts: kind:text per token, separated by " ". */
-    private static String shape(List<AltToken> tokens) {
+    private static String shape(List<PontifToken> tokens) {
         return tokens.stream()
-                .filter(t -> t.kind() != AltToken.Kind.EOF)
+                .filter(t -> t.kind() != PontifToken.Kind.EOF)
                 .map(t -> t.kind() + ":" + t.text())
                 .collect(Collectors.joining(" "));
     }
@@ -74,16 +74,16 @@ class AltLexerTest {
         // The headline win: `\d` is the two chars backslash-d, NOT a decoded
         // escape. A string literal "\\d" would carry one backslash; the regex
         // literal keeps both characters exactly as written.
-        List<AltToken> tokens = tokenize("`\\d\\.\\n`");
-        assertEquals(AltToken.Kind.REGEX, tokens.get(0).kind());
+        List<PontifToken> tokens = tokenize("`\\d\\.\\n`");
+        assertEquals(PontifToken.Kind.REGEX, tokens.get(0).kind());
         assertEquals("\\d\\.\\n", tokens.get(0).text());
     }
 
     @Test
     void regexLiteral_backslashBacktick_embedsLiteralBacktick() throws Exception {
         // \` is the sole escape — it embeds a backtick without ending the literal.
-        List<AltToken> tokens = tokenize("`a\\`b`");
-        assertEquals(AltToken.Kind.REGEX, tokens.get(0).kind());
+        List<PontifToken> tokens = tokenize("`a\\`b`");
+        assertEquals(PontifToken.Kind.REGEX, tokens.get(0).kind());
         assertEquals("a`b", tokens.get(0).text());
     }
 
@@ -187,9 +187,9 @@ class AltLexerTest {
 
     @Test
     void lineAndColumnTracking_isAccurate() throws Exception {
-        List<AltToken> ts = tokenize("function\n  factorial");
-        AltToken func = ts.get(0);
-        AltToken fact = ts.get(1);
+        List<PontifToken> ts = tokenize("function\n  factorial");
+        PontifToken func = ts.get(0);
+        PontifToken fact = ts.get(1);
         assertEquals(1, func.line());
         assertEquals(1, func.column());
         assertEquals(2, fact.line());
@@ -208,7 +208,7 @@ class AltLexerTest {
     @Test
     void functionSignature_tokenizesAsExpected() throws Exception {
         // function factorial(n:[Int==0]):Int -> 1
-        List<AltToken> ts = tokenize("function factorial(n:[Int==0]):Int -> 1");
+        List<PontifToken> ts = tokenize("function factorial(n:[Int==0]):Int -> 1");
         String s = shape(ts);
         assertTrue(s.contains("IDENT:function"));
         assertTrue(s.contains("IDENT:factorial"));

@@ -7,7 +7,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 
 import java.util.List;
 
@@ -32,7 +32,7 @@ class RecursiveSortProbeTest {
 
     private static String compileOutcome(String src) {
         try {
-            IrModule module = AltParser.parseModule(src, "rec.ptf");
+            IrModule module = PontifParser.parseModule(src, "rec.ptf");
             Simplifier simp = new Simplifier(List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
             new IrCompiler(simp).compile(module);
             return "COMPILED OK";
@@ -41,9 +41,9 @@ class RecursiveSortProbeTest {
         }
     }
 
-    /** Compile + interpret alt-syntax source end to end. */
+    /** Compile + interpret Pontif-syntax source end to end. */
     private Object run(String src) throws Exception {
-        IrModule module = AltParser.parseModule(src, "rec.ptf");
+        IrModule module = PontifParser.parseModule(src, "rec.ptf");
         Simplifier simp = new Simplifier(List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);

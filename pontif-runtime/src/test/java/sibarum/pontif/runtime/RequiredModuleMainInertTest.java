@@ -2,7 +2,7 @@ package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 
 import java.io.ByteArrayOutputStream;
@@ -31,13 +31,13 @@ class RequiredModuleMainInertTest {
     void aRequiredModulesMainDoesNotRun_onlyTheEntryModulesDoes() throws sibarum.pontif.parser.ParseException {
         // A "third-party library" whose own main has an observable effect. If required mains ran, importing
         // this would print LIB-RAN.
-        IrModule lib = AltParser.parseModule("""
+        IrModule lib = PontifParser.parseModule("""
                 module lib
                 requires pontif.events.{Event, StdOut}
                 emit StdOut("LIB-RAN")  0
                 """, "lib");
         // The app: its own main is the only one that should fire.
-        IrModule app = AltParser.parseModule("""
+        IrModule app = PontifParser.parseModule("""
                 module app
                 requires pontif.events.{Event, StdOut}
                 emit StdOut("APP-RAN")  0

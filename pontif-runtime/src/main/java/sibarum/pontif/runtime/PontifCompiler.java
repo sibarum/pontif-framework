@@ -11,10 +11,10 @@ import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
-import sibarum.pontif.parser.Parser;
+import sibarum.pontif.parser.SexprParser;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.runtime.module.AlgebraExtension;
 import sibarum.pontif.receipts.BuiltinIssuer;
@@ -79,14 +79,14 @@ public final class PontifCompiler {
     }
 
     /**
-     * Compile the S-expression reference syntax. Used by the unit-test suite
-     * (which is the canonical source of language behavior). Stable; not
-     * expected to change.
+     * Compile the S-expression reference syntax. Used by much of the unit-test
+     * suite (the stable ground truth for language behavior). Stable; not
+     * expected to change. The Pontif surface syntax is {@link #compile}.
      */
-    public CompileResult compile(String source, String sourceName) {
+    public CompileResult compileSexpr(String source, String sourceName) {
         IrModule module;
         try {
-            module = Parser.parseModule(source, sourceName, language);
+            module = SexprParser.parseModule(source, sourceName, language);
         } catch (ParseException pe) {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + pe.getMessage(), pe.origin()));
@@ -98,18 +98,18 @@ public final class PontifCompiler {
     }
 
     /**
-     * Compile the alt syntax (see {@code docs/language-reference.ptf}) with no
-     * sibling-module resolution — only builtin {@code requires} are honored.
-     * Equivalent to {@link #compileAlt(String, String, java.nio.file.Path)} with
-     * a {@code null} directory; kept for callers (and tests) compiling a buffer
-     * with no on-disk home.
+     * Compile the Pontif surface syntax (see {@code docs/language-reference.ptf})
+     * with no sibling-module resolution — only builtin {@code requires} are
+     * honored. Equivalent to {@link #compile(String, String, java.nio.file.Path)}
+     * with a {@code null} directory; kept for callers (and tests) compiling a
+     * buffer with no on-disk home.
      */
-    public CompileResult compileAlt(String source, String sourceName) {
-        return compileAlt(source, sourceName, null);
+    public CompileResult compile(String source, String sourceName) {
+        return compile(source, sourceName, null);
     }
 
     /**
-     * Compile the alt syntax, resolving sibling {@code requires} demand-driven
+     * Compile the Pontif surface syntax, resolving sibling {@code requires} demand-driven
      * from {@code resolveDir}. The playground passes the open file's directory,
      * so a script can import its neighbors while an unrelated broken file in the
      * same directory is never parsed (see {@link ModuleResolver}). A
@@ -120,10 +120,10 @@ public final class PontifCompiler {
      * receipt-graph, conservation, and IR reports so Run and the inspector views
      * never disagree about whether a file was linked.
      */
-    public CompileResult compileAlt(String source, String sourceName, java.nio.file.Path resolveDir) {
+    public CompileResult compile(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule module;
         try {
-            module = AltParser.parseModule(source, sourceName);
+            module = PontifParser.parseModule(source, sourceName);
         } catch (ParseException pe) {
             return new CompileResult.Failed(
                     RunResult.error("Parse error: " + pe.getMessage(), pe.origin()));
@@ -211,7 +211,7 @@ public final class PontifCompiler {
      * module (FQN-keyed, coherence-checked) and runs it through the same
      * pipeline as a single file — so the return gate, overload check, and
      * runtime are all shared. {@code entryModule}'s {@code main} is the program
-     * entry. Single-file {@link #compile}/{@link #compileAlt} are unaffected.
+     * entry. Single-file {@link #compile}/{@link #compile} are unaffected.
      */
     public CompileResult compileProject(Map<String, IrModule> modules, String entryModule) {
         IrModule linked;
@@ -228,7 +228,7 @@ public final class PontifCompiler {
 
     /**
      * Runs the IR compile pipeline on an already-parsed module. Shared by
-     * {@link #compile}, {@link #compileAlt}, and {@link #compileProject}.
+     * {@link #compile}, {@link #compile}, and {@link #compileProject}.
      */
     private CompileResult compileModule(IrModule rawModule, String sourceName) {
         // Resolve instance-method calls AND route operators up front so every

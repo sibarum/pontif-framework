@@ -18,7 +18,7 @@ class TypeParameterTraitTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private void compiles(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tpt.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tpt.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -26,7 +26,7 @@ class TypeParameterTraitTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "tpt.ptf"), "expected a compile rejection");
+                compiler.compile(src, "tpt.ptf"), "expected a compile rejection");
     }
 
     @Test

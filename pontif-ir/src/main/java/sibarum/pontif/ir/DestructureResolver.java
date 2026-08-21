@@ -51,7 +51,7 @@ public final class DestructureResolver {
 
     /**
      * Slot-sort encodings for a DEFERRED positional struct pattern, written by
-     * the parser ({@code AltParser}) and decoded here. A slot bound to binder
+     * the parser ({@code PontifParser}) and decoded here. A slot bound to binder
      * {@code x} carries sort {@code Named("_$bind$x")}; a {@code _} discard
      * carries {@code Named("_$skip$")}. Defined in {@code pontif-ir} (the module
      * the parser depends on) so both sides share one constant.

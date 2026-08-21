@@ -41,11 +41,11 @@ class LetClaimGateTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src, Engine engine) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+        return runner.run(compiler.compile(src, "t.ptf"), engine);
     }
 
     private CompiledModule compiled(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Compiled ok = assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "expected a clean compile; got: "
                         + ((CompileResult.Failed) result).error().text());
@@ -53,7 +53,7 @@ class LetClaimGateTest {
     }
 
     private void assertCompileError(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("can never satisfy"),
@@ -63,7 +63,7 @@ class LetClaimGateTest {
     /** §1d: an undecidable (overlap / outside-the-kernel) claim is a compile error —
      *  "cannot be proved to satisfy" — not a silently stamped runtime check. */
     private void assertUnprovable(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection (§1d: no silent runtime stamp)");
         assertTrue(failed.error().text().contains("cannot be proved to satisfy"),
@@ -190,7 +190,7 @@ class LetClaimGateTest {
         // The embedding exemption is Int→Decimal only (a COERCE) — Bool against Int is a trait-free
         // provable mismatch the parser still rejects early, now via Assignability rather than the
         // retired CoercionResolver (roadmap §4.5 item 1; the diagnostic is unchanged).
-        CompileResult result = compiler.compileAlt("let m:Bool = 5\nm", "t.ptf");
+        CompileResult result = compiler.compile("let m:Bool = 5\nm", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("different types"),

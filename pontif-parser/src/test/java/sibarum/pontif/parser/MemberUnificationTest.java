@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MemberUnificationTest {
 
     private static IrModule parse(String src) throws ParseException {
-        return AltParser.parseModule(src, "t");
+        return PontifParser.parseModule(src, "t");
     }
 
     /** A sort's head name, for structural comparison that ignores source origin. */

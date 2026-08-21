@@ -36,7 +36,7 @@ class OrchestraTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "orchestra.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "orchestra.ptf"), Engine.INTERPRETER);
             return new Output(out.toString(StandardCharsets.UTF_8),
                     err.toString(StandardCharsets.UTF_8), r);
         } finally {

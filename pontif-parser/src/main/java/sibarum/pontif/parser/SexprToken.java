@@ -2,7 +2,7 @@ package sibarum.pontif.parser;
 
 import sibarum.pontif.core.Origin;
 
-public record Token(Kind kind, String text, String source, int line, int column) {
+public record SexprToken(Kind kind, String text, String source, int line, int column) {
 
     public enum Kind {
         LPAREN,
@@ -16,7 +16,7 @@ public record Token(Kind kind, String text, String source, int line, int column)
         return Origin.at(source, line, column);
     }
 
-    public Origin spanTo(Token end) {
+    public Origin spanTo(SexprToken end) {
         return Origin.span(source, line, column, end.line, end.column + end.text.length());
     }
 }

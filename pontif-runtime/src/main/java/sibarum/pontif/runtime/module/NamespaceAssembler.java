@@ -58,7 +58,7 @@ public final class NamespaceAssembler {
         return new IrModule(name, statements, main == null ? new IrExpr.Lit(0, Origin.NONE) : main);
     }
 
-    /** The parser's "no entry expression" sentinel is {@code Lit(0)} (see AltParser.parseModule). */
+    /** The parser's "no entry expression" sentinel is {@code Lit(0)} (see PontifParser.parseModule). */
     private static boolean isTrivialMain(IrExpr main) {
         return main instanceof IrExpr.Lit lit && lit.value() == 0;
     }

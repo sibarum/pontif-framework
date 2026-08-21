@@ -3,7 +3,7 @@
 #. Start by implementing language features in the execution AST (Truffle)
 #. Then extend the IR with those new features, with slightly different semantics to simplify or abstract features as desired.
 #. Lower the IR down to the reference language - doing the absolute minimum to gain support for the feature.
-#. Finally, use the reference language output to guide design of the primary language (sometimes this is called the "alternate language" or "alt language").
+#. Finally, use the reference language output to guide design of the primary language — the surface syntax people actually write.
 
 It's ok to hypothesize about language features ahead of time, but none of this should be load-bearing or contractual.
 Here's why:

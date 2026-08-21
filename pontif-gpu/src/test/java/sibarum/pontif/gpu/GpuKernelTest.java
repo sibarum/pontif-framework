@@ -32,7 +32,7 @@ class GpuKernelTest {
     void gpuVectorAdd_runsOnTheGpu() {
         Extensions.install(new GpuExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.gpu.{gpuVectorAdd}
                         gpuVectorAdd({1, 2, 3, 4}, {10, 20, 30, 40})""", "gpu.ptf"),
                 PontifRunner.Engine.INTERPRETER);
@@ -168,7 +168,7 @@ class GpuKernelTest {
         // its fields (`t._0 + t._1`), which verifies BOTH output columns: {11+10, 22+40, 33+90, 44+160}.
         Extensions.install(new GpuExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.core.{Stream}
                         let a:Stream[Int] = {1, 2, 3, 4}
                         let b:Stream[Int] = {10, 20, 30, 40}
@@ -240,7 +240,7 @@ class GpuKernelTest {
         // an honest error rather than a silent no-op. GPU-independent (rejected before dispatch).
         Extensions.install(new GpuExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.core.{Stream}
                         let c:Stream[Int] = {1, 2, 3, 4}
                         main ( &c:[ (x:Int) -> x * x ] on Gpu )""", "ongpu.ptf"),
@@ -274,7 +274,7 @@ class GpuKernelTest {
         // Proof the boundary is honest int64, not a narrowed int32 (values > 2^32 survive).
         Extensions.install(new GpuExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.gpu.{gpuVectorAdd}
                         gpuVectorAdd({5000000000, 1}, {5000000000, 2})""", "gpu.ptf"),
                 PontifRunner.Engine.INTERPRETER);
@@ -290,7 +290,7 @@ class GpuKernelTest {
         try {
             System.setOut(new PrintStream(cap, true, StandardCharsets.UTF_8));
             PontifRunner.RunResult r = new PontifRunner().run(
-                    new PontifCompiler().compileAlt(src, "ongpu.ptf"), PontifRunner.Engine.INTERPRETER);
+                    new PontifCompiler().compile(src, "ongpu.ptf"), PontifRunner.Engine.INTERPRETER);
             assertFalse(r.isError(), () -> "on-Gpu program should run; got " + r.text());
         } finally {
             System.setOut(oldOut);

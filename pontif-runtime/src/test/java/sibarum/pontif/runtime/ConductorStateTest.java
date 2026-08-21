@@ -31,7 +31,7 @@ class ConductorStateTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "state.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "state.ptf"), Engine.INTERPRETER);
             assertFalse(r.isError(), "program should compile and run: " + r);
             return out.toString(StandardCharsets.UTF_8);
         } finally {
@@ -123,7 +123,7 @@ class ConductorStateTest {
         try {
             System.setOut(new PrintStream(new ByteArrayOutputStream()));
             System.setErr(new PrintStream(new ByteArrayOutputStream()));
-            r = runner.run(compiler.compileAlt(
+            r = runner.run(compiler.compile(
                     "function f(x:Int):Int -> this.x = 5  x\nmain ( f(1) )", "state.ptf"),
                     Engine.INTERPRETER);
         } finally {

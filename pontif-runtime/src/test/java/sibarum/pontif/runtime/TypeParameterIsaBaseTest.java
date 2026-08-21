@@ -19,7 +19,7 @@ class TypeParameterIsaBaseTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private void compiles(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "isa.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "isa.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -27,7 +27,7 @@ class TypeParameterIsaBaseTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "isa.ptf"), "expected a compile rejection");
+                compiler.compile(src, "isa.ptf"), "expected a compile rejection");
     }
 
     @Test

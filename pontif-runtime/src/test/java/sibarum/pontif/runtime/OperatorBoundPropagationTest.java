@@ -22,13 +22,13 @@ class OperatorBoundPropagationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        var r = runner.run(compiler.compileAlt(src, "op-bound.ptf"), Engine.INTERPRETER);
+        var r = runner.run(compiler.compile(src, "op-bound.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "expected success; got: " + r.text());
         return r.text();
     }
 
     private String reject(String src) {
-        CompileResult r = compiler.compileAlt(src, "op-bound.ptf");
+        CompileResult r = compiler.compile(src, "op-bound.ptf");
         assertInstanceOf(CompileResult.Failed.class, r, "expected compile failure");
         return ((CompileResult.Failed) r).error().text();
     }

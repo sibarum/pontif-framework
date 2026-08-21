@@ -23,7 +23,7 @@ class ReExportTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
     }
 
     @Test
@@ -90,7 +90,7 @@ class ReExportTest {
     void proofTreesStillBuild_throughTheReExport() {
         // The original consumer keeps working: Leaf arrives via std.proof's
         // re-export and the proof vocabulary recognizes it.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires std.proof.{Leaf, Split}
                 function f(x:Int):[Int:@>=0] -> x*(x-1)
                 proof f = Split(x>=1, Leaf(), Leaf())
@@ -103,7 +103,7 @@ class ReExportTest {
 
     @Test
     void unexportedName_throughAnyDoor_stillRejects() {
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires std.common.{Split}
                 42
                 """, "t.ptf");

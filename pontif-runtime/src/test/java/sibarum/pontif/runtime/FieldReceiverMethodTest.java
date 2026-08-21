@@ -18,7 +18,7 @@ class FieldReceiverMethodTest {
 
     private String run(String src) {
         var r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "field-recv.ptf"), Engine.INTERPRETER);
+                new PontifCompiler().compile(src, "field-recv.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "expected success; got: " + r.text());
         return r.text();
     }

@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * End-to-end coverage for the unified {@code call} form with lambdas:
- * source string → Parser → IrCompiler → IrInterpreter, via PontifRunner.
+ * source string → SexprParser → IrCompiler → IrInterpreter, via PontifRunner.
  *
  * <p>The same {@code call} keyword handles both named-function invocation
  * and value-level closure invocation; the runtime picks based on whether the
@@ -20,7 +20,7 @@ class LambdaParserIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String source, String name) {
-        return runner.run(compiler.compile(source, name), PontifRunner.Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(source, name), PontifRunner.Engine.INTERPRETER);
     }
 
     @Test

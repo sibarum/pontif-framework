@@ -24,7 +24,7 @@ class ImplicitNumericCoercionTest {
 
     private void bothEngines(String src, String expected) {
         for (Engine engine : Engine.values()) {
-            RunResult r = runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+            RunResult r = runner.run(compiler.compile(src, "t.ptf"), engine);
             assertFalse(r.isError(), () -> engine + " got: " + r.text());
             assertEquals(expected, r.text(), engine.toString());
         }
@@ -80,7 +80,7 @@ class ImplicitNumericCoercionTest {
         // The reverse (lossy) direction stays out: a Decimal value does not silently
         // become an Int. The declared Int either rejects or keeps it a Decimal — in
         // no case is this a silent Decimal→Int narrowing to "5".
-        RunResult r = runner.run(compiler.compileAlt(
+        RunResult r = runner.run(compiler.compile(
                 "function f():Decimal -> 5.0\nlet x:Int = f()\nx", "t.ptf"), Engine.INTERPRETER);
         // Whatever the verdict, it must NOT be a silently narrowed Int "5".
         boolean silentlyNarrowed = !r.isError() && r.text().equals("5");

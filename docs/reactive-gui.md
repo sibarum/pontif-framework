@@ -73,7 +73,7 @@ ordered pipeline (ancestry least→most specific, each stage feeding the next) �
 **Naming convention** (unenforced): **past-tense = a notification** ("it happened", e.g. `Clicked`,
 `Counted`); **imperative = a command** ("cause it", e.g. `Draw`, `Save`).
 
-Lowering: the parser (`AltParser.parseConduit`) lowers a conduit to two synthetic `FunctionDecl`s
+Lowering: the parser (`PontifParser.parseConduit`) lowers a conduit to two synthetic `FunctionDecl`s
 (`#conduit#…` fold + `#conduit-init#…` seed, mirroring `#action#`); `IrCompiler` pairs them into a
 `CompiledModule.CompiledConduit`; `IrInterpreter` holds a persistent per-conduit `conduitState` cell
 and runs `foldThroughConduit` inside `fireEvent`, threading `S` and dispatching the result.

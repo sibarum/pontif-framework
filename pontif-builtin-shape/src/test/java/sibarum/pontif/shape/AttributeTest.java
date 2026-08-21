@@ -26,7 +26,7 @@ class AttributeTest {
 
     private static String eval(String expr) {
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(IMPORTS + expr, "attr.ptf"),
+                new PontifCompiler().compile(IMPORTS + expr, "attr.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());
         return r.text();

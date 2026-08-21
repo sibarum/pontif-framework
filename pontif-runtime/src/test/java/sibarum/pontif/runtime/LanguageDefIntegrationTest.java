@@ -41,7 +41,7 @@ class LanguageDefIntegrationTest {
                 """;
 
         PontifCompiler compiler = new PontifCompiler(rebranded, PontifCompiler.defaultRules());
-        RunResult r = runner.run(compiler.compile(src, "rebranded.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compileSexpr(src, "rebranded.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), "expected success; got: " + r.text());
         assertEquals("120", r.text());
     }
@@ -67,7 +67,7 @@ class LanguageDefIntegrationTest {
                 """;
 
         PontifCompiler compiler = new PontifCompiler(def, PontifCompiler.defaultRules());
-        RunResult r = runner.run(compiler.compile(src, "wordy.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(compiler.compileSexpr(src, "wordy.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), "expected success; got: " + r.text());
         assertEquals("15", r.text());
     }

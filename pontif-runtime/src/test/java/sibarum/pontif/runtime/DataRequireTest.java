@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * data. The data file's terminal value is bound under the last FQN segment and
  * typed by its structural effective sort, so field access is statically safe.
  * These are disk-resolved (a data file has no {@code module} header; it is found
- * by literal filename {@code $a.b.c.ptf}), so they run through {@code compileAlt}
+ * by literal filename {@code $a.b.c.ptf}), so they run through {@code compile}
  * with a real resolve directory.
  */
 class DataRequireTest {
@@ -32,7 +32,7 @@ class DataRequireTest {
     }
 
     private CompileResult compile(Path dir, String entrySource) {
-        return compiler.compileAlt(entrySource, "app.ptf", dir);
+        return compiler.compile(entrySource, "app.ptf", dir);
     }
 
     @Test

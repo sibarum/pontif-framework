@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Demand-driven single-file resolution ({@code compileAlt(src, name, dir)}):
+ * Demand-driven single-file resolution ({@code compile(src, name, dir)}):
  * the entry buffer's {@code requires} closure is loaded from {@code dir}, and
  * <b>only</b> that closure — so an unrelated unparseable sibling never breaks a
  * script that doesn't import it. The whole-project counterpart lives in
@@ -33,14 +33,14 @@ class ModuleResolverTest {
     }
 
     private RunResult run(String entry, Path dir) {
-        CompileResult r = compiler.compileAlt(entry, "entry", dir);
+        CompileResult r = compiler.compile(entry, "entry", dir);
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile; got: " + ((CompileResult.Failed) r).error().text());
         return runner.run(r, Engine.INTERPRETER);
     }
 
     private String rejected(String entry, Path dir) {
-        CompileResult r = compiler.compileAlt(entry, "entry", dir);
+        CompileResult r = compiler.compile(entry, "entry", dir);
         assertInstanceOf(CompileResult.Failed.class, r, "expected compile failure");
         return ((CompileResult.Failed) r).error().text();
     }
@@ -158,7 +158,7 @@ class ModuleResolverTest {
         String a = "module poly\nfunction f(x:Int):Int -> x + 1\n0";
         write(dir, "a.ptf", a);
         write(dir, "b.ptf", "module poly\nfunction g(x:Int):Int -> f(x) * 2\ng(20)");
-        CompileResult r = compiler.compileAlt(a, "a.ptf", dir);
+        CompileResult r = compiler.compile(a, "a.ptf", dir);
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile; got: " + ((CompileResult.Failed) r).error().text());
         assertEquals("42", runner.run(r, Engine.INTERPRETER).text());

@@ -21,7 +21,7 @@ class LiveCompileMarksTest {
     private static final String SRC = "<editor>";
 
     private static List<App.ErrorMark> marksFor(String content) {
-        PontifCompiler.CompileResult r = new PontifCompiler().compileAlt(content, SRC, null);
+        PontifCompiler.CompileResult r = new PontifCompiler().compile(content, SRC, null);
         assertTrue(r instanceof PontifCompiler.CompileResult.Failed, "program should fail to compile");
         return App.computeMarks(content, SRC, ((PontifCompiler.CompileResult.Failed) r).error());
     }

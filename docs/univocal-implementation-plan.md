@@ -23,9 +23,9 @@ Two findings from recon reshape the work and are baked into the slices below:
 ## Lose-freely half
 
 ### ☑ S0 — `self → this` (receiver keyword only)  *(landed 2026-06-08, full suite green)*
-**Landed:** alt-syntax receiver param `self`→`this` (AltParser); `@`-node
+**Landed:** Pontif-syntax receiver param `self`→`this` (PontifParser); `@`-node
 `SelfRef`/`SymExpr.Self` untouched (it's `@`); S-expr kept `self` as the
-test-stable legacy (`Parser.java`, `LanguageDef.selfReference` unchanged). Bare
+test-stable legacy (`SexprSexprParser.java`, `LanguageDef.selfReference` unchanged). Bare
 receiver refs (`match self`, `-> self`) needed a second pass beyond the dotted
 `self.`. Remaining: doc prose in `traits.md` / `language-reference.ptf` still says
 `self` (cosmetic, non-blocking).
@@ -33,11 +33,11 @@ receiver refs (`match self`, `-> self`) needed a second pass beyond the dotted
 **Disambiguation done (recon was wrong):** `IrExpr.SelfRef` / `SymExpr.Self` are
 `@` (the refinement subject, line 2834 maps the `@` token to `SelfRef`), NOT the
 receiver — renaming them to `ThisRef` would conflate `@` with `this`. The
-receiver is a plain injected param named `"self"` (AltParser 711/1199), referenced
+receiver is a plain injected param named `"self"` (PontifParser 711/1199), referenced
 as `self.x` → `Var("self")`. **Only that becomes `this`.** The 68-site
 `NarrowingInference` / `SymExpr.Self` cluster is `@` machinery and stays untouched.
-- Seams: rename injected param `"self"`→`"this"` (AltParser 711, 1199; reject
-  message 701; Parser.java 238); `LanguageDef.selfReference` default + reserved
+- Seams: rename injected param `"self"`→`"this"` (PontifParser 711, 1199; reject
+  message 701; SexprParser.java 238); `LanguageDef.selfReference` default + reserved
   list; glossary `self` entry; user-facing `self.` → `this.` across tests/docs/.ptf.
 - **`this` in struct-decl type position** (the "statement subject" generalization,
   `this.x` where there's no injected param) is NOT here — it arrives with S2.
@@ -48,13 +48,13 @@ as `self.x` → `Var("self")`. **Only that becomes `this`.** The 68-site
 sites (function, method, let). Bodyless-without-`;` is now an error; `;` on a
 non-pinning sort is an honest "does not pin" error (the old silent NoOp for
 bodyless lets is gone). Corpus migrated (~23 spec-only decls across
-SpecOnlyLetTest, SpecOnlySynthesisTest, AltParserIntegrationTest,
+SpecOnlyLetTest, SpecOnlySynthesisTest, PontifParserIntegrationTest,
 PlaygroundProbeTest, ReturnVerificationMeasurementTest). Partial-value+pin
 (`= partial;`) deferred to S6 — `;` is a harmless terminator when a value is
 present today.
 
 Make a trailing `;` the explicit, sole trigger for function AND value synthesis.
-- Seams: add `SEMICOLON` to `AltToken.Kind` + `AltLexer`; gate `parseFunction`
+- Seams: add `SEMICOLON` to `PontifToken.Kind` + `PontifLexer`; gate `parseFunction`
   (~616) and `parseLet` (~876) on `;`; bodyless-without-`;` → error;
   `;`-without-determinable-pin → error. Migrate existing spec-only decls.
 - **Risk:** breaks every current bodyless synthesis until the corpus is migrated.

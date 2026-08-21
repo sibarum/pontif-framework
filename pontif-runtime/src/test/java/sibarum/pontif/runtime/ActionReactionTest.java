@@ -35,7 +35,7 @@ class ActionReactionTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "actions.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "actions.ptf"), Engine.INTERPRETER);
             return new Output(out.toString(StandardCharsets.UTF_8),
                     err.toString(StandardCharsets.UTF_8), r);
         } finally {

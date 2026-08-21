@@ -23,7 +23,7 @@ class UnionAliasCrossModuleTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private PontifCompiler.CompileResult compile(String src) {
-        return compiler.compileAlt(src, "cross-module.ptf");
+        return compiler.compile(src, "cross-module.ptf");
     }
 
     private String run(String src) {

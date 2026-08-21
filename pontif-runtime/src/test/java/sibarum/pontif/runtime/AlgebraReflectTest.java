@@ -16,7 +16,7 @@ class AlgebraReflectTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "algebra.ptf"), Engine.INTERPRETER).text();
+                new PontifCompiler().compile(src, "algebra.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test

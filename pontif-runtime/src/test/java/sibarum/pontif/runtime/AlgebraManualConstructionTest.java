@@ -22,7 +22,7 @@ class AlgebraManualConstructionTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "algebra.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "algebra.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test

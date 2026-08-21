@@ -21,7 +21,7 @@ class DestructuringLetTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
     }
 
     @Test

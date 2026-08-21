@@ -243,7 +243,7 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
      * {@link sibarum.pontif.core.symbolic.TraitRegistry}.
      *
      * <p>SortChecker validates each contract method has a matching impl
-     * (after self-prepending). Surface form (alt syntax):
+     * (after self-prepending). Surface form (Pontif syntax):
      * {@code assign trait T:Tr { ... }}.
      */
     record TraitImpl(
@@ -312,7 +312,7 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
      * ({@code PontifCompiler}) translates it to a
      * {@link sibarum.pontif.receipts.Refinement} and validates it against the
      * named function's obligation; a proof that no longer discharges is a hard
-     * compile error. Surface form (alt syntax): {@code proof f = Split(...)}.
+     * compile error. Surface form (Pontif syntax): {@code proof f = Split(...)}.
      */
     record Proof(String functionName, IrExpr proofTree, Origin origin) implements IrStmt {
         public Proof {
@@ -339,7 +339,7 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
      * {@link sibarum.pontif.receipts.Refinement}, and validates it. The function
      * itself declares only a base return; the proof is where the refinement lives
      * (so dispatched proofs can grant different refinements per argument region).
-     * Surface (alt syntax): {@code assign proof f(params):[ (match s ...) -> [Sort] ]}
+     * Surface (Pontif syntax): {@code assign proof f(params):[ (match s ...) -> [Sort] ]}
      * or {@code assign proof f(params):[Sort]}.
      */
     record ReturnProof(

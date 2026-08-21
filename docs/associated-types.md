@@ -116,7 +116,7 @@ trait Container{
 }
 ```
 
-The parser change: in `parseTraitTypeLiteral` (`AltParser.java:1867`), a member
+The parser change: in `parseTraitTypeLiteral` (`PontifSexprParser.java:1867`), a member
 beginning with the `type` keyword is parsed as `type IDENT (: Bound)?` and
 collected into a new **associated-types** map on `IrSort.Trait` (name → bound,
 with the bound absent meaning "any type"; today it has only `methods` +
@@ -136,7 +136,7 @@ hold:[Method():[Pair(T, T)]]   # nested inside another sort
 ```
 
 The method-sort parser feeds each component through the general `parseSort`
-(`AltParser.java:2181`), so `T` becomes `IrSort.Named("T")` — a *reference to the
+(`PontifSexprParser.java:2181`), so `T` becomes `IrSort.Named("T")` — a *reference to the
 associated type member*, resolved in the trait's scope (GOTCHA G4). The
 associated-types map from §2.1 is what tells the checker `T` is a (possibly
 bounded) type variable, not an unknown sort; the bound `R` is what any *use* of a
@@ -163,10 +163,10 @@ binding, `[Int]` = the type (bracket-law: types live in `[]`). The compiler
 makes **no** guesses — contrast the rejected `T:Type -> [Int]`, which needed two
 (is `Type` the magic metatype sort? is the `->` RHS a value or a type?).
 
-Parser shape: in `parseAssignTrait` (`AltParser.java:1553`), a member beginning
+Parser shape: in `parseAssignTrait` (`PontifSexprParser.java:1553`), a member beginning
 with `type` is parsed as `type IDENT = parseSort()` and recorded as a type
 binding; everything else stays the existing method / attribute-producer split
-(`peek(1) == COLON`, `AltParser.java:1571`). Because `type` is the discriminator,
+(`peek(1) == COLON`, `PontifSexprParser.java:1571`). Because `type` is the discriminator,
 there is no value-vs-type ambiguity on the right-hand side — GOTCHA G3
 disappears entirely.
 
@@ -263,7 +263,7 @@ recognised. The remaining cost is small and ordinary:
 
 ## G2 — producer bodies are values, not types
 An attribute producer lowers to `IrStmt.FunctionDecl(Type.attr, [this], sort,
-bodyExpr)` where `body` is an `IrExpr` (`AltParser.java:1617`,
+bodyExpr)` where `body` is an `IrExpr` (`PontifSexprParser.java:1617`,
 `IrStmt.java:66`). There is **no way to put a type in body position** — the
 parser calls `parseExpr` exclusively. So an associated-type binding **cannot be
 a FunctionDecl**; it is recorded separately (G6). This is *why* the bind needs
@@ -273,10 +273,10 @@ its own declarator rather than riding the producer arrow.
 With the rejected `T:Type -> [Int]` form, the `->` RHS would have to be
 disambiguated value-vs-type (by a leading `[`, or by recognising the declared
 sort is `Type`). The `type X = […]` form **removes the guess**: the `type`
-keyword is the discriminator. In `parseAssignTrait` (`AltParser.java:1553`) a
+keyword is the discriminator. In `parseAssignTrait` (`PontifSexprParser.java:1553`) a
 member beginning with `type` is parsed as `type IDENT = parseSort()` and recorded
 as a type binding; the existing method / attribute-producer split
-(`peek(1)==COLON`, `AltParser.java:1571`) is untouched. The RHS is unconditionally
+(`peek(1)==COLON`, `PontifSexprParser.java:1571`) is untouched. The RHS is unconditionally
 a sort — no `parseExpr`/`parseSort` ambiguity.
 
 ## G4 — associated-type names look like unknown sorts
@@ -351,7 +351,7 @@ takes — *free* type parameters on functions/structs — is the separate next a
   even if checking them is phased (G9). `IrSort.java:123`.
 - `IrStmt.TraitImpl`: add `Map<String,IrSort> typeBindings`. `IrStmt.java:117`.
 - Lexer: add the `type` keyword.
-- `AltParser`: parse `type X` / `type X:Bound` in `parseTraitTypeLiteral`
+- `PontifParser`: parse `type X` / `type X:Bound` in `parseTraitTypeLiteral`
   (collect into the map) and `type X = [Sort]` in `parseAssignTrait` (record a
   type binding). No `Type`-as-a-sort handling needed.
 - `AliasResolver`: nominalize traits (G5).
@@ -394,7 +394,7 @@ takes — *free* type parameters on functions/structs — is the separate next a
    `copy:[Method():this.type]`) is spelled with `this.type` — the runtime-actual
    type of the receiver instance. **LANDED** (`AssociatedTypeSelfTypeTest`).
    Reserved sentinel sort `IrSort.SELF_TYPE` (`"this.type"` — un-spellable as a
-   user name); parsed in `AltParser.parseSort`; scoped over a trait's member
+   user name); parsed in `PontifParser.parseSort`; scoped over a trait's member
    sorts in `SortChecker.validateSortNames` (like an associated-type name); per
    impl, substituted `this.type → <implType>` so the existing conformance check
    enforces that `copy` really returns its own type (the type-preservation gate,

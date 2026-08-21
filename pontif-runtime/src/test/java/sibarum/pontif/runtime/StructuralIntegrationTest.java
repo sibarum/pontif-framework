@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end coverage for structural sorts + records + field access at the
- * source level. Goes through Parser → PontifCompiler → PontifRunner; checks
+ * source level. Goes through SexprParser → PontifCompiler → PontifRunner; checks
  * both engines (interpreter and Truffle) where a parity check makes sense.
  */
 class StructuralIntegrationTest {
@@ -19,11 +19,11 @@ class StructuralIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String source) {
-        return runner.run(compiler.compile(source, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(source, "t.ptf"), Engine.INTERPRETER);
     }
 
     private RunResult runTruffle(String source) {
-        return runner.run(compiler.compile(source, "t.ptf"), Engine.TRUFFLE);
+        return runner.run(compiler.compileSexpr(source, "t.ptf"), Engine.TRUFFLE);
     }
 
     // --- Record construction + field access ---

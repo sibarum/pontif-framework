@@ -16,7 +16,7 @@ import java.util.Set;
  * call resolves to the right declaration.
  *
  * <p>Invoked <b>only by the module linker</b> (multi-file projects). A
- * single-file compile via {@code PontifCompiler.compile}/{@code compileAlt}
+ * single-file compile via {@code PontifCompiler.compile}/{@code compile}
  * never runs this pass, so its dispatch keys stay bare and identical to today —
  * backward compatibility is structural, not rule-based.
  *

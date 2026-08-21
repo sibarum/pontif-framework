@@ -218,7 +218,7 @@ let xs:[Element[Int]] = Element(1, Element(2, Leaf))     # at a use site
 
 Using **brackets** (not parens) is what keeps this clear of the existing
 `[Name(…)]` *refinement* syntax: `[Ternion(z, 0, w)]` (positional field
-constraints, `parseStructFields`, `AltParser.java` ~`:2260`) uses **parens** for
+constraints, `parseStructFields`, `PontifSexprParser.java` ~`:2260`) uses **parens** for
 value-shaped constraints, while `Element[Int]` uses **brackets** for the type
 argument. Different brackets, different jobs — the G7 collision the parens form
 would have caused simply does not arise.
@@ -367,7 +367,7 @@ parameter as phantom/uninhabited rather than silently misbehave (G4).
 
 ## G1 — parsing the `[type E]` bracket slot
 A function name is followed directly by `(` today, parsed by `parseParamList`
-(`AltParser.java:818`, from `parseFunction` `:616`); a struct similarly. **Fix:**
+(`PontifSexprParser.java:818`, from `parseFunction` `:616`); a struct similarly. **Fix:**
 after the name, if a `[` follows, parse a `[type IDENT (: Bound)?, …]` slot into a
 *separate* type-parameter map before the value `(…)`. This is a new slot, parallel
 to (and composable with) the struct's `:[Base]` is-a slot; it does **not** live
@@ -420,7 +420,7 @@ earlier parens form `Element(Int)` would have collided; switching application to
 
 - `IrStmt.FunctionDecl`: add `Map<String,IrSort> typeParams` (G2).
 - `IrSort.Structural`: add `Map<String,IrSort> typeParams` (G2).
-- `AltParser`: parse the `[type E]` / `[type E:R]` bracket slot after a
+- `PontifParser`: parse the `[type E]` / `[type E:R]` bracket slot after a
   function/struct name (G1); parse `Name[Arg]` type application in `parseSort`
   (brackets — no collision with the paren refinement form, G7); accept
   `name[Arg](…)` explicit type application at calls (free of `$`-metareferences,
@@ -478,7 +478,7 @@ combinators) follow.
      reuses the same sort but in the `:[…]` slot — a later consumer.
    - **3c (TODO)** — the literal desugar (`(1,2,3) : [Stream[Int]]`).
 4. **`let P:Type[…]` → `type P = […]`** — retire the value-shaped sort-alias form
-   (`AltParser.java:1066`) in favour of the declarator. Pure consolidation, lowest
+   (`PontifSexprParser.java:1066`) in favour of the declarator. Pure consolidation, lowest
    priority; do last so the migration is mechanical.
 
 # 7. Decisions (resolved 2026-06-14) + future scope

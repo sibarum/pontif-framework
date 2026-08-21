@@ -21,7 +21,7 @@ class AlgebraFractionalPowerTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private String run(String src) {
-        var r = compiler.compileAlt(src, "pow.ptf");
+        var r = compiler.compile(src, "pow.ptf");
         if (r instanceof PontifCompiler.CompileResult.Failed f) return "COMPILE-FAIL: " + f;
         return new PontifRunner().run(r, Engine.INTERPRETER).text();
     }

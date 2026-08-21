@@ -18,10 +18,10 @@ Status: **E1 LANDED (behavior-preserving); E2 not yet started.** Baseline for E1
   (`function-style = {Method}`, `dispatch-style = {Dispatch, DispatchBase, AlgebraicDispatch}`) and
   the shared trait-name constants `FUNCTION_STYLE` / `DISPATCH_STYLE`. The ctx-aware lookup
   (`Assignability.callKind`) is `builtin(typeName)` else `ctx.satisfies(typeName, …-style)`.
-- **Parser.** Discrimination is purely syntactic — `AltParser.callSigColonFollows()` (a `:` after the
+- **Parser.** Discrimination is purely syntactic — `PontifParser.callSigColonFollows()` (a `:` after the
   matching `)` at depth 0) → `parseCallSigBody(headTok)` with the head name as data; the
-  `equals("Method")`/`equals("Dispatch")` branches are gone. Both the alt parser AND the live
-  S-expression reference parser (`Parser.java`, used by the unit suite) were updated.
+  `equals("Method")`/`equals("Dispatch")` branches are gone. Both the Pontif parser AND the live
+  S-expression reference parser (`SexprSexprParser.java`, used by the unit suite) were updated.
 - **Core `Sort` (deliberate E1 deferral).** §2 calls for a `callSigTypeName` discriminator on the
   core `Sort`; for E1 I KEPT the existing `method`/`dispatch` field-pairs instead (so `Refinements`
   is untouched — lowest-risk behavior-preservation) and made `IrCompiler.compileSort(CallSig)` pick
@@ -32,7 +32,7 @@ Status: **E1 LANDED (behavior-preserving); E2 not yet started.** Baseline for E1
   `isDispatch()`, but those field-pairs are now SET by capability at compile — so behavior is
   capability-driven one layer up, and a new callable type needs no core edit. Reworking `Refinements`
   to read a `callSigTypeName` directly is deferred with the core-`Sort` decision above.
-- **Acid test (green).** `AltParserSortTest.callSignature_arbitraryHeadName_parsesPurelySyntactically`
+- **Acid test (green).** `PontifParserSortTest.callSignature_arbitraryHeadName_parsesPurelySyntactically`
   (parse) + `AssignabilityTest.newCallableType_parsesSubtypesSatisfies_viaCapabilityDataOnly`
   (subtype via `ctx.satisfies` capability data; satisfy via the dispatch-shaped compiled sort). A new
   callable type is recognized entirely through capability DATA — no edit to Assignability,
@@ -45,7 +45,7 @@ Status: **E1 LANDED (behavior-preserving); E2 not yet started.** Baseline for E1
 ## 1. Why (the problem)
 
 `Method` and `Dispatch` are hardcoded three ways: **(a)** parser keywords
-(`AltParser.parseBracketBranch` matches `equals("Method")`/`equals("Dispatch")`), **(b)** two
+(`PontifParser.parseBracketBranch` matches `equals("Method")`/`equals("Dispatch")`), **(b)** two
 bespoke `IrSort` kinds (`IrSort.Method`, `IrSort.Dispatch`), and **(c)** name/`instanceof`-based
 special logic in subtyping, satisfaction, printing, resolution — ~40 sites. This makes the type
 system **genuinely hard to extend**: the `.ast` feature (a `Dispatch` that statically carries
@@ -219,11 +219,11 @@ Sealed `IrSort` means every exhaustive `switch` is compiler-enforced — removin
   `satisfiesFunction` (:394-420), `implyFunction` + kind guards (:77-78,:434-435,:484-485).
 
 **Parser**
-- `pontif-parser/.../AltParser.java` — the Method/Dispatch keyword branches (:3107-3137),
+- `pontif-parser/.../PontifSexprParser.java` — the Method/Dispatch keyword branches (:3107-3137),
   `parseFunctionSortBody` (shared grammar, :3433-3462), operator-contract parsing that requires an
   `IrSort.Dispatch` (:2790-2807, `requireHomogeneousSelfOperatorContract` :2992), Method
   construction sites (:205,:1765,:2946,:4537), `describeSort`/`baseSortName` (:5612-5613,
-  :5639-5640). *(`Parser.java` is a legacy parser — confirm it's not live before editing.)*
+  :5639-5640). *(`SexprSexprParser.java` is a legacy parser — confirm it's not live before editing.)*
 
 **IR→core + resolution + validation (mostly mechanical)**
 - `IrCompiler.java` — `compileSort` Dispatch/Method arms (:364-382), `registerSort` (:254-261).
@@ -244,7 +244,7 @@ Sealed `IrSort` means every exhaustive `switch` is compiler-enforced — removin
 
 **Overload / lowering / monomorphization (needs care)**
 - `OverloadOverlap.java` `checkSorts` (:181-185 — Method listed, Dispatch not; decide CallSig
-  handling), `AltParser.unifyTypeParam`/`needsMono` Dispatch arms (:490-492,:539-544),
+  handling), `PontifParser.unifyTypeParam`/`needsMono` Dispatch arms (:490-492,:539-544),
   `pontif-supirvast/SortLowering.java` both reject (:39-40), `DispatchTable.java` guard (:186).
 
 **Trait type-params / nominal subtyping (for E2's `AlgebraicDispatch is-a Dispatch`)**

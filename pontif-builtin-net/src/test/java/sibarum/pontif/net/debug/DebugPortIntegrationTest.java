@@ -63,7 +63,7 @@ class DebugPortIntegrationTest {
                 PontifCompiler compiler = new PontifCompiler();
                 PontifRunner runner = new PontifRunner();
                 PontifRunner.RunResult result =
-                        runner.run(compiler.compileAlt(PROGRAM, "test.ptf"), PontifRunner.Engine.INTERPRETER);
+                        runner.run(compiler.compile(PROGRAM, "test.ptf"), PontifRunner.Engine.INTERPRETER);
                 if (result.isError()) {
                     session.runFailed(result.text(), 0, 0);
                     throw new AssertionError("program failed to run: " + result.text());

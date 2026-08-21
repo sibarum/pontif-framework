@@ -23,7 +23,7 @@ import java.util.List;
  * {@code out[gid] = f(in0[gid], in1[gid], …)}, then delegates {@code f} to {@link ExprLowering}.
  *
  * <p>It consumes exactly the {@code Iterate} shape the parser produces for stream spread/zip
- * ({@code AltParser.lowerSpreadCall}): a single {@code STREAM} output written by one wildcard arm.
+ * ({@code PontifParser.lowerSpreadCall}): a single {@code STREAM} output written by one wildcard arm.
  *
  * <ul>
  *   <li><b>map</b> — {@code double(&s)} / {@code &s:[x -> x*x]}: one source, the body reads the element

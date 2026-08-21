@@ -26,12 +26,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       prepended and their names qualified with {@code TypeName.}.</li>
  * </ul>
  */
-class ParserTraitTest {
+class SexprParserTraitTest {
 
     private static final Simplifier SIMPLIFIER = new Simplifier(List.<RewriteRule>of());
 
     private static IrModule parseModule(String src) throws ParseException {
-        return Parser.parseModule(src, "t");
+        return SexprParser.parseModule(src, "t");
     }
 
     // --- (interface ...) ----------------------------------------------------

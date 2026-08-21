@@ -45,7 +45,7 @@ public final class GuiLauncher {
         PontifRunner runner = new PontifRunner();
 
         PontifRunner.RunResult result = runner.run(
-                compiler.compileAlt(source, displayName, resolveDir),
+                compiler.compile(source, displayName, resolveDir),
                 PontifRunner.Engine.INTERPRETER);
 
         if (result.isError()) {

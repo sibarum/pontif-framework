@@ -6,13 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Phase B end-to-end: alt-syntax source with a struct-refined parameter
+ * Phase B end-to-end: Pontif-syntax source with a struct-refined parameter
  * compiles through {@link PontifCompiler} and runs.
  */
 class StructRefinementAltTest {
 
     private static PontifCompiler.CompileResult compile(String src) {
-        return new PontifCompiler().compileAlt(src, "t.ptf");
+        return new PontifCompiler().compile(src, "t.ptf");
     }
 
     @Test

@@ -47,7 +47,7 @@ class StdinEchoTest {
         try {
             System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
             System.setOut(new PrintStream(cap, true, StandardCharsets.UTF_8));
-            CompileResult r = compiler.compileAlt(src, "echo.ptf");
+            CompileResult r = compiler.compile(src, "echo.ptf");
             CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                     () -> "should compile; got " + (r instanceof CompileResult.Failed f ? f.error().text() : r));
             new IrInterpreter(c.program().simplifier()).eval(c.program().module());
@@ -92,7 +92,7 @@ class StdinEchoTest {
         try {
             System.setIn(new ByteArrayInputStream(input.getBytes(StandardCharsets.UTF_8)));
             System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-            CompileResult r = compiler.compileAlt(src, "echo.ptf");
+            CompileResult r = compiler.compile(src, "echo.ptf");
             CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                     () -> "should compile; got " + (r instanceof CompileResult.Failed f ? f.error().text() : r));
             return new IrInterpreter(c.program().simplifier()).eval(c.program().module());

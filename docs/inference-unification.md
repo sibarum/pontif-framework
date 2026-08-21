@@ -11,7 +11,7 @@ the campaign survives a context reset. Slices 1–3 of the inference-engine unif
 There must be **no place in the syntax where a narrowing feature is unavailable when it
 is logically derivable.** Today three typers disagree (docs/TODO.md Cluster 5); slices
 1–2 collapsed the two *engine-side* ones (`SortChecker.inferSort` → `inferFloor`). The
-*parser-side* `AltParser.inferMaximalSort` is the last divergent reasoner — and the way
+*parser-side* `PontifParser.inferMaximalSort` is the last divergent reasoner — and the way
 it differs reveals a real **hole in the core**, not a thing to mechanically absorb.
 
 The parser produces an exact **value-pin** `[Int:@==a+b]` for arithmetic; the core
@@ -74,7 +74,7 @@ One engine, invoked at every stage with a stage-appropriate `InferenceContext`:
   base fallback (landed, slice 1). New: `closeOver(sort, Set<String> escaping, ctx)` —
   if the predicate references any escaping var, re-project via `BoundAnalysis`
   (reusing `intervalToIntSort`); else return as-is. Boundaries call `closeOver`.
-- **Parser** (`AltParser`): build an `InferenceContext` from its scope maps
+- **Parser** (`PontifParser`): build an `InferenceContext` from its scope maps
   (`currentScope` → `typeEnv`, `declaredFunctionReturns` → `functionReturns`,
   `declaredTopLevelLets`, `declaredStructs` → `structDefs`) and call `inferFloor`.
   `inferMaximalSort` is deleted; parse-time weakness then falls out *only* from an
@@ -113,7 +113,7 @@ scrutinee to its base. **Full suite + 150-probe matrix green.** The core is now 
 capability superset for narrowing *shapes* — the exact pin the parser had is now the
 core's behavior.
 
-**Step 4 LANDED (commit 108e3e1).** `AltParser.inferMaximalSort` now delegates to
+**Step 4 LANDED (commit 108e3e1).** `PontifParser.inferMaximalSort` now delegates to
 `inferFloor` over an `InferenceContext` built from the parser's live scope maps; the
 parser is no longer a separate reasoner. The three impedance points below were all
 absorbed into the core floor (so it is a true superset): MethodCall + unrouted-operator

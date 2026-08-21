@@ -5,35 +5,35 @@ import sibarum.dasum.gui.core.render.Color;
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Editor colorizer for Pontif alt syntax. Two independent passes:
+ * Editor colorizer for Pontif surface syntax. Two independent passes:
  *
  * <p><b>Foreground</b> — a single-pass, error-tolerant token scanner:
  * comments, literals (numbers, chars, strings — dimmed neutral, never hued),
  * and the {@code @} principal subject; keywords keep the base color. User
  * names get the hue rainbow (the only semantic color). Deliberately NOT built on
- * {@link sibarum.pontif.parser.AltLexer}: the real lexer throws on invalid
+ * {@link sibarum.pontif.parser.PontifLexer}: the real lexer throws on invalid
  * input (mid-edit source usually is invalid), skips comments entirely, and
  * reports line/column rather than the flat char offsets {@link TextStyle}
  * wants. The scanning mirrors the lexer's token shapes tolerantly —
  * anything that doesn't scan just stays uncolored. The keyword vocabulary
- * is NOT mirrored: it is read from {@link AltParser#KEYWORDS}, so a keyword
+ * is NOT mirrored: it is read from {@link PontifParser#KEYWORDS}, so a keyword
  * added to the parser highlights here with no second list to update.
  *
  * <p><b>Background</b> — function-body tints, parser-backed: where a body
  * starts and ends (the lets through the final expression) is not decidable
  * by a flat scanner — a top-level {@code let} is textually identical to a
- * body {@code let} — so this pass runs the real {@link AltParser} and uses
+ * body {@code let} — so this pass runs the real {@link PontifParser} and uses
  * the statement origins as boundaries. When the source doesn't parse
  * (mid-edit), body spans are CLEARED rather than left stale: no claim
  * beats a wrong claim. They reappear on the next parseable keystroke.
  */
-final class AltHighlighter {
+final class PontifHighlighter {
 
     // --- Foreground palette (dark-theme; editor default CODE_FG stays the base) ---
     // Non-name terms carry NO semantic hue — only user names get the rainbow.
@@ -73,7 +73,7 @@ final class AltHighlighter {
     /** Foreground token spans + background block spans for one pass. */
     record Styles(List<TextStyle> foreground, List<TextStyle> background) {}
 
-    private AltHighlighter() {}
+    private PontifHighlighter() {}
 
     /**
      * Foreground token colors only — the stateless half of {@link #highlight}
@@ -114,7 +114,7 @@ final class AltHighlighter {
         while (i < n) {
             char c = content.charAt(i);
             if (c == '#') {
-                // Comment — to end of line, same as AltLexer's skip rule.
+                // Comment — to end of line, same as PontifLexer's skip rule.
                 int start = i;
                 while (i < n && content.charAt(i) != '\n') i++;
                 fg.add(new TextStyle(start, i, COMMENT));
@@ -200,7 +200,7 @@ final class AltHighlighter {
     private static List<TextStyle> bodySpans(String content) {
         IrModule module;
         try {
-            module = AltParser.parseModule(content, "<editor>");
+            module = PontifParser.parseModule(content, "<editor>");
         } catch (Exception e) {
             if (lastParsedContent == null) {
                 return List.of();   // never had a good parse — nothing to carry
@@ -460,7 +460,7 @@ final class AltHighlighter {
 
     /**
      * End index (exclusive) of a char literal opening at {@code i}, or -1
-     * if it doesn't scan. Mirrors {@code AltLexer.readChar}: one escape
+     * if it doesn't scan. Mirrors {@code PontifLexer.readChar}: one escape
      * from {@code \n \t \' \\} or one code point (surrogate pairs
      * included), then the mandatory closing quote. Where the lexer throws
      * (empty, unknown escape, unterminated), this returns -1.
@@ -486,7 +486,7 @@ final class AltHighlighter {
 
     /**
      * End index (exclusive) of a string literal opening at {@code i}, or -1
-     * if it doesn't scan. Mirrors {@code AltLexer.readString}: zero or more
+     * if it doesn't scan. Mirrors {@code PontifLexer.readString}: zero or more
      * code points (surrogate pairs included) or escapes from
      * {@code \n \t \" \\}, then the mandatory closing quote. Where the lexer
      * throws (unknown escape, unterminated), this returns -1.
@@ -513,14 +513,14 @@ final class AltHighlighter {
     /**
      * Whether an identifier should render in the neutral default color rather
      * than the user-name rainbow. Three sources, all reserved: the parser's
-     * {@link AltParser#KEYWORDS}; the contextual receiver {@code this}; and the
+     * {@link PontifParser#KEYWORDS}; the contextual receiver {@code this}; and the
      * reserved {@code type} accessor in {@code this.type} (recognized
      * positionally — {@code type} elsewhere is an ordinary name). The last two
      * are NOT parser keywords (so they can't go in {@code KEYWORDS} without
      * disturbing name validation), hence this highlighter-local check.
      */
     private static boolean isReserved(String word, String content, int start) {
-        if (AltParser.KEYWORDS.contains(word)) return true;
+        if (PontifParser.KEYWORDS.contains(word)) return true;
         if (word.equals("this")) return true;
         return word.equals("type") && precededByThisDot(content, start);
     }
@@ -535,7 +535,7 @@ final class AltHighlighter {
         return content.substring(s, dot).equals("this");
     }
 
-    // ASCII predicates matching AltLexer's identifier rules: start is a
+    // ASCII predicates matching PontifLexer's identifier rules: start is a
     // letter or underscore; continue adds digits and '$'.
     private static boolean isDigit(char c)      { return c >= '0' && c <= '9'; }
     private static boolean isIdentStart(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }

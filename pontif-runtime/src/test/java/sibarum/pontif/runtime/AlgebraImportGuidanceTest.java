@@ -19,7 +19,7 @@ class AlgebraImportGuidanceTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private String failureText(String src) {
-        var r = compiler.compileAlt(src, "<editor>");
+        var r = compiler.compile(src, "<editor>");
         assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
                 "expected a compile failure, got " + r);
         return r.toString();
@@ -39,7 +39,7 @@ class AlgebraImportGuidanceTest {
 
     @Test
     void algebraicProofWithImport_stillCompiles() {
-        var r = compiler.compileAlt("""
+        var r = compiler.compile("""
                 requires pontif.algebra.{Algebraic}
                 function poly(x:Decimal):Decimal -> x*x + 2.0*x + 1.0
                 assign proof poly:Algebraic

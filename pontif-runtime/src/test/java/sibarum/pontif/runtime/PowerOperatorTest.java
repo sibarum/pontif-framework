@@ -20,7 +20,7 @@ class PowerOperatorTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src, Engine engine) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+        return runner.run(compiler.compile(src, "t.ptf"), engine);
     }
 
     @Test

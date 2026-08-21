@@ -18,7 +18,7 @@ class NestedDestructureTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "nest.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "nest.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());

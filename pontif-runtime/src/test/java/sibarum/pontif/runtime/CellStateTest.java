@@ -29,7 +29,7 @@ class CellStateTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "cell.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "cell.ptf"), Engine.INTERPRETER);
             assertFalse(r.isError(), "program should compile and run: " + r);
             return out.toString(StandardCharsets.UTF_8);
         } finally {

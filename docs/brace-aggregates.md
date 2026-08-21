@@ -68,7 +68,7 @@ non-brace mechanism.
    `{EXPR}` block form is **gone from braces entirely** — the grouping / let-chain-boundary
    role is parens (`( let y = 5  y + 1 )`, which already bound to its closing `)`). Fallout
    migrated: every braced function body / let-value / call-arg block `-> { … }` moved to
-   `-> ( … )` (`AltParserLetExprTest`, `AltParserIntegrationTest`, `DictTest`,
+   `-> ( … )` (`PontifParserLetExprTest`, `PontifParserIntegrationTest`, `DictTest`,
    `LetClaimGateTest`, the ternion examples in `ApproxEqualityTest`/`DecimalPromotionTest`).
    `match this { … }` is the match parser's own braces — untouched. Empty/1-ary `_tuple`
    Records work downstream unchanged (no arity≥2 assumption). Full reactor green.
@@ -80,7 +80,7 @@ non-brace mechanism.
    `parseSort`, so patterns came along free. Paren forms still parse (additive). Full reactor
    green.
 4. **Printer flip + mass migration — LANDED.** `RecordValue` renders tuples as `{…}`; all
-   output-assertion sites migrated. Every alt-syntax input migrated parens→braces: the
+   output-assertion sites migrated. Every Pontif-syntax input migrated parens→braces: the
    builtin `std.stream` source (`BuiltinModules` — `partition`'s tuple sort/pattern/values;
    this single fix cleared ~109 cascading link failures), ~35 test files (via parallel
    subagents + central verification), `README.md` snippets, and `ReadmeSnippetTest`'s embedded
@@ -96,9 +96,9 @@ non-brace mechanism.
 ## Blast radius (inventory 2026-06-22)
 
 - `.ptf` files with paren-aggregates: ~6 examples + `docs/language-reference.ptf`.
-- Java tests embedding alt-syntax with paren-tuples: ~12 tuple-heavy (`TupleTest`,
+- Java tests embedding Pontif syntax with paren-tuples: ~12 tuple-heavy (`TupleTest`,
   `NestedDestructureTest`, `ConservationGateTest`, `PositionalParamDestructureTest`,
-  `CastAltTest`, `ReadmeSnippetTest`, …) of 71 `compileAlt` users.
+  `CastAltTest`, `ReadmeSnippetTest`, …) of 71 `compile` users.
 - Probe resources: ~10–15 of ~150 (`destructure__*`, `generics__*`, …).
 - Hard cases: nested tuples `((a,b),c)`, refined components `[([Int:@>0], Bool)]`,
   tuple param/codomain shapes (`previous:(Int,Int)`, `(el):(Stream[Int],Int) -> …`).
@@ -111,9 +111,9 @@ non-brace mechanism.
 
 ## WAR markers (cut sites)
 
-- `AltParser` `LBRACE` case in `parsePrimary` — value aggregate only (S1+S2 done; block
+- `PontifParser` `LBRACE` case in `parsePrimary` — value aggregate only (S1+S2 done; block
   fallthrough removed).
-- `AltParser.parseTupleSortBody` — parameterize over the delimiter (slice 3).
-- `AltParser` `LPAREN` tuple branch + the `(` triggers into `parseTupleSortBody` — remove at
+- `PontifParser.parseTupleSortBody` — parameterize over the delimiter (slice 3).
+- `PontifParser` `LPAREN` tuple branch + the `(` triggers into `parseTupleSortBody` — remove at
   slice 5 (paren-aggregate retirement).
 - Tuple printer (`ReceiptGraphPrinter` / value `toString`) — render `{…}` (slice 5).

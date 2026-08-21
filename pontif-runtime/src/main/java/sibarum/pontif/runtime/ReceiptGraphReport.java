@@ -4,7 +4,7 @@ import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.receipts.BuiltinIssuer;
@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  * a developer-facing window into the proof process, emitted as plain text
  * (per the project decision to favor text artifacts over visualization).
  *
- * <p>Pipeline: alt-syntax source → {@link AltParser} → {@link AliasResolver}
+ * <p>Pipeline: Pontif-syntax source → {@link PontifParser} → {@link AliasResolver}
  * → {@link Drafter} → {@link ReceiptGraphPrinter}, with {@link BuiltinIssuer}
  * + {@link Notary} layered on for the closing-receipt section. The
  * alias-resolution step mirrors {@code IrCompiler.compile} so struct-typed
@@ -51,23 +51,23 @@ public final class ReceiptGraphReport {
     }
 
     /**
-     * Drafts and renders the receipt-graph report for alt-syntax source.
+     * Drafts and renders the receipt-graph report for Pontif-syntax source.
      * Never throws — parse/compile failures come back as
      * {@link Result.Failed}.
      */
-    public static Result fromAltSource(String source, String sourceName) {
-        return fromAltSource(source, sourceName, null);
+    public static Result fromPontifSource(String source, String sourceName) {
+        return fromPontifSource(source, sourceName, null);
     }
 
     /**
-     * As {@link #fromAltSource(String, String)} but resolving sibling
+     * As {@link #fromPontifSource(String, String)} but resolving sibling
      * {@code requires} from {@code resolveDir} (the open file's directory) —
      * mirrors the compiler's Run path so the Receipts view and Run agree.
      */
-    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
+    public static Result fromPontifSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         IrModule parsed;
         try {
-            parsed = AltParser.parseModule(source, sourceName);
+            parsed = PontifParser.parseModule(source, sourceName);
         } catch (ParseException pe) {
             return new Result.Failed("Parse error: " + pe.getMessage());
         } catch (RuntimeException e) {
@@ -99,7 +99,7 @@ public final class ReceiptGraphReport {
      */
     public static Path writeReport(Path dir, String baseName, String source, String sourceName)
             throws IOException {
-        String body = switch (fromAltSource(source, sourceName)) {
+        String body = switch (fromPontifSource(source, sourceName)) {
             case Result.Generated g -> g.text();
             case Result.Failed f -> "# Receipt-graph report: " + sourceName + "\n\n"
                     + f.error() + "\n";

@@ -35,7 +35,7 @@ public final class ShapeLauncher {
                 ? args[2] : target.getFileName().toString();
 
         PontifRunner.RunResult result = new PontifRunner().run(
-                new PontifCompiler().compileAlt(source, displayName, resolveDir),
+                new PontifCompiler().compile(source, displayName, resolveDir),
                 PontifRunner.Engine.INTERPRETER);
 
         if (result.isError()) {

@@ -18,11 +18,11 @@ class BooleanOpsIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
     }
 
     private RunResult runTruffle(String src) {
-        return runner.run(compiler.compile(src, "t.ptf"), Engine.TRUFFLE);
+        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.TRUFFLE);
     }
 
     // --- Direct evaluation at the value level ---

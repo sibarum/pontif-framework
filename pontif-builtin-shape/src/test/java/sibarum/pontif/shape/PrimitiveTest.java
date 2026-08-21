@@ -24,7 +24,7 @@ class PrimitiveTest {
     private static String eval(String expr) {
         Extensions.install(new ShapeExtension());
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(IMPORTS + expr, "prim.ptf"),
+                new PontifCompiler().compile(IMPORTS + expr, "prim.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());
         return r.text();

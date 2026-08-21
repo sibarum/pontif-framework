@@ -17,11 +17,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * expression is still accepted as the legacy entry form (coexistence); a file
  * with neither is declarative-only and gets a dormant placeholder main.
  */
-class AltParserMainBlockTest {
+class PontifParserMainBlockTest {
 
     @Test
     void mainBlock_bindsBodyExpressionAsMain() throws Exception {
-        IrModule m = AltParser.parseModule("main ( 1 + 2 )", "t");
+        IrModule m = PontifParser.parseModule("main ( 1 + 2 )", "t");
         IrExpr.BinOp main = assertInstanceOf(IrExpr.BinOp.class, m.main());
         assertEquals(IrExpr.Op.ADD, main.op());
     }
@@ -29,14 +29,14 @@ class AltParserMainBlockTest {
     @Test
     void mainStatement_parensOptional() throws Exception {
         // `main` takes a bare statement; parens are optional grouping, not required.
-        IrModule m = AltParser.parseModule("main 1 + 2", "t");
+        IrModule m = PontifParser.parseModule("main 1 + 2", "t");
         IrExpr.BinOp main = assertInstanceOf(IrExpr.BinOp.class, m.main());
         assertEquals(IrExpr.Op.ADD, main.op());
     }
 
     @Test
     void mainBlock_sequencesWithLetIn() throws Exception {
-        IrModule m = AltParser.parseModule("main ( let x = 5 x + 1 )", "t");
+        IrModule m = PontifParser.parseModule("main ( let x = 5 x + 1 )", "t");
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, m.main());
         assertEquals("x", let.name());
     }
@@ -44,20 +44,20 @@ class AltParserMainBlockTest {
     @Test
     void mainBlock_coexistsWithDeclarations() throws Exception {
         String src = "function inc(n:Int):Int -> n + 1\nmain ( inc(41) )";
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         assertEquals(1, m.statements().size());
         assertInstanceOf(IrExpr.Call.class, m.main());
     }
 
     @Test
     void legacyTrailingExpression_stillParses_duringMigration() throws Exception {
-        IrModule m = AltParser.parseModule("1 + 2", "t");
+        IrModule m = PontifParser.parseModule("1 + 2", "t");
         assertInstanceOf(IrExpr.BinOp.class, m.main());
     }
 
     @Test
     void declarativeOnly_getsPlaceholderMain() throws Exception {
-        IrModule m = AltParser.parseModule("function inc(n:Int):Int -> n + 1", "t");
+        IrModule m = PontifParser.parseModule("function inc(n:Int):Int -> n + 1", "t");
         IrExpr.Lit placeholder = assertInstanceOf(IrExpr.Lit.class, m.main());
         assertEquals(0L, placeholder.value());
     }
@@ -65,6 +65,6 @@ class AltParserMainBlockTest {
     @Test
     void trailingTokensAfterMainBlock_rejected() {
         assertThrows(ParseException.class,
-                () -> AltParser.parseModule("main ( 1 ) extra", "t"));
+                () -> PontifParser.parseModule("main ( 1 ) extra", "t"));
     }
 }

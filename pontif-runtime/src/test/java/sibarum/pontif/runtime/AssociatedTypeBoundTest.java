@@ -18,7 +18,7 @@ class AssociatedTypeBoundTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "bound.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "bound.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -27,7 +27,7 @@ class AssociatedTypeBoundTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "bound.ptf"), "expected a compile rejection");
+                compiler.compile(src, "bound.ptf"), "expected a compile rejection");
     }
 
     private static final String SETUP = """

@@ -124,7 +124,7 @@ amber. The caret/selection sits on the declaration so Ctrl+C copies it.
 ## Syntax highlighting
 
 The Definition view gets the editor's token coloring via a stateless
-`AltHighlighter.foreground(content)` — comments/literals dimmed, keywords neutral,
+`PontifHighlighter.foreground(content)` — comments/literals dimmed, keywords neutral,
 user names in the hue-hashed rainbow (so a name keeps the *same* color across the
 jump). Foreground only: the editor's parser-backed **body-div** background pass is
 omitted — it carries cross-keystroke state for the live editor and would also
@@ -147,7 +147,7 @@ change needed.
 | IR → Pontif-source unparser | `pontif-ir/.../IrSourcePrinter.java` |
 | Real-source accessor for builtins | `pontif-runtime/.../module/BuiltinModules.java` (`sourceOf`) |
 | Editor wiring (tab, Ctrl+click / Ctrl+Enter, underline, Esc, highlight, `addRequires`, module explorer) | `pontif-playground/.../App.java` |
-| Stateless foreground colorizer | `pontif-playground/.../AltHighlighter.java` (`foreground`) |
+| Stateless foreground colorizer | `pontif-playground/.../PontifHighlighter.java` (`foreground`) |
 | Tests | `pontif-playground/.../DefinitionNavigatorTest.java` |
 
 ## Deferred

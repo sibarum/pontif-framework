@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class StreamGuardFilterTest {
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "m.ptf");
+        IrModule module = PontifParser.parseModule(src, "m.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);

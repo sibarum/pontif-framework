@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReceiptGraphFeatureCoverageTest {
 
     private static String report(String src, String name) {
-        ReceiptGraphReport.Result r = ReceiptGraphReport.fromAltSource(src, name);
+        ReceiptGraphReport.Result r = ReceiptGraphReport.fromPontifSource(src, name);
         return assertInstanceOf(ReceiptGraphReport.Result.Generated.class, r,
                 () -> "expected a generated report; got " + r).text();
     }

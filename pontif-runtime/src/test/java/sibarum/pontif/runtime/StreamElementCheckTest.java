@@ -24,7 +24,7 @@ class StreamElementCheckTest {
     }
 
     @Test void computedStream_matchingElementType_passes() {
-        Object val = eval(compiler.compileAlt("""
+        Object val = eval(compiler.compile("""
                 requires pontif.core.{Stream}
                 let s:Stream[Int] = {1, 2, 3, 4}
                 let double:[ (el:Int) -> el * 2 ]
@@ -35,7 +35,7 @@ class StreamElementCheckTest {
 
     @Test void computedStream_wrongElementType_isRejected() {
         // THE LIE: an Int stream declared as Stream[String]. Must NOT pass clean.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream}
                 let s:Stream[Int] = {1, 2, 3, 4}
                 let double:[ (el:Int) -> el * 2 ]

@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Match totality (alt-syntax principle 8), under the conservation rule:
+ * Match totality (Pontif-syntax principle 8), under the conservation rule:
  * <b>if totality cannot be determined at compile time, a default arm is
  * required.</b> {@code SortChecker} proves coverage where it can (the
  * decidable Int/Bool fragment, bare-struct Tier A, single-field Tier B,
@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MatchTotalityTest {
 
     private static Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "t.ptf");
+        IrModule module = PontifParser.parseModule(src, "t.ptf");
         Simplifier simp = new Simplifier(
                 java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);

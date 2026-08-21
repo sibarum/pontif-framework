@@ -25,7 +25,7 @@ class TypeParameterTraitSortTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private void compiles(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tpts.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tpts.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -33,7 +33,7 @@ class TypeParameterTraitSortTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "tpts.ptf"), "expected a compile rejection");
+                compiler.compile(src, "tpts.ptf"), "expected a compile rejection");
     }
 
     // --- The trait-application sort `[Stream[Int]]` ---

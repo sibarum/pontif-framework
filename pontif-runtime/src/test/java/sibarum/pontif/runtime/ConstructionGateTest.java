@@ -50,11 +50,11 @@ class ConstructionGateTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src, Engine engine) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+        return runner.run(compiler.compile(src, "t.ptf"), engine);
     }
 
     private CompiledModule compiled(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Compiled ok = assertInstanceOf(CompileResult.Compiled.class, result,
                 () -> "expected a clean compile; got: "
                         + ((CompileResult.Failed) result).error().text());
@@ -76,10 +76,10 @@ class ConstructionGateTest {
         // 1: dog:Animal = Dog()  → effective Dog → should ROUTE.
         RunResult c1 = run(p + "let dog:Animal = Dog()\nbark(dog)", Engine.INTERPRETER);
         // 2: bark(a) with a:Animal param → should COMPILE-FAIL.
-        CompileResult c2 = compiler.compileAlt(
+        CompileResult c2 = compiler.compile(
                 p + "function speak(a:Animal):String -> bark(a)\n42", "t.ptf");
         // 4: cat:Animal = Cat() → effective Cat, not-a Dog → should COMPILE-FAIL.
-        CompileResult c4 = compiler.compileAlt(p + "let cat:Animal = Cat()\nbark(cat)", "t.ptf");
+        CompileResult c4 = compiler.compile(p + "let cat:Animal = Cat()\nbark(cat)", "t.ptf");
         // Assert the EXPECTED behavior; failures reveal current-vs-expected.
         assertFalse(c1.isError(), () -> "case 1 (effective Dog) should route; got: " + c1.text());
         assertInstanceOf(CompileResult.Failed.class, c2, "case 2 (Animal param) should compile-fail");
@@ -87,7 +87,7 @@ class ConstructionGateTest {
     }
 
     private void assertCompileError(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("can never satisfy"),
@@ -97,7 +97,7 @@ class ConstructionGateTest {
     /** §1d: an undecidable (overlap / outside-the-kernel) construction fit is a compile
      *  error — "cannot be proved to satisfy" — not a silently stamped runtime check. */
     private void assertUnprovableConstruction(String src) {
-        CompileResult result = compiler.compileAlt(src, "t.ptf");
+        CompileResult result = compiler.compile(src, "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection (§1d: no silent runtime stamp)");
         assertTrue(failed.error().text().contains("cannot be proved to satisfy"),
@@ -240,7 +240,7 @@ class ConstructionGateTest {
         // arg [A|B] into field [A|B]: each arg branch (A, B) is a member of the field
         // union → allFit → FITS. Pre-reorder this asked "does the whole [A|B] fit a
         // single field branch?" for every branch → UNKNOWN → a spurious compile error.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 UNIONS + "function w(x:[A|B]):WrapAB -> WrapAB(x)\nw(A())", "u.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "reflexive union subsumption at construction must compile; got: " + errorText(r));
@@ -250,7 +250,7 @@ class ConstructionGateTest {
     void unionArgSubsetOfUnionField_fits() {
         // arg [A|B] into field [A|B|C]: a proper subset — both arg branches are members
         // of the field union → FITS.
-        CompileResult r = compiler.compileAlt(
+        CompileResult r = compiler.compile(
                 UNIONS + "function w(x:[A|B]):WrapABC -> WrapABC(x)\nw(A())", "u.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "subset union subsumption must compile; got: " + errorText(r));

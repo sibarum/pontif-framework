@@ -13,7 +13,7 @@ public final class QuickTour {
 
     private QuickTour() {}
 
-    /** Alt-syntax source of the quick tour. Evaluates to {@code 25}. */
+    /** Pontif-syntax source of the quick tour. Evaluates to {@code 25}. */
     public static final String SOURCE = """
             # Pontif quick tour — click Run to compile and evaluate this module.
             # Pontif PROVES every declared return refinement at compile time, or

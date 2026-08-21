@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConductorDeclTest {
 
     private static IrStmt.ConductorDecl parseConductor(String src) throws ParseException {
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         return assertInstanceOf(IrStmt.ConductorDecl.class, m.statements().get(0));
     }
 
@@ -102,7 +102,7 @@ class ConductorDeclTest {
     // --- seating placement: `spawn C [over TIER]` (docs/orchestration.md, §Seating — the tier matrix) ---
 
     private static IrStmt.Spawn parseSpawn(String src) throws ParseException {
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         return assertInstanceOf(IrStmt.Spawn.class, m.statements().get(m.statements().size() - 1));
     }
 

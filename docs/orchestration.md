@@ -727,7 +727,7 @@ mutable-state substrate runs real programs through the interpreter.
    the impl no-ops it like an inert `main` — pick one rule for consistency).
 7. **Brittle `#caction#` / `#action#` substring contract.** Conductor-reaction routing relies on the
    invariant that the `#caction#`-prefixed key must not *contain* the substring `#action#`, spread across
-   `AltParser` (`:2977`), `IrCompiler` (`:173`), and `IrInterpreter`. It holds today, but a typed
+   `PontifParser` (`:2977`), `IrCompiler` (`:173`), and `IrInterpreter`. It holds today, but a typed
    discriminator would be sturdier than a cross-file substring convention.
 
 Coverage note: the untested surfaces track the still-open feature gaps — no end-to-end for a

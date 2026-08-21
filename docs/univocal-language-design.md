@@ -27,7 +27,7 @@ return (a caller still sees the base). `assign trait` is built (now incl. data
 attributes); the general/bare `assign` is not. Do not read the remaining draft
 sections as shipped.
 Deltas from this draft (core):
-- `self -> this`: DONE (alt-syntax receiver). `@` is unchanged — it's the
+- `self -> this`: DONE (Pontif-syntax receiver). `@` is unchanged — it's the
   refinement subject, distinct from the receiver.
 - The `requires @` / "outside the universe" world-boundary: DROPPED. The in-type
   pipeline's `let` stages call global functions by name, so no import was needed;

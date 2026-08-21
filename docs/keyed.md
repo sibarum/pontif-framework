@@ -265,7 +265,7 @@ grows freely, not a language boundary and not a design open-edge.
 
 **Multi-hop `@`-path refinements are NOT implemented — single-hop `@.field <op>
 value` only.** (Verified 2026-07-26; already tracked at `TODO.md:519`.) `@.a.b.c`
-parses to an uncapped `FieldAccess` chain (`AltParser.java:3947`), but
+parses to an uncapped `FieldAccess` chain (`PontifSexprParser.java:3947`), but
 `SortChecker.validateSelfFieldAccesses` (`SortChecker.java:1336`) validates a field
 only when its base is `SelfRef` *directly*, so hops past the first are silently
 unchecked no-ops; `Refinements` projects Self→member one hop only; and

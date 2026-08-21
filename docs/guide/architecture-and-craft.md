@@ -25,10 +25,11 @@ parse → link modules → resolve aliases → promote literals → construction
       → return-refinement gate → conservation gate → lower / interpret
 ```
 
-- **The parser's only job is shape.** Parsing produces a typed IR and nothing
-  downstream ever sees source text again — every gate, every backend, and both
-  execution engines work on the IR alone. Surface syntax can move without any of
-  them noticing.
+- **Two front ends, one IR.** The **Pontif parser** reads the surface syntax you
+  write; the **reference parser** reads a stable S-expression syntax and is the
+  ground truth much of the test suite is written against. Both emit the *same* typed
+  IR, so everything downstream is blind to which one ran — no gate, no backend, and
+  neither execution engine ever sees source text again.
 - **Gates, not warnings.** The construction gate judges every constructor argument
   three ways (provable fit → no runtime check; provable miss → compile error;
   genuine overlap → a check at the construction site). The return-refinement and
@@ -86,7 +87,7 @@ lives.
 | `pontif-ir` | Typed intermediate representation (`IrExpr`, `IrStmt`, `IrSort`, `IrModule`). **`NarrowingInference` is the single inference engine** — every stage (parse, type-check, return gate, dispatch) decides a value's narrowing through it, over a stage-appropriate `InferenceContext`; `inferFloor` adds the coarse-base fallback for the totality/field-existence consumers, and `closeOver` projects a value-pin to a variable-free bound at scope boundaries. `IrSourceReflector` re-emits the IR as source-shaped text with declared types replaced by inferred narrowings (the playground's Narrowings view), walked from a variable entrypoint with shallow call-site specialization. `AliasResolver` substitutes type aliases; `SortChecker` validates types, calls, trait impls, Decimal narrow shapes, and **match totality** (the conservation rule); `DecimalPromotion` promotes Int literals at Decimal boundaries; `IrCompiler` lowers to compiled functions; `TruffleLowering` emits executable Truffle nodes; `IrInterpreter` evaluates the IR directly. |
 | `pontif-predicates` | Predicate-arithmetic kernel — satisfiability, complement, and bound analysis over `Int` and `Bool` domains. `PredicateArithmetic` decides single-domain coverage (used by match totality, the `_`-arm desugar, and overload-overlap); `BoundAnalysis` is the hybrid linear-bound + sign engine that powers integer discharge. |
 | `pontif-defaults` | Canonical rule-set factories for the simplifier — `DefaultRules.production()` and `DefaultRules.full()`. Owns `BoundAnalysisRules`, the in-simplifier wrapper over `BoundAnalysis.discharge`, gated to abstain on non-integer values. |
-| `pontif-parser` | Source text → IR: the lexer and parser for the surface syntax, including the destructure desugars, literal field patterns, rename binders, and destructuring `let`. |
+| `pontif-parser` | Source text → IR. Two front ends sharing one IR: the **Pontif parser** (`PontifParser`, the user-facing surface syntax) — including the destructure desugars, literal field patterns, rename binders, and destructuring `let` — and the **reference parser** (`SexprParser`, S-expression, stable, for tests and reference). |
 | `pontif-receipts` | Receipt-graph subsystem — `Drafter` (deterministic source-to-obligation graph through recursive bodies, match arms, and cross-function calls), `BuiltinIssuer` + `Notary` (default issuer + refutation-only verifier), and the **domain-routed discharge**: `IntegerDischarge` (integer-strict, via `BoundAnalysis`) vs `DecimalDischarge` (dense-valid only) selected by the obligation's type. In-source `proof` / `assign proof` declarations supply the hard cases. |
 | `pontif-conservation` | The conservation ledger, derived from the sealed IR per `docs/conservation-algebra.md` — three node kinds (Computation, Branch, Construction) with metadata on flow edges; `ConservationDrafter`, `ConservationRoles` (per-branch-path role multisets), `ConservationQueries` (`DataConservative`, `Reversible`, duplication — all fail-closed on residual flow), `ConservationProofs` (the `std.conservation` vocabulary), and the text reading. |
 | `pontif-runtime` | The runtime entry point (`PontifCompiler`, `PontifRunner`) — parser, module linker, simplifier, IR compiler, the return-verification **and conservation** gates, and interpreter / Truffle in a single flow. Owns the `Extensions` mechanism and the default builtins installed through it — `IoExtension` (`pontif.events`: `emit` sinks `StdOut`/`StdErr`, `stdin`), `MathExtension` (`pontif.math`), `MathExtExtension` (`pontif.math.ext`), and `AlgebraExtension` (`pontif.algebra`). `ReceiptGraphReport` / `ConservationReport` produce reviewable text renderings of a program's two ledgers, and `ReflectionReport` renders the inferred-narrowings ("Narrowings") view from any entrypoint. |
@@ -114,6 +115,11 @@ Some of Pontif's choices look arbitrary or even backwards.
   waiting to be deleted; it exists so the Truffle backend has something to be
   cross-checked against. A second, dumb-simple evaluator is one of the cheapest forms of
   assurance you can build.
+
+- **The reference front end is S-expressions.** A large part of the test suite is
+  written against a stable, boring S-expression syntax rather than the evolving surface
+  syntax — so a surface-syntax change can't silently rewrite what those tests mean. The
+  pretty syntax and the ground truth are deliberately different notations over one IR.
 
 - **The documentation is pinned by the build.** Every ` ```pontif ` snippet in the README
   and these guide pages is a test case in `ReadmeSnippetTest` — the docs compile and

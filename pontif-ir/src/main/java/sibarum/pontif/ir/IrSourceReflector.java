@@ -248,7 +248,7 @@ public final class IrSourceReflector {
     }
 
     /**
-     * Best-effort alt-syntax for an expression. {@code indent} is the current
+     * Best-effort Pontif-syntax for an expression. {@code indent} is the current
      * nesting depth (multi-line forms — match, let — indent their parts by it).
      */
     private static String renderExpr(IrExpr e, int indent, InferenceContext ctx) {

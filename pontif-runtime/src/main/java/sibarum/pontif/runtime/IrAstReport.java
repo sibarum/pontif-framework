@@ -11,7 +11,7 @@ import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrPrinter;
 import sibarum.pontif.ir.TruffleLowering;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.module.ModuleResolver;
 
@@ -47,19 +47,19 @@ public final class IrAstReport {
 
     private IrAstReport() {}
 
-    public static Result fromAltSource(String source, String sourceName) {
-        return fromAltSource(source, sourceName, null);
+    public static Result fromPontifSource(String source, String sourceName) {
+        return fromPontifSource(source, sourceName, null);
     }
 
-    /** As {@link #fromAltSource(String, String)} but resolving sibling
+    /** As {@link #fromPontifSource(String, String)} but resolving sibling
      *  {@code requires} from {@code resolveDir} — mirrors the Run path. */
-    public static Result fromAltSource(String source, String sourceName, java.nio.file.Path resolveDir) {
+    public static Result fromPontifSource(String source, String sourceName, java.nio.file.Path resolveDir) {
         StringBuilder out = new StringBuilder();
         out.append("# IR — ").append(sourceName).append("\n\n");
 
         IrModule parsed;
         try {
-            parsed = AltParser.parseModule(source, sourceName);
+            parsed = PontifParser.parseModule(source, sourceName);
         } catch (ParseException pe) {
             out.append("Parse failed").append(located(pe.origin())).append(":\n  ")
                     .append(pe.getMessage()).append('\n');

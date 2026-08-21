@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for operator parsing in {@link AltParser} under the unified-dispatch
+ * Tests for operator parsing in {@link PontifParser} under the unified-dispatch
  * model.
  *
  * <p>Operators are symmetric mechanism-1 multi-dispatch free functions. The
@@ -21,10 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * BOTH operand base sorts. The receiver-rooted {@code method Type.<op>} form is
  * rejected at parse — operators must be declared as free functions.
  */
-class AltParserOperatorOverloadTest {
+class PontifParserOperatorOverloadTest {
 
     private static IrModule parse(String src) throws ParseException {
-        return AltParser.parseModule(src, "t");
+        return PontifParser.parseModule(src, "t");
     }
 
     /** Helper: extracts the body of the last function declaration in a module. */
@@ -116,7 +116,7 @@ class AltParserOperatorOverloadTest {
                 () -> "Unexpected: " + ex.getMessage());
     }
 
-    // --- Parser never routes: every operator use stays a BinOp --------------
+    // --- SexprParser never routes: every operator use stays a BinOp --------------
 
     @Test
     void structPlusStruct_staysBinOp() throws Exception {

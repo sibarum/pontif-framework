@@ -14,7 +14,7 @@ class PontifRunnerTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String source, String name) {
-        return runner.run(compiler.compile(source, name), Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(source, name), Engine.INTERPRETER);
     }
 
     @Test
@@ -58,7 +58,7 @@ class PontifRunnerTest {
         // time now — a partial match without a default no longer compiles, so
         // the runtime no-match path is unreachable through a checked program.)
         RunResult r = runner.run(
-                compiler.compileAlt("function f(x:Int):Int -> 10 / x\nf(0)", "divzero.ptf"),
+                compiler.compile("function f(x:Int):Int -> 10 / x\nf(0)", "divzero.ptf"),
                 Engine.INTERPRETER);
         assertTrue(r.isError());
         assertTrue(r.text().toLowerCase().contains("runtime"),
@@ -69,7 +69,7 @@ class PontifRunnerTest {
     @Test
     void sameCompiledProgram_canRunMultipleTimes_withoutReparsing() throws Exception {
         // Demonstrates the separation: compile once, run many times.
-        PontifCompiler.CompileResult result = compiler.compile(
+        PontifCompiler.CompileResult result = compiler.compileSexpr(
                 "(module m () (+ 1 (* 2 3)))", "x.ptf");
         for (int i = 0; i < 3; i++) {
             assertEquals("7", runner.run(result, Engine.INTERPRETER).text());

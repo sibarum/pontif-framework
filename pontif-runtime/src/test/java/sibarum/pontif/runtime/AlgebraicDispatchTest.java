@@ -20,7 +20,7 @@ class AlgebraicDispatchTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "algdispatch.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "algdispatch.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test
@@ -43,7 +43,7 @@ class AlgebraicDispatchTest {
         // metareference (Dispatch, not AlgebraicDispatch) passed where Algebraic is required
         // is a COMPILE error — the guarantee travelling THROUGH a parameter, not just the
         // direct `$f[…].ast`.
-        var r = compiler.compileAlt("""
+        var r = compiler.compile("""
                 requires pontif.algebra.{eval, Algebraic}
                 function inc(x:Decimal):Decimal -> x + 1.0
                 function reflectAndEval(f:Algebraic, x:Decimal):Decimal -> eval(f.ast, x)

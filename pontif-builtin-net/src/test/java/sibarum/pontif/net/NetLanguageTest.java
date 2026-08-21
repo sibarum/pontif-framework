@@ -23,7 +23,7 @@ class NetLanguageTest {
     private static PontifRunner.RunResult run(String source) {
         Extensions.install(new NetExtension());
         return new PontifRunner()
-                .run(new PontifCompiler().compileAlt(source, "net-lang-test"), PontifRunner.Engine.INTERPRETER);
+                .run(new PontifCompiler().compile(source, "net-lang-test"), PontifRunner.Engine.INTERPRETER);
     }
 
     @Test

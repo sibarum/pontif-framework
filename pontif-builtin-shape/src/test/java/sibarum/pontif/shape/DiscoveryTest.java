@@ -20,7 +20,7 @@ class DiscoveryTest {
     @Test
     void shapeModule_autoDiscovered_withNoExplicitInstall() {
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(
+                new PontifCompiler().compile(
                         "requires pontif.shape.{Sphere, distanceAt}\n"
                       + "distanceAt(Sphere(1.0), 0.0, 0.0, 0.0) == -1.0", "disc.ptf"),
                 PontifRunner.Engine.INTERPRETER);

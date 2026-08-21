@@ -58,7 +58,7 @@ class ExtensionInstallTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             RunResult r = runner.run(
-                    compiler.compileAlt("""
+                    compiler.compile("""
                             requires test.notes.{Note}
                             main ( emit Note("from an extension")  0 )""", "ext.ptf"),
                     Engine.INTERPRETER);

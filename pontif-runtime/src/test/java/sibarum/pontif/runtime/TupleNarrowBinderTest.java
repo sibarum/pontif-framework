@@ -40,7 +40,7 @@ class TupleNarrowBinderTest {
     }
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tuple-narrow-binder.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tuple-narrow-binder.ptf");
         PontifCompiler.CompileResult.Compiled compiled =
                 assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                         () -> "should compile; got " + r);

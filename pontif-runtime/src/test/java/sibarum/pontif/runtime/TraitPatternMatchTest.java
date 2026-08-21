@@ -23,7 +23,7 @@ class TraitPatternMatchTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        CompileResult r = compiler.compileAlt(src, "traitmatch.ptf");
+        CompileResult r = compiler.compile(src, "traitmatch.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
         PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);

@@ -5,7 +5,7 @@ import sibarum.pontif.core.Origin;
 import java.util.ArrayList;
 import java.util.List;
 
-public final class Lexer {
+public final class SexprLexer {
 
     private final String src;
     private final String source;
@@ -13,7 +13,7 @@ public final class Lexer {
     private int line = 1;
     private int column = 1;
 
-    public Lexer(String src, String source) {
+    public SexprLexer(String src, String source) {
         if (src == null) {
             throw new IllegalArgumentException("Source string must be non-null");
         }
@@ -21,12 +21,12 @@ public final class Lexer {
         this.source = source == null ? "<input>" : source;
     }
 
-    public List<Token> tokenize() throws ParseException {
-        List<Token> tokens = new ArrayList<>();
+    public List<SexprToken> tokenize() throws ParseException {
+        List<SexprToken> tokens = new ArrayList<>();
         while (true) {
             skipWhitespaceAndComments();
             if (pos >= src.length()) {
-                tokens.add(new Token(Token.Kind.EOF, "", source, line, column));
+                tokens.add(new SexprToken(SexprToken.Kind.EOF, "", source, line, column));
                 return tokens;
             }
             char c = src.charAt(pos);
@@ -34,10 +34,10 @@ public final class Lexer {
             int startCol = column;
             if (c == '(') {
                 advance();
-                tokens.add(new Token(Token.Kind.LPAREN, "(", source, startLine, startCol));
+                tokens.add(new SexprToken(SexprToken.Kind.LPAREN, "(", source, startLine, startCol));
             } else if (c == ')') {
                 advance();
-                tokens.add(new Token(Token.Kind.RPAREN, ")", source, startLine, startCol));
+                tokens.add(new SexprToken(SexprToken.Kind.RPAREN, ")", source, startLine, startCol));
             } else if (isDigit(c) || (c == '-' && pos + 1 < src.length() && isDigit(src.charAt(pos + 1)))) {
                 tokens.add(readInteger(startLine, startCol));
             } else if (isSymbolStart(c)) {
@@ -70,7 +70,7 @@ public final class Lexer {
         }
     }
 
-    private Token readInteger(int startLine, int startCol) {
+    private SexprToken readInteger(int startLine, int startCol) {
         int start = pos;
         if (src.charAt(pos) == '-') {
             advance();
@@ -79,16 +79,16 @@ public final class Lexer {
             advance();
         }
         String text = src.substring(start, pos);
-        return new Token(Token.Kind.INTEGER, text, source, startLine, startCol);
+        return new SexprToken(SexprToken.Kind.INTEGER, text, source, startLine, startCol);
     }
 
-    private Token readSymbol(int startLine, int startCol) {
+    private SexprToken readSymbol(int startLine, int startCol) {
         int start = pos;
         while (pos < src.length() && isSymbolPart(src.charAt(pos))) {
             advance();
         }
         String text = src.substring(start, pos);
-        return new Token(Token.Kind.SYMBOL, text, source, startLine, startCol);
+        return new SexprToken(SexprToken.Kind.SYMBOL, text, source, startLine, startCol);
     }
 
     private void advance() {

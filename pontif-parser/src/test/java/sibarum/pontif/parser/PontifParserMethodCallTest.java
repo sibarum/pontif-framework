@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * Tests for instance-method call routing and dotted-let auto-Call in
- * {@link AltParser}.
+ * {@link PontifParser}.
  *
  * <p>Instance methods: {@code receiver.method(args)} on a value receiver
  * parses to an unresolved {@code MethodCall(receiver, "method", args)}. The
@@ -26,10 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * dotted) are rewritten to a 0-arg dispatch call. Field access on a let
  * value works ({@code Point.origin.x} → {@code Call("Point.origin", []).x}).
  */
-class AltParserMethodCallTest {
+class PontifParserMethodCallTest {
 
     private static IrModule parse(String src) throws ParseException {
-        return AltParser.parseModule(src, "t");
+        return PontifParser.parseModule(src, "t");
     }
 
     // --- Instance method calls ----------------------------------------------

@@ -38,7 +38,7 @@ class DeadLetterTest {
         try {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-            RunResult r = runner.run(compiler.compileAlt(src, "deadletter.ptf"), Engine.INTERPRETER);
+            RunResult r = runner.run(compiler.compile(src, "deadletter.ptf"), Engine.INTERPRETER);
             assertFalse(r.isError(), "program should run (emit is never rejected): " + r);
             return new Output(out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
         } finally {

@@ -27,7 +27,7 @@ class ConservationReportTest {
 
     private Ledger ledger(String name, String src) throws Exception {
         ConservationReport.writeReport(OUT, name, src, name + ".ptf");
-        Result r = ConservationReport.fromAltSource(src, name + ".ptf");
+        Result r = ConservationReport.fromPontifSource(src, name + ".ptf");
         assertInstanceOf(Result.Generated.class, r,
                 () -> "expected ledger; got: " + ((Result.Failed) r).error());
         return ((Result.Generated) r).ledger();
@@ -38,7 +38,7 @@ class ConservationReportTest {
     }
 
     private String print(String src) {
-        Result r = ConservationReport.fromAltSource(src, "t.ptf");
+        Result r = ConservationReport.fromPontifSource(src, "t.ptf");
         return ((Result.Generated) r).text();
     }
 

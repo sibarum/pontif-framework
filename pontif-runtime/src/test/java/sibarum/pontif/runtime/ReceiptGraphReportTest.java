@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * R5: end-to-end receipt-graph text artifacts from alt-syntax source.
+ * R5: end-to-end receipt-graph text artifacts from Pontif-syntax source.
  * Emits the canonical examples to {@code target/receipt-graphs/} as
  * reviewable build artifacts and asserts the headline content.
  */
@@ -19,7 +19,7 @@ class ReceiptGraphReportTest {
     private static final Path OUT = Path.of("target", "receipt-graphs");
 
     private static String generate(String src, String name) {
-        ReceiptGraphReport.Result r = ReceiptGraphReport.fromAltSource(src, name);
+        ReceiptGraphReport.Result r = ReceiptGraphReport.fromPontifSource(src, name);
         assertInstanceOf(ReceiptGraphReport.Result.Generated.class, r,
                 () -> "Expected Generated; got " + r);
         return ((ReceiptGraphReport.Result.Generated) r).text();

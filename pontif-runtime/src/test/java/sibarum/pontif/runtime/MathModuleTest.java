@@ -18,7 +18,7 @@ class MathModuleTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "t.ptf"), Engine.INTERPRETER).text();
+                new PontifCompiler().compile(src, "t.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test
@@ -67,7 +67,7 @@ class MathModuleTest {
     @Test
     void spirvBoundary_gcdNotInPontifMath() {
         // gcd is CPU-only (no GLSL opcode) — it lives in pontif.math.ext, NOT pontif.math.
-        CompileResult r = new PontifCompiler().compileAlt(
+        CompileResult r = new PontifCompiler().compile(
                 "requires pontif.math.{gcd}\ngcd(12, 8)", "t.ptf");
         assertInstanceOf(CompileResult.Failed.class, r,
                 "gcd must not be importable from pontif.math (it's a pontif.math.ext function)");

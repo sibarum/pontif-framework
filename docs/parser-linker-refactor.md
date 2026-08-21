@@ -44,11 +44,11 @@ alone — revisit only if a caller other than `resolveAndCombine` appears.
 
 ## Item 2 — declaration-keyword registry (TODO)
 
-**Symptom:** three lists that must agree, none checked against the others, in `AltParser`:
-- `KEYWORDS` (`AltParser.java:79`) — the superset (also holds `match`/`emit`/`true`/…);
-- the decl-head set inside `isMainExpressionStart` (`AltParser.java:585`) — the *exact* declaration
+**Symptom:** three lists that must agree, none checked against the others, in `PontifParser`:
+- `KEYWORDS` (`PontifSexprParser.java:79`) — the superset (also holds `match`/`emit`/`true`/…);
+- the decl-head set inside `isMainExpressionStart` (`PontifSexprParser.java:585`) — the *exact* declaration
   keywords;
-- the `parseDeclaration` switch cases (`AltParser.java:644`).
+- the `parseDeclaration` switch cases (`PontifSexprParser.java:644`).
 
 The decl-head set and the switch must be **identical**; drift gives the
 `"unexpected keyword 'X' in expression position"` error (hit when adding `conductor`, whose keyword
@@ -106,10 +106,10 @@ not compiler-forced for the *next* kind. Consider dropping their `default` to lo
 
 ## Item 4 — reference parser divergence (TODO / decision)
 
-**Symptom:** the S-expression reference `Parser` (`Parser.java`) — documented in the README as
+**Symptom:** the S-expression reference `SexprParser` (`SexprSexprParser.java`) — documented in the README as
 "the ground truth the test suite is written against" — contains **none** of the effect /
 orchestration surface: a grep for `action` / `conduit` / `conductor` / `spawn` / `emit` returns
-zero. That entire subsystem is expressible only through `AltParser`.
+zero. That entire subsystem is expressible only through `PontifParser`.
 
 **Decision needed:** is the reference parser meant to track every surface construct (in which case
 it is already well behind — this predates conductors), or has it been intentionally frozen to the

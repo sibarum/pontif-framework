@@ -19,14 +19,14 @@ class AlgebraicMarkerTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private void assertCompiles(String src) {
-        CompileResult r = compiler.compileAlt(src, "algebraic.ptf");
+        CompileResult r = compiler.compile(src, "algebraic.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile success; got: "
                         + ((CompileResult.Failed) r).error().text());
     }
 
     private String assertRejected(String src) {
-        CompileResult r = compiler.compileAlt(src, "algebraic.ptf");
+        CompileResult r = compiler.compile(src, "algebraic.ptf");
         assertInstanceOf(CompileResult.Failed.class, r, "expected compile failure");
         return ((CompileResult.Failed) r).error().text();
     }

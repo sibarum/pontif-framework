@@ -6,7 +6,7 @@ import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSourceReflector;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.ir.MethodOperatorResolver;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.module.ModuleResolver;
 
@@ -22,7 +22,7 @@ import java.util.List;
  * able text over visualization).
  *
  * <p>Pipeline mirrors the Run path so the view agrees with what compiles: alt
- * source → {@link AltParser} → {@link ModuleResolver} (link) →
+ * source → {@link PontifParser} → {@link ModuleResolver} (link) →
  * {@link MethodOperatorResolver} (resolve methods + route operators) →
  * {@link AliasResolver} → {@link IrSourceReflector}. The entrypoint is variable
  * (a function/let name, or {@code main} when none is given); only the functions
@@ -39,8 +39,8 @@ public final class ReflectionReport {
     }
 
     /** Reflects at {@code main}, single-file (no sibling {@code requires} resolution). */
-    public static Result fromAltSource(String source, String sourceName) {
-        return fromAltSource(source, sourceName, null, null);
+    public static Result fromPontifSource(String source, String sourceName) {
+        return fromPontifSource(source, sourceName, null, null);
     }
 
     /**
@@ -49,11 +49,11 @@ public final class ReflectionReport {
      * {@code null} for {@code main}). Never throws — failures come back as
      * {@link Result.Failed}.
      */
-    public static Result fromAltSource(
+    public static Result fromPontifSource(
             String source, String sourceName, java.nio.file.Path resolveDir, String entryName) {
         IrModule parsed;
         try {
-            parsed = AltParser.parseModule(source, sourceName);
+            parsed = PontifParser.parseModule(source, sourceName);
         } catch (ParseException pe) {
             return new Result.Failed("Parse error: " + pe.getMessage());
         } catch (RuntimeException e) {
@@ -82,7 +82,7 @@ public final class ReflectionReport {
         List<String> names = new ArrayList<>();
         names.add("main");
         try {
-            IrModule parsed = AltParser.parseModule(source, sourceName);
+            IrModule parsed = PontifParser.parseModule(source, sourceName);
             for (IrStmt stmt : parsed.statements()) {
                 if (stmt instanceof IrStmt.FunctionDecl fd
                         && isReadableName(fd.name()) && !names.contains(fd.name())) {

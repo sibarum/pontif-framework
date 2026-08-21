@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class IrAstReportTest {
 
     private static String report(String src) {
-        return switch (IrAstReport.fromAltSource(src, "t.ptf")) {
+        return switch (IrAstReport.fromPontifSource(src, "t.ptf")) {
             case IrAstReport.Result.Generated g -> g.text();
             case IrAstReport.Result.Failed f -> "FAILED: " + f.error();
         };

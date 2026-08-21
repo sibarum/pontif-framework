@@ -4,7 +4,7 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSourcePrinter;
 import sibarum.pontif.ir.IrStmt;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.module.BuiltinModules;
 
 import java.io.IOException;
@@ -319,7 +319,7 @@ public final class DefinitionNavigator {
         out.computeIfAbsent("pontif.gui", k -> {
             try {
                 String src = new sibarum.pontif.gui.GuiExtension().pontifSource();
-                return new Builtin(AltParser.parseModule(src, "pontif.gui"), src);
+                return new Builtin(PontifParser.parseModule(src, "pontif.gui"), src);
             } catch (Exception e) {
                 return null;  // GUI module unavailable — skip it
             }
@@ -401,11 +401,11 @@ public final class DefinitionNavigator {
         return out;
     }
 
-    // --- text helpers (identifier-boundary aware; mirror AltHighlighter rules) ---
+    // --- text helpers (identifier-boundary aware; mirror PontifHighlighter rules) ---
 
     private static IrModule tryParse(String source, String name) {
         try {
-            return AltParser.parseModule(source, name);
+            return PontifParser.parseModule(source, name);
         } catch (Exception e) {
             return null;
         }

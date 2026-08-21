@@ -18,7 +18,7 @@ class AssociatedTypeDeclTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private void compiles(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "assoc.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "assoc.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -26,7 +26,7 @@ class AssociatedTypeDeclTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "assoc.ptf"), "expected a compile rejection");
+                compiler.compile(src, "assoc.ptf"), "expected a compile rejection");
     }
 
     @Test

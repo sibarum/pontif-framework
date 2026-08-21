@@ -8,7 +8,7 @@ import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSort;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.ir.NarrowingInference;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -196,7 +196,7 @@ public final class ModuleResolver {
                             + io.getMessage(), requireOrigin);
         }
         try {
-            IrModule loaded = AltParser.parseModule(source, label);
+            IrModule loaded = PontifParser.parseModule(source, label);
             if (!loaded.name().equals(name)) {
                 throw new CompileException(
                         "file " + label + " declares `module " + loaded.name()
@@ -249,7 +249,7 @@ public final class ModuleResolver {
         }
         IrModule loaded;
         try {
-            loaded = AltParser.parseModule(source, fileName);
+            loaded = PontifParser.parseModule(source, fileName);
         } catch (Exception e) {
             throw new CompileException(
                     "required data file '" + fileName + "' failed to parse: " + e.getMessage(),

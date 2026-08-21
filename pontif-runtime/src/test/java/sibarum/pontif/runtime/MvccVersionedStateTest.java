@@ -24,7 +24,7 @@ class MvccVersionedStateTest {
     }
 
     private static IrInterpreter run(String src) {
-        var res = new PontifCompiler().compileAlt(src, "mvcc.ptf");
+        var res = new PontifCompiler().compile(src, "mvcc.ptf");
         assertTrue(res instanceof PontifCompiler.CompileResult.Compiled, "program should compile: " + res);
         var prog = ((PontifCompiler.CompileResult.Compiled) res).program();
         IrInterpreter interp = new IrInterpreter(prog.simplifier());

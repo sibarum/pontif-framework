@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 
@@ -26,7 +26,7 @@ class StreamMapTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "m.ptf");
+        IrModule module = PontifParser.parseModule(src, "m.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);
@@ -44,7 +44,7 @@ class StreamMapTest {
     @Test
     void spreadResult_isAStream_typedLetAutoboxes() {
         // The mapped result is a stream, so a Stream[Int]-typed binding accepts it.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream}
                 function double(x:Int):Int -> x * 2
                 let s:Stream[Int] = {1, 2, 3, 4}
@@ -59,7 +59,7 @@ class StreamMapTest {
         // Slice 2b: a function that returns Nothing (pontif.core) at the stream
         // channel drops that element — the lossy filter shape. keep maps to Int or
         // Nothing; the 1 and 2 become Nothing and drop, leaving (3, 4).
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 function keep(x:Int):[Int|Nothing] -> match x {

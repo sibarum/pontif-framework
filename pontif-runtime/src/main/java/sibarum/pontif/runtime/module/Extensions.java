@@ -3,7 +3,7 @@ package sibarum.pontif.runtime.module;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.ir.NativeFunctions;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import java.util.Map;
@@ -65,7 +65,7 @@ public final class Extensions {
     public static void install(Extension ext) {
         String module = ext.moduleName();
         try {
-            IrModule parsed = AltParser.parseModule(ext.pontifSource(), module);
+            IrModule parsed = PontifParser.parseModule(ext.pontifSource(), module);
             BuiltinModules.registerExtensionModule(
                     module, new IrModule(module, parsed.statements(), parsed.main()),
                     ext.pontifSource());

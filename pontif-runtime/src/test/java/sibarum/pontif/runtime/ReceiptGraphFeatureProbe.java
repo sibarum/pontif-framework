@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * DIAGNOSTIC RUNNER (temporary) — pushes each post-refactor language feature
- * through the receipt-graph pipeline ({@link ReceiptGraphReport#fromAltSource})
+ * through the receipt-graph pipeline ({@link ReceiptGraphReport#fromPontifSource})
  * and reports the outcome per probe: GENERATED (with a degeneracy note if the
  * graph is empty / the feature's function is missing a node), FAILED (a
  * parse/compile error the report caught), or THREW (an uncaught throwable from
@@ -153,7 +153,7 @@ class ReceiptGraphFeatureProbe {
             String outcome;
             try {
                 ReceiptGraphReport.Result r =
-                        ReceiptGraphReport.fromAltSource(e.getValue(), name + ".ptf");
+                        ReceiptGraphReport.fromPontifSource(e.getValue(), name + ".ptf");
                 if (r instanceof ReceiptGraphReport.Result.Generated g) {
                     outcome = classifyGenerated(g.text());
                 } else {

@@ -59,7 +59,7 @@ Campaigns and status (full detail + dependency graph in the doc):
   (post-link resolution) is the linchpin that unblocks C3's parser-side deletion.**
 - **C3 — nominal-subtype / `Assignability`.** ◐ **engine substantially built** (2026-07-18).
   `Assignability` (`pontif-ir/types`) is the target single is-a / assign / construct / cast
-  engine; only struct↔struct `let` is *wired* so far (`AltParser:2098`), but the engine now
+  engine; only struct↔struct `let` is *wired* so far (`PontifParser:2098`), but the engine now
   handles intersection, `Int→Decimal` (`COERCE`), refinement-precise leaves, and Method/Dispatch
   function-sorts, guarded by a differential harness (8 agree / 2 diverge, both engine-stricter —
   no case weaker than the legacy). Landed slices, engine state, remaining gaps (generics /
@@ -110,7 +110,7 @@ memory `project_type_spec_layering`.*
   param / another field's value (`struct Window(n, data:[Indexed:@.count==n])`);
   **receiver-relative** bounds (`at(i:[Int:@<this.count])`); **value-indexed struct
   sorts** (`OutOfRange(i)`); and **named-parameter method sorts** (`[Method(i:Int):…i…]`,
-  rejected at `AltParser:2686` today). First consumer = `Indexed` (`docs/indexed-streams.md`).
+  rejected at `PontifParser:2686` today). First consumer = `Indexed` (`docs/indexed-streams.md`).
   **War doc: `docs/dependent-sorts.md` (PROPOSED)** — substrate-first; slice 1 =
   `IrSort.Method` carries param names (the fulcrum, deletes the `:2686` guard); binder
   references + scope + substitution next; discharge deferred behind `[!!]`. **Chosen as
@@ -363,7 +363,7 @@ capability for storage-backed sequences. `Array` is the first implementor. Spell
   `count` as a data attribute + total `at(i):[Present(T)|OutOfRange]` (out-of-bounds is a
   match arm — can't lie, no proof machinery). First implementor = the tuple/aggregate
   substrate, NOT Array. Interaction to rule: does dynamic `xs(i)` reopen the deliberately-
-  forbidden value-level positional access (`p._0`, `AltParser.java:3214`)? (They differ —
+  forbidden value-level positional access (`p._0`, `PontifSexprParser.java:3214`)? (They differ —
   static field-style vs dynamic option-returning — but confirm.)
 - **Slice 2 — refined `xs(i):T` via receiver-relative refinement.** `i:[Int: @>=0 & @ <
   this.count]` (`@`=index, `this`=receiver, `this.count`=FIELD ref — NOT `@.length`,
@@ -531,7 +531,7 @@ forcing function).
 - **`@` as the current concrete type (parked)** — eventually `@` may denote a Self-type in type
   position. Noted so the symbol isn't reused meanwhile.
 - **Record-literal vs declared-sort mismatch (S-expr only)** — the `(record …)` form doesn't
-  verify its field-set against a declared struct (the alt parser closes this at construction).
+  verify its field-set against a declared struct (the Pontif parser closes this at construction).
 
 ## Exception handling
 
@@ -561,7 +561,7 @@ forcing function).
 
 ---
 
-## Alt syntax — not yet parsed (would error today)
+## Pontif syntax — not yet parsed (would error today)
 
 - **Named-parameter method sorts** `[Method(x:Int):[Int:x+n]]` — lets a dependent return
   refinement reference the function's own parameter. Needs `IrSort.Method` to carry param names.

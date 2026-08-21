@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.conservation.ConservationDrafter;
 import sibarum.pontif.conservation.ConservationGraph;
 import sibarum.pontif.conservation.ConservationQueries;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
@@ -28,7 +28,7 @@ class NativeConstructorTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src, Engine engine) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), engine);
+        return runner.run(compiler.compile(src, "t.ptf"), engine);
     }
 
     private void assertBothEngines(String src, String expected) {
@@ -88,7 +88,7 @@ class NativeConstructorTest {
     @Test
     void wrongBasedScaleArgument_isCompileError() {
         // 2.5 is a Decimal — provably disjoint from the scale:Int field.
-        CompileResult result = compiler.compileAlt("let z = Decimal(25, 2.5)\n42", "t.ptf");
+        CompileResult result = compiler.compile("let z = Decimal(25, 2.5)\n42", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected a compile-time rejection");
         assertTrue(failed.error().text().contains("can never satisfy"),
@@ -97,7 +97,7 @@ class NativeConstructorTest {
 
     @Test
     void structNamedDecimal_isRejected() {
-        CompileResult result = compiler.compileAlt(
+        CompileResult result = compiler.compile(
                 "struct Decimal(a:Int)\nlet z = Decimal(1)\n42", "t.ptf");
         CompileResult.Failed failed = assertInstanceOf(CompileResult.Failed.class, result,
                 "expected the native-name guard");
@@ -137,7 +137,7 @@ class NativeConstructorTest {
         // Both parts flow verbatim into the carrier — the bijection's
         // conservation reading, certified by the ruled algebra with no
         // native-specific plumbing.
-        var module = AltParser.parseModule("""
+        var module = PontifParser.parseModule("""
                 function mk(u:Int, s:Int):Decimal -> Decimal(u, s)
                 mk(25, 1)
                 """, "t.ptf");

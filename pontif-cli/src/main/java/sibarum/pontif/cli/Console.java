@@ -4,7 +4,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 
@@ -119,14 +119,14 @@ public final class Console implements Callable<Integer> {
         // `0` main, since expressions are never persisted.)
         boolean isExpression;
         try {
-            IrModule parsed = AltParser.parseModule(candidate, "<console>");
+            IrModule parsed = PontifParser.parseModule(candidate, "<console>");
             isExpression = !isTrivialMain(parsed.main());
         } catch (sibarum.pontif.parser.ParseException | RuntimeException parseFailure) {
             System.err.println("Parse error: " + parseFailure.getMessage());
             return;
         }
 
-        CompileResult result = CliSupport.COMPILER.compileAlt(candidate, "<console>", resolveDir);
+        CompileResult result = CliSupport.COMPILER.compile(candidate, "<console>", resolveDir);
         if (result instanceof CompileResult.Failed failed) {
             System.err.println(CliSupport.formatError(failed.error()));
             return;   // buffer unchanged — last good state wins

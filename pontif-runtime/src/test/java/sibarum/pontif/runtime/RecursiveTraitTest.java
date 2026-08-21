@@ -21,7 +21,7 @@ class RecursiveTraitTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "rec.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "rec.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -141,7 +141,7 @@ class RecursiveTraitTest {
 
     /** Asserts a program is rejected at compile time with an error containing {@code needle}. */
     private void reject(String src, String needle) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "rec.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "rec.ptf");
         PontifCompiler.CompileResult.Failed failed = assertInstanceOf(
                 PontifCompiler.CompileResult.Failed.class, r, "expected a compile-time rejection");
         assertTrue(failed.error().text().contains(needle),

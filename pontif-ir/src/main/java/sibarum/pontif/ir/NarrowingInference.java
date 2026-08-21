@@ -365,7 +365,7 @@ public final class NarrowingInference {
                 && !base.equals("Decimal") && !base.equals("Char") && !base.equals("String");
     }
 
-    /** The operator symbol used as an overload key (mirrors AltParser). */
+    /** The operator symbol used as an overload key (mirrors PontifParser). */
     private static String operatorTextFor(IrExpr.Op op) {
         return switch (op) {
             case ADD -> "+"; case SUB -> "-"; case MUL -> "*"; case DIV -> "/";
@@ -1502,7 +1502,7 @@ public final class NarrowingInference {
     /**
      * Unions sibling narrowings, normalizing same-base branches into a
      * single {@link IrSort.Refined} with an {@code OR}-joined predicate
-     * (mirroring {@code AltParser.normalizeMultiBranch}). Cross-base or
+     * (mirroring {@code PontifParser.normalizeMultiBranch}). Cross-base or
      * non-normalizable branches return {@code null} for this slice — the
      * full {@link IrSort.Union} form isn't surfaced from inference yet.
      */

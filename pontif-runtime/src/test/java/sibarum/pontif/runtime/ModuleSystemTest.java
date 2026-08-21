@@ -2,7 +2,7 @@ package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
@@ -29,7 +29,7 @@ class ModuleSystemTest {
         Map<String, IrModule> mods = new LinkedHashMap<>();
         sources.forEach((name, src) -> {
             try {
-                mods.put(name, AltParser.parseModule(src, name + ".ptf"));
+                mods.put(name, PontifParser.parseModule(src, name + ".ptf"));
             } catch (Exception e) {
                 throw new RuntimeException("parse " + name + ": " + e.getMessage(), e);
             }
@@ -363,7 +363,7 @@ class ModuleSystemTest {
                 requires std.proof.{Leaf, Split}
                 Split(true, Leaf(), Leaf())
                 """;
-        CompileResult r = compiler.compileAlt(src, "demo.ptf");
+        CompileResult r = compiler.compile(src, "demo.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile success; got: " + ((CompileResult.Failed) r).error().text());
         assertTrue(!runner.run(r, Engine.INTERPRETER).isError());
@@ -378,7 +378,7 @@ class ModuleSystemTest {
                 struct Leaf(tag:Int)
                 Leaf(7).tag
                 """;
-        CompileResult r = compiler.compileAlt(src, "demo.ptf");
+        CompileResult r = compiler.compile(src, "demo.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "expected compile success; got: " + ((CompileResult.Failed) r).error().text());
         assertEquals("7", runner.run(r, Engine.INTERPRETER).text());
@@ -479,7 +479,7 @@ class ModuleSystemTest {
         // public->internal mapping in the export tables.
         sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 sibarum.pontif.parser.ParseException.class,
-                () -> AltParser.parseModule("""
+                () -> PontifParser.parseModule("""
                         module lib
                         exports @.{inc -> increment}
                         function inc(x:Int):Int -> x + 1

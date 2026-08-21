@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Reflects an {@link IrModule} back into <em>Pontif alt-syntax source</em> — a
+ * Reflects an {@link IrModule} back into <em>Pontif Pontif-syntax source</em> — a
  * faithful unparse of its declarations, NOT the structural debug dump of
  * {@link IrPrinter}. Where {@code IrPrinter} tags every node with its kind for
  * inspection, this re-emits {@code struct …}, {@code trait …}, {@code function …},

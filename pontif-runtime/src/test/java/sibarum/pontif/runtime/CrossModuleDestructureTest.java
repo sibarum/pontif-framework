@@ -30,14 +30,14 @@ class CrossModuleDestructureTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(Path dir, String entryFile) throws Exception {
-        var r = compiler.compileAlt(Files.readString(dir.resolve(entryFile)), entryFile, dir);
+        var r = compiler.compile(Files.readString(dir.resolve(entryFile)), entryFile, dir);
         var run = runner.run(r, Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "expected success; got: " + run.text());
         return run.text();
     }
 
     private String reject(Path dir, String entryFile) throws Exception {
-        CompileResult r = compiler.compileAlt(Files.readString(dir.resolve(entryFile)), entryFile, dir);
+        CompileResult r = compiler.compile(Files.readString(dir.resolve(entryFile)), entryFile, dir);
         assertInstanceOf(CompileResult.Failed.class, r, "expected compile failure");
         return ((CompileResult.Failed) r).error().text();
     }

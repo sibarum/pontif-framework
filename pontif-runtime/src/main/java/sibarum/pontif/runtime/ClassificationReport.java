@@ -10,7 +10,7 @@ import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.ir.MethodResolver;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.receipts.BuiltinIssuer;
 import sibarum.pontif.receipts.Drafter;
@@ -77,15 +77,15 @@ public final class ClassificationReport {
         record Failed(String error) implements Result {}
     }
 
-    /** Classifies every function in alt-syntax source. Never throws. */
-    public static Result fromAltSource(String source, String sourceName) {
-        return fromAltSource(source, sourceName, null);
+    /** Classifies every function in Pontif-syntax source. Never throws. */
+    public static Result fromPontifSource(String source, String sourceName) {
+        return fromPontifSource(source, sourceName, null);
     }
 
-    public static Result fromAltSource(String source, String sourceName, Path resolveDir) {
+    public static Result fromPontifSource(String source, String sourceName, Path resolveDir) {
         IrModule parsed;
         try {
-            parsed = AltParser.parseModule(source, sourceName);
+            parsed = PontifParser.parseModule(source, sourceName);
         } catch (ParseException | RuntimeException e) {
             return new Result.Failed("Parse error: " + e.getMessage());
         }
@@ -129,7 +129,7 @@ public final class ClassificationReport {
     /** Writes {@code dir/baseName.classification.txt}; returns the path. */
     public static Path writeReport(Path dir, String baseName, String source, String sourceName)
             throws IOException {
-        String body = switch (fromAltSource(source, sourceName)) {
+        String body = switch (fromPontifSource(source, sourceName)) {
             case Result.Generated g -> g.text();
             case Result.Failed f -> "# Classification report: " + sourceName + "\n\n" + f.error() + "\n";
         };

@@ -12,7 +12,7 @@ import java.util.Set;
  * Post-link pass that turns a constructor-shaped {@code Call} into a struct
  * {@link IrExpr.Record} when the called name is a declared struct type.
  *
- * <p><b>Why this exists (parser-blindness):</b> the alt parser recognizes a
+ * <p><b>Why this exists (parser-blindness):</b> the Pontif parser recognizes a
  * positional struct literal {@code Point(x, y)} only for structs declared in the
  * <em>same file</em> (its local {@code declaredStructs} map). A struct
  * <em>imported</em> from another module is invisible at parse time, so
@@ -24,11 +24,11 @@ import java.util.Set;
  * FQN'd struct definitions via {@link sibarum.pontif.types.TypeCatalog#fromModule}) and rewrites any
  * {@code Call(name, args)} whose {@code name} is a registered struct into the
  * equivalent positional {@link IrExpr.Record} — mirroring what
- * {@code AltParser.parsePositionalStructLiteral} does for local structs. Arity is
+ * {@code PontifParser.parsePositionalStructLiteral} does for local structs. Arity is
  * checked against the struct's declared field count.
  *
  * <p><b>By-name imported literals.</b> The by-name form {@code Point{x=…}} for an
- * imported struct is the parser-blind twin: {@code AltParser} emits an
+ * imported struct is the parser-blind twin: {@code PontifParser} emits an
  * <em>uncanonicalized</em> {@link IrExpr.Record} (source field order, no field-set
  * check — it can't see the declaration). This pass validates the field set and
  * reorders members to declared order in {@link #canonicalizeByName}, applied to
@@ -216,7 +216,7 @@ public final class StructLiteralRewriter {
     /**
      * Validates a by-name record's field set against the declared struct and
      * reorders its members to declared field order — mirroring
-     * {@code AltParser.parseByNameStructLiteral} for a struct the parser couldn't
+     * {@code PontifParser.parseByNameStructLiteral} for a struct the parser couldn't
      * see (imported). Idempotent: a record already in declared order with the full
      * field set passes through unchanged.
      */

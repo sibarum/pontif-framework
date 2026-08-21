@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Slice 2 — lowering the stream {@link IrExpr.Iterate} construct to a SuperVast kernel and running it.
  * Streams unblocked this: {@code (&a, &b):[(x,y) -> x+y]} (zip) is vector-add, the motivating GPU kernel.
  *
- * <p>The {@code Iterate} values here are built to match exactly what {@code AltParser.lowerSpreadCall}
+ * <p>The {@code Iterate} values here are built to match exactly what {@code PontifParser.lowerSpreadCall}
  * emits for spread/zip, so the lowering is exercised against the real construct shape, not a bespoke one.
  */
 final class KernelLoweringTest {

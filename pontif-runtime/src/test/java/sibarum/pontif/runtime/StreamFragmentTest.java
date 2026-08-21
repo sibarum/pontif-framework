@@ -8,7 +8,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 
@@ -26,7 +26,7 @@ class StreamFragmentTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "m.ptf");
+        IrModule module = PontifParser.parseModule(src, "m.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);
@@ -61,7 +61,7 @@ class StreamFragmentTest {
     @Test
     void spreadAscription_inlineFilter_dropsNothing() {
         // The canonical filteredLossy line in the ruled syntax: &s:[ fragment ].
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 let s:Stream[Int] = {1, 2, 3, 4}
@@ -83,7 +83,7 @@ class StreamFragmentTest {
         // rule). The fragment returns (streamPos, accPos); fold sends null to the
         // stream (empty) and threads the running total. Tuples are destructure-only,
         // so the result is bound positionally — `total` is the final accumulator.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 let fold:[ (el:Int, total:Int) -> {null, el + total} ]
@@ -101,7 +101,7 @@ class StreamFragmentTest {
         // maps AND folds at once, with the stream channel emitting something DIFFERENT
         // from the accumulator. Unlike scan (which emits the running total = the
         // accumulator), here the stream channel is el*2 while the accumulator is the sum.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream}
                 let mapAndFold:[ (el:Int, total:Int) -> {el * 2, el + total} ]
                 let s:Stream[Int] = {1, 2, 3, 4}
@@ -134,7 +134,7 @@ class StreamFragmentTest {
         // A tuple codomain of stream channels is fan-out (fork): each element is
         // routed to exactly one of two output streams (null drops the other) — the
         // conservative split. The codomain distinguishes this from a stream-of-tuples.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 let s:Stream[Int] = {1, 2, 3, 4}
@@ -204,7 +204,7 @@ class StreamFragmentTest {
     void fragment_filter_dropsNothing() {
         // The canonical filteredLossy line: a fragment whose arms return the
         // element or null; spread over the stream, the nulls drop.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 requires pontif.core.{Stream, Nothing}
                 let null:Nothing = Nothing()
                 let filter:[

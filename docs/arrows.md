@@ -4,7 +4,7 @@ Status: **WAR IN PROGRESS 2026-06-24.** Unifying the five `->` constructs.
 
 ## Why
 
-Pontif's `->` (the only arrow token — `AltLexer.java:290`; no `<-`/`=>`) drives five
+Pontif's `->` (the only arrow token — `PontifLexer.java:290`; no `<-`/`=>`) drives five
 constructs that are all one atom: a **clause = `DESTRUCTURE → PRODUCTION`**. Left binds the
 input (James's "argument sorts = value ranges + destructuring"); right produces the output
 ("return types are sequences of type conversion"). The realization came from the event war
@@ -23,7 +23,7 @@ A **clause** = `DESTRUCTURE → PRODUCTION`.
   [[principle_ascription_is_transform]]), three faces:
   - **value (definitional)** — an expression body (fragment, cast, match-arm result);
     equivalently the `@==witness` in sort position (pipeline, construction-pin, spec-only `;`).
-    The value↔sort-witness bridge already exists: `definitionWitness` (`AltParser.java:1282`).
+    The value↔sort-witness bridge already exists: `definitionWitness` (`PontifSexprParser.java:1282`).
   - **predicate (membership)** — a sort `[Base:pred]` (proof-grant's granted sort when it is
     not a definition).
 - **AGGREGATION** — a set of pattern-clauses = `Match` (ordered, overlap-ok); proof-grant's
@@ -74,7 +74,7 @@ enclosing scope). The production-as-sort-witness face rides `definitionWitness`.
   - **In-type pipeline** is the one genuinely-specialized site: let-stage binders that
     accumulate across stages and a *sort* production. It is unified only **conceptually +
     by the already-existing value↔sort-witness bridge** (`definitionWitness`,
-    `AltParser.java`), which is exactly the production-duality. No code change.
+    `PontifSexprParser.java`), which is exactly the production-duality. No code change.
 
   Net: the three **value-production** clauses share one front-end (`parseClauseBody`); the
   two **sort-production** clauses are unified by the existing witness bridge, with the proof
@@ -153,7 +153,7 @@ The doc below describes the S1–S4 shape; S5 generalized the stage model (every
 `@`; `[Type]` = coercion) and unified the parsers — see `project_arrow_unification` memory.
 
 - **S1** — the anonymous-`@` conversion chain `[ A -> @… -> B ]` runs as a one-input transform
-  (`AltParser.parseClauseChain` lowers it to an `IrExpr.Lambda` over a synthetic `$at` param;
+  (`PontifParser.parseClauseChain` lowers it to an `IrExpr.Lambda` over a synthetic `$at` param;
   `@`→`$at` via `substituteSelf`, so the interpreter never meets a chain `SelfRef`). Recognized
   in the fragment value positions (`let f:[…]` top-level + nested, `&s:[…]` spread) via
   `looksLikeClauseChain` (a top-level `->` that is neither the named-binder fragment nor

@@ -26,7 +26,7 @@ class AliasTraitCombinationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        CompileResult r = compiler.compileAlt(src, "combo.ptf");
+        CompileResult r = compiler.compile(src, "combo.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
         PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
@@ -35,7 +35,7 @@ class AliasTraitCombinationTest {
     }
 
     private String reject(String src) {
-        CompileResult r = compiler.compileAlt(src, "combo.ptf");
+        CompileResult r = compiler.compile(src, "combo.ptf");
         if (r instanceof CompileResult.Failed f) return f.error().text();
         // A compile that "succeeds" may still error at runtime — surface either.
         PontifRunner.RunResult rr = runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER);

@@ -20,7 +20,7 @@ class TraitExtendsTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         CompileResult.Compiled c =
                 assertInstanceOf(CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
         PontifRunner.RunResult rr = runner.run(c.program(), PontifRunner.Engine.INTERPRETER);
@@ -31,7 +31,7 @@ class TraitExtendsTest {
     @Test
     void implOfSubTrait_mustSatisfyBaseContract() {
         // T : Derived provides only Derived's `b`, not Base's `a` → rejected.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 trait Base{ a:[Method():Int] }
                 trait Derived:Base{ b:[Method():Int] }
                 struct T(x:Int)
@@ -83,7 +83,7 @@ class TraitExtendsTest {
     @Test
     void subTraitExtendingUnknownTrait_isRejected() {
         // `Derived : Missing` where Missing is undeclared → hard error at impl time.
-        CompileResult r = compiler.compileAlt("""
+        CompileResult r = compiler.compile("""
                 trait Derived:Missing{ b:[Method():Int] }
                 struct T(x:Int)
                 assign trait T:Derived {

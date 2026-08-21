@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class ParserTest {
+class SexprParserTest {
 
     private static IrExpr expr(String s) throws ParseException {
-        return Parser.parseExpr(s, "t.ptf");
+        return SexprParser.parseExpr(s, "t.ptf");
     }
 
     private static IrSort sort(String s) throws ParseException {
-        return Parser.parseSort(s, "t.ptf");
+        return SexprParser.parseSort(s, "t.ptf");
     }
 
     // --- Literals and atoms ---
@@ -316,7 +316,7 @@ class ParserTest {
 
     @Test
     void module_withSingleFunctionDecl_parses() throws Exception {
-        IrModule m = Parser.parseModule(
+        IrModule m = SexprParser.parseModule(
                 "(module square ((defn square ((n Int)) Int (* n n))) (call square 5))",
                 "t.ptf");
         assertEquals("square", m.name());
@@ -332,7 +332,7 @@ class ParserTest {
     @Test
     void module_withMultipleFunctionDecls_parses() throws Exception {
         // Demonstrates parsing multiple defns
-        IrModule m = Parser.parseModule(
+        IrModule m = SexprParser.parseModule(
                 "(module m ((defn a ((x Int)) Int x) (defn b ((y Int)) Int y)) (call a 1))",
                 "t.ptf");
         assertEquals(2, m.statements().size());

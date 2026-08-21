@@ -141,7 +141,7 @@ war docs.
 
 - **C1 (inference) — done, on master.** `NarrowingInference` is the sole expression-typer:
   `SortChecker.inferSort` → `inferFloor` ([SortChecker.java:2226]),
-  `AltParser.inferMaximalSort` → `inferFloor` ([AltParser.java:2039]); all four stages route
+  `PontifParser.inferMaximalSort` → `inferFloor` ([PontifSexprParser.java:2039]); all four stages route
   through it; TODO marks Cluster 5 done. **Precondition SATISFIED (verified 2026-07-18):**
   `war/scope-aware-narrowing` is fully subsumed by master (master 0 behind / 207 ahead), so
   C3 already builds on the unified state — no merge needed.
@@ -178,7 +178,7 @@ war docs.
   (declared-first method routing) **landed 2026-07-21** — `MethodOperatorResolver.nominalReceiverSort`
   is now declared-first (§6.6). The audit's diagnosis was directionally right but mislocated the leak:
   a *top-level* demoted `let b:Point = point3dValue` never leaked — its binding sort is narrowed to the
-  declared `Point` at parse time (`AltParser.nominalBinding`), so inference already yields the `Point`
+  declared `Point` at parse time (`PontifParser.nominalBinding`), so inference already yields the `Point`
   head. The real leak was in **local** bindings: `MethodOperatorResolver` re-infers the value sort and
   binds the local var to the concrete Inferred sort (`Point3D`), so a local demoted `let` routed methods
   on `Point3D`. The fix reads a `Var` receiver's own Declared claim from a lexically-scoped `localClaims`
@@ -228,7 +228,7 @@ C3 Assignability
 ```
 
 **The former "one hard cross-campaign gate" is discharged.** The reasoning was: `CoercionResolver`
-is invoked at the **parser** ([AltParser.java:1888] / `:4605`, still true), and the parser cannot
+is invoked at the **parser** ([PontifSexprParser.java:1888] / `:4605`, still true), and the parser cannot
 see trait satisfaction — a **post-link** fact ([AssignabilityContext.fromModule] needs a finished
 `IrModule`). The roadmap treated this as *"blocked until C2 Phase 2 moves resolution post-link."*
 **C2 Phase 2 has landed** — but Phase 2 moved *dispatch resolution* post-link, it did **not** move
@@ -294,11 +294,11 @@ pairs as those gaps are worked (each new pair either agrees or joins `KNOWN_DIVE
 
 | Decision | Site | Action | Size |
 |---|---|---|---|
-| struct↔struct `let` assign | [AltParser.java:2098] | landed (Slice 1) | — |
-| all other `let` coercions | `AltParser.nominalBinding` (was `coercionFor` → `CoercionResolver`) | ✅ **DONE (2026-07-21, `22578bf`).** The trait-free nominal cases (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`, primitives) are decided at the parser **via `Assignability`** (no trait closure needed); `Autobox` stays a parser-local sentinel (re-homes to the generics slice later); only **`TraitCast`** legality is deferred post-link (permissive, as before — eager satisfaction is the C2-adjacent follow-up). `CoercionResolver` deleted. | — |
+| struct↔struct `let` assign | [PontifSexprParser.java:2098] | landed (Slice 1) | — |
+| all other `let` coercions | `PontifParser.nominalBinding` (was `coercionFor` → `CoercionResolver`) | ✅ **DONE (2026-07-21, `22578bf`).** The trait-free nominal cases (`IntToDecimal`, `RecordPromotion`, `Demote`, `Mismatch`/`None`, primitives) are decided at the parser **via `Assignability`** (no trait closure needed); `Autobox` stays a parser-local sentinel (re-homes to the generics slice later); only **`TraitCast`** legality is deferred post-link (permissive, as before — eager satisfaction is the C2-adjacent follow-up). `CoercionResolver` deleted. | — |
 | construction fit | `ConstructionGate.gateRecord/gateClaim` (`classify`) | ✅ **DONE (2026-07-21, `5eb9aaa`)** — fit is a single-engine query (`Assignability`+`Refinements`) reading the effective-sort lens; the `UNKNOWN → runtimeChecks` stamp is dropped (§1d); demotion projection removed (§6.5). Dependent-claims/type-params orchestration stays. | — |
 | parametric base invariance | `SortChecker.sortsExactlyEqual` ([:1051]) | optional — it's exact-equality, arguably not assignment | S |
-| cast legality | `CastGate` (pontif-ir) + `PontifCompiler.compileAlt` | ✅ **DONE (2026-07-21, `f803d23`).** Compile-time gate matching the runtime's real cast paths (String render / user coercion via `Assignability.isA`); rejects a no-path cast. NB not `Assignability.cast` — the runtime does coercion-dispatch, not structural retag (the cast *law* is a follow-up needing runtime retag). Runtime throws kept as backstops. | — |
+| cast legality | `CastGate` (pontif-ir) + `PontifCompiler.compile` | ✅ **DONE (2026-07-21, `f803d23`).** Compile-time gate matching the runtime's real cast paths (String render / user coercion via `Assignability.isA`); rejects a no-path cast. NB not `Assignability.cast` — the runtime does coercion-dispatch, not structural retag (the cast *law* is a follow-up needing runtime retag). Runtime throws kept as backstops. | — |
 
 Note `IrStmt.Coercion` / `CoercionCheck` (user-defined `cast Target:(x:Source)->…`) is a
 **different axis** (runtime execution of author coercions), *not* a copy to absorb.
@@ -353,7 +353,7 @@ finish line is now **two C3-internal items, none blocked on C2** (C2 Phase 2 has
    (structural retag — sibling/narrow), but the runtime (`IrInterpreter.evalCast`) does NOT implement
    structural retags — it only renders to `String` or dispatches a user `cast Target:(Source)` coercion.
    So gating via `Assignability.cast` would accept casts the runtime then fails. The new `CastGate`
-   (pontif-ir, wired in `PontifCompiler.compileAlt`) instead matches the runtime's real criteria
+   (pontif-ir, wired in `PontifCompiler.compile`) instead matches the runtime's real criteria
    (render-from-renderable-primitive OR a declared coercion whose source the value satisfies via
    `Assignability.isA`), abstaining when the value sort is unknown. The runtime throws remain as
    defense-in-depth backstops (raw `IrCompiler` path). **Follow-up:** the aspirational structural-cast
@@ -477,7 +477,7 @@ stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays
    the projection machinery (`projectDemotion` + helpers) was removed. Full ir+runtime+demo
    suite green (~1290 tests), README pins intact. (2) **already satisfied** for the nominal
    case — a same-structure sibling struct assign is already rejected: `Assignability.assign`
-   returns `NEEDS_CAST` and `structAssignBinding` throws ([AltParser.java:2099]); the legacy
+   returns `NEEDS_CAST` and `structAssignBinding` throws ([PontifSexprParser.java:2099]); the legacy
    `CoercionResolver` returns `Mismatch` too. The only residual implicit same-structure
    coercion is between **transparent aliases**, which is correct under view-based (no concrete
    change — same structural type) and is tied to `project_type_aliases`, not this ruling.
@@ -490,7 +490,7 @@ stones E2 reworks onto the real traits. The shipped runtime `astOf`/`eval` stays
    *restricts* static access to the declared interface) mandate **declared-first** method routing.
    `MethodOperatorResolver.nominalReceiverSort` is now declared-first, and the leak's true location was
    pinned down in the process: a **top-level** demoted `let b:Point = point3dValue` never leaked — its
-   binding sort is narrowed to the declared `Point` at parse time (`AltParser.nominalBinding` returns the
+   binding sort is narrowed to the declared `Point` at parse time (`PontifParser.nominalBinding` returns the
    declared sort for a WIDEN/demotion verdict), so inference already gives the `Point` head; a top-level
    let / 0-arg fn / computed receiver lowers to a 0-arg `Call`. The leak was in **local** bindings (which
    lower to a `Var`): the pass re-infers the value sort and binds the local var to the concrete Inferred

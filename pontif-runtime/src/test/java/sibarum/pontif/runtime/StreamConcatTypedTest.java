@@ -18,7 +18,7 @@ class StreamConcatTypedTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private Object run(String src) {
-        CompileResult r = compiler.compileAlt(src, "m.ptf");
+        CompileResult r = compiler.compile(src, "m.ptf");
         CompileResult.Compiled c = assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "should compile; got " + (r instanceof CompileResult.Failed f ? f.error().text() : r));
         return new IrInterpreter(c.program().simplifier()).eval(c.program().module());

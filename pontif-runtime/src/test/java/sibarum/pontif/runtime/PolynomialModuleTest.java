@@ -20,7 +20,7 @@ class PolynomialModuleTest {
 
     private String run(String src) {
         return new PontifRunner().run(
-                compiler.compileAlt(src, "poly.ptf"), Engine.INTERPRETER).text();
+                compiler.compile(src, "poly.ptf"), Engine.INTERPRETER).text();
     }
 
     @Test

@@ -19,11 +19,11 @@ class PontifRunnerTruffleTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult runTruffle(String source, String name) {
-        return runner.run(compiler.compile(source, name), Engine.TRUFFLE);
+        return runner.run(compiler.compileSexpr(source, name), Engine.TRUFFLE);
     }
 
     private RunResult runInterp(String source, String name) {
-        return runner.run(compiler.compile(source, name), Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(source, name), Engine.INTERPRETER);
     }
 
     @Test
@@ -101,7 +101,7 @@ class PontifRunnerTruffleTest {
                      (* n (call factorial (- n 1)))))
                   (call factorial 5))
                 """;
-        PontifCompiler.CompileResult compiled = compiler.compile(src, "x.ptf");
+        PontifCompiler.CompileResult compiled = compiler.compileSexpr(src, "x.ptf");
         RunResult interp = runner.run(compiled, Engine.INTERPRETER);
         RunResult truffle = runner.run(compiled, Engine.TRUFFLE);
         assertFalse(interp.isError());

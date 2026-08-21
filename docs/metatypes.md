@@ -18,7 +18,7 @@ section; do not read this as shipped.
 >   function-body-from-function-structure.
 > - **Still unbuilt:** `inverse[f]`/`differential[f]` (absent from code); a *generic*
 >   `M[arg]` operator dispatch (`Type[…]` is special-cased to the keyword `"Type"` in
->   `AltParser:1699`, sort-only).
+>   `PontifParser:1699`, sort-only).
 > - **So:** `inverse`/`differential` *extend* a proven prover-synthesis seam (adding a
 >   function-from-function routine + an `IrExpr→IrExpr` bridge + generalizing the
 >   application surface), rather than building the substrate from scratch.

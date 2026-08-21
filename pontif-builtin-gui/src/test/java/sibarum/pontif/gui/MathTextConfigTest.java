@@ -56,7 +56,7 @@ class MathTextConfigTest {
         // read like a record — statically, no struct/constructor boilerplate.
         Files.writeString(dir.resolve("$mathstyle.ptf"),
                 "{ scriptScale = 0.7, axisHeight = 0.25, fontGroup = \"math\" }");
-        CompileResult r = new PontifCompiler().compileAlt("""
+        CompileResult r = new PontifCompiler().compile("""
                 module app
                 requires $mathstyle
                 mathstyle.axisHeight

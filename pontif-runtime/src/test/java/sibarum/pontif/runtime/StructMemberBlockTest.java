@@ -20,7 +20,7 @@ class StructMemberBlockTest {
     private final PontifRunner runner = new PontifRunner();
 
     private PontifCompiler.CompileResult compile(String src) {
-        return compiler.compileAlt(src, "structblock.ptf");
+        return compiler.compile(src, "structblock.ptf");
     }
 
     private String run(String src) {

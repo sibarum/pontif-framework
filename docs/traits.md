@@ -221,7 +221,7 @@ Each method inside `(impl ...)` parses with the type-qualified
 function name (`Donald.quack`) and receiver-prepended params reconstructed
 from the trait's contract.
 
-### Step 4 — alt syntax
+### Step 4 — Pontif syntax
 
 ```
 trait Duck{
@@ -265,7 +265,7 @@ Bottom-up, each slice testable end-to-end via the layer below.
    Tested via constructed IR + IrCompiler pipeline.
 3. **S-expr reference.** Surface form for the IR shapes, testable via
    existing S-expr test infrastructure.
-4. **Alt syntax.** `trait X{...}` and `assign trait X:Y {...}`.
+4. **Pontif syntax.** `trait X{...}` and `assign trait X:Y {...}`.
 
 ## Default method implementations (landed 2026-06-25)
 

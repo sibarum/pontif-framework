@@ -9,7 +9,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,17 +17,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * The iteration construct's <em>alt-syntax</em> surface (docs/iteration.md §8),
+ * The iteration construct's <em>Pontif-syntax</em> surface (docs/iteration.md §8),
  * slice 1 — map + filter, over a NATIVE stream (a tuple literal `(1,2,3)`; no
  * Element/Leaf — trees use recursion, streams are native; James 2026-06-15).
- * Parses `iter(src).{…} { match value … }` end-to-end (AltParser →
+ * Parses `iter(src).{…} { match value … }` end-to-end (PontifParser →
  * {@link sibarum.pontif.ir.IrExpr.Iterate} → IrInterpreter) and inspects the
  * completed result's streams.
  */
 class IterationParseTest {
 
     private Object run(String src) throws Exception {
-        IrModule module = AltParser.parseModule(src, "iter.ptf");
+        IrModule module = PontifParser.parseModule(src, "iter.ptf");
         Simplifier simp = new Simplifier(List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         CompiledModule compiled = new IrCompiler(simp).compile(module);
         return new IrInterpreter(simp).eval(compiled);
@@ -103,7 +103,7 @@ class IterationParseTest {
     void streamAnnotation_heterogeneousTuple_isRejected() {
         sibarum.pontif.parser.ParseException ex = org.junit.jupiter.api.Assertions.assertThrows(
                 sibarum.pontif.parser.ParseException.class,
-                () -> AltParser.parseModule("let s:Stream[Int] = {1, true, 3}\ns\n", "iter.ptf"));
+                () -> PontifParser.parseModule("let s:Stream[Int] = {1, true, 3}\ns\n", "iter.ptf"));
         org.junit.jupiter.api.Assertions.assertTrue(
                 ex.getMessage().contains("Cannot box") && ex.getMessage().contains("Bool"),
                 () -> ex.getMessage());

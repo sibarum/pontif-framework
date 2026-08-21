@@ -14,7 +14,7 @@ import java.util.concurrent.Callable;
  * with a {@code main}), or a packaged {@code .ptfpkg} artifact.
  *
  * <p>Each target shape maps onto an existing compiler entry point:
- * a file → {@code compileAlt} (sibling {@code requires} resolved from the
+ * a file → {@code compile} (sibling {@code requires} resolved from the
  * file's directory); a directory → {@code compileProjectDir}; a {@code .ptfpkg}
  * → unpack then {@code compileProjectDir} ({@link Artifacts}).
  */
@@ -45,7 +45,7 @@ public final class Run implements Callable<Integer> {
 
         String source = Files.readString(target);
         Path resolveDir = target.toAbsolutePath().getParent();
-        CompileResult compiled = CliSupport.COMPILER.compileAlt(source, fileName, resolveDir);
+        CompileResult compiled = CliSupport.COMPILER.compile(source, fileName, resolveDir);
         return CliSupport.runAndReport(compiled);
     }
 }

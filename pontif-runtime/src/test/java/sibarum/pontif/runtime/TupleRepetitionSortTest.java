@@ -14,7 +14,7 @@ class TupleRepetitionSortTest {
 
     private String run(String src) {
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "reps.ptf"), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(src, "reps.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "should run; got " + r.text());
         return r.text();
     }

@@ -22,7 +22,7 @@ class OverloadedFactorialDischargeTest {
                 function factorial(n:[Int:@>0]):[Int:@>=1] -> n * factorial(n-1)
                 factorial(5)
                 """;
-        ReceiptGraphReport.Result r = ReceiptGraphReport.fromAltSource(src, "factorial.ptf");
+        ReceiptGraphReport.Result r = ReceiptGraphReport.fromPontifSource(src, "factorial.ptf");
         assertInstanceOf(ReceiptGraphReport.Result.Generated.class, r,
                 () -> "Expected Generated; got " + r);
         String text = ((ReceiptGraphReport.Result.Generated) r).text();

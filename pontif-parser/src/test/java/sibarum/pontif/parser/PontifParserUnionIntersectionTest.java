@@ -13,16 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 /**
  * Tests for sort-level {@code |} and {@code &} inside {@code [...]} in the
- * alt parser. Same-base unions/intersections normalize to a single
+ * Pontif parser. Same-base unions/intersections normalize to a single
  * {@link IrSort.Refined}; cross-base stays as {@link IrSort.Union} or
  * {@link IrSort.Intersection}.
  */
-class AltParserUnionIntersectionTest {
+class PontifParserUnionIntersectionTest {
 
     /** Parses a single function decl whose param uses the given sort literal. */
     private static IrSort paramSort(String sortLiteral) throws ParseException {
         String src = "function f(x:" + sortLiteral + "):Int -> 0";
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = (IrStmt.FunctionDecl) m.statements().get(0);
         return fd.params().get(0).sort();
     }

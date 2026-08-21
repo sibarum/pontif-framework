@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReflectionReportTest {
 
     private static String reflect(String src, String entry) {
-        ReflectionReport.Result r = ReflectionReport.fromAltSource(src, "t.ptf", null, entry);
+        ReflectionReport.Result r = ReflectionReport.fromPontifSource(src, "t.ptf", null, entry);
         ReflectionReport.Result.Generated g =
                 assertInstanceOf(ReflectionReport.Result.Generated.class, r,
                         () -> "expected a reflection; got " + r);

@@ -14,14 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for the {@code _} default-arm desugar in {@link AltParser#parseMatch()}.
+ * Tests for the {@code _} default-arm desugar in {@link PontifParser#parseMatch()}.
  *
  * <p>The parser computes the {@code _} arm's predicate as the complement of
  * the union of other arms' predicates over the scrutinee's sort, via the
  * {@code pontif-predicates} kernel. The resulting IR contains only explicit
  * refinement predicates.
  */
-class AltParserUnderscoreArmTest {
+class PontifParserUnderscoreArmTest {
 
     /**
      * Parses a function whose body is the given match expression. The scrutinee
@@ -31,7 +31,7 @@ class AltParserUnderscoreArmTest {
      */
     private static IrExpr.Match parseMatchInIntFunction(String matchSrc) throws ParseException {
         String source = "function test(n:Int):Int -> " + matchSrc;
-        IrModule module = AltParser.parseModule(source, "test");
+        IrModule module = PontifParser.parseModule(source, "test");
         IrStmt.FunctionDecl decl = (IrStmt.FunctionDecl) module.statements().get(0);
         IrExpr body = decl.body();
         // Structural-destructure desugar may wrap in an outer let — unwrap if so.

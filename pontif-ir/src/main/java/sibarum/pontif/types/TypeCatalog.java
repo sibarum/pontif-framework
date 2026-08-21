@@ -50,7 +50,7 @@ public final class TypeCatalog {
     /**
      * Builds a catalog from a finished module's preserved declarations — the single interpretation of
      * struct / trait / alias type-aliases, in source order. A struct is registered under both the alias
-     * name and its own internal name (they coincide in the alt syntax; the S-expr {@code deftype} form
+     * name and its own internal name (they coincide in the Pontif syntax; the S-expr {@code deftype} form
      * lets them differ, and both must resolve now that struct references stay nominal). Primitives and
      * native constructors are not stored — {@link #lookup} answers them by fallback.
      */

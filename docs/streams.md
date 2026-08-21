@@ -244,7 +244,7 @@ they stay.
   storage is representation) with an inductive `Queue(Char)` view underneath.
   **Slice 1 (landed)** delivers the value half — `"..."`/`'...'` literals (full
   Unicode incl. astral) through the whole stack (`StringValue` →
-  `StringLiteral` → `IrExpr.Str` → lexer `readString` → alt parser), and
+  `StringLiteral` → `IrExpr.Str` → lexer `readString` → Pontif parser), and
   ordering **lexicographically by code point** via `Cmp` (not `String.compareTo`,
   so astral ranks correctly). **Strings are deliberately privileged** — unlike
   the rest of the sequence substrate they get bespoke sugar (`+` as a plain

@@ -45,7 +45,7 @@ class ProbeHarnessTest {
             String status;
             String detail;
             try {
-                var r = compiler.compileAlt(Files.readString(entry), name + "/entry.ptf", dir);
+                var r = compiler.compile(Files.readString(entry), name + "/entry.ptf", dir);
                 if (r instanceof PontifCompiler.CompileResult.Failed f) {
                     status = "COMPILE_FAIL";
                     detail = f.error().text();

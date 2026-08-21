@@ -158,7 +158,7 @@ Cluster (1) owns: **dispatch__22, traits__20, generics__22, generics__23** (4 BU
 ### (2) Destructuring wired per-form with seams — positional-param, .{}-param, match, tuple, nested
 
 The parser resolves struct *shapes at parse time* via `patternShapeFor(typeName)`
-(AltParser.java:2836), which only sees declarations earlier **in the same file**. Each
+(PontifSexprParser.java:2836), which only sees declarations earlier **in the same file**. Each
 destructuring form is wired independently, so they fail asymmetrically across the
 module boundary:
 
@@ -213,7 +213,7 @@ Cluster (3) owns: **inference__18, inference__20, methods__18** (3 BUGs).
 
 ### (4) Operator routing decided twice — parse-time name-based + post-link OperatorResolver correction
 
-Operators are routed once at parse time (AltParser keeps a `BinOp` and guesses by
+Operators are routed once at parse time (PontifParser keeps a `BinOp` and guesses by
 operator name) and again post-link in `OperatorResolver` (which corrects to the exact
 overload by operand sort). The two-decision design leaks:
 

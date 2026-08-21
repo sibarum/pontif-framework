@@ -34,10 +34,10 @@ longer reflects open work. What actually shipped:
   bare-trait-typed receiver value. Removing that fallback is optional polish, not a
   blocker.
 - **Phase 4 (parser de-blinding) — landed.** The parse-time sort-inference hacks are
-  deleted; `AltParser.inferMaximalSort` now routes through the one inference engine
+  deleted; `PontifParser.inferMaximalSort` now routes through the one inference engine
   (`docs/inference-unification.md`).
 - **Cluster 4 (route once + drop method-form operators) — landed.** `method T.+` is
-  rejected at parse (`AltParser` ~line 804) with a "operators are free functions"
+  rejected at parse (`PontifParser` ~line 804) with a "operators are free functions"
   diagnostic; operators route once, post-link, by both operands.
 
 **The one remaining piece of "dispatch unification" is the cross-module *visibility*
@@ -62,7 +62,7 @@ unrelated systems held together by name-string tricks and a hardcoded fast path:
    `IrInterpreter.evalBinOp` as `(Long) l + (Long) r`. The dispatch table is
    never consulted, so a user type can never participate in `+` on equal footing
    with `Int`.
-2. **User operators — resolved at *parse time*.** `AltParser.tryOperatorOverloadRoute`
+2. **User operators — resolved at *parse time*.** `PontifParser.tryOperatorOverloadRoute`
    infers the left operand's sort during parsing; if it's a non-primitive type
    with a declared `+` (or legacy `Type.+`) overload, it emits `Call("+", …)`,
    otherwise it falls back to `BinOp`. So `Int`/`Bool` always bypass dispatch and
@@ -70,7 +70,7 @@ unrelated systems held together by name-string tricks and a hardcoded fast path:
    sort.
 3. **Instance methods — name-mangled.** `method Type.name(…)` desugars to
    `function Type.name(this:Type, …)`, and `p.name(a)` becomes
-   `Call("Type.name", [p, a])` via `AltParser.methodNameForReceiver`, which needs
+   `Call("Type.name", [p, a])` via `PontifParser.methodNameForReceiver`, which needs
    the receiver's sort *at parse time*. That parse-time requirement is the
    parser-blindness that blocks cross-module `recv.method()`. Trait calls add a
    third redirect: `Trait.method(v)` → `Type.method(v)` via

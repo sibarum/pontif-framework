@@ -383,7 +383,7 @@ class AssignabilityTest {
         // context (as if a user wrote `assign trait Widget : dispatch-style`). No edit to
         // Assignability, Refinements, or the parser is required — the head name is data and
         // the call-kind behavior is looked up from the trait-impl view. (Parsing of an
-        // arbitrary `Widget(Int):Int` head is proven in AltParserSortTest.)
+        // arbitrary `Widget(Int):Int` head is proven in PontifParserSortTest.)
         AssignabilityContext c = AssignabilityContext.of(new TypeCatalog(), Map.of(
                 "Widget", java.util.Set.of(CallKinds.DISPATCH_STYLE)));
         IrSort gt0 = refinedInt(IrExpr.Op.GT, 0);

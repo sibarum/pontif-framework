@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end coverage of the path the playground actually drives:
- * {@code App.onRunClicked} → {@code PontifCompiler.compileAlt} (alt parser) →
+ * {@code App.onRunClicked} → {@code PontifCompiler.compile} (Pontif parser) →
  * the return-refinement gate → {@code PontifRunner.run(INTERPRETER)}. Catches a
  * regression that would make the playground error on the first click — which
  * unit tests on individual passes can miss.
@@ -21,7 +21,7 @@ class PlaygroundIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compileAlt(src, "<editor>"), Engine.INTERPRETER);
+        return runner.run(compiler.compile(src, "<editor>"), Engine.INTERPRETER);
     }
 
     /**

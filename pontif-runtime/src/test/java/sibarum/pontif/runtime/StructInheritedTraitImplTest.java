@@ -44,7 +44,7 @@ class StructInheritedTraitImplTest {
     private static final String WALK_RESIDUE = "{" + RES + "}";
 
     private String run(String tail) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(PRELUDE + tail, "inherit.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(PRELUDE + tail, "inherit.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -155,7 +155,7 @@ class StructInheritedTraitImplTest {
                 }
                 0
                 """;
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "hole.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "hole.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
                 "an unprovided abstract method must be rejected");
         assertTrue(((PontifCompiler.CompileResult.Failed) r).error().text().contains("missing method 'walk'"),
@@ -163,7 +163,7 @@ class StructInheritedTraitImplTest {
     }
 
     private String runOK(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "partial.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "partial.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -182,7 +182,7 @@ class StructInheritedTraitImplTest {
                 assign trait Leaf:Expr { walk():Stream[Expr] -> {this} }
                 assign trait Residue:Expr { walk():Stream[Expr] -> {} }
                 """;
-        PontifCompiler.CompileResult r = compiler.compileAlt(
+        PontifCompiler.CompileResult r = compiler.compile(
                 prelude + "let s:Residue = zero\ns.walk()\n", "override.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
@@ -196,7 +196,7 @@ class StructInheritedTraitImplTest {
         // this.type) is now checked: an impl returning an unrelated `Int` must fail.
         // Before the fix only the type-var branch compared returns, so this slipped
         // through arity-only.
-        PontifCompiler.CompileResult r = compiler.compileAlt("""
+        PontifCompiler.CompileResult r = compiler.compile("""
                 trait Expr { simplify():Expr -> this }
                 struct Leaf()
                 assign trait Leaf:Expr { simplify():Int -> 5 }
@@ -223,7 +223,7 @@ class StructInheritedTraitImplTest {
                 assign trait Bag:Box { items():Stream[[Int]] -> {1, 2, 3} }
                 Bag().items()
                 """;
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "parametric.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "parametric.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());

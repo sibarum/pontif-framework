@@ -3,12 +3,12 @@ package sibarum.pontif.parser;
 import sibarum.pontif.core.Origin;
 
 /**
- * Token type for {@link AltLexer} / {@link AltParser} — the alt syntax
+ * Token type for {@link PontifLexer} / {@link PontifParser} — the Pontif syntax
  * frontend described in {@code docs/language-reference.ptf}. Distinct from
- * the S-expression {@link Token} because the alt syntax tokenizes operator
+ * the S-expression {@link SexprToken} because the Pontif syntax tokenizes operator
  * characters as their own tokens (so {@code Int>0} splits into three).
  */
-public record AltToken(Kind kind, String text, String source, int line, int column) {
+public record PontifToken(Kind kind, String text, String source, int line, int column) {
 
     public enum Kind {
         // Atoms
@@ -45,7 +45,7 @@ public record AltToken(Kind kind, String text, String source, int line, int colu
         return Origin.at(source, line, column);
     }
 
-    public Origin spanTo(AltToken end) {
+    public Origin spanTo(PontifToken end) {
         return Origin.span(source, line, column, end.line, end.column + end.text.length());
     }
 }

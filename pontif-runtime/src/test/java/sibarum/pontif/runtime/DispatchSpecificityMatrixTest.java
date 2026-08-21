@@ -52,7 +52,7 @@ class DispatchSpecificityMatrixTest {
     /** Runs LATTICE + overloads + `f(arg)`, returning the winner's value or {@link #AMB}. */
     private String dispatch(String overloads, String argExpr) {
         String src = LATTICE + overloads + "f(" + argExpr + ")";
-        CompileResult r = compiler.compileAlt(src, "spec.ptf");
+        CompileResult r = compiler.compile(src, "spec.ptf");
         if (r instanceof CompileResult.Failed f) {
             return isAmbiguity(f.error().text()) ? AMB : "COMPILE_ERR: " + f.error().text();
         }

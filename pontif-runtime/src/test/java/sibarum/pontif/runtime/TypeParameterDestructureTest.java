@@ -20,7 +20,7 @@ class TypeParameterDestructureTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "tpd.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "tpd.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -29,7 +29,7 @@ class TypeParameterDestructureTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "tpd.ptf"), "expected a compile rejection");
+                compiler.compile(src, "tpd.ptf"), "expected a compile rejection");
     }
 
     @Test

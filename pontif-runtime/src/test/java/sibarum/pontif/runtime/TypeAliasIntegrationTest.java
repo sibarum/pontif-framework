@@ -20,11 +20,11 @@ class TypeAliasIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
     }
 
     private RunResult runTruffle(String src) {
-        return runner.run(compiler.compile(src, "t.ptf"), Engine.TRUFFLE);
+        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.TRUFFLE);
     }
 
     @Test
@@ -173,7 +173,7 @@ class TypeAliasIntegrationTest {
                    (defn double ((n PosInt)) Int (* n 2)))
                   (call double 5))
                 """;
-        RunResult r = runner.run(customCompiler.compile(src, "t.ptf"), Engine.INTERPRETER);
+        RunResult r = runner.run(customCompiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
         assertFalse(r.isError(), "expected success; got: " + r.text());
         assertEquals("10", r.text());
     }

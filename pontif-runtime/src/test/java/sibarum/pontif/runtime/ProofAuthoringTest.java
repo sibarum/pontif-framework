@@ -17,7 +17,7 @@ class ProofAuthoringTest {
     private final PontifCompiler compiler = new PontifCompiler();
 
     private CompileResult compile(String src) {
-        return compiler.compileAlt(src, "proof.ptf");
+        return compiler.compile(src, "proof.ptf");
     }
 
     private void assertCompiles(String src) {

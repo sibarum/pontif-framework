@@ -26,7 +26,7 @@ class StreamRangeSynthesisTest {
     private String synth(String declared) {
         String src = PRELUDE + "let r:" + declared + ";\nr";
         PontifRunner.RunResult run = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "range.ptf"),
+                new PontifCompiler().compile(src, "range.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertTrue(!run.isError(), () -> "expected synthesis to run; got " + run.text());
         return run.text();
@@ -35,7 +35,7 @@ class StreamRangeSynthesisTest {
     private String error(String declared) {
         String src = PRELUDE + "let r:" + declared + ";\nr";
         PontifRunner.RunResult run = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "range.ptf"),
+                new PontifCompiler().compile(src, "range.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertTrue(run.isError(), () -> "expected an error; got " + run.text());
         return run.text();
@@ -127,13 +127,13 @@ class StreamRangeSynthesisTest {
         // in-range value binds and an out-of-range one is rejected.
         String ok = PRELUDE + "let x:[Int:0 <= @ < 10] = 5;\nx";
         PontifRunner.RunResult pass = new PontifRunner().run(
-                new PontifCompiler().compileAlt(ok, "chain.ptf"), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(ok, "chain.ptf"), PontifRunner.Engine.INTERPRETER);
         assertTrue(!pass.isError(), () -> "in-range value should bind; got " + pass.text());
         assertEquals("5", pass.text());
 
         String bad = PRELUDE + "let x:[Int:0 <= @ < 10] = 50;\nx";
         PontifRunner.RunResult fail = new PontifRunner().run(
-                new PontifCompiler().compileAlt(bad, "chain.ptf"), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(bad, "chain.ptf"), PontifRunner.Engine.INTERPRETER);
         assertTrue(fail.isError(), () -> "out-of-range value should be rejected; got " + fail.text());
     }
 }

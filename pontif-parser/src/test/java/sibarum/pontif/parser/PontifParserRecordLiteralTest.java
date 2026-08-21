@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for struct-literal construction in {@link AltParser}.
+ * Tests for struct-literal construction in {@link PontifParser}.
  *
  * <p>Two surface forms produce the same {@link IrExpr.Record} shape:
  * <ul>
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * resulting record to declared field iteration order regardless of how
  * the source was written.
  */
-class AltParserRecordLiteralTest {
+class PontifParserRecordLiteralTest {
 
     /** Parses a function body in the context of a {@code Point(x:Int, y:Int)} struct. */
     private static IrExpr parseBodyInPointFunction(String bodySrc) throws ParseException {
@@ -38,7 +38,7 @@ class AltParserRecordLiteralTest {
     /** Parses a custom prelude + final function decl, returns the last decl's body. */
     private static IrExpr parseBodyWithPrelude(String prelude, String functionDecl)
             throws ParseException {
-        IrModule module = AltParser.parseModule(prelude + "\n" + functionDecl, "test");
+        IrModule module = PontifParser.parseModule(prelude + "\n" + functionDecl, "test");
         IrStmt last = module.statements().get(module.statements().size() - 1);
         IrStmt.FunctionDecl decl = (IrStmt.FunctionDecl) last;
         return decl.body();
@@ -192,7 +192,7 @@ class AltParserRecordLiteralTest {
         // No `struct Foo` decl — `Foo(1, 2)` must still parse, but as a Call.
         // The dispatch table will reject it at compile time, which is the
         // appropriate error layer.
-        IrModule module = AltParser.parseModule(
+        IrModule module = PontifParser.parseModule(
                 "function test(n:Int):Int -> Foo(1, 2)", "test");
         IrStmt.FunctionDecl decl = (IrStmt.FunctionDecl) module.statements().get(0);
         assertInstanceOf(IrExpr.Call.class, decl.body());

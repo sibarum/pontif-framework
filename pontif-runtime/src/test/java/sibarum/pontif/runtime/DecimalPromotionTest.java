@@ -20,7 +20,7 @@ class DecimalPromotionTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compileAlt(src, "t.ptf"), PontifRunner.Engine.INTERPRETER);
+        return runner.run(compiler.compile(src, "t.ptf"), PontifRunner.Engine.INTERPRETER);
     }
 
     @Test

@@ -9,7 +9,7 @@ import sibarum.pontif.ir.CompiledModule;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReadmeSnippetTest {
 
     private Object run(String src) throws ParseException, CompileException {
-        IrModule module = AltParser.parseModule(src, "readme.ptf");
+        IrModule module = PontifParser.parseModule(src, "readme.ptf");
         Simplifier simp = new Simplifier(java.util.List.<RewriteRule>copyOf(PontifCompiler.defaultRules()));
         IrCompiler compiler = new IrCompiler(simp);
         CompiledModule compiled = compiler.compile(module);
@@ -48,7 +48,7 @@ class ReadmeSnippetTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String runGated(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "readme.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "readme.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected compile success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -56,7 +56,7 @@ class ReadmeSnippetTest {
     }
 
     private PontifCompiler.CompileResult.Failed rejectGated(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "readme.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "readme.ptf");
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
                 "expected a compile rejection");
     }

@@ -2013,7 +2013,7 @@ public final class SortChecker {
     }
 
     /**
-     * Match totality (alt-syntax principle 8): every value of the scrutinee's
+     * Match totality (Pontif-syntax principle 8): every value of the scrutinee's
      * sort must be covered by some arm. <b>The conservation rule: if totality
      * cannot be determined at compile time, a default arm is required.</b>
      * No value may fall through a match unhandled, and "we'll find out at

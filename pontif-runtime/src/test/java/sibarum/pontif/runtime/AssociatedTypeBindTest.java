@@ -19,7 +19,7 @@ class AssociatedTypeBindTest {
     private final PontifRunner runner = new PontifRunner();
 
     private String run(String src) {
-        PontifCompiler.CompileResult r = compiler.compileAlt(src, "bind.ptf");
+        PontifCompiler.CompileResult r = compiler.compile(src, "bind.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
                 () -> "expected success; got: "
                         + ((PontifCompiler.CompileResult.Failed) r).error().text());
@@ -28,7 +28,7 @@ class AssociatedTypeBindTest {
 
     private PontifCompiler.CompileResult.Failed rejects(String src) {
         return assertInstanceOf(PontifCompiler.CompileResult.Failed.class,
-                compiler.compileAlt(src, "bind.ptf"), "expected a compile rejection");
+                compiler.compile(src, "bind.ptf"), "expected a compile rejection");
     }
 
     private static final String EXPR = """

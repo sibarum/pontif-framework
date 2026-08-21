@@ -10,15 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Slice 2 — bracket sorts + refinements.  Exercises {@link AltParser#parseSort()}
+ * Slice 2 — bracket sorts + refinements.  Exercises {@link PontifParser#parseSort()}
  * directly (same package access).  The integration tests in
- * {@code AltParserIntegrationTest} can't run sorts in isolation since they need
+ * {@code PontifParserIntegrationTest} can't run sorts in isolation since they need
  * function declarations (Slice 3) for a usable program.
  */
-class AltParserSortTest {
+class PontifParserSortTest {
 
     private static IrSort sort(String src) throws ParseException {
-        AltParser p = new AltParser(new AltLexer(src, "test").tokenize());
+        PontifParser p = new PontifParser(new PontifLexer(src, "test").tokenize());
         return p.parseSort();
     }
 

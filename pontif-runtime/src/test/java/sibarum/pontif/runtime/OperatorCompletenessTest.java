@@ -21,14 +21,14 @@ class OperatorCompletenessTest {
 
     /** Asserts the source fails to compile and returns the error message. */
     private String rejects(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         assertInstanceOf(CompileResult.Failed.class, r, () -> "expected a compile error for: " + src);
         return ((CompileResult.Failed) r).error().text();
     }
 
     /** Asserts the source compiles and runs, returning its value text. */
     private String runs(String src) {
-        CompileResult r = compiler.compileAlt(src, "t.ptf");
+        CompileResult r = compiler.compile(src, "t.ptf");
         assertInstanceOf(CompileResult.Compiled.class, r, () -> "expected success; got: "
                 + (r instanceof CompileResult.Failed f ? f.error().text() : "?"));
         return runner.run(r, Engine.INTERPRETER).text();

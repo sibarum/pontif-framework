@@ -24,7 +24,7 @@ class TransformTest {
 
     private static String eval(String expr) {
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(IMPORTS + expr, "xform.ptf"),
+                new PontifCompiler().compile(IMPORTS + expr, "xform.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());
         return r.text();

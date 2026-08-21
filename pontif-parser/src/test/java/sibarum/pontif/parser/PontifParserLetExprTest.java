@@ -13,20 +13,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for in-expression {@code let} in {@link AltParser}.
+ * Tests for in-expression {@code let} in {@link PontifParser}.
  *
  * <p>Surface form: {@code let NAME (:Sort)? = VALUE BODY}. No separator
  * between VALUE and BODY — value is parsed greedily via Pratt, body is the
  * next expression. Lowers to {@link IrExpr.LetIn}; the bound name is pushed
- * into the parser's {@link AltParser#currentScope} only for the duration of
+ * into the parser's {@link PontifParser#currentScope} only for the duration of
  * body parsing.
  */
-class AltParserLetExprTest {
+class PontifParserLetExprTest {
 
     /** Parses a function whose body is the given expression source. */
     private static IrExpr parseFunctionBody(String bodySrc) throws ParseException {
         String src = "function test(n:Int):Int -> " + bodySrc;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = (IrStmt.FunctionDecl) m.statements().get(0);
         return fd.body();
     }
@@ -106,7 +106,7 @@ class AltParserLetExprTest {
                 function f(n:Int):Int -> let m = 5 m
                 function g(n:Int):Int -> m + 1
                 """;
-        IrModule mod = AltParser.parseModule(src, "t");
+        IrModule mod = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl g = (IrStmt.FunctionDecl) mod.statements().get(1);
         IrExpr.BinOp body = (IrExpr.BinOp) g.body();
         // m in g's body is just a Var (not in any scope — let scope from f
@@ -140,7 +140,7 @@ class AltParserLetExprTest {
                 let n = 99
                 function f():Int -> let n = 5 n + 1
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl f = (IrStmt.FunctionDecl) m.statements().get(1);
         IrExpr.LetIn let = (IrExpr.LetIn) f.body();
         IrExpr.BinOp body = (IrExpr.BinOp) let.body();
@@ -264,7 +264,7 @@ class AltParserLetExprTest {
                   p.x + p.y
                 )
                 """;
-        IrModule m = AltParser.parseModule(src, "t");
+        IrModule m = PontifParser.parseModule(src, "t");
         IrStmt.FunctionDecl fd = (IrStmt.FunctionDecl) m.statements().get(1);
         IrExpr.LetIn let = assertInstanceOf(IrExpr.LetIn.class, fd.body());
         // The value is a struct literal (Record), NOT a block-unwrapped expr.

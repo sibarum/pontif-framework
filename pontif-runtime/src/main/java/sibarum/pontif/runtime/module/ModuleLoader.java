@@ -2,7 +2,7 @@ package sibarum.pontif.runtime.module;
 
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.IrModule;
-import sibarum.pontif.parser.AltParser;
+import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.parser.ParseException;
 
 import java.io.IOException;
@@ -41,7 +41,7 @@ public final class ModuleLoader {
         for (Path file : files) {
             String source = Files.readString(file);
             String label = rootDir.relativize(file).toString().replace('\\', '/');
-            IrModule module = AltParser.parseModule(source, label);
+            IrModule module = PontifParser.parseModule(source, label);
             byName.computeIfAbsent(module.name(), k -> new ArrayList<>()).add(module);
         }
         Map<String, IrModule> modules = new LinkedHashMap<>();

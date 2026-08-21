@@ -45,7 +45,7 @@ class ShapeExtensionTest {
         NativeCalls.register("pontif.plot/renderScene", stub);
 
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.shape.{Sphere, previewGradientField}
                         previewGradientField(Sphere(1.0))""", "sphere.ptf"),
                 PontifRunner.Engine.INTERPRETER);
@@ -99,7 +99,7 @@ class ShapeExtensionTest {
         NativeCalls.register("pontif.plot/renderScene", stub);
 
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt("""
+                new PontifCompiler().compile("""
                         requires pontif.shape.{Sphere, render}
                         render(Sphere(1.0))""", "render.ptf"),
                 PontifRunner.Engine.INTERPRETER);
@@ -234,7 +234,7 @@ class ShapeExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, "render.ptf"), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(src, "render.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "render program should run; got " + r.text());
         RecordValue tuple = (RecordValue) captured[0];
         RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
@@ -249,7 +249,7 @@ class ShapeExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
         return new PontifRunner().run(
-                new PontifCompiler().compileAlt(src, name), PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(src, name), PontifRunner.Engine.INTERPRETER);
     }
 
     /** Pins the README "3D shapes" CSG + transforms snippet (verbatim, minus the comments). */
