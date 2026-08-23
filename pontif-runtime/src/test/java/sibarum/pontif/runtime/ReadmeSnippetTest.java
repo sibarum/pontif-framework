@@ -198,6 +198,21 @@ class ReadmeSnippetTest {
         assertEquals(true, run(src));
     }
 
+    // --- The inline conditional (if c then a else b) --------------------------
+
+    @Test
+    void guideInlineConditionalSnippet_evaluatesTo109() {
+        assertEquals("109", runGated("""
+                function abs(n:Int):Int -> if n < 0 then 0 - n else n
+
+                function grade(score:Int):Int -> if score >= 90 then 4 else if score >= 80 then 3 else 1
+
+                let peak = if grade(85) > 2 then 99 else 0
+
+                abs(0 - 7) + grade(85) + peak
+                """));
+    }
+
     // --- Structs and methods -------------------------------------------------
 
     @Test
@@ -418,6 +433,30 @@ class ReadmeSnippetTest {
                 }
 
                 Ace(11).boosted()
+                """));
+    }
+
+    // --- Constructor bodies (-> let this.field = ...) -------------------------
+
+    @Test
+    void guideConstructorBodySnippet_addsAndInheritsFields() {
+        assertEquals("16.50", runGated("""
+                struct Rect(
+                  w:Decimal
+                  h:Decimal
+                ) ->
+                  let this.area = this.w * this.h
+                  let this.halfArea:Decimal = this.area / 2.0
+                {
+                  describe():Decimal -> this.area + this.halfArea
+                }
+
+                struct Square:[Rect:@.w==side & @.h==side](side:Decimal)
+
+                let r = Rect(3.0, 4.0)
+                let s = Square(3.0)
+
+                r.area + s.halfArea
                 """));
     }
 

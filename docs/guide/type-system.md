@@ -21,11 +21,13 @@ just the widest case, the refined type with no predicate at all.
 ## Contents
 
 - [Function dispatching with refined types](#function-dispatching-with-refined-types)
+- [The inline conditional](#the-inline-conditional)
 - [Structs and methods](#structs-and-methods)
 - [Traits — alternative interfaces](#traits--alternative-interfaces)
 - [Type extension — a richer type](#type-extension--a-richer-type)
 - [Multiple polymorphism models](#multiple-polymorphism-models)
 - [Struct member blocks](#struct-member-blocks)
+- [Constructor bodies](#constructor-bodies)
 - [Generics (type parameters)](#generics-type-parameters)
 - [Operator overloading](#operator-overloading)
 
@@ -85,6 +87,43 @@ grow(acct) ~= 105.0   # → true
 `~=` is approximate equality done right — equal within one ulp at the working
 precision (DECIMAL128), a tolerance *derived from the division policy*, never
 configured — and it is rejected in type position: the proof layer never forgives.
+
+## The inline conditional
+
+`if c then a else b` is an ordinary **expression**, valid anywhere a value is — a
+call argument, a `let` right-hand side, the terminal expression of a member:
+
+```pontif
+function abs(n:Int):Int -> if n < 0 then 0 - n else n
+
+function grade(score:Int):Int -> if score >= 90 then 4 else if score >= 80 then 3 else 1
+
+let peak = if grade(85) > 2 then 99 else 0
+
+abs(0 - 7) + grade(85) + peak   # → 7 + 3 + 99 = 109
+```
+
+It is pure sugar for a `match`, and lowers to exactly one — no new construct in
+the IR:
+
+```
+if c then a else b   ==   match (c) { [Bool:@] -> a  _ -> b }
+```
+
+`[Bool:@]` is the sub-type of `Bool` where the value itself holds (`{true}`), and
+the ordered `_` complement is `{false}`. Two consequences fall out of the lowering
+rather than being decided separately:
+
+- **`else` is mandatory** — there is no partial `if`. The lowering is total by
+  construction, which is the same rule match totality already enforces; a
+  one-armed `if` would be a non-exhaustive match.
+- **`else if` chains need no grammar of their own.** The else-branch is *any*
+  expression, so a nested `if` just works — `grade` above is three arms deep with
+  no special case anywhere in the parser.
+
+Prefer `match` when you are discriminating on *types* or on more than a couple of
+predicates — it is the form that carries narrowing into each arm. `if` is for the
+case where a `Bool` you already have picks between two values.
 
 ## Structs and methods
 
@@ -362,9 +401,12 @@ The cast law is the no-lie law made geometric: **lose freely, fabricate never.**
 - **Promotion** builds a strictly richer type *through the view* — `back` sees
   `Point`'s `x, y` plus the `z==0` pin, so `back.z` is `0` (the concrete's hidden `5`
   isn't consulted by a pinned promotion; an explicit downcast would recover it). The
-  view can't conjure `z`, so promotion is never implicit: the trailing `;` is the
-  *synthesis directive* (see the [proofs guide](proofs-and-ledgers.md)), and
-  every existing behavior of the base still applies.
+  view can't conjure `z`, so promotion is never implicit — it is a **synthesized
+  construction**, and what triggers the synthesis is the *pin*: a definition
+  terminated without a value synthesizes exactly when its type pins one (see the
+  [proofs guide](proofs-and-ledgers.md)). The trailing `;` above is just the
+  optional terminator, not a command. Every existing behavior of the base still
+  applies.
 
 ### Explicit casts — `(Type:value)`
 
@@ -448,6 +490,61 @@ to standalone `Ace.label(this:Ace, …)` method decls, and the intersection base
 into the single struct super plus one empty `assign trait Ace:T` per trait — so the
 is-a core, demotion, and construction are untouched
 ([docs/struct-methods.md](../struct-methods.md)).
+
+## Constructor bodies
+
+A struct's default constructor takes its declared fields and always runs first.
+A `->` body **extends** it: a let-led preamble in which each `let this.name = expr`
+line adds *one more* field, computed from the fields already bound.
+
+```pontif
+struct Rect(
+  w:Decimal
+  h:Decimal
+) ->
+  let this.area = this.w * this.h            # type inferred (Decimal)
+  let this.halfArea:Decimal = this.area / 2.0
+{
+  describe():Decimal -> this.area + this.halfArea
+}
+
+struct Square:[Rect:@.w==side & @.h==side](side:Decimal)
+
+let r = Rect(3.0, 4.0)
+let s = Square(3.0)
+
+r.area + s.halfArea   # → 12.00 + 4.50 = 16.50
+```
+
+`area` and `halfArea` are ordinary fields once construction is done — readable,
+usable in methods, counted by equality — but they can never be *supplied*.
+
+- **Add-only.** An extension introduces a new name. Reusing a constructor field's
+  name, or an inherited one, is a compile error — a constructor body cannot
+  reassign, only extend. There is no mutation here and no second constructor to
+  pick between.
+- **Never undefined.** Each field is materialized onto the value at construction
+  and judged against its type exactly like a constructor argument, so an
+  initializer that cannot satisfy its declared type is a compile error rather than
+  a runtime surprise. There is no order in which the field does not yet exist.
+- **The type annotation is optional.** It is inferred over the preamble's
+  whitelist grammar — field reads carry their declared types, operators stay in the
+  primitive tower. Annotate when the operands leave the tower.
+- **Order is the only dependency rule.** An initializer may read the constructor's
+  fields and any *earlier* extension (`halfArea` reads `area`); naming a field that
+  is not bound yet is an error.
+- **Constructor-facing positions never see them.** Positional arity, by-name
+  literals, destructuring slots, and is-a base-field determination all read the
+  declared fields only — `Rect(3.0, 4.0, 12.0)` is an arity error and
+  `Rect{w=3.0 h=4.0 area=9.9}` is rejected outright.
+- **They are inherited.** Bodies run root-first down the is-a chain, so `Square`
+  gets `area` and `halfArea` without restating them — `s.halfArea` is `4.50`
+  because `Square`'s morphism pins `Rect`'s `w` and `h` to `side`.
+
+The body and the [member block](#struct-member-blocks) coexist, in that order: the
+`this.` target ends the preamble, so the `{ … }` methods follow it and a subsequent
+top-level `let` parses as usual. A struct wanting a body writes at least one `let`
+in it — a `->` with nothing after it is an error, not a no-op.
 
 ## Generics (type parameters)
 

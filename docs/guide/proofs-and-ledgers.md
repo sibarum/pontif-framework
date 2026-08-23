@@ -57,8 +57,8 @@ The base function's return is unrefined `[Int]`; the proof *grants and proves*
 `[Int:@>=-16]` by cutting the domain into regions the engine can each close (the
 finite middle residual is peeled to singletons automatically).
 
-A return refinement can **reference destructured arguments**, and the `;`
-synthesis directive lets the *specification write the body*:
+A return refinement can **reference destructured arguments**, and a declaration
+terminated with no body lets the *specification write the body*:
 
 ```pontif
 struct Vec(x:Int, y:Int)
@@ -72,9 +72,11 @@ normSq(Vec(3, 4))   # → 25
 ```
 
 `v:[Vec.{x, y}]` destructures the parameter into `x` and `y`; the return is an
-in-type pipeline (`let`-stages then a final pin); the trailing `;` synthesizes the
-body from the spec. The same directive drives **value synthesis** and **function
-synthesis**:
+in-type pipeline (`let`-stages then a final pin); because that pin fixes a single
+value and no `->` body follows, the body is synthesized from the spec. The trailing
+`;` terminates the declaration — it is not what asks for the synthesis; the pin is
+(see [the type system guide](type-system.md#type-extension--a-richer-type)). The
+same rule drives **value synthesis** and **function synthesis**:
 
 ```pontif
 struct Point(x:Int, y:Int)
@@ -85,8 +87,8 @@ function promote(point:[Point.{x, y}], z:Int):Point3D{x, y, z};
 promote(Point(2, 3), 7).x + promote(Point(2, 3), 7).y + promote(Point(2, 3), 7).z   # → 12
 ```
 
-`Point3D{x, y, z}` is a construction-pin: no `->` body, just `;`, and the
-constructor is written from the return spec.
+`Point3D{x, y, z}` is a construction-pin: no `->` body, so the constructor is
+written from the return spec.
 
 Two more pieces of compile-time machinery round out the metaprogramming:
 

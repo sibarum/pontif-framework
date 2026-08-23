@@ -449,24 +449,35 @@ deferred decision — ruled 2026-06-08). See `docs/univocal-language-design.md`.
 **demotion / promotion** — the two subtype casts, governed by *lose freely,
 fabricate never*. **Demotion** (subtype → supertype, `let b:Point = p`) runs the
 declared **morphism** — a total functional map pinning every base field
-(`@.x==x & @.y==y`) — dropping unmentioned fields: a clean forget, no surviving
-tag (`b.z` errors). **Promotion** (supertype → subtype) can't conjure the missing
+(`@.x==x & @.y==y`). It is a **view**, not a copy (ruled 2026-07-14): unmentioned
+fields are *hidden*, not destroyed, so `b.z` errors because `Point` has no `z`,
+while the value keeps its concrete `Point3D` identity. Concrete identity changes
+only by construction or an explicit cast — *lose freely* is losing access, not
+data. **Promotion** (supertype → subtype) can't conjure the missing
 fields, so it's never an implicit cast — an explicit, synthesized construction:
 a function, a method, or a value-pin merge (`let q:[Point3D:@.z==0] = b;`). Both
 ride the construction gate; `a/b` dropping its remainder is demotion's analogue
 (the conservative pair is its promote).
 
-**synthesis directive (`;`)** — a trailing `;` in place of a body/value: the
-explicit, sole trigger for spec-only synthesis (functions, methods, lets).
-Bodyless-without-`;` is an error; `;` on a sort that pins no value is a "does not
-pin" error. Synthesis is opt-in and visible — never implicit.
+**terminator (`;`)** — an *optional* terminator, not a command (ruled
+2026-08-10). Members of a trait / struct / conductor body are terminated, not
+comma-separated: a newline ends a member, and `;` is needed only to put two on one
+line or to close a member the parser would otherwise read as continuing (`,` is
+accepted as a transitional alias).
+
+**synthesis** — a *consequence* of terminating a definition without a body or
+value: a function, method, or `let` so terminated synthesizes iff its sort pins a
+value (the prover already computes exactly this). So `let scale:[Int:@==3]` needs
+no `;`, and the partial+pin promotion fires on its structural conditions alone.
+Terminating without a value on a sort that pins none is a "does not pin" error.
+Superseded the earlier reading in which `;` was itself the trigger.
 
 **construction pin** — a return sort `Name{e1, …}` over a declared struct:
 synthesis sugar for `[Name:@ == Name(e1, …)]` (values positional into declared
-fields), so a `;` function's body is the construction. Definitional — the
+fields), so a synthesized function's body is the construction. Definitional — the
 declared return collapses to the bare struct. Sibling of the value pin (`@==EXPR`).
 
-**in-type pipeline** — a staged synthesis directive in sort position,
+**in-type pipeline** — a staged synthesis spec in sort position,
 `[let x:S = E -> … -> Base:@==witness]`: the `let` stages compute (calling global
 functions by name — no import), the final pin returns. Desugars to
 `@ == (let x = E in … in witness)` and rides the synthesis path; the `->` is the
