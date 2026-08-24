@@ -4336,14 +4336,18 @@ public final class PontifParser {
                     if (firstPositional != null) {
                         throw mixedAggregateBody(binder);
                     }
-                    if (narrowed instanceof IrSort.CallSig sig
-                            && isCallableMemberKind(CallKinds.builtin(sig.typeName()))) {
+                    // Read the call kind off the HEAD NAME, not off `instanceof CallSig`:
+                    // the four contract faces do not all parse to a CallSig ([Action(Int)]
+                    // arrives as a bound structural), and a member that is a contract in one
+                    // spelling but data in another would be the worst of both.
+                    String head = callContractHead(narrowed);
+                    if (head != null) {
                         throw new ParseException(
                                 "An anonymous structural type carries DATA members only, but '"
                                         + binder.text() + "' is declared as a call contract ("
-                                        + sig.typeName() + "). Behaviour is named: put the member on "
-                                        + "a trait — trait T { " + binder.text() + ":["
-                                        + sig.typeName() + "(…):…] } — and write the type as [T].",
+                                        + head + "). Behaviour is named: put the member on a trait "
+                                        + "— trait T { " + binder.text() + ":[" + head
+                                        + "(…):…] } — and write the type as [T].",
                                 binder.origin());
                     }
                     if (namedMembers.containsKey(binder.text())) {
@@ -4503,6 +4507,24 @@ public final class PontifParser {
         if (!discards.isEmpty()) literalConstrainedFields.put(tuple, discards);
         if (!renames.isEmpty()) destructureRenames.put(tuple, renames);
         return tuple;
+    }
+
+    /**
+     * The call-contract head a member sort names ({@code Method} / {@code Action} /
+     * {@code Conduit} / {@code Dispatch}), or null when the sort is data. Every
+     * contract face is rejected as a record member — a shape says what a value HAS,
+     * and all four say what it DOES.
+     */
+    private static String callContractHead(IrSort memberSort) {
+        String head = switch (memberSort) {
+            case IrSort.CallSig sig -> sig.typeName();
+            case IrSort.Named n -> n.name();
+            case IrSort.Structural st -> st.name();
+            case IrSort.Trait t -> t.name();
+            case IrSort.Refined r -> r.name();
+            default -> null;
+        };
+        return head != null && CallKinds.builtin(head) != null ? head : null;
     }
 
     /**
