@@ -57,6 +57,9 @@ import java.util.Set;
  */
 final class ConstructionGate {
 
+    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
+    private static final String RECORD_SENTINEL = "_record";
+
     private ConstructionGate() {}
 
     static IrModule rewrite(IrModule module, Map<Origin.Span, IrSort> lens) throws CompileException {
@@ -696,6 +699,20 @@ final class ConstructionGate {
                 && structs.containsKey(rec.typeName())) {
             return IrSort.named(rec.typeName());
         }
+        // An anonymous BY-NAME literal ({property = "s"}) has a shape even though it has
+        // no name: its members' own sorts. Rebuilding it here is what lets an anonymous
+        // record CLAIM be judged member-wise (the shape is the ground truth, so there is
+        // no registry entry to consult). Abstain-never-bluff: one unknown member sort
+        // makes the whole shape unknown rather than inventing a member.
+        if (arg instanceof IrExpr.Record anon && anon.typeName() == null) {
+            Map<String, IrSort> members = new LinkedHashMap<>();
+            for (Map.Entry<String, IrExpr> en : anon.members().entrySet()) {
+                IrSort member = argSort(en.getValue(), ctx, structs);
+                if (member == null) return null;
+                members.put(en.getKey(), member);
+            }
+            return IrSort.structural(RECORD_SENTINEL, members);
+        }
         return null;
     }
 
@@ -711,6 +728,12 @@ final class ConstructionGate {
         return switch (field) {
             case IrSort.Refined ref -> true;
             case IrSort.Named n -> structs.containsKey(n.name());
+            // A written ANONYMOUS shape ([{property:String}]) is a real claim: the shape IS
+            // the ground truth, so there is no registry lookup to make it "declared". Without
+            // this the shape would be a decoration — nothing would judge its members, and a
+            // record type would be strictly weaker than the struct it mirrors. Other inline
+            // structurals (named shape requirements) stay ungated, as before.
+            case IrSort.Structural st -> RECORD_SENTINEL.equals(st.name());
             case IrSort.Trait t -> isParametricStream(t);
             case IrSort.Union u -> u.branches().stream().anyMatch(b -> gated(b, structs));
             case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> gated(b, structs));

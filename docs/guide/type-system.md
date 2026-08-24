@@ -23,6 +23,7 @@ just the widest case, the refined type with no predicate at all.
 - [Function dispatching with refined types](#function-dispatching-with-refined-types)
 - [The inline conditional](#the-inline-conditional)
 - [Structs and methods](#structs-and-methods)
+- [Anonymous structural types](#anonymous-structural-types)
 - [Traits — alternative interfaces](#traits--alternative-interfaces)
 - [Type extension — a richer type](#type-extension--a-richer-type)
 - [Multiple polymorphism models](#multiple-polymorphism-models)
@@ -205,6 +206,56 @@ combine(Lit(3), Lit(4))   # → 7
 
 Without it you'd have to destructure — `[{Lit(av), Lit(bv)}]` — even when you want
 the value whole; `name:T` keeps the value intact while still guarding on its type.
+
+`name:T` reads this way **inside a pattern**. In plain type position the same
+spelling declares a *named member* — see [anonymous structural
+types](#anonymous-structural-types) below. Position decides, and the two never
+meet: a pattern matches a value, a type describes one.
+
+## Anonymous structural types
+
+A brace aggregate has two faces, and each has a type. The `=` knob picks which:
+positional members make a **tuple**, named members make a **record**. Both are
+*anonymous* — they describe a shape without claiming a name.
+
+|            | value        | type                |
+| ---------- | ------------ | ------------------- |
+| positional | `{1, 2}`     | `[{Int, Int}]`      |
+| by-name    | `{a = 1}`    | `[{a:Int}]`         |
+
+The value writes `=` and the type writes `:` because that is what those symbols
+mean everywhere else: `=` binds a value, and the right of `:` is always a type.
+
+```pontif
+let objectWithProp:[{property:String}] = {property = "a string"}
+let point:[{x:[Int:@>0], y:[Int:@>0]}] = {x = 3, y = 4}
+
+function widthOf(box:[{w:Int, h:Int}]):Int -> box.w
+
+objectWithProp.property + (String:point.x + widthOf({w = 6, h = 9}))   # → "a string9"
+```
+
+A shape is a **requirement, not a name**: any literal of that shape satisfies it,
+with no struct to declare and no nominal claim made. That is the whole difference
+from `struct Point(x:Int, y:Int)`, which additionally says *this value is a Point*
+and can carry methods and traits.
+
+What a shape is not is a decoration — its members are judged exactly like a
+struct's fields. A member of the wrong type, a missing member, and an extra member
+are all compile errors, refinements on members are proved, and the primitive tower
+coerces across the boundary (`{d = 3}` fits `[{d:Decimal}]`, as `P(3)` fits
+`struct P(d:Decimal)`).
+
+Two forms are deliberately rejected rather than half-supported:
+
+- **Mixing positional and named members** in one body — `[{Int, property:Decimal}]`.
+  The reserved reading is constructor-order members first and named members after,
+  but nothing implements it, so it fails with that explanation instead of parsing
+  into a shape that quietly drops half of what you wrote.
+- **A method member** — `[{doStuff:[Method(Int):String]}]`. A shape carries data.
+  Behaviour is named: declare a trait with that contract and use `[T]`. This is the
+  same line the [traits](#traits--alternative-interfaces) section draws — a trait is
+  how a type says what it *does*, and an anonymous shape says only what it *has*.
 
 ## Traits — alternative interfaces
 

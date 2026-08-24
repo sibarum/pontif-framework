@@ -12,6 +12,7 @@ import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.types.TypeCatalog;
 import sibarum.pontif.types.TypeInfo;
 
+import static sibarum.pontif.parser.IrQueries.RECORD_SENTINEL;
 import static sibarum.pontif.parser.IrQueries.TUPLE_SENTINEL;
 import static sibarum.pontif.parser.IrQueries.baseSortName;
 import static sibarum.pontif.parser.IrQueries.describeSort;
@@ -2092,10 +2093,19 @@ public final class PontifParser {
         if (binding == null) {
             String inferredBase = baseSortName(inferredSort);
             String declaredBase = baseSortName(declaredSort);
-            if ("_record".equals(inferredBase)) {
-                // Anonymous aggregate: AggregatePromotion stamps + validates it at IR time (the record's
-                // own construction-gate judgment IS the claim check), so no claim LetIn is emitted.
-                recordPromotion = true;
+            if (RECORD_SENTINEL.equals(inferredBase)) {
+                // Anonymous aggregate promoted to a NAMED struct: AggregatePromotion stamps +
+                // validates it at IR time (the record's own construction-gate judgment IS the
+                // claim check), so no claim LetIn is emitted.
+                //
+                // But a declared ANONYMOUS shape ([{property:String}]) has no named struct to
+                // stamp into, so that judgment never runs — the shape would be a decoration.
+                // Keep the claim in that case and let the construction gate judge it the way it
+                // judges every other claim: classify(value, declared) over the one Assignability
+                // engine, which compares two structural shapes member-wise.
+                boolean declaredIsAnonymousShape = declaredSort instanceof IrSort.Structural ds
+                        && RECORD_SENTINEL.equals(ds.name());
+                recordPromotion = !declaredIsAnonymousShape;
                 binding = declaredSort;
             } else if ("_tuple".equals(inferredBase) && "Stream".equals(declaredBase)) {
                 // tuple → Stream[T] autobox (§8.6), gated at parse by the element check.
@@ -4285,6 +4295,13 @@ public final class PontifParser {
         Map<String, IrSort> members = new LinkedHashMap<>();
         java.util.Set<String> discards = new java.util.LinkedHashSet<>();
         Map<String, String> renames = new LinkedHashMap<>();
+        // The BY-NAME face: in TYPE position `name:Sort` declares a named member of
+        // an anonymous record (`[{property:String}]`), not a positional slot. A body
+        // is all-positional (a tuple) or all-named (a record) — the two first-seen
+        // tokens below drive the mixed-body diagnostic.
+        Map<String, IrSort> namedMembers = new LinkedHashMap<>();
+        PontifToken firstNamed = null;
+        PontifToken firstPositional = null;
         int index = 0;
         boolean first = true;
         while (peek().kind() != closeKind) {
@@ -4313,6 +4330,32 @@ public final class PontifParser {
                     narrowed = memberSort();
                 } finally {
                     parsingTuplePattern = prevPat;
+                }
+                if (!prevPat) {
+                    // TYPE position: a NAMED MEMBER of an anonymous record.
+                    if (firstPositional != null) {
+                        throw mixedAggregateBody(binder);
+                    }
+                    if (narrowed instanceof IrSort.CallSig sig
+                            && isCallableMemberKind(CallKinds.builtin(sig.typeName()))) {
+                        throw new ParseException(
+                                "An anonymous structural type carries DATA members only, but '"
+                                        + binder.text() + "' is declared as a call contract ("
+                                        + sig.typeName() + "). Behaviour is named: put the member on "
+                                        + "a trait — trait T { " + binder.text() + ":["
+                                        + sig.typeName() + "(…):…] } — and write the type as [T].",
+                                binder.origin());
+                    }
+                    if (namedMembers.containsKey(binder.text())) {
+                        throw new ParseException(
+                                "Duplicate member '" + binder.text()
+                                        + "' in an anonymous structural type.",
+                                binder.origin());
+                    }
+                    if (firstNamed == null) firstNamed = binder;
+                    namedMembers.put(binder.text(), narrowed);
+                    first = false;
+                    continue;
                 }
                 members.put(key, narrowed);
                 renames.put(key, binder.text());
@@ -4395,6 +4438,10 @@ public final class PontifParser {
                 // Type position: a member sort, optionally REPEATED as `T*N` or `N*T`
                 // (e.g. {Decimal*3}, {2*{2*Decimal}}) — expands to N positional members. The
                 // count is whichever operand is the integer, so the order is free and unambiguous.
+                if (firstNamed != null) {
+                    throw mixedAggregateBody(peek());
+                }
+                if (firstPositional == null) firstPositional = peek();
                 int repeat = 1;
                 IrSort memberSort;
                 if (peek().kind() == PontifToken.Kind.INTEGER && isStar(peek(1))) {
@@ -4433,6 +4480,12 @@ public final class PontifParser {
                             + "refer to fields by name, e.g. [Interval:@.lo <= @.hi].",
                     peek().origin());
         }
+        if (!namedMembers.isEmpty()) {
+            // The by-name face. NOT subject to the single-member grouping collapse
+            // below: `[{property:String}]` is a one-field record, not a parenthesized
+            // `String` — the name is the whole point, so there is nothing to group.
+            return new IrSort.Structural(RECORD_SENTINEL, namedMembers, open.origin());
+        }
         if (members.isEmpty()) {
             throw new ParseException(
                     "An empty tuple sort '()' is not yet supported (the empty/single-element "
@@ -4450,6 +4503,23 @@ public final class PontifParser {
         if (!discards.isEmpty()) literalConstrainedFields.put(tuple, discards);
         if (!renames.isEmpty()) destructureRenames.put(tuple, renames);
         return tuple;
+    }
+
+    /**
+     * The mixed-body diagnostic: an anonymous structural type is all-positional (a
+     * tuple) or all-named (a record), never a mix. The mixed form is reserved — the
+     * intended reading is constructor-order members first and named members after —
+     * but nothing implements it, so it fails here rather than parsing into a shape
+     * that silently drops half its members.
+     */
+    private static ParseException mixedAggregateBody(PontifToken at) {
+        return new ParseException(
+                "An anonymous structural type is either all-positional — a tuple, "
+                        + "[{Int, String}] — or all-named — a record, [{property:String}]. "
+                        + "Mixing positional and named members in one body is not supported; "
+                        + "declare a struct when the members are related, or split them into "
+                        + "a tuple and a record.",
+                at.origin());
     }
 
     /** A tuple member sort in type position: a nested tuple ({@code {…}}) or any other sort. */

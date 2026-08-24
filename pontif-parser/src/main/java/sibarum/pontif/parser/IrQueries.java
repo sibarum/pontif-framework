@@ -23,6 +23,14 @@ final class IrQueries {
     /** Structural-sort name marking an anonymous tuple aggregate. */
     static final String TUPLE_SENTINEL = "_tuple";
 
+    /**
+     * Structural-sort name marking an anonymous BY-NAME aggregate — the
+     * dictionary/record face, the by-name sibling of {@link #TUPLE_SENTINEL}.
+     * Written {@code [{property:String}]}; inferred for a name-present brace
+     * literal ({@code {property = "s"}}) that asserts no declared struct.
+     */
+    static final String RECORD_SENTINEL = "_record";
+
     /** A compact, human-readable rendering of a sort for error messages. */
     static String describeSort(IrSort s) {
         return switch (s) {

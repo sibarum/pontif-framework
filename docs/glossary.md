@@ -31,6 +31,14 @@ literals are written with **braces `{ }`** (the BRACE-AGGREGATES war, 2026-06-22
 | anonymous  | tuple `{1, 2}`     | dictionary `{a=1}`   |
 | named      | `Point{1, 2}`*     | `Point{x=1}`         |
 
+Both anonymous cells have a **type face**, written with `:` because the right of
+`:` is always a sort: a tuple sort `[{Int, Int}]` and a record sort `[{a:Int}]`
+(ruled 2026-08-24). A body is all-positional or all-named — the mixed form is
+reserved (constructor-order members first, named after) but unimplemented, and a
+call-signature member is rejected outright: an anonymous shape carries data, and
+behaviour is named, so it belongs on a trait. The record sort rides the
+`_record` sentinel exactly as the tuple sort rides `_tuple`.
+
 A named sort claims "this **is** a `Point`"; an anonymous sort claims only its
 shape. Tuples/dictionaries are the anonymous cells; structs are the same cells
 with the name (and behavior) turned on. Tuples are stored with positional keys
@@ -208,9 +216,13 @@ is rejected; positional keys are excluded (tuples are destructure-only). Not a
 value: `.{}` always binds into a receiving context. *(Exports rename — public ≠
 internal name — is parked.)*
 
-**dictionary** — The anonymous by-name **aggregate**: `{a = 1, b = 2}` — a
-struct with the type name (and behavior) turned off; the by-name sibling of the
-tuple, riding the same record substrate with no dedicated node. Free-form at
+**dictionary / record shape** — The anonymous by-name **aggregate**:
+`{a = 1, b = 2}` — a struct with the type name (and behavior) turned off; the
+by-name sibling of the tuple, riding the same record substrate with no dedicated
+node. Its type is written `[{a:Int, b:Int}]` and is a **requirement, not a name**:
+any literal of that shape satisfies it, no struct is declared, and no nominal
+claim is made — but its members are judged like a struct's fields (wrong sort,
+missing, and extra member are all compile errors; the primitive tower coerces). Free-form at
 construction (no completeness obligation — there's no named type to be complete
 *of*; the named `Point{x=1}` form is total by construction). Fields read by name
 (`d.a`) or by **decomposition** (`let d.{a, b -> bee}`).

@@ -1,0 +1,45 @@
+# Anonymous structural types — the two faces of a brace aggregate.
+#
+# A brace body is POSITIONAL (a tuple) or BY-NAME (a record), never a mix:
+#
+#     value        type
+#     {1, 2}       [{Int, Int}]           positional — slots keyed _0.._n
+#     {a = 1}      [{a:Int}]              by-name    — members keyed by name
+#
+# The by-name TYPE is written with `:` (every RHS of `:` is a sort) while the
+# by-name VALUE is written with `=`. The type is a real claim, not a decoration:
+# members are judged exactly like a struct's fields.
+
+module examples.anonymous_record_sort
+
+# The by-name face: a shape with no name, satisfied by a name-present literal.
+let objectWithProp:[{property:String}] = {property = "a string"}
+
+# Several members, refinements, and nesting all work.
+let point:[{x:[Int:@>0], y:[Int:@>0]}] = {x = 3, y = 4}
+let outer:[{inner:[{v:Int}]}] = {inner = {v = 5}}
+
+# A member sort is a boundary like any other, so the primitive tower coerces:
+# the Int literal promotes to Decimal exactly as a struct field would.
+let measured:[{d:Decimal}] = {d = 3}
+
+# A shape is usable as a parameter type — structural, so any literal of that
+# shape satisfies it without declaring a struct.
+function widthOf(box:[{w:Int, h:Int}]):Int -> box.w
+
+# The positional face is unchanged.
+let pair:[{String, Int}] = {"s", 3}
+
+# Rejected, each with its own diagnostic:
+#   let bad:[{property:String}] = {property = 1}   # member sort — can never satisfy
+#   let bad:[{x:Int, y:Int}]    = {x = 1}          # missing member 'y'
+#   let bad:[{x:Int}]           = {x = 1, y = 2}   # extra member 'y'
+#   let bad:[{Int, property:Decimal}] = …          # positional and named mixed
+#   let bad:[{doStuff:[Method(Int):String]}] = …   # behaviour belongs on a trait
+
+objectWithProp.property + "/"
+    + (String:point.x + point.y)
+    + "/" + (String:outer.inner.v)
+    + "/" + (String:measured.d + 0.5)          # 3.5 — it really is a Decimal
+    + "/" + (String:widthOf({w = 6, h = 9}))
+    + "/" + (String:pair._1)

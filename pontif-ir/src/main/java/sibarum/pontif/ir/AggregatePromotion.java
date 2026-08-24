@@ -39,6 +39,9 @@ import java.util.Map;
  */
 final class AggregatePromotion {
 
+    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record). */
+    private static final String RECORD_SENTINEL = "_record";
+
     private AggregatePromotion() {}
 
     static IrModule rewrite(IrModule module) throws CompileException {
@@ -187,6 +190,10 @@ final class AggregatePromotion {
             IrExpr.Record r, IrSort expected,
             Map<String, IrSort.Structural> structs,
             Map<String, List<IrStmt.FunctionDecl>> fns) throws CompileException {
+        IrSort.Structural anonShape = anonymousRecordShape(expected);
+        if (r.typeName() == null && anonShape != null) {
+            return judgeAgainstAnonymousRecord(r, anonShape, structs, fns);
+        }
         IrSort.Structural target = r.typeName() == null
                 ? resolveStruct(expected, structs)
                 : structs.get(r.typeName());
@@ -230,6 +237,53 @@ final class AggregatePromotion {
     }
 
     /**
+     * The declared shape of an anonymous BY-NAME sort ({@code [{property:String}]}),
+     * or null when the expectation is not one. This is the by-name sibling of the
+     * named-struct target below: there is no registry entry to look up, because the
+     * written shape IS the ground truth.
+     */
+    private static IrSort.Structural anonymousRecordShape(IrSort expected) {
+        return expected instanceof IrSort.Structural st && RECORD_SENTINEL.equals(st.name())
+                ? st : null;
+    }
+
+    /**
+     * Judges a name-present brace literal against a declared anonymous record shape.
+     * The rule is the named-struct rule minus the naming: the literal must supply
+     * EXACTLY the declared members (no missing, no extra) and each member is promoted
+     * against its declared sort, so a nested literal stamps and a mistyped member is
+     * caught here rather than surviving into the value. The result stays anonymous —
+     * an anonymous shape is a requirement, not a nominal type to be stamped with.
+     */
+    private static IrExpr judgeAgainstAnonymousRecord(
+            IrExpr.Record r, IrSort.Structural shape,
+            Map<String, IrSort.Structural> structs,
+            Map<String, List<IrStmt.FunctionDecl>> fns) throws CompileException {
+        for (String declared : shape.members().keySet()) {
+            if (!r.members().containsKey(declared)) {
+                throw new CompileException(
+                        "Aggregate literal is missing member '" + declared
+                                + "'; the declared shape requires: " + shape.members().keySet(),
+                        r.origin());
+            }
+        }
+        for (String provided : r.members().keySet()) {
+            if (!shape.members().containsKey(provided)) {
+                throw new CompileException(
+                        "Aggregate literal has member '" + provided
+                                + "', which the declared shape does not: " + shape.members().keySet(),
+                        r.origin());
+            }
+        }
+        Map<String, IrExpr> ordered = new LinkedHashMap<>();
+        for (Map.Entry<String, IrSort> en : shape.members().entrySet()) {
+            ordered.put(en.getKey(), rewriteExpr(
+                    r.members().get(en.getKey()), en.getValue(), structs, fns));
+        }
+        return new IrExpr.Record(r.typeName(), ordered, r.origin());
+    }
+
+    /**
      * Resolves an expected sort to the named struct it asserts, or null when it
      * asserts no (single, real-named) struct. Sentinel names ({@code _},
      * {@code _record}, {@code _tuple}) assert nothing.
@@ -243,7 +297,7 @@ final class AggregatePromotion {
             case IrSort.Structural s -> s.name();
             default -> null;
         };
-        if (name == null || name.equals("_") || name.equals("_record") || name.equals("_tuple")) {
+        if (name == null || name.equals("_") || name.equals(RECORD_SENTINEL) || name.equals("_tuple")) {
             return null;
         }
         // Only a REGISTRY-DECLARED struct is a construction target. An inline

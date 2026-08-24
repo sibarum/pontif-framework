@@ -277,6 +277,20 @@ class ReadmeSnippetTest {
                 """));
     }
 
+    // --- Anonymous structural types (tuple + record faces) --------------------
+
+    @Test
+    void guideAnonymousRecordSnippet_evaluatesToStringPlusNine() {
+        assertEquals("\"a string9\"", runGated("""
+                let objectWithProp:[{property:String}] = {property = "a string"}
+                let point:[{x:[Int:@>0], y:[Int:@>0]}] = {x = 3, y = 4}
+
+                function widthOf(box:[{w:Int, h:Int}]):Int -> box.w
+
+                objectWithProp.property + (String:point.x + widthOf({w = 6, h = 9}))
+                """));
+    }
+
     // --- Traits: methods (the primary example) -------------------------------
 
     @Test

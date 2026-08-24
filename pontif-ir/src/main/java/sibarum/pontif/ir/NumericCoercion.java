@@ -170,11 +170,35 @@ final class NumericCoercion {
      * {@code Dec} — is left alone).
      */
     private static IrExpr coerce(IrExpr value, IrSort declared, InferenceContext ctx) {
+        // An anonymous BY-NAME shape ([{d:Decimal}]) carries its members' declared sorts,
+        // so it is a value boundary like any other: recurse so `{d = 3}` promotes exactly
+        // as a struct field would. A named struct's members are already coerced from the
+        // registry in the Record case above; this supplies the shape the anonymous face
+        // has no registry entry for.
+        if (declared instanceof IrSort.Structural shape
+                && RECORD_SENTINEL.equals(shape.name())
+                && value instanceof IrExpr.Record rec && rec.typeName() == null) {
+            Map<String, IrExpr> members = new LinkedHashMap<>();
+            boolean changed = false;
+            for (Map.Entry<String, IrExpr> en : rec.members().entrySet()) {
+                IrSort memberSort = shape.members().get(en.getKey());
+                IrExpr member = memberSort == null
+                        ? en.getValue() : coerce(en.getValue(), memberSort, ctx);
+                changed |= member != en.getValue();
+                members.put(en.getKey(), member);
+            }
+            return changed
+                    ? new IrExpr.Record(rec.typeName(), members, rec.runtimeChecks(), rec.origin())
+                    : value;
+        }
         if (!isDecimalSort(declared)) return value;
         IrSort inferred = TypeSystem.standard().infer(value, ctx);
         if (!isIntSort(inferred)) return value;
         return new IrExpr.Cast(IrSort.named("Decimal"), value, value.origin());
     }
+
+    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
+    private static final String RECORD_SENTINEL = "_record";
 
     private static boolean isDecimalSort(IrSort sort) {
         return sort != null && "Decimal".equals(sort.baseName());
