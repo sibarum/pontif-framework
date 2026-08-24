@@ -253,6 +253,14 @@ public final class StaticDispatch {
                 if (isStructBaseWiden(argSort, paramSort, structAncestors)) {
                     continue;
                 }
+                // The same widen, one step further: an unrefined TRAIT param that the arg's type — or
+                // any is-a ancestor of it — implements. Also total (a bare trait carries no predicate),
+                // so also a genuine MATCHES. Assignability already reaches this by recursing on the
+                // nominal base; this is the same conclusion for the gate's Sort-level view.
+                if (!paramSort.isRefined()
+                        && satisfiesTrait(argSort.name(), paramSort.name(), traitImpls, structAncestors)) {
+                    continue;
+                }
                 allPassed = false;
                 if (provablyDisjoint(argSort, paramSort, simp, traitImpls, structAncestors)) {
                     return OverloadFit.EXCLUDED;  // arg ∩ this param = ∅ → can't route here
@@ -301,7 +309,7 @@ public final class StaticDispatch {
         }
         // The arg's type satisfies the param trait (nominal is-a) → not disjoint. Refinements can't
         // see this relation, so its Failed would otherwise mis-read a satisfying struct as excluded.
-        if (traitImpls.getOrDefault(arg.name(), java.util.Set.of()).contains(param.name())) {
+        if (satisfiesTrait(arg.name(), param.name(), traitImpls, structAncestors)) {
             return false;
         }
         // The arg's struct is-a the param's struct through the inheritance chain (`Sub:Base`) → not
@@ -320,6 +328,47 @@ public final class StaticDispatch {
      * <em>bare</em> name (the ancestry view is bare-keyed). A refined param is excluded here so its
      * predicate obligation is not silently dropped — that case falls through to the abstain path.
      */
+    /**
+     * Whether the type named {@code argName} satisfies the trait named {@code paramName} — by its own
+     * impl, or by an impl on any of its is-a ancestors.
+     *
+     * <p>Both halves of this were already here and neither was composed with the other: the
+     * {@code traitImpls} view answers "does THIS type implement it" (walking the trait-extends chain),
+     * and {@code structAncestors} answers "what does this type inherit from". An {@code assign trait
+     * Base:T} impl is inherited by every descendant of {@code Base} — which is exactly what
+     * {@code structAncestors}' own contract says the gate must respect — so asking only the first
+     * question read a {@code Sub} argument as provably disjoint from a {@code T} parameter. That is a
+     * false disjointness claim, and the gate's FAILED verdict is supposed to mean provably-misroutes.
+     * {@link sibarum.pontif.types.Assignability#isA} reaches the same conclusion by recursing on the
+     * nominal base; this is that conclusion for the gate's compiled-{@link Sort} view.
+     *
+     * <p>Bare-tolerant on both sides: {@code structAncestors} is bare-keyed while {@code traitImpls} may
+     * be qualified by the linker, so names are compared unqualified as well as as-written.
+     */
+    private static boolean satisfiesTrait(String argName, String paramName,
+            java.util.Map<String, java.util.Set<String>> traitImpls,
+            java.util.Map<String, java.util.Set<String>> structAncestors) {
+        if (argName == null || paramName == null) return false;
+        if (implementsTrait(argName, paramName, traitImpls)) return true;
+        for (String ancestor : structAncestors.getOrDefault(bareName(argName), java.util.Set.of())) {
+            if (implementsTrait(ancestor, paramName, traitImpls)) return true;
+        }
+        return false;
+    }
+
+    /** One {@code traitImpls} membership test, tolerating linker qualification on either side. */
+    private static boolean implementsTrait(String typeName, String traitName,
+            java.util.Map<String, java.util.Set<String>> traitImpls) {
+        String bareTrait = bareName(traitName);
+        for (java.util.Map.Entry<String, java.util.Set<String>> e : traitImpls.entrySet()) {
+            if (!bareName(e.getKey()).equals(bareName(typeName))) continue;
+            for (String t : e.getValue()) {
+                if (bareName(t).equals(bareTrait)) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean isStructBaseWiden(Sort arg, Sort param,
             java.util.Map<String, java.util.Set<String>> structAncestors) {
         if (arg == null || param == null || param.isRefined()) return false;

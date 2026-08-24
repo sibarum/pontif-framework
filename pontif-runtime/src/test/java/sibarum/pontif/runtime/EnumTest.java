@@ -258,26 +258,38 @@ class EnumTest {
     }
 
     /**
-     * An enum takes trait obligations on its declaration exactly as a struct does, and
-     * its block methods satisfy them. Passing a case where the TRAIT is expected is a
-     * separate, pre-existing gap (docs/enums.md §6): a pinned subtype does not inherit
-     * its base's trait impl at the call gate, which a hand-written
-     * {@code struct Sub:[Base:@.n==1]()} fails in exactly the same way.
+     * An enum takes trait obligations on its declaration exactly as a struct does, its
+     * block methods satisfy them, and a CASE is usable wherever the trait is expected —
+     * the case is-a the enum, and the enum implements the trait. (That last leg needed
+     * the call gate taught to compose the trait-impl and struct-ancestry views; see
+     * {@code StructInheritedTraitImplTest}'s I-group.)
      */
+    private static final String BUDGETED_TIER = """
+            trait Budgeted { budget:[Method():Int] }
+            enum Tier:[Budgeted](name:String) {
+              Cheap("basic")
+              Costly("premium")
+
+              budget():Int -> match this {
+                [Tier.Costly] -> 500
+                [Tier] -> 5
+              }
+            }
+            """;
+
     @Test
     void enum_declaresTraitObligations_andItsBlockMethodsSatisfyThem() {
-        assertEquals("500", value("""
-                trait Budgeted { budget:[Method():Int] }
-                enum Tier:[Budgeted](name:String) {
-                  Cheap("basic")
-                  Costly("premium")
+        assertEquals("500", value(BUDGETED_TIER + "main ( Tier.Costly.budget() )"));
+    }
 
-                  budget():Int -> match this {
-                    [Tier.Costly] -> 500
-                    [Tier] -> 5
-                  }
-                }
-                main ( Tier.Costly.budget() )"""));
+    @Test
+    void caseValue_passesWhereTheEnumsTraitIsExpected() {
+        assertEquals("500", value(BUDGETED_TIER + """
+                function spend(b:Budgeted):Int -> b.budget()
+                main ( spend(Tier.Costly) )"""));
+        assertEquals("5", value(BUDGETED_TIER + """
+                function spend(b:Budgeted):Int -> b.budget()
+                main ( spend(Tier.Cheap) )"""));
     }
 
     /** A case is usable wherever the enum is expected — the demotion is total. */

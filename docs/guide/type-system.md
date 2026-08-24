@@ -603,8 +603,8 @@ one zero-field case struct per case, each pinning every base field — with two 
 added: a compiler-forced `_ordinal` discriminant (so payload-free cases, and cases
 sharing a payload, stay distinct and ordered) and the recorded cover that closes the
 type. Nothing in the is-a core, demotion, or construction changes
-([docs/enums.md](../enums.md), which also records the one open limitation: a case
-cannot yet be passed where a *trait* is expected).
+([docs/enums.md](../enums.md)). An enum takes trait obligations and its block methods
+satisfy them, so a case is usable wherever the enum's trait is expected.
 
 ## Generics (type parameters)
 

@@ -164,10 +164,11 @@ Undecidability is reported honestly. An arm outside the closed fragment makes th
 cover question unanswerable, and the tier declines, falling back to the standing
 conservation rule: no proof of totality means a default arm is required.
 
-# Two fixes this needed in shared machinery (§5)
+# Three fixes this needed in shared machinery (§5)
 
-Neither is enum-specific; both were latent gaps that enums are simply the first
-feature to walk into.
+None is enum-specific; all three were latent gaps that enums are simply the first
+feature to walk into. Each is a case of the static and dynamic sides, or two views of
+the same relation, disagreeing about the is-a chain.
 
 **The runtime claim rule now reads the is-a chain.** A `struct Exp:[BiOp:@.op=="+"]`
 value's claim is `Exp`, and the matcher required the sort's name to *equal* that
@@ -187,31 +188,24 @@ therefore raised an undecidable obligation instead of simply not matching.
 `RefinementRules.CMP_STR_STR` folds all six operators by `compareTo` — strings order
 and compare, they just don't compute.
 
+**A subtype now routes to a trait its base implements.** `StaticDispatch` (the call
+gate's decider) held both halves of the answer and never composed them: one view
+answers "does the argument's own type implement this trait" (walking the trait-extends
+chain), the other answers "what does it inherit from" — and `structAncestors`' own
+contract already said an `assign trait Base:T` impl is inherited by every descendant.
+Asking only the first question read a `Sub` argument as *provably disjoint* from a `T`
+parameter, which is a false disjointness claim: the gate's FAILED verdict is supposed
+to mean provably-misroutes. `Assignability.isA` had it right all along by recursing on
+the nominal base — which is why `let b:Budgeted = aSub` was fine while the call gate
+refused the same widen, one more symptom of the is-a/base-chain fork. Both legs now go
+through one `StaticDispatch.satisfiesTrait`, so widening to an unrefined trait an
+ancestor implements is a *proved* match rather than merely not-disjoint. For enums this
+is what makes `spend(Tier.Costly)` route for `function spend(b:Budgeted)`; witnessed by
+the I-group in `StructInheritedTraitImplTest`, negatives included (a struct that
+implements nothing, and an ancestor implementing a *different* trait, are both still
+rejected).
+
 # Open / deliberately not done (§6)
-
-**A case cannot be passed where a TRAIT is expected.** An enum takes trait
-obligations (`enum Tier:[Budgeted](…)`) and its block methods satisfy them —
-`Tier.Costly.budget()` works, and a case passes freely where the *enum* is expected.
-But `spend(Tier.Costly)` for `function spend(b:Budgeted)` is refused by the call
-gate. This is **not enum-specific**: a pinned subtype does not inherit its base's
-trait impl at the call gate, and the hand-written equivalent fails identically —
-
-```pontif
-trait Budgeted { budget:[Method():Int] }
-struct Base(n:Int)
-assign trait Base:Budgeted { budget():Int -> 5 }
-struct Sub:[Base:@.n==1]()
-function spend(b:Budgeted):Int -> b.budget()
-spend(Sub())                       # rejected: "provably violate the parameter refinement"
-```
-
-The nominal relation *does* know (`TraitRelations` declares `Sub` is-a `Base`, and
-`TraitRegistry.satisfies` walks the ancestry) — the compile-time call gate reads a
-different path and misses it. That is the is-a/base-chain fork the type-system
-inventory already ranks; fixing it there fixes it for enums for free, which is why it
-was left alone here rather than patched at the enum layer.
-
-Also open:
 
 - **Positional literal patterns over ordinary structs.** `[Person("bob", age)]` still
   rejects the String literal: `parseStructFields`'s literal-clause set covers

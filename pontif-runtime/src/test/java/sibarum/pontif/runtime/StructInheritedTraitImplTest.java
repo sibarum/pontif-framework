@@ -104,6 +104,84 @@ class StructInheritedTraitImplTest {
         assertEquals(WALK_RESIDUE, run("let s:Expr = zero\ns.walk()\n"));
     }
 
+    // --- I: the sub-struct passed where the base's TRAIT is the declared PARAMETER -----------
+    //
+    // Distinct from E/H (a base-STRUCT param) and from F (a trait-typed local): here the call gate
+    // itself has to see that an `Exp` argument can route to an `Expr` parameter. It could not —
+    // {@code StaticDispatch} asked whether the ARGUMENT'S OWN type implements the trait, and
+    // separately whether it inherits from the parameter's struct, but never composed the two. So a
+    // sub-struct argument read as *provably disjoint* from its base's trait, which is a false
+    // disjointness claim: the gate's FAILED verdict is supposed to mean provably-misroutes.
+
+    @Test
+    void i_subStructArgument_routesToATraitParameterItsBaseImplements() {
+        assertEquals(WALK_EXP, run("""
+                function traverse(e:Expr):Stream[Expr] -> e.walk()
+                traverse(Exp(zero, zero))
+                """));
+    }
+
+    @Test
+    void i_subStructArgument_routesThroughATwoHopChain() {
+        assertEquals(WALK_RESIDUE, run("""
+                struct Deep:Residue(exp:Int, sign:Bool)
+                function traverse(e:Expr):Stream[Expr] -> e.walk()
+                traverse(Residue(1, false))
+                """));
+    }
+
+    /**
+     * The gate must still catch a genuine misroute: a struct that neither implements the trait nor
+     * inherits an impl is correctly excluded, so the fix widens what routes without blunting the
+     * check. (The diagnostic is dispatch's, not the gate's, because {@code Refinements} leaves this
+     * pairing undecided rather than Failed — unchanged by the fix.)
+     */
+    @Test
+    void i_nonSatisfyingStructArgument_isStillRejected() {
+        PontifCompiler.CompileResult r = compiler.compile(PRELUDE + """
+                struct Unrelated(k:Int)
+                function traverse(e:Expr):Stream[Expr] -> e.walk()
+                traverse(Unrelated(1))
+                """, "inherit.ptf");
+        boolean rejected = r instanceof PontifCompiler.CompileResult.Failed
+                || runner.run(r, PontifRunner.Engine.INTERPRETER).isError();
+        assertTrue(rejected, "a struct satisfying no trait must not route to a trait parameter");
+    }
+
+    /** An impl on the ancestor of a DIFFERENT trait must not satisfy the parameter's trait. */
+    @Test
+    void i_ancestorImplementingAnotherTrait_isStillRejected() {
+        PontifCompiler.CompileResult r = compiler.compile("""
+                trait Budgeted { budget:[Method():Int] }
+                trait Other { tag:[Method():Int] }
+                struct Base(n:Int)
+                assign trait Base:Other { tag():Int -> 1 }
+                struct Sub:[Base:@.n==1]()
+                function spend(b:Budgeted):Int -> b.budget()
+                spend(Sub())
+                """, "wrongtrait.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Failed.class, r,
+                "Base implements Other, not Budgeted — Sub must not route to a Budgeted parameter");
+    }
+
+    /** A trait reached by BOTH chains at once: struct ancestry, then trait-extends. */
+    @Test
+    void i_traitExtendsChain_composesWithStructAncestry() {
+        PontifCompiler.CompileResult r = compiler.compile("""
+                trait Top { budget:[Method():Int] }
+                trait Tier:Top { }
+                struct Base(n:Int)
+                assign trait Base:Tier { budget():Int -> 9 }
+                struct Kid:[Base:@.n==1]()
+                function spend(b:Top):Int -> b.budget()
+                spend(Kid())
+                """, "twochains.ptf");
+        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, r,
+                () -> "expected success; got: "
+                        + ((PontifCompiler.CompileResult.Failed) r).error().text());
+        assertEquals("9", runner.run(r, PontifRunner.Engine.INTERPRETER).text());
+    }
+
     // --- override: a sub-struct's own impl wins over the inherited one -----------------------
 
     @Test
