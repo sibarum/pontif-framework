@@ -446,6 +446,35 @@ be encapsulated as a field, not is-a'd (so record-is-a-scalar / newtypes /
 refinement-subtyping *over a primitive*, e.g. `Complex:[Decimal:@==r](r,i)`, is a
 deferred decision — ruled 2026-06-08). See `docs/univocal-language-design.md`.
 
+**enum** — a **struct-extension** whose value-set is *closed*: a base struct plus
+one zero-field case struct per case, each pinning every base field, plus the
+**seal**. Not new type machinery — `enum E(f:S) { A(lit) … }` is exactly the
+discriminant-pin form spelled once instead of N+1 times. Every case gets a
+compiler-forced `_ordinal`, which is what makes a payload-free enum
+(`enum Colour { Red; Green; Blue }`) and two cases sharing a payload distinct values,
+and what gives every enum a declaration order. See `docs/enums.md`.
+
+**seal** — the recorded, complete, ordered case cover on an `enum`'s base
+(`Structural.sealedCases`). It is the *only* new fact `enum` introduces, and it buys
+two things: the base becomes **abstract** (constructing it directly would fabricate a
+value outside its own cover), and match totality becomes **set arithmetic over a
+finite table** rather than predicate complementation — decided case by case with no
+solver call, which is why it is trustworthy. A missing arm names the case you forgot.
+
+**type-level member** — a member of a *type* rather than of its values, and so far
+only an `enum` case. `ResourceType.DatabaseTable` names the case's singleton sort
+**and** that sort's unique inhabitant: a pattern in brackets, a value in an
+expression. Because the sort has exactly one value the two readings can never
+disagree, which is what makes one name for both honest rather than merely convenient.
+Distinct from a **method**, which is a member of the type's *namespace* but operates
+on a value.
+
+**lookup (`Enum(literal…)`)** — applying an enum to a row of literals *selects* the
+case carrying that row; it never constructs. A sealed type has exactly the values its
+cases name, so a row no case carries is a compile error naming the ones that do. A
+non-literal argument is refused on purpose: that is a **narrowing**, and narrowing is
+done by match (*widen for free, narrow by match*), not by application.
+
 **demotion / promotion** — the two subtype casts, governed by *lose freely,
 fabricate never*. **Demotion** (subtype → supertype, `let b:Point = p`) runs the
 declared **morphism** — a total functional map pinning every base field

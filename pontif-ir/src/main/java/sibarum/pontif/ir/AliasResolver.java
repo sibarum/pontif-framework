@@ -347,7 +347,7 @@ public final class AliasResolver {
                         ? null : resolveSort(s.baseSort(), aliases, path);
                 yield new IrSort.Structural(
                         s.name(), resolvedMembers, resolvedBase, s.typeParams(),
-                        s.extensions(), s.origin());
+                        s.extensions(), s.sealedCases(), s.origin());
             }
             case IrSort.CallSig c -> {
                 List<IrSort> resolvedParams = new ArrayList<>(c.paramSorts().size());
@@ -554,7 +554,7 @@ public final class AliasResolver {
                         ? null : substituteResolved(s.baseSort(), resolved);
                 yield new IrSort.Structural(
                         s.name(), newMembers, newBase, s.typeParams(),
-                        s.extensions(), s.origin());
+                        s.extensions(), s.sealedCases(), s.origin());
             }
             case IrSort.CallSig c -> {
                 List<IrSort> newParams = new ArrayList<>(c.paramSorts().size());

@@ -204,9 +204,15 @@ public final class NameResolver {
                 }
                 IrSort base = s.baseSort() == null
                         ? null : rewriteSort(s.baseSort(), m, table);
+                // The seal's entries are type names too — FQN-rewrite each so a
+                // cross-module `match` still resolves the cover after linking.
+                List<String> cases = new ArrayList<>(s.sealedCases().size());
+                for (String c : s.sealedCases()) {
+                    cases.add(resolveTypeName(c, m, table, s.origin()));
+                }
                 yield new IrSort.Structural(
                         resolveTypeName(s.name(), m, table, s.origin()), members, base,
-                        s.typeParams(), s.extensions(), s.origin());
+                        s.typeParams(), s.extensions(), cases, s.origin());
             }
             case IrSort.CallSig c -> {
                 List<IrSort> ps = new ArrayList<>(c.paramSorts().size());

@@ -449,7 +449,9 @@ public final class IrInterpreter {
      * bare name treated as unconstrained — accepting any value.
      */
     private Simplifier checker(CompiledModule module) {
-        return simplifier.withRegistry(module.structRegistry());
+        return simplifier
+                .withRegistry(module.structRegistry())
+                .withNominals(module.dispatch().traitRegistry());
     }
 
     public Object eval(IrExpr expr, Environment env, CompiledModule module) {

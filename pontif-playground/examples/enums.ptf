@@ -1,0 +1,69 @@
+# The `enum` declarator (ruled 2026-08-24).
+#
+# An enum is a struct with a CLOSED set of values, each named in the type's own
+# namespace. It adds no type-system machinery: it lowers to the pinned-subtype
+# form `discriminant-pin.ptf` already shows, plus one new fact — the SEAL.
+#
+#   enum ResourceType(driver:String) { DatabaseTable("postgres") … }
+#
+# becomes, in the grammar that already shipped:
+#
+#   struct ResourceType(driver:[String:@=="postgres"|…], _ordinal:[Int:@>=0 & @<3])
+#   struct ResourceType$DatabaseTable:[ResourceType:@.driver=="postgres" & @._ordinal==0]()
+#   …and the cover [DatabaseTable, LocalFilesystem, RemoteHttp] recorded on the base.
+#
+# `_ordinal` is compiler-forced (the leading-underscore rule): it is what makes a
+# payload-free enum, or two cases with the same payload, distinct values at all,
+# and it gives every enum a declaration order for free.
+
+enum ResourceType(driver:String) {
+    DatabaseTable("postgres")
+    LocalFilesystem("NTFS")
+    RemoteHttp("tcp/ip")
+
+    # Methods share the member block, exactly as on a struct, and a body may name
+    # sibling cases.
+    latencyBudget():Int -> match this {
+        [ResourceType.RemoteHttp] -> 500
+        [ResourceType] -> 5
+    }
+}
+
+# A case name is a TYPE-LEVEL MEMBER: it denotes the case's singleton sort and that
+# sort's one inhabitant at once. In a value position it reads as the inhabitant,
+# carrying the fields the morphism pinned.
+let local = ResourceType.LocalFilesystem
+let driverOfLocal = local.driver                    # "NTFS"
+
+# In a sort position the same spelling reads as the sort. The two can never
+# disagree — the sort has exactly one value.
+let pinned:ResourceType.DatabaseTable = ResourceType.DatabaseTable
+
+# Applying the enum to a row of literals is a LOOKUP, not a construction: a sealed
+# type has exactly the values its cases name, so this selects one of them.
+# `ResourceType("mysql")` is a compile error naming the three that exist.
+let byDriver = ResourceType("tcp/ip")               # ResourceType.RemoteHttp
+
+# The seal is what makes this match total with NO default arm: the compiler knows
+# the value-set IS the three cases, and checks the cover case by case (a table, not
+# a solver). Dropping any arm names the case you forgot.
+function availability(r:ResourceType):String -> match r {
+    [ResourceType("NTFS")]           -> "available"
+    [ResourceType.DatabaseTable]     -> "needs DB access"
+    [ResourceType.RemoteHttp]        -> "needs network"
+}
+
+# A payload-free enum is told apart by `_ordinal` alone. Cases are members, so they
+# are newline- or `;`-terminated like every other member list.
+enum Colour { Red; Green; Blue }
+
+function warm(c:Colour):Bool -> match c {
+    [Colour.Red]   -> true
+    [Colour.Green] -> false
+    [Colour.Blue]  -> false
+}
+
+let redIsWarm = warm(Colour.Red)                    # true
+let localBudget = local.latencyBudget()             # 5
+
+availability(byDriver)                              # "needs network"

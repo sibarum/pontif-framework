@@ -83,6 +83,24 @@ public final class Refinements {
     }
 
     /**
+     * The claim rule's test: does a value CLAIMING {@code claimed} answer to a sort
+     * requiring {@code required}? Its own name does, and so does any name that is-a
+     * {@code required} — a {@code struct Exp:[BiOp:…]} value satisfies {@code [BiOp]},
+     * an enum case satisfies its enum. Claims are still never invented: the value's
+     * constructed type is the only thing consulted, just read through the is-a
+     * relation the declaration already asserted. A value with no claim at all answers
+     * to nothing declared.
+     *
+     * <p>This is what keeps the runtime test in step with the static one. A narrowing
+     * the type checker licenses ({@code let b:BiOp = anExp}) must not be refused by
+     * the matcher, or a match arm the compiler proved reachable dies at runtime.
+     */
+    private static boolean claimAccepts(String required, String claimed, Simplifier simplifier) {
+        if (claimed == null) return false;
+        return required.equals(claimed) || simplifier.nominals().isNominalSubtype(claimed, required);
+    }
+
+    /**
      * A built-in scalar base name (the kinds {@link #primitiveKindGate} bites on).
      * A refinement over one of these is provably disjoint from a struct/tuple; a
      * refinement over any other base ({@code _tuple}, {@code _record}, an inline
@@ -160,7 +178,7 @@ public final class Refinements {
         // keep the existing predicate-only behavior.
         if (isDeclaredName(sort.name(), simplifier)
                 && simplifier.simplify(value) instanceof SymExpr.Record(var ignored, String claimed)
-                && !sort.name().equals(claimed)) {
+                && !claimAccepts(sort.name(), claimed, simplifier)) {
             return ProofResult.failed(
                     "Value " + (claimed == null ? "makes no type claim" : "claims '" + claimed + "'")
                             + " but the refined sort requires the declared type '" + sort.name() + "'");
@@ -323,11 +341,12 @@ public final class Refinements {
                                 + sort.members().size() + " — positional sorts take no width");
             }
         } else if (isDeclaredName(sort.name(), simplifier)) {
-            if (!sort.name().equals(recordTypeName)) {
+            if (!claimAccepts(sort.name(), recordTypeName, simplifier)) {
                 return ProofResult.failed(
                         "Value " + (recordTypeName == null ? "makes no type claim" : "claims '" + recordTypeName + "'")
                                 + " but the sort requires the declared type '" + sort.name()
-                                + "' — a name is satisfied only by values constructed as that type");
+                                + "' — a name is satisfied only by values constructed as that type "
+                                + "or as one of its is-a descendants");
             }
         }
 

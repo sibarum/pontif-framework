@@ -20,6 +20,16 @@ public final class Simplifier {
      * it via {@link #withRegistry}.
      */
     private final Map<String, Sort> registry;
+    /**
+     * The nominal is-a relation — struct-extends-struct, struct-implements-trait,
+     * trait-extends-trait. The claim rule reads it so a value's declared type
+     * satisfies a sort naming any of its ANCESTORS: a {@code struct Exp:[BiOp:…]}
+     * value answers to {@code [BiOp]}, exactly as the static side already lets
+     * {@code let b:BiOp = anExp} through. Without it the runtime rejected what the
+     * type checker had accepted. Empty by default; the engines attach the module's
+     * populated registry via {@link #withNominals}.
+     */
+    private final TraitRegistry nominals;
 
     public Simplifier(List<RewriteRule> rules) {
         this(rules, Context.EMPTY);
@@ -30,9 +40,15 @@ public final class Simplifier {
     }
 
     public Simplifier(List<RewriteRule> rules, Context context, Map<String, Sort> registry) {
+        this(rules, context, registry, new TraitRegistry());
+    }
+
+    public Simplifier(List<RewriteRule> rules, Context context, Map<String, Sort> registry,
+                      TraitRegistry nominals) {
         this.rules = List.copyOf(rules);
         this.context = context;
         this.registry = Map.copyOf(registry);
+        this.nominals = nominals == null ? new TraitRegistry() : nominals;
     }
 
     public static Simplifier of(RewriteRule... rules) {
@@ -40,12 +56,22 @@ public final class Simplifier {
     }
 
     public Simplifier withContext(Context context) {
-        return new Simplifier(rules, context, registry);
+        return new Simplifier(rules, context, registry, nominals);
     }
 
     /** A copy carrying the given nominal-struct registry. */
     public Simplifier withRegistry(Map<String, Sort> registry) {
-        return new Simplifier(rules, context, registry);
+        return new Simplifier(rules, context, registry, nominals);
+    }
+
+    /** A copy carrying the given nominal is-a relation. */
+    public Simplifier withNominals(TraitRegistry nominals) {
+        return new Simplifier(rules, context, registry, nominals);
+    }
+
+    /** The nominal is-a relation; an empty relation when none was attached. */
+    public TraitRegistry nominals() {
+        return nominals;
     }
 
     public Context context() {

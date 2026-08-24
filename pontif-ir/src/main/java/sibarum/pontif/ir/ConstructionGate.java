@@ -417,6 +417,18 @@ final class ConstructionGate {
             // Anonymous / tuple-sentinel / unregistered — no declared claim to gate.
             return new IrExpr.Record(r.typeName(), members, r.origin());
         }
+        // A sealed enum base is ABSTRACT: its values are exactly the cases it lists,
+        // so a direct construction would fabricate a value outside its own cover and
+        // break the seal every other enum guarantee rests on (docs/enums.md §3).
+        if (decl.isSealed()) {
+            throw new CompileException(
+                    "'" + r.typeName() + "' is a sealed enum — it cannot be constructed directly, "
+                            + "because its values are exactly its cases "
+                            + decl.sealedCases().stream().map(EnumCover::display).toList()
+                            + ". Name one (e.g. `" + EnumCover.display(decl.sealedCases().get(0))
+                            + "`), or look one up by its values (`" + r.typeName() + "(…)`).",
+                    r.origin());
+        }
         boolean nativeTarget = NativeConstructors.has(r.typeName());
         Map<String, IrSort> checks = new LinkedHashMap<>();
         for (Map.Entry<String, IrExpr> en : members.entrySet()) {

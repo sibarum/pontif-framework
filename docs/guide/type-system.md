@@ -28,6 +28,7 @@ just the widest case, the refined type with no predicate at all.
 - [Multiple polymorphism models](#multiple-polymorphism-models)
 - [Struct member blocks](#struct-member-blocks)
 - [Constructor bodies](#constructor-bodies)
+- [Enums — a closed set of values](#enums--a-closed-set-of-values)
 - [Generics (type parameters)](#generics-type-parameters)
 - [Operator overloading](#operator-overloading)
 
@@ -545,6 +546,65 @@ The body and the [member block](#struct-member-blocks) coexist, in that order: t
 `this.` target ends the preamble, so the `{ … }` methods follow it and a subsequent
 top-level `let` parses as usual. A struct wanting a body writes at least one `let`
 in it — a `->` with nothing after it is an error, not a no-op.
+
+## Enums — a closed set of values
+
+An `enum` is a struct whose values are a **closed, named set**. The fields are shared
+by every case; each case fixes them.
+
+```pontif
+enum ResourceType(driver:String) {
+    DatabaseTable("postgres")
+    LocalFilesystem("NTFS")
+    RemoteHttp("tcp/ip")
+
+    latencyBudget():Int -> match this {
+        [ResourceType.RemoteHttp] -> 500
+        [ResourceType] -> 5
+    }
+}
+```
+
+Cases and methods share one member block — a method always writes
+`name(params):Ret -> body`, which is how the two are told apart. Both are members, so
+both are newline- or `;`-terminated (`enum Colour { Red; Green; Blue }` on one line).
+The field list is optional, and an enum takes trait obligations (`enum E:[T1 & T2](…)`)
+exactly as a struct does.
+
+A case name is a **type-level member**: it names the case's singleton sort *and* that
+sort's one value, so it reads as a pattern in brackets and as a value in an
+expression. Since the sort has exactly one inhabitant, the two can never disagree.
+
+```pontif
+let f:ResourceType.LocalFilesystem = ResourceType.LocalFilesystem   # sort, then value
+let d = ResourceType.DatabaseTable.driver                           # "postgres"
+```
+
+Applying the enum to a row of literals is a **lookup**, not a construction — a sealed
+type has exactly the values its cases name, so `ResourceType("tcp/ip")` *selects*
+`RemoteHttp`, and `ResourceType("mysql")` is a compile error listing the three that
+exist. A non-literal argument is refused: `ResourceType(someString)` is a narrowing,
+and narrowing is done by match, not by application.
+
+The seal is what buys you exhaustiveness. Because the value-set **is** the case list,
+a match needs no default arm, and a missing arm names the case you forgot:
+
+```pontif
+function availability(r:ResourceType):String -> match r {
+    [ResourceType("NTFS")]       -> "available"      # a literal row is a filter
+    [ResourceType.DatabaseTable] -> "needs DB access"
+    [ResourceType.RemoteHttp]    -> "needs network"
+}
+```
+
+All of this is sugar. The declaration lowers to the pinned-subtype form
+[type extension](#type-extension--a-richer-type) already provides — a base struct plus
+one zero-field case struct per case, each pinning every base field — with two things
+added: a compiler-forced `_ordinal` discriminant (so payload-free cases, and cases
+sharing a payload, stay distinct and ordered) and the recorded cover that closes the
+type. Nothing in the is-a core, demotion, or construction changes
+([docs/enums.md](../enums.md), which also records the one open limitation: a case
+cannot yet be passed where a *trait* is expected).
 
 ## Generics (type parameters)
 

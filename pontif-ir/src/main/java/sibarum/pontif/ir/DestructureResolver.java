@@ -276,7 +276,7 @@ public final class DestructureResolver {
                         ? resolvePattern(nested, structs) : e.getValue());
             }
             return new IrSort.Structural(sp.name(), members, sp.baseSort(), sp.typeParams(),
-                    sp.extensions(), sp.origin());
+                    sp.extensions(), sp.sealedCases(), sp.origin());
         }
         IrSort.Structural decl = lookup(sp, structs);
         List<String> fields = new ArrayList<>(decl.constructorMembers().keySet());

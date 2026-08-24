@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -2055,6 +2056,13 @@ public final class SortChecker {
             throw cannotProveTotality(m, null, "the scrutinee's sort is not statically known");
         }
 
+        // Tier E: the enum cover. A sealed enum's value-set IS its case list, so
+        // totality is set arithmetic over a finite table rather than predicate
+        // complementation — decided case by case by {@link EnumCover}, no solver.
+        if (tryEnumCover(m, scrutineeIr, structDefs)) {
+            return;  // total (or threw, naming the cases no arm covers)
+        }
+
         // Struct totality (Tier A): a bare structural arm (no refined fields)
         // whose field set is a subset of the scrutinee's fields matches every
         // value of that struct shape — per Pontif's subset-semantics structural
@@ -2128,6 +2136,59 @@ public final class SortChecker {
             throw cannotProveTotality(m, scrutineeIr,
                     "coverage over this domain is undecidable");
         }
+    }
+
+    /**
+     * <b>Tier E — the enum cover.</b> When the scrutinee is a sealed {@code enum}
+     * (or one of its cases), its domain is a finite, declared set of cases, so
+     * totality is decided by subtracting what each arm covers from that set. This is
+     * the payoff of sealing: {@code [E.A] [E.B] [E.C]} is total with no {@code [_]},
+     * and the failure message can name the case the author forgot instead of
+     * rendering an uncovered predicate.
+     *
+     * <p>Returns false — deferring to the generic tiers, which will demand a default
+     * arm — when the scrutinee is not an enum, or when any arm's coverage is
+     * undecidable. Throws when every arm is decidable and cases remain uncovered.
+     */
+    private static boolean tryEnumCover(
+            IrExpr.Match m, IrSort scrutineeIr,
+            Map<String, IrSort.Structural> structDefs) throws CompileException {
+        String head = sortBaseName(scrutineeIr);
+        IrSort.Structural decl = head == null ? null : structDefs.get(head);
+        if (decl == null) return false;
+
+        IrSort.Structural enumBase;
+        Set<String> domain;
+        if (decl.isSealed()) {
+            enumBase = decl;
+            domain = new LinkedHashSet<>(decl.sealedCases());
+        } else {
+            // A case sort: the enum is its is-a base, and the domain is that one case.
+            String parent = decl.baseSort() instanceof IrSort.Refined r ? r.name() : null;
+            IrSort.Structural p = parent == null ? null : structDefs.get(parent);
+            if (p == null || !p.isSealed() || !p.sealedCases().contains(head)) return false;
+            enumBase = p;
+            domain = new LinkedHashSet<>(List.of(head));
+        }
+        // A refined scrutinee ([E:@.driver=="NTFS"]) narrows the domain before the
+        // arms are subtracted — the same cover question, asked of the scrutinee.
+        if (scrutineeIr instanceof IrSort.Refined) {
+            Set<String> narrowed = EnumCover.covered(scrutineeIr, enumBase, structDefs);
+            if (narrowed != null) domain.retainAll(narrowed);
+        }
+
+        Set<String> uncovered = new LinkedHashSet<>(domain);
+        for (IrExpr.MatchBranch b : m.branches()) {
+            Set<String> reach = EnumCover.covered(b.pattern(), enumBase, structDefs);
+            if (reach == null) return false;   // an arm outside the closed fragment
+            uncovered.removeAll(reach);
+        }
+        if (uncovered.isEmpty()) return true;
+        throw new CompileException(
+                "match over enum '" + enumBase.name() + "' is not exhaustive — no arm covers "
+                        + uncovered.stream().map(EnumCover::display).toList()
+                        + " (every match must be total; add the missing arm(s) or a '_' default)",
+                m.origin());
     }
 
     /**
@@ -2473,7 +2534,7 @@ public final class SortChecker {
                 yield new IrSort.Structural(
                         s.name(), mem,
                         s.baseSort() == null ? null : substituteTypeVars(s.baseSort(), bindings),
-                        java.util.Map.of(), s.extensions(), s.origin());
+                        java.util.Map.of(), s.extensions(), s.sealedCases(), s.origin());
             }
             // A Refined's name is its base, not a substitution site; but a
             // parametric base's type args (`[Literal[T]:…]`) are substituted.

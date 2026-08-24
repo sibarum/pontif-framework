@@ -133,12 +133,18 @@ public final class IrCompiler {
                 sibarum.pontif.types.TypeCatalog.fromModule(resolved).structShapes().entrySet()) {
             structRegistry.put(e.getKey(), compileSort(e.getValue()));
         }
-        this.simplifier = this.simplifier.withRegistry(structRegistry);
-
         DispatchTable dispatch = new DispatchTable();
         // Populate the trait/struct/impl relations up front via the shared builder
         // (the same one SortChecker uses), so both see one transitive relation.
         TraitRelations.populate(resolved, dispatch.traitRegistry());
+        // Both registries ride the simplifier: the struct shapes so a by-reference
+        // sort resolves, and the is-a relation so the claim rule reads a value's
+        // declared type through its ancestry (a `struct Exp:[BiOp:…]` value
+        // answers to `[BiOp]`). Wired here rather than per-engine so the Truffle
+        // path's MatchNodes carry both, not just the IrInterpreter path.
+        this.simplifier = this.simplifier
+                .withRegistry(structRegistry)
+                .withNominals(dispatch.traitRegistry());
         Map<FunctionDecl, CompiledModule.CompiledFunction> functions = new LinkedHashMap<>();
         // Eager pre-compilation: every IrSort reachable from the module gets
         // compiled to a Sort here. Match-branch patterns and other runtime sort

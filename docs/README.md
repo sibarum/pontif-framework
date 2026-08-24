@@ -43,7 +43,7 @@ came out the way it did, and the wrong place to learn how to use it. Where a des
 note and the guide disagree, the guide is current.
 
 - **Type system** — [dependent-sorts](dependent-sorts.md),
-  [subtypes](subtypes.md), [traits](traits.md),
+  [subtypes](subtypes.md), [enums](enums.md), [traits](traits.md),
   [type-parameters](type-parameters.md), [associated-types](associated-types.md),
   [sort-transforms](sort-transforms.md), [metatypes](metatypes.md),
   [type-records](type-records.md), [inference-unification](inference-unification.md),

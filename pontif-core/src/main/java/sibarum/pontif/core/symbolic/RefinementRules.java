@@ -102,7 +102,37 @@ public final class RefinementRules {
         return Optional.empty();
     };
 
+    /**
+     * String counterpart: folds comparisons where BOTH sides are {@link SymExpr.Str},
+     * by lexicographic {@code compareTo}. Strings <em>order and compare</em> (they
+     * just don't compute), so all six operators fold — the same six {@link
+     * #CMP_CHR_CHR} folds, which is the consistent reading for a sequence of Chars.
+     *
+     * <p>Without this a String refinement was only half-decidable at runtime: equal
+     * strings collapsed by structural identity, but UNEQUAL ones stayed residual, so
+     * a match arm like {@code [R:@.driver=="NTFS"]} died with an undecidable
+     * obligation instead of simply not matching. Strictly Str-with-Str: there is no
+     * String/Char tower, so a mixed comparison stays residual rather than inventing a
+     * conversion.
+     */
+    public static final RewriteRule CMP_STR_STR = (expr, simp) -> {
+        if (expr instanceof SymExpr.Cmp(SymExpr l, SymExpr.CmpOp op, SymExpr r)
+                && l instanceof SymExpr.Str ls && r instanceof SymExpr.Str rs) {
+            int c = ls.value().compareTo(rs.value());
+            boolean truth = switch (op) {
+                case LT -> c < 0;
+                case LE -> c <= 0;
+                case GT -> c > 0;
+                case GE -> c >= 0;
+                case EQ -> c == 0;
+                case NE -> c != 0;
+            };
+            return Optional.of(SymExpr.bool(truth));
+        }
+        return Optional.empty();
+    };
+
     public static List<RewriteRule> all() {
-        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL, CMP_DEC_NUMERIC, CMP_CHR_CHR);
+        return List.of(CMP_LIT_LIT, CMP_BOOL_BOOL, CMP_DEC_NUMERIC, CMP_CHR_CHR, CMP_STR_STR);
     }
 }

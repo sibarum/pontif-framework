@@ -134,7 +134,7 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      */
     record Structural(String name, Map<String, IrSort> members, IrSort baseSort,
                       Map<String, IrSort> typeParams, Map<String, IrExpr> extensions,
-                      Origin origin) implements IrSort {
+                      List<String> sealedCases, Origin origin) implements IrSort {
         public Structural {
             if (name == null || name.isEmpty()) {
                 throw new IllegalArgumentException("Structural sort name must be non-empty");
@@ -165,6 +165,29 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
                 throw new IllegalArgumentException("Structural sort extensions must be non-null");
             }
             extensions = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(extensions));
+            // The SEAL (docs/enums.md): for an `enum` base, the complete, ordered
+            // cover of its value-set — one entry per case, each the internal name of
+            // a case struct whose is-a morphism pins every field of this one. Empty
+            // for an ordinary `struct`. Non-empty means the type is CLOSED: it may
+            // not be constructed directly (only a case may), and a match over it is
+            // total exactly when the arms cover every listed case — the finite-cover
+            // fact {@link EnumCover} decides against, no solver involved.
+            if (sealedCases == null) {
+                throw new IllegalArgumentException("Structural sort sealedCases must be non-null");
+            }
+            sealedCases = List.copyOf(sealedCases);
+        }
+
+        /** Whether this is a sealed {@code enum} base — its cover is declared and closed. */
+        public boolean isSealed() {
+            return !sealedCases.isEmpty();
+        }
+
+        /** Back-compat: an ordinary (unsealed) struct with extension fields. */
+        public Structural(String name, Map<String, IrSort> members, IrSort baseSort,
+                          Map<String, IrSort> typeParams, Map<String, IrExpr> extensions,
+                          Origin origin) {
+            this(name, members, baseSort, typeParams, extensions, List.of(), origin);
         }
 
         /** Back-compat: the pre-extension canonical shape (no extension fields). */

@@ -2,6 +2,7 @@ package sibarum.pontif.parser;
 
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.CallKinds;
+import sibarum.pontif.ir.EnumCover;
 import sibarum.pontif.ir.IrCompiler;
 import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
@@ -78,7 +79,7 @@ public final class PontifParser {
      */
     public static final Set<String> KEYWORDS = Set.of(
             "module", "requires", "exports",
-            "function", "method", "struct", "let", "cast",
+            "function", "method", "struct", "enum", "let", "cast",
             "assign", "trait", "Type", "type",
             "match", "proof", "main", "emit", "action", "conduit", "conductor", "spawn",
             "if", "then", "else",
@@ -649,7 +650,7 @@ public final class PontifParser {
         PontifToken t = peek();
         if (t.kind() != PontifToken.Kind.IDENT) return true;
         return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "let", "trait", "cast", "assign", "proof",
+                "function", "method", "struct", "enum", "let", "trait", "cast", "assign", "proof",
                 "action", "conduit", "conductor", "spawn").contains(t.text());
     }
 
@@ -709,6 +710,7 @@ public final class PontifParser {
             case "exports"  -> parseExports();
             case "function" -> parseFunction();
             case "struct"   -> parseStruct();
+            case "enum"     -> parseEnum();
             case "method"   -> parseMethod();
             case "cast"     -> parseCoercion();
             case "let"      -> parseLet();
@@ -722,7 +724,7 @@ public final class PontifParser {
             default -> throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
                             + "declarative only (module / requires / exports / function / method / "
-                            + "struct / let / cast / trait / assign / proof / action / conduit / conductor); executable logic must "
+                            + "struct / enum / let / cast / trait / assign / proof / action / conduit / conductor); executable logic must "
                             + "live inside a `main { … }` block (docs/events.md Slice 0).",
                     head.origin());
         };
@@ -2654,6 +2656,485 @@ public final class PontifParser {
         return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
     }
 
+    /** The enum base's shape if {@code name} names a sealed enum, else null. */
+    private IrSort.Structural enumShape(String name) {
+        IrSort.Structural s = declaredStructShape(name);
+        return s != null && s.isSealed() ? s : null;
+    }
+
+    /**
+     * The internal type name of enum {@code enumName}'s case {@code caseName}, or
+     * null if {@code enumName} is not a declared enum or has no such case. The
+     * surface spelling is always qualified — {@code ResourceType.DatabaseTable}.
+     */
+    private String enumCaseIfAny(String enumName, String caseName) {
+        IrSort.Structural e = enumShape(enumName);
+        if (e == null) return null;
+        String internal = EnumCover.caseType(enumName, caseName);
+        return e.sealedCases().contains(internal) ? internal : null;
+    }
+
+    /**
+     * Parses an enum declaration (docs/enums.md):
+     *
+     * <pre>
+     * enum ResourceType(driver:String) {
+     *   DatabaseTable("postgres")
+     *   LocalFilesystem("NTFS")
+     *   RemoteHttp("tcp/ip")
+     *   describe():String -&gt; this.driver          # methods share the block
+     * }
+     * </pre>
+     *
+     * <p>Enum is <b>sugar</b>, not new type machinery. It lowers to exactly what
+     * {@code struct} already expresses (docs/language-reference.ptf; the shipped
+     * discriminant-pin form of {@code pontif-playground/examples/discriminant-pin.ptf}):
+     *
+     * <ul>
+     *   <li>the <b>base</b> struct {@code ResourceType(driver:…, _ordinal:…)} — the
+     *       declared fields plus the compiler-forced {@code _ordinal} discriminant
+     *       (the leading-underscore rule), so cases with no fields, or with
+     *       duplicate field values, stay distinct values and carry an order;</li>
+     *   <li>one <b>case</b> struct per case, {@code struct ResourceType$DatabaseTable
+     *       :[ResourceType:@.driver=="postgres" & @._ordinal==0]()} — zero fields of
+     *       its own, every base field pinned by the is-a morphism, so it is a
+     *       singleton sort whose one inhabitant ConstructionGate materializes the
+     *       pinned fields onto;</li>
+     *   <li>the <b>seal</b> — the ordered case cover recorded on the base
+     *       ({@link IrSort.Structural#sealedCases()}). It closes the type: the base
+     *       may not be constructed directly, and {@code EnumCover} decides match
+     *       totality against the finite cover (a table, not a solver).</li>
+     * </ul>
+     *
+     * <p>Each case name is a <b>type-level member</b> of the enum, denoting its
+     * singleton sort and that sort's unique inhabitant at once — so
+     * {@code [ResourceType.DatabaseTable]} reads as a pattern and
+     * {@code ResourceType.DatabaseTable} as a value, and they can never disagree.
+     */
+    private IrStmt parseEnum() throws ParseException {
+        PontifToken start = expectKeyword("enum");
+        PontifToken nameTok = expect(PontifToken.Kind.IDENT);
+        String enumName = nameTok.text();
+        if (sibarum.pontif.ir.NativeConstructors.has(enumName)) {
+            throw new ParseException(
+                    "'" + enumName + "' is a native type — its constructor is built in "
+                            + "and cannot be redeclared", nameTok.origin());
+        }
+        // Optional `:[T1 & T2]` — trait obligations, exactly as on a struct. (An
+        // enum has no struct super: its base IS the seal, and a sealed type whose
+        // cover is fixed cannot also be a narrowing of something else.)
+        IrSort declaredBase = null;
+        if (peek().kind() == PontifToken.Kind.COLON) {
+            consume();
+            declaredBase = parseSort();
+        }
+        // Optional `(field:Sort, …)` — the shared payload every case supplies.
+        // Absent (`enum Color { Red Green Blue }`) means a payload-free enum, whose
+        // cases are told apart by `_ordinal` alone.
+        Map<String, IrSort> declaredFields = new LinkedHashMap<>();
+        if (peek().kind() == PontifToken.Kind.LPAREN) {
+            consume();
+            boolean first = true;
+            while (atMemberBoundary(first, PontifToken.Kind.RPAREN)) {
+                PontifToken fieldName = expect(PontifToken.Kind.IDENT);
+                if (fieldName.text().startsWith("_")) {
+                    throw new ParseException(
+                            "Enum field '" + fieldName.text() + "' may not start with '_' — a "
+                                    + "leading underscore is reserved for compiler-forced members "
+                                    + "(here: the '_ordinal' discriminant)",
+                            fieldName.origin());
+                }
+                expect(PontifToken.Kind.COLON);
+                declaredFields.put(fieldName.text(), parseSort());
+                first = false;
+            }
+            expect(PontifToken.Kind.RPAREN);
+        }
+
+        List<String> fieldOrder = new ArrayList<>(declaredFields.keySet());
+        List<String> caseNames = new ArrayList<>();
+        List<List<IrExpr>> caseValues = new ArrayList<>();
+        List<Origin> caseOrigins = new ArrayList<>();
+        boolean anyMethods = false;
+
+        // The block holds cases and methods, told apart by shape: a method always
+        // writes `name(params):Ret -> body`, so a `:` after the balanced `)` is the
+        // discriminator. A case is a bare name or `name(literals…)`.
+        //
+        // Two passes over the same tokens, because a method body may name the
+        // enum's own cases (`this == ResourceType.RemoteHttp`) and so cannot be
+        // parsed until the seal is registered. Pass one reads the cases and SKIPS
+        // methods at the token level; pass two (below, after registration) parses
+        // the methods and skips the cases.
+        expect(PontifToken.Kind.LBRACE);
+        int blockStart = pos;
+        boolean firstMember = true;
+        while (atMemberBoundary(firstMember, PontifToken.Kind.RBRACE)) {
+            if (enumMemberIsMethod()) {
+                anyMethods = true;
+                skipEnumMember();
+                firstMember = false;
+                continue;
+            }
+            PontifToken caseTok = expect(PontifToken.Kind.IDENT);
+            String caseName = caseTok.text();
+            if (caseName.startsWith("_")) {
+                throw new ParseException(
+                        "Enum case '" + caseName + "' may not start with '_' — a leading "
+                                + "underscore is reserved for compiler-forced members",
+                        caseTok.origin());
+            }
+            if (KEYWORDS.contains(caseName)) {
+                throw new ParseException(
+                        "Cannot use keyword '" + caseName + "' as an enum case name",
+                        caseTok.origin());
+            }
+            if (caseNames.contains(caseName)) {
+                throw new ParseException(
+                        "Enum '" + enumName + "' declares case '" + caseName + "' twice — "
+                                + "each case names one distinct value",
+                        caseTok.origin());
+            }
+            List<IrExpr> values = new ArrayList<>();
+            PontifToken end = caseTok;
+            if (peek().kind() == PontifToken.Kind.LPAREN) {
+                consume();
+                values = parseLiteralRow("enum case '" + enumName + "." + caseName + "'");
+                end = expect(PontifToken.Kind.RPAREN);
+            }
+            if (values.size() != fieldOrder.size()) {
+                throw new ParseException(
+                        "Enum case '" + enumName + "." + caseName + "' supplies " + values.size()
+                                + " value(s) but '" + enumName + "' declares " + fieldOrder.size()
+                                + " field(s) " + fieldOrder
+                                + " — every case must determine every field",
+                        caseTok.origin());
+            }
+            caseNames.add(caseName);
+            caseValues.add(values);
+            caseOrigins.add(caseTok.spanTo(end));
+            firstMember = false;
+        }
+        PontifToken close = expect(PontifToken.Kind.RBRACE);
+        Origin origin = start.spanTo(close);
+        if (caseNames.isEmpty()) {
+            throw new ParseException(
+                    "Enum '" + enumName + "' declares no cases — a sealed type with an empty "
+                            + "cover has no values, which is not expressible (docs/enums.md)",
+                    nameTok.origin());
+        }
+
+        // --- the base struct: declared fields (narrowed to the case values where
+        // they are all primitive literals) plus the forced `_ordinal` discriminant.
+        Map<String, IrSort> baseMembers = new LinkedHashMap<>();
+        for (int f = 0; f < fieldOrder.size(); f++) {
+            String field = fieldOrder.get(f);
+            IrSort declared = declaredFields.get(field);
+            baseMembers.put(field, narrowToCaseValues(declared, caseValues, f, origin));
+        }
+        baseMembers.put(EnumCover.ORDINAL_FIELD, ordinalSort(caseNames.size(), origin));
+        List<String> seal = new ArrayList<>(caseNames.size());
+        for (String c : caseNames) seal.add(EnumCover.caseType(enumName, c));
+        IrSort.Structural baseSort = new IrSort.Structural(
+                enumName, baseMembers, declaredBase, new LinkedHashMap<>(),
+                new LinkedHashMap<>(), seal, origin);
+        types.register(enumName, new TypeInfo.Struct(baseSort));
+
+        // --- one case struct per case: no fields of its own, every base field
+        // pinned by the is-a morphism (so the demotion to the enum is total and
+        // the pinned values are materialized onto the singleton at construction).
+        for (int i = 0; i < caseNames.size(); i++) {
+            String internal = seal.get(i);
+            Origin co = caseOrigins.get(i);
+            IrExpr pin = null;
+            for (int f = 0; f < fieldOrder.size(); f++) {
+                pin = conjoin(pin, pinField(fieldOrder.get(f), caseValues.get(i).get(f), co), co);
+            }
+            pin = conjoin(pin, pinField(EnumCover.ORDINAL_FIELD, new IrExpr.Lit(i, co), co), co);
+            IrSort.Structural caseSort = new IrSort.Structural(
+                    internal, new LinkedHashMap<>(),
+                    new IrSort.Refined(enumName, pin, co),
+                    new LinkedHashMap<>(), new LinkedHashMap<>(), List.of(), co);
+            types.register(internal, new TypeInfo.Struct(caseSort));
+            pendingTopLevelDecls.add(new IrStmt.TypeAlias(internal, caseSort, co));
+        }
+
+        // --- pass two: the methods, now that the enum and its cases are registered
+        // (so a body may read fields off `this` and name sibling cases).
+        if (anyMethods) {
+            int afterBlock = pos;
+            pos = blockStart;
+            IrSort selfSort = new IrSort.Named(enumName, nameTok.origin());
+            boolean firstMethod = true;
+            while (atMemberBoundary(firstMethod, PontifToken.Kind.RBRACE)) {
+                if (enumMemberIsMethod()) {
+                    pendingTopLevelDecls.add(parseTraitImplMethod(enumName, selfSort));
+                } else {
+                    skipEnumMember();
+                }
+                firstMethod = false;
+            }
+            expect(PontifToken.Kind.RBRACE);
+            pos = afterBlock;
+        }
+        return new IrStmt.TypeAlias(enumName, baseSort, origin);
+    }
+
+    /** {@code [Int:@>=0 & @<caseCount]} — the discriminant's closed domain. */
+    private static IrSort ordinalSort(int caseCount, Origin o) {
+        IrExpr lo = new IrExpr.BinOp(IrExpr.Op.GE,
+                new IrExpr.SelfRef(o), new IrExpr.Lit(0, o), o);
+        IrExpr hi = new IrExpr.BinOp(IrExpr.Op.LT,
+                new IrExpr.SelfRef(o), new IrExpr.Lit(caseCount, o), o);
+        return new IrSort.Refined("Int",
+                new IrExpr.BinOp(IrExpr.Op.AND, lo, hi, o), o);
+    }
+
+    /**
+     * Narrows a declared enum field to the closed set its cases actually supply —
+     * {@code driver:String} with cases {@code "postgres"/"NTFS"/"tcp/ip"} becomes
+     * {@code [String:@=="postgres" | @=="NTFS" | @=="tcp/ip"]}. Only a bare
+     * primitive declaration is narrowed: an already-refined or user-typed field
+     * keeps exactly what was written, so narrowing can never silently drop a
+     * refinement the author put there.
+     */
+    private static IrSort narrowToCaseValues(
+            IrSort declared, List<List<IrExpr>> caseValues, int fieldIndex, Origin o) {
+        if (!(declared instanceof IrSort.Named n) || !n.typeArgs().isEmpty()) return declared;
+        if (!Set.of("Int", "Decimal", "String", "Bool", "Char").contains(n.name())) return declared;
+        IrExpr disjunction = null;
+        for (List<IrExpr> row : caseValues) {
+            IrExpr eq = new IrExpr.BinOp(IrExpr.Op.EQ,
+                    new IrExpr.SelfRef(o), row.get(fieldIndex), o);
+            disjunction = disjunction == null
+                    ? eq : new IrExpr.BinOp(IrExpr.Op.OR, disjunction, eq, o);
+        }
+        return new IrSort.Refined(n.name(), disjunction, o);
+    }
+
+    /** {@code @.field == value} — one conjunct of a case's demotion morphism. */
+    private static IrExpr pinField(String field, IrExpr value, Origin o) {
+        return new IrExpr.BinOp(IrExpr.Op.EQ,
+                new IrExpr.FieldAccess(new IrExpr.SelfRef(o), field, o), value, o);
+    }
+
+    private static IrExpr conjoin(IrExpr left, IrExpr right, Origin o) {
+        return left == null ? right : new IrExpr.BinOp(IrExpr.Op.AND, left, right, o);
+    }
+
+    /**
+     * A comma-separated row of literals, up to (not including) the closing paren —
+     * the one shape an enum's compile-time values take, wherever they appear: a case
+     * declaration, a lookup, or a literal-row pattern. Unlike a member list this is an
+     * ARGUMENT list, so it is comma-separated, and anything but a comma or the close
+     * after a value is reported as the real problem (a non-literal value) rather than
+     * as a missing separator.
+     */
+    private List<IrExpr> parseLiteralRow(String what) throws ParseException {
+        List<IrExpr> row = new ArrayList<>();
+        if (peek().kind() == PontifToken.Kind.RPAREN) return row;
+        while (true) {
+            row.add(expectLiteral(what));
+            if (peek().kind() == PontifToken.Kind.COMMA) {
+                consume();
+                continue;
+            }
+            if (peek().kind() == PontifToken.Kind.RPAREN) return row;
+            throw new ParseException(
+                    "Expected ',' or ')' after a value of " + what + "; got " + peek().kind()
+                            + " '" + peek().text() + "'. Its values are pinned at compile time, "
+                            + "so each must be a literal — not an expression.",
+                    peek().origin());
+        }
+    }
+
+    /**
+     * A literal argument in an enum case's value list. Cases are pinned at compile
+     * time, so their values must be literals — anything else has no single value to
+     * pin and could not seal the type.
+     */
+    private IrExpr expectLiteral(String what) throws ParseException {
+        PontifToken t = peek();
+        IrExpr lit = switch (t.kind()) {
+            case INTEGER -> new IrExpr.Lit(Long.parseLong(t.text()), t.origin());
+            case DECIMAL -> new IrExpr.Dec(new java.math.BigDecimal(t.text()), t.origin());
+            case STRING -> new IrExpr.Str(t.text(), t.origin());
+            case CHAR -> new IrExpr.Chr(t.text().codePointAt(0), t.origin());
+            case IDENT -> isLiteralToken(t)
+                    ? new IrExpr.Bool(t.text().equals("true"), t.origin()) : null;
+            default -> null;
+        };
+        if (lit == null) {
+            throw new ParseException(
+                    "Expected a literal value for " + what + "; got " + t.kind() + " '"
+                            + t.text() + "'. A case's values are pinned at compile time, so "
+                            + "each must be a literal.",
+                    t.origin());
+        }
+        consume();
+        return lit;
+    }
+
+    /**
+     * Whether the enum-block member at the cursor is a METHOD rather than a case.
+     * A method is always {@code name(params):Ret -> body}; a case is {@code Name} or
+     * {@code Name(literals…)}. So the discriminator is a {@code :} directly after
+     * the balanced {@code )} — the same scan {@link #callSigColonFollows} runs.
+     */
+    private boolean enumMemberIsMethod() {
+        return peek().kind() == PontifToken.Kind.IDENT
+                && peek(1).kind() == PontifToken.Kind.LPAREN
+                && callSigColonFollows();
+    }
+
+    /**
+     * {@code Enum(literal, …)} in a VALUE position — a <b>lookup</b>, not a
+     * construction. A sealed type has exactly the values its cases name, so applying
+     * the enum to a row of literals selects the case carrying that row; the result is
+     * that case's singleton, identical to writing {@code Enum.Case}. A row no case
+     * carries is a compile error naming the ones that exist — the payoff of the seal.
+     *
+     * <p>A non-literal argument is rejected on purpose. {@code Enum(someString)} is a
+     * <em>narrowing</em> of the argument's sort, and the standing cast law says narrow
+     * by match: write the refinement arm ({@code match s [Enum:@.driver==…]}) and let
+     * the construction gate discharge it, rather than have a lookup silently become
+     * partial at runtime.
+     */
+    private IrExpr parseEnumLookup(String enumName, PontifToken open) throws ParseException {
+        IrSort.Structural e = enumShape(enumName);
+        List<String> fields = new ArrayList<>(e.members().keySet());
+        fields.remove(EnumCover.ORDINAL_FIELD);
+        List<IrExpr> args = parseLiteralRow("a lookup on enum '" + enumName + "'");
+        PontifToken close = expect(PontifToken.Kind.RPAREN);
+        Origin origin = open.spanTo(close);
+        if (args.size() != fields.size()) {
+            throw new ParseException(
+                    "Lookup on enum '" + enumName + "' supplies " + args.size()
+                            + " value(s) but '" + enumName + "' declares " + fields.size()
+                            + " field(s) " + fields,
+                    origin);
+        }
+        List<String> hits = new ArrayList<>();
+        for (String internal : e.sealedCases()) {
+            Map<String, IrExpr> pins = EnumCover.pins(declaredStructShape(internal));
+            boolean all = true;
+            for (int i = 0; i < fields.size() && all; i++) {
+                IrExpr pinned = pins.get(fields.get(i));
+                all = pinned != null && EnumCover.sameLiteral(pinned, args.get(i));
+            }
+            if (all) hits.add(internal);
+        }
+        if (hits.isEmpty()) {
+            throw new ParseException(
+                    "No case of enum '" + enumName + "' carries that value — '" + enumName
+                            + "' is sealed, so its only values are " + caseList(e),
+                    origin);
+        }
+        if (hits.size() > 1) {
+            throw new ParseException(
+                    "That value is carried by more than one case of enum '" + enumName + "' ("
+                            + hits.stream().map(EnumCover::display).toList()
+                            + ") — name the case you mean (e.g. `"
+                            + EnumCover.display(hits.get(0)) + "`)",
+                    origin);
+        }
+        return new IrExpr.Record(hits.get(0), new LinkedHashMap<>(), origin);
+    }
+
+    /**
+     * {@code [Enum(literal, …)]} — the literal-row pattern over an enum, desugared to
+     * the refinement it means: {@code [Enum:@.f0==lit0 & …]}. The values map
+     * positionally onto the enum's declared fields (never onto {@code _ordinal},
+     * which no source may name), so the arm reads as the filter it is and
+     * {@link EnumCover} decides which cases it covers.
+     *
+     * <p>Binding an enum's fields is a different thing and stays the refinement /
+     * case-arm forms — a positional binder list here would be a destructure of the
+     * record, {@code _ordinal} and all, which is not what the enum face promises.
+     */
+    private IrSort parseEnumLiteralPattern(PontifToken enumTok) throws ParseException {
+        IrSort.Structural e = enumShape(enumTok.text());
+        List<String> fields = new ArrayList<>(e.members().keySet());
+        fields.remove(EnumCover.ORDINAL_FIELD);
+        PontifToken open = expect(PontifToken.Kind.LPAREN);
+        if (fields.isEmpty()) {
+            throw new ParseException(
+                    "Enum '" + enumTok.text() + "' declares no fields, so there is no literal row "
+                            + "to match on — name the case instead: [" + enumTok.text()
+                            + "." + EnumCover.caseLabel(e.sealedCases().get(0)) + "].",
+                    open.origin());
+        }
+        if (!isLiteralToken(peek()) && peek().kind() != PontifToken.Kind.RPAREN) {
+            throw new ParseException(
+                    "Pattern [" + enumTok.text() + "(…)] takes literal case values, but got "
+                            + peek().kind() + " '" + peek().text() + "'. To BIND an enum's fields, "
+                            + "refine instead — [" + enumTok.text() + ":@." + fields.get(0)
+                            + " == …] — or match a case: [" + enumTok.text() + ".Case].",
+                    peek().origin());
+        }
+        List<IrExpr> values = parseLiteralRow("pattern [" + enumTok.text() + "(…)]");
+        PontifToken close = expect(PontifToken.Kind.RPAREN);
+        Origin origin = enumTok.spanTo(close);
+        if (values.size() != fields.size()) {
+            throw new ParseException(
+                    "Pattern [" + enumTok.text() + "(…)] lists " + values.size() + " of "
+                            + fields.size() + " field(s) " + fields + " — a literal row must give "
+                            + "a value for every declared field; to constrain only some, refine: ["
+                            + enumTok.text() + ":@." + fields.get(0) + " == …].",
+                    origin);
+        }
+        IrExpr pred = null;
+        for (int i = 0; i < fields.size(); i++) {
+            pred = conjoin(pred, pinField(fields.get(i), values.get(i), origin), origin);
+        }
+        return new IrSort.Refined(enumTok.text(), pred, origin);
+    }
+
+    /** Whether {@code t} opens a literal value ({@link #expectLiteral}'s domain). */
+    private static boolean isLiteralToken(PontifToken t) {
+        return switch (t.kind()) {
+            case INTEGER, DECIMAL, STRING, CHAR -> true;
+            case IDENT -> t.text().equals("true") || t.text().equals("false");
+            default -> false;
+        };
+    }
+
+    /** An enum's cases in surface spelling, for a diagnostic. */
+    private static String caseList(IrSort.Structural enumBase) {
+        return enumBase.sealedCases().stream().map(EnumCover::display).toList().toString();
+    }
+
+    /**
+     * Skips one enum-block member at the TOKEN level — no expression parsing, so it
+     * is safe on either pass (a case whose sorts are not yet registered, a method
+     * whose body names a case that is not yet registered). The member ends exactly
+     * where {@link #atMemberBoundary} would end it: at a {@code ;}, at the block's
+     * {@code }}, or at the first token on a later line than the one before it —
+     * all judged at bracket depth zero, so a multi-line parenthesised sub-expression
+     * inside the member does not terminate it.
+     */
+    private void skipEnumMember() {
+        int depth = 0;
+        consume();  // at least one token — the member's own name
+        while (true) {
+            PontifToken t = peek();
+            if (t.kind() == PontifToken.Kind.EOF) return;
+            if (depth == 0) {
+                if (t.kind() == PontifToken.Kind.SEMICOLON) return;
+                if (t.kind() == PontifToken.Kind.RBRACE) return;
+                if (t.line() > tokens.get(pos - 1).line()) return;
+            }
+            if (t.kind() == PontifToken.Kind.LPAREN || t.kind() == PontifToken.Kind.LBRACKET
+                    || t.kind() == PontifToken.Kind.LBRACE) {
+                depth++;
+            } else if (t.kind() == PontifToken.Kind.RPAREN || t.kind() == PontifToken.Kind.RBRACKET
+                    || t.kind() == PontifToken.Kind.RBRACE) {
+                depth--;
+            }
+            consume();
+        }
+    }
+
     /**
      * Parses one line of a struct constructor body:
      * {@code let this.name(:Sort)? = expr}. The default constructor is always
@@ -2949,6 +3430,19 @@ public final class PontifParser {
                 consume();              // .
                 PontifToken typeTok = consume();   // type
                 return new IrSort.Named(IrSort.SELF_TYPE, t.spanTo(typeTok));
+            }
+            // `Enum.Case` in a SORT position — the other face of the type-level
+            // member: the case's singleton sort (docs/enums.md). Its one inhabitant
+            // is what the same spelling denotes in a value position, so the two
+            // readings can never disagree.
+            if (peek(1).kind() == PontifToken.Kind.DOT
+                    && peek(2).kind() == PontifToken.Kind.IDENT
+                    && enumCaseIfAny(t.text(), peek(2).text()) != null) {
+                String internal = enumCaseIfAny(t.text(), peek(2).text());
+                consume();  // enum name
+                consume();  // DOT
+                PontifToken caseTok = consume();
+                return new IrSort.Named(internal, t.spanTo(caseTok));
             }
             // `Type{...}` — an anonymous trait sort literal, usable in ANY sort
             // position (param/return/nested in unions/refinements), part of the
@@ -3633,6 +4127,34 @@ public final class PontifParser {
             return parseBracketSort();
         }
         PontifToken baseTok = expect(PontifToken.Kind.IDENT);
+
+        // `[Enum.Case]` / `[Enum.Case:pred]` — the case's singleton sort as a
+        // pattern. Rewritten to its internal name here so the whole rest of the
+        // bracket-sort grammar (refinement tail, `|`/`&` branches) composes with it
+        // unchanged.
+        String enumCase = peek().kind() == PontifToken.Kind.DOT
+                && peek(1).kind() == PontifToken.Kind.IDENT
+                ? enumCaseIfAny(baseTok.text(), peek(1).text())
+                : null;
+        if (enumCase != null) {
+            consume();  // DOT
+            PontifToken caseTok = consume();
+            if (peek().kind() == PontifToken.Kind.COLON) {
+                consume();
+                IrExpr pred = applyPredicateSugar(parseExpr());
+                return new IrSort.Refined(enumCase, pred, baseTok.spanTo(caseTok));
+            }
+            return new IrSort.Named(enumCase, baseTok.spanTo(caseTok));
+        }
+        // `[Enum(literal, …)]` — sugar for the equivalent field pins,
+        // `[Enum:@.f0==lit0 & …]`. A row of literals is a FILTER over the cover, so
+        // unlike a struct pattern it need not be arity-total over the record's
+        // fields: it says nothing about `_ordinal`, and so may match several cases.
+        if (enumShape(baseTok.text()) != null
+                && peek().kind() == PontifToken.Kind.LPAREN
+                && !callSigColonFollows()) {
+            return parseEnumLiteralPattern(baseTok);
+        }
 
         // Optional parametric application on the base — `Literal[Int]` inside a
         // bracket sort (docs/type-parameters.md §2.3): an is-a base
@@ -4606,6 +5128,22 @@ public final class PontifParser {
                 continue;
             }
             if (t.kind() == PontifToken.Kind.DOT && peek(1).kind() == PontifToken.Kind.IDENT) {
+                // `Enum.Case` — a type-level member (docs/enums.md). The case name
+                // denotes its singleton sort AND that sort's unique inhabitant; here,
+                // in a VALUE position, it reads as the inhabitant: the zero-field
+                // construction of the case struct, whose pinned base fields
+                // ConstructionGate materializes. Not a field read of a variable, so
+                // a local binding named like the enum still shadows it.
+                if (expr instanceof IrExpr.Var ev && !currentScope.containsKey(ev.name())) {
+                    String caseType = enumCaseIfAny(ev.name(), peek(1).text());
+                    if (caseType != null) {
+                        consume();  // DOT
+                        PontifToken caseTok = consume();
+                        expr = new IrExpr.Record(
+                                caseType, new LinkedHashMap<>(), t.spanTo(caseTok));
+                        continue;
+                    }
+                }
                 consume();  // DOT
                 PontifToken name = consume();
                 // Positional projection `value._N` reads a tuple component, the
@@ -4620,6 +5158,13 @@ public final class PontifParser {
                 // struct constructs a record (positional), not a Call. Native
                 // constructors (Decimal(unscaled, scale)) route the same way —
                 // their registered shape plays the struct declaration's part.
+                // `Enum(literals…)` is a LOOKUP, never a construction: a sealed type
+                // has exactly the values its cases name, so applying the enum to a
+                // literal row selects the case that carries it (docs/enums.md).
+                if (expr instanceof IrExpr.Var ev && enumShape(ev.name()) != null) {
+                    expr = parseEnumLookup(ev.name(), open);
+                    continue;
+                }
                 if (expr instanceof IrExpr.Var v && types.isStruct(v.name())) {
                     expr = parsePositionalStructLiteral(
                             declaredStructShape(v.name()), v.name(), open);

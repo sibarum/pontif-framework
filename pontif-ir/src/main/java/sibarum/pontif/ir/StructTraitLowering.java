@@ -116,7 +116,7 @@ public final class StructTraitLowering {
             out.add(new IrStmt.TypeAlias(
                     ta.name(),
                     new IrSort.Structural(st.name(), st.members(), superBranch,
-                            st.typeParams(), st.extensions(), st.origin()),
+                            st.typeParams(), st.extensions(), st.sealedCases(), st.origin()),
                     ta.origin()));
             // Each trait becomes an empty impl — verified against the struct's block
             // methods by SortChecker, defaults filled by TraitDefaultExpansion.

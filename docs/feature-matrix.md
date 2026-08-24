@@ -42,6 +42,7 @@ receipt graph · **Nominal** = by-name typing · **Struct** = shape-based typing
 | @              | ^^^  | ^^^    | /      | ^^      |        | ?        |      | ^^^   | ^^^   | ^^^    | ^^      | ^^     |
 | let            | ^^   | ^^^    | /      | ^^      | ^^     | /        |      | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
 | struct         | ^^   | ^^^    | !!     | ^^^     | ^^^    | ^^       | ^    | ^^^   | ^^^   | ^^^    | ^^^     | ^^^    |
+| enum           | ^^   | ^^^    | !!     | ?       | /      |          | ^    | ^^    |       |        | ^^^     | ^^^    |
 | trait          | ^^^  | ^^^    | !!     | ^^^     | ^^^    | !        |      | ^^    |       | ^^     | ^^^     | !      |
 | match          |      | ^^^    |        |         | ^^     |          |      | ^^^   |       | ^^     | ^^^     | ^^^    |
 | destructuring  | ^^   | ^^     |        | ^^      |        |          |      | ^^    |       | ^^     | ^^^     | ^^^    |
@@ -90,6 +91,18 @@ Each supported cell, with the passing test(s)/probe(s) that witness it. Probes l
 `StructExtensionTest` (promotion) · Proofs: `ConstructionGateTest` · Nominal:
 `StructExtensionTest`, `ClaimRuleTest` · Struct: `StructExtensionTest`,
 `PartialPatternTest`.
+
+**enum** — this: `EnumTest.enum_carriesMethods_whichMayNameSiblingCases` · Refine:
+`EnumTest.match_refinementArm_coversWhateverTheCoverSays`,
+`EnumTest.match_literalRowArmsAlone_areTotal` · Traits (partial, see N14):
+`EnumTest.enum_declaresTraitObligations_andItsBlockMethodsSatisfyThem` · Infer:
+`EnumTest.caseValue_demotesToTheEnum_keepingItsFields`,
+`EnumTest.caseValue_passesWhereTheEnumIsExpected` · Nominal:
+`EnumTest.match_isTotalOverTheCasesAlone_withNoDefaultArm`,
+`EnumTest.match_missingACase_namesTheCaseNoArmCovers`,
+`NominalIsaClaimTest` · Struct:
+`EnumTest.caseName_isAValue_andCarriesItsPinnedFields`,
+`EnumTest.sealedBase_cannotBeConstructedDirectly`, `EnumTest.ordinal_ordersTheCasesInDeclarationOrder`.
 
 **trait** — this: `AssociatedTypeDeclTest`, `AssociatedTypeSelfTypeTest` · Refine:
 `TraitAttributeTest`, `traits__18_producer_violates_refinement_reject` · Generic:
@@ -301,6 +314,20 @@ propagating an element **refinement** (`Stream[Int:@>0]`) through a combinator's
 key-sort coherence check — `map($f[Int], s:Stream[Int:@>0])` loses `@>0` at the call boundary.
 `docs/streams.md` (§"element-sort flow") marks this OPEN; zero tests witness refinement
 preservation across combinators.
+
+**N14 — `enum × Traits = /`: a case cannot be passed where a TRAIT is expected.**
+An enum takes trait obligations (`enum Tier:[Budgeted](…)`) and its block methods
+satisfy them — `Tier.Costly.budget()` resolves, and a case passes freely where the
+*enum* is expected (`EnumTest.caseValue_passesWhereTheEnumIsExpected`). What fails is
+`spend(Tier.Costly)` for `function spend(b:Budgeted)`. This is **not enum-specific**:
+a pinned subtype does not inherit its base's trait impl at the call gate, and the
+hand-written `struct Sub:[Base:@.n==1]()` is refused identically. The nominal relation
+knows (`TraitRelations` declares the is-a edge; `TraitRegistry.satisfies` walks the
+ancestry) — the compile-time call gate reads a different path and misses it, which is
+the is-a/base-chain fork the type-system inventory ranks. Fixed there, it is fixed for
+enums for free, so it was deliberately not patched at the enum layer. `Generic` is `?`
+(no `[type T]` slot on the declaration, not scoped); `Synth`/`Proofs`/`TypeFrag` have
+no enum-specific requirement identified yet. See docs/enums.md §6.
 
 **N13 — Conservation has no column (deliberate, for now).** The conservation ledger
 (`pontif-conservation`) underpins `Proofs`/`Synth`/`destructuring` rather than standing as a
