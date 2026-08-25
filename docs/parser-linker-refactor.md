@@ -68,7 +68,43 @@ switch, plus a unit test that `DECLARATION_KEYWORDS ⊆ KEYWORDS` and that the s
 
 ---
 
-## Item 3 — `default ->` on `IrStmt` switches silently swallows new kinds (TODO — systemic)
+## Item 3 — `default ->` on `IrStmt` switches silently swallows new kinds — DONE for the rewriter passes (2026-08-25)
+
+**Three live defects, not a latent trap.** The prediction below was that this was harmless
+*today* and would bite when a later cut relied on it. It was already biting. Auditing the
+four rewriting passes found:
+
+1. **A return proof in a required module was rejected outright.** `NameResolver` never
+   FQN-rewrote `IrStmt.ReturnProof` — a kind the stale comment did not even list — so an
+   `assign proof f(…)` kept its bare target name while the function it proves became
+   `mod/f`. `ReturnProofBinding` then refused a valid program with *"assign proof
+   references unknown function 'isSparse'"*.
+2. **A conductor state initializer calling an imported function died at runtime** with
+   "No function named 'startAt' is declared". Initializers are compiled — `IrCompiler`
+   builds the conductor's state seed from them — so this was never dormant.
+3. **A conductor state initializer containing a method call failed to compile** with the
+   internal-sounding *"MethodResolver must eliminate MethodCall before IrCompiler"*: the
+   pass meant to eliminate it never looked inside a conductor.
+
+**What landed.** `NameResolver`, `DestructureResolver`, `StructLiteralRewriter` and
+`MethodOperatorResolver` are exhaustive over `IrStmt` — every kind either handled or
+explicitly declared to need nothing, so the next kind cannot be added silently.
+`ConductorDecl.mapStateInits` is the one home for "which part of a conductor a
+body-rewriting pass must visit". A coercion body is now destructure-rewritten too (it was
+in the same `default`, while `StructLiteralRewriter` had already singled it out).
+
+**A boundary worth recording:** the passes must NOT rewrite a conductor's *reactions*.
+Seating injects them as ordinary `FunctionDecl`s before these passes run, so the copies
+that are compiled go through the normal function arm with the parameter scope that makes
+`this.n.apply(…)` resolvable; rewriting the conductor's own copies out of that context
+fails with "Cannot determine the type of the receiver". That is how the boundary was found.
+
+**Verification (the work-order's own suggestion, and it works).** Adding a throwaway
+`IrStmt` permit fails the build at these sites. Note that javac reports **one file per
+compile round** here — satisfy the site it names and recompile to see the next. Tests:
+`StatementKindResolutionTest` (4).
+
+### The original entry (kept — its diagnosis was right)
 
 **Symptom (the flip side of the sealed discipline):** ~15 `switch (stmt)` sites over the sealed
 `IrStmt` use a `default ->` clause. Unlike an exhaustive switch, `default` means a **newly added

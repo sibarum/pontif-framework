@@ -97,7 +97,24 @@ public final class DestructureResolver {
                 }
                 case IrStmt.Proof p -> new IrStmt.Proof(
                         p.functionName(), rewriteExpr(p.proofTree(), structs), p.origin());
-                default -> stmt;  // TypeAlias / Requires / Exports / NoOp carry no destructure expr
+                // A conductor state initializer is code like any other, and is compiled from here.
+                case IrStmt.ConductorDecl cd -> cd.mapStateInits(e -> rewriteExpr(e, structs));
+                case IrStmt.ReturnProof rp -> rp.body() == null ? rp : new IrStmt.ReturnProof(
+                        rp.functionName(), rp.params(), rp.grantedReturn(),
+                        rewriteExpr(rp.body(), structs), rp.origin());
+                // A coercion body is a body: it may destructure its parameter, exactly as it may
+                // construct an imported struct (which is why StructLiteralRewriter already
+                // rewrites it). It reached here through the same `default` as everything else.
+                case IrStmt.Coercion c -> new IrStmt.Coercion(
+                        c.sourceSort(), c.targetSort(), c.paramName(),
+                        rewriteExpr(c.body(), structs), c.origin());
+                // Exhaustive from here, so a new statement kind must be classified rather than
+                // silently skipped: these genuinely carry no expression to rewrite.
+                case IrStmt.TypeAlias ta -> ta;
+                case IrStmt.Spawn sp -> sp;
+                case IrStmt.Requires rq -> rq;
+                case IrStmt.Exports ex -> ex;
+                case IrStmt.NoOp np -> np;
             });
         }
         // A null main() is legitimate (IrModule never requires it); carry it through unchanged,

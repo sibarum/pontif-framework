@@ -110,7 +110,46 @@ public final class NameResolver {
                         rewriteSort(c.sourceSort(), m, table),
                         rewriteSort(c.targetSort(), m, table),
                         c.paramName(), rewrite(c.body(), m, table), c.origin());
-                default -> stmt;  // Requires / Exports / NoOp unchanged
+                // An `assign proof f(…):[Sort]` names its target function and carries param sorts,
+                // a granted return and a case-function body — every one of which needs the same
+                // FQN rewrite a function's does. It had none: the switch ended in `default ->
+                // stmt`, so a return proof declared in a REQUIRED module kept its bare name while
+                // the function it proves became `mod/f`, and ReturnProofBinding then rejected the
+                // program with "assign proof references unknown function 'f'". A valid program,
+                // refused, because the proof was silently passed through.
+                case IrStmt.ReturnProof rp -> new IrStmt.ReturnProof(
+                        resolveCallName(rp.functionName(), m, table),
+                        rewriteParams(rp.params(), m, table),
+                        rewriteSort(rp.grantedReturn(), m, table),
+                        rp.body() == null ? null : rewrite(rp.body(), m, table),
+                        rp.origin());
+                // A conductor's STATE INITIALIZERS are compiled (IrCompiler builds the state seed
+                // from them), so an initializer calling an imported function needs resolving like
+                // any other body — unresolved, it reached the runtime as "No function named
+                // 'startAt' is declared". Its reactions are resolved for the same reason the
+                // injected copies are; the conductor's NAME is deliberately left bare, because
+                // seating matches conductors by their declared name and has already run.
+                case IrStmt.ConductorDecl cd -> {
+                    List<IrStmt.ConductorDecl.StateField> state = new ArrayList<>(cd.state().size());
+                    for (IrStmt.ConductorDecl.StateField f : cd.state()) {
+                        state.add(new IrStmt.ConductorDecl.StateField(
+                                f.name(), rewriteSort(f.sort(), m, table), rewrite(f.init(), m, table)));
+                    }
+                    List<IrStmt.FunctionDecl> reactions = new ArrayList<>(cd.reactions().size());
+                    for (IrStmt.FunctionDecl r : cd.reactions()) {
+                        reactions.add(new IrStmt.FunctionDecl(
+                                r.name(), rewriteParams(r.params(), m, table),
+                                rewriteSort(r.returnSort(), m, table), rewrite(r.body(), m, table),
+                                r.origin(), r.topLevelLet(), r.typeParams()));
+                    }
+                    yield new IrStmt.ConductorDecl(cd.name(), state, cd.handlers(), reactions, cd.origin());
+                }
+                // Deliberately unchanged, and now stated rather than defaulted — so a new IrStmt
+                // kind fails to compile here until someone decides which of these it is.
+                case IrStmt.Spawn sp -> sp;          // seats by declared name; seating already ran
+                case IrStmt.Requires rq -> rq;       // consumed by the loader/linker, not rewritten
+                case IrStmt.Exports ex -> ex;        // consumed by the linker's visibility check
+                case IrStmt.NoOp np -> np;           // parser placeholder
             });
         }
         return new IrModule(m, out, rewrite(module.main(), m, table));

@@ -93,7 +93,20 @@ public final class StructLiteralRewriter {
                 case IrStmt.Coercion c -> new IrStmt.Coercion(
                         c.sourceSort(), c.targetSort(), c.paramName(),
                         rewriteExpr(c.body(), structs), c.origin());
-                default -> stmt;  // TypeAlias / Requires / Exports / NoOp carry no struct-literal expr
+                // A conductor's state initializers and reaction bodies may construct an imported
+                // struct like any other code — they reached here through `default`.
+                case IrStmt.ConductorDecl cd -> cd.mapStateInits(e -> rewriteExpr(e, structs));
+                case IrStmt.ReturnProof rp -> rp.body() == null ? rp : new IrStmt.ReturnProof(
+                        rp.functionName(), rp.params(), rp.grantedReturn(),
+                        rewriteExpr(rp.body(), structs), rp.origin());
+                // Exhaustive from here: these genuinely carry no struct-literal expression, and
+                // saying so is what makes the next statement kind a compile error rather than a
+                // silent omission.
+                case IrStmt.TypeAlias ta -> ta;
+                case IrStmt.Spawn sp -> sp;
+                case IrStmt.Requires rq -> rq;
+                case IrStmt.Exports ex -> ex;
+                case IrStmt.NoOp np -> np;
             });
         }
         return new IrModule(combined.name(), out, rewriteExpr(combined.main(), structs));

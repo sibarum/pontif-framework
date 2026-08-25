@@ -7,6 +7,12 @@ import java.util.Map;
 
 public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, IrStmt.TraitImpl, IrStmt.Coercion, IrStmt.Proof, IrStmt.ReturnProof, IrStmt.Requires, IrStmt.Exports, IrStmt.ConductorDecl, IrStmt.Spawn, IrStmt.NoOp {
 
+    /** An expression rewrite a pass hands to {@link ConductorDecl#mapStateInits}; may reject. */
+    @FunctionalInterface
+    interface ExprRewrite {
+        IrExpr apply(IrExpr expr) throws CompileException;
+    }
+
     Origin origin();
 
     static FunctionDecl functionDecl(
@@ -191,6 +197,34 @@ public sealed interface IrStmt permits IrStmt.FunctionDecl, IrStmt.TypeAlias, Ir
             state = List.copyOf(state);
             handlers = Map.copyOf(handlers);
             reactions = List.copyOf(reactions);
+        }
+
+        /**
+         * Applies {@code f} to each state field's INITIALIZER — the code this declaration carries
+         * that is compiled from here.
+         *
+         * <p>The single home for "which part of a conductor a body-rewriting pass must visit".
+         * Three such passes (destructure resolution, struct-literal rewriting, method/operator
+         * resolution) each ended their statement switch in {@code default -> stmt} under a comment
+         * listing the kinds that "carry no expression" — a list written before conductors existed
+         * and wrong ever since. {@code IrCompiler} builds the conductor's state seed from these
+         * initializers, so skipping them meant one calling an imported function died at runtime
+         * with "No function named 'startAt'", and one containing a method call failed to compile
+         * with "MethodResolver must eliminate MethodCall before IrCompiler" — the pass that was
+         * meant to eliminate it never looked inside a conductor.
+         *
+         * <p><b>Reactions are deliberately not visited.</b> Seating injects them into the statement
+         * list as ordinary {@link FunctionDecl}s BEFORE these passes run, so the copies that are
+         * compiled are rewritten through the normal function arm, with the parameter scope that
+         * makes {@code this.n.apply(…)} resolvable. The copies held here are not compiled, and
+         * rewriting them out of that context fails — which is how this boundary was found.
+         */
+        public ConductorDecl mapStateInits(ExprRewrite f) throws CompileException {
+            List<StateField> newState = new java.util.ArrayList<>(state.size());
+            for (StateField sf : state) {
+                newState.add(new StateField(sf.name(), sf.sort(), f.apply(sf.init())));
+            }
+            return new ConductorDecl(name, newState, handlers, reactions, origin);
         }
 
         /** One mutable single-owner state field of a conductor: {@code name:sort = init}. */

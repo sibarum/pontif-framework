@@ -172,7 +172,21 @@ public final class MethodOperatorResolver {
                 yield new IrStmt.TraitImpl(ti.typeName(), ti.traitName(), methods, producers,
                         ti.typeBindings(), ti.typeParams(), ti.traitTypeArgs(), ti.origin());
             }
-            default -> stmt;
+            // A conductor's state initializers and reaction bodies contain method calls and
+            // operators like any other code. Skipped by the old `default`, a state initializer
+            // holding one failed with the internal-sounding "MethodResolver must eliminate
+            // MethodCall before IrCompiler" — the pass that was supposed to eliminate it never
+            // looked inside a conductor.
+            case IrStmt.ConductorDecl cd -> cd.mapStateInits(e -> rewriteExpr(e, ctx));
+            // Exhaustive from here: no method call or operator to route.
+            case IrStmt.Proof p -> p;          // a proof tree is a marker call, routed by its own gate
+            case IrStmt.ReturnProof rp -> rp;  // the case-function body's arms are inert guards
+            case IrStmt.Coercion c -> c;       // lowered to a FunctionDecl before this pass runs
+            case IrStmt.TypeAlias ta -> ta;
+            case IrStmt.Spawn sp -> sp;
+            case IrStmt.Requires rq -> rq;
+            case IrStmt.Exports ex -> ex;
+            case IrStmt.NoOp np -> np;
         };
     }
 
