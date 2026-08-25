@@ -76,6 +76,22 @@ class PontifRunnerTruffleTest {
     }
 
     @Test
+    void mutualRecursionThroughDispatchOverloads() {
+        // isEven(4) → isOdd(3) → isEven(2) → isOdd(1) → isEven(0) = 1. Kept from the S-expr
+        // factorial suite, which was the only place mutual recursion across two overload sets
+        // was exercised on both engines; the rest of that file is covered by the cases here.
+        String src = """
+                function isEven(n:[Int:@==0]):Int -> 1
+                function isEven(n:[Int:@>0]):Int -> isOdd(n - 1)
+                function isOdd(n:[Int:@==0]):Int -> 0
+                function isOdd(n:[Int:@>0]):Int -> isEven(n - 1)
+                isEven(4)
+                """;
+        assertEquals("1", truffleValue(src, "evenodd.ptf"));
+        assertEquals(runInterp(src, "evenodd.ptf").text(), runTruffle(src, "evenodd.ptf").text());
+    }
+
+    @Test
     void runtimeError_truffle_carriesOrigin() {
         // Division by zero — the original used a non-total match, which is a compile error now.
         RunResult r = runTruffle("function f(x:Int):Int -> 10 / x\nf(0)", "divzero.ptf");

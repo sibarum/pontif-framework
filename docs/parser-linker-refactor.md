@@ -45,10 +45,10 @@ alone — revisit only if a caller other than `resolveAndCombine` appears.
 ## Item 2 — declaration-keyword registry (TODO)
 
 **Symptom:** three lists that must agree, none checked against the others, in `PontifParser`:
-- `KEYWORDS` (`PontifSexprParser.java:79`) — the superset (also holds `match`/`emit`/`true`/…);
-- the decl-head set inside `isMainExpressionStart` (`PontifSexprParser.java:585`) — the *exact* declaration
+- `KEYWORDS` (`PontifParser.java:79`) — the superset (also holds `match`/`emit`/`true`/…);
+- the decl-head set inside `isMainExpressionStart` (`PontifParser.java:585`) — the *exact* declaration
   keywords;
-- the `parseDeclaration` switch cases (`PontifSexprParser.java:644`).
+- the `parseDeclaration` switch cases (`PontifParser.java:644`).
 
 The decl-head set and the switch must be **identical**; drift gives the
 `"unexpected keyword 'X' in expression position"` error (hit when adding `conductor`, whose keyword
@@ -140,9 +140,32 @@ not compiler-forced for the *next* kind. Consider dropping their `default` to lo
 
 ---
 
-## Item 4 — reference parser divergence (TODO / decision)
+## Item 4 — reference parser divergence — RESOLVED by DECOMMISSION (2026-08-25)
 
-**Symptom:** the S-expression reference `SexprParser` (`SexprSexprParser.java`) — documented in the README as
+**Ruled (James):** "We don't need the S-expr parser." Neither branch of the decision below was
+taken — the third option was. `SexprParser`, `SexprLexer`, `SexprToken` and `LanguageDef` are
+deleted, along with `PontifCompiler.compileSexpr` and the `LanguageDef` plumbing. "Two parsers,
+one IR" is now one parser, one IR.
+
+Of the 143 tests that touched it, **72 went with it** (the parser's own grammar tests, and
+`LanguageDef`'s re-spelling capability, which was configuration for a parser that no longer
+exists) and **59 were ported to the surface syntax**, becoming 62 — every scenario the tests
+covered is covered in the language people actually write, most now on both engines where the
+originals ran one.
+
+**Porting was not bookkeeping.** Changing the notation changed the lowering, and two defects
+fell out that the old notation had been hiding: a top-level binding holding a closure could not
+be invoked on Truffle (fixed, `65290fe`), and the by-name anonymous shape `[{x:Int}]` never
+matches as a match arm even against an exactly shaped value (pinned as a known limitation).
+Three cases also came out strictly better in Pontif — a missing field on a call result, an
+applied literal, and an unknown key in a decomposition are all compile errors now where the
+S-expr forms failed at runtime.
+
+---
+
+### The original entry (kept — the divergence it names is what prompted the ruling)
+
+**Symptom:** the S-expression reference `SexprParser` (`SexprParser.java`) — documented in the README as
 "the ground truth the test suite is written against" — contains **none** of the effect /
 orchestration surface: a grep for `action` / `conduit` / `conductor` / `spawn` / `emit` returns
 zero. That entire subsystem is expressible only through `PontifParser`.

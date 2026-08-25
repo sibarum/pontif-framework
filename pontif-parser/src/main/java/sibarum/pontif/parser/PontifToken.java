@@ -3,10 +3,9 @@ package sibarum.pontif.parser;
 import sibarum.pontif.core.Origin;
 
 /**
- * Token type for {@link PontifLexer} / {@link PontifParser} — the Pontif syntax
- * frontend described in {@code docs/language-reference.ptf}. Distinct from
- * the S-expression {@link SexprToken} because the Pontif syntax tokenizes operator
- * characters as their own tokens (so {@code Int>0} splits into three).
+ * Token type for {@link PontifLexer} / {@link PontifParser} — the Pontif syntax frontend
+ * described in {@code docs/language-reference.ptf}. Operator characters tokenize as their own
+ * tokens, so {@code Int>0} splits into three.
  */
 public record PontifToken(Kind kind, String text, String source, int line, int column) {
 

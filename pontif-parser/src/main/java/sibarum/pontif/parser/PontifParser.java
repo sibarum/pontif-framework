@@ -283,7 +283,7 @@ public final class PontifParser {
         return p.parseModule();
     }
 
-    // --- SexprToken cursor ---
+    // --- token cursor ---
 
     private PontifToken peek() {
         return tokens.get(pos);

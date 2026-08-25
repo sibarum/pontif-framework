@@ -3,9 +3,8 @@ package sibarum.pontif.parser;
 import sibarum.pontif.core.Origin;
 
 /**
- * Checked. Thrown by {@link SexprParser} when source text doesn't conform to the
- * grammar configured by the active {@link LanguageDef}. Carries the
- * {@link Origin} of the offending token so callers can highlight it.
+ * Checked. Thrown by {@link PontifParser} when source text doesn't conform to the grammar.
+ * Carries the {@link Origin} of the offending token so callers can highlight it.
  */
 public class ParseException extends Exception {
 

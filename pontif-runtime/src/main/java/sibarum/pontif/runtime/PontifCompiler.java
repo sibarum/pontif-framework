@@ -12,9 +12,7 @@ import sibarum.pontif.ir.IrExpr;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.PontifParser;
-import sibarum.pontif.parser.LanguageDef;
 import sibarum.pontif.parser.ParseException;
-import sibarum.pontif.parser.SexprParser;
 import sibarum.pontif.ir.AliasResolver;
 import sibarum.pontif.runtime.module.AlgebraExtension;
 import sibarum.pontif.receipts.BuiltinIssuer;
@@ -37,9 +35,8 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Source → {@link CompiledProgram} pipeline. Parses with a configured
- * {@link LanguageDef}, then runs the IR compiler with a configured set of
- * simplifier rules. Errors at any stage become a {@link CompileResult.Failed}
+ * Source → {@link CompiledProgram} pipeline. Parses the Pontif surface syntax, then runs the
+ * IR compiler with a configured set of simplifier rules. Errors at any stage become a {@link CompileResult.Failed}
  * carrying a {@link RunResult} with origin information.
  *
  * <p>Immutable and thread-safe. Reuse one instance across many sources; one
@@ -47,15 +44,13 @@ import java.util.Set;
  */
 public final class PontifCompiler {
 
-    private final LanguageDef language;
     private final List<RewriteRule> simplifierRules;
 
     public PontifCompiler() {
-        this(LanguageDef.defaults(), defaultRules());
+        this(defaultRules());
     }
 
-    public PontifCompiler(LanguageDef language, List<RewriteRule> simplifierRules) {
-        this.language = language;
+    public PontifCompiler(List<RewriteRule> simplifierRules) {
         this.simplifierRules = List.copyOf(simplifierRules);
     }
 
@@ -70,31 +65,8 @@ public final class PontifCompiler {
         return DefaultRules.production();
     }
 
-    public LanguageDef language() {
-        return language;
-    }
-
     public List<RewriteRule> simplifierRules() {
         return simplifierRules;
-    }
-
-    /**
-     * Compile the S-expression reference syntax. Used by much of the unit-test
-     * suite (the stable ground truth for language behavior). Stable; not
-     * expected to change. The Pontif surface syntax is {@link #compile}.
-     */
-    public CompileResult compileSexpr(String source, String sourceName) {
-        IrModule module;
-        try {
-            module = SexprParser.parseModule(source, sourceName, language);
-        } catch (ParseException pe) {
-            return new CompileResult.Failed(
-                    RunResult.error("Parse error: " + pe.getMessage(), pe.origin()));
-        } catch (RuntimeException e) {
-            return new CompileResult.Failed(
-                    RunResult.error("Parse error: " + e.getMessage()));
-        }
-        return compileModule(module, sourceName);
     }
 
     /**

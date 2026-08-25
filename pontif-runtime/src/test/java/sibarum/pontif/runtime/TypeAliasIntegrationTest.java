@@ -9,172 +9,146 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end coverage for {@code (deftype Name sort)} at the source level.
- * Verifies that aliases resolve correctly through every site that mentions
- * a sort: function params, return sorts, let-binding declared sorts,
- * match-branch patterns, and nested compound sorts.
+ * End-to-end coverage for the reusable sort alias {@code let Name:Type[sort]} — that it
+ * resolves at every site mentioning a sort: a parameter, a return, a let's declared sort, a
+ * match arm, inside another alias, and inside a function sort.
+ *
+ * <p>Ported from the S-expression syntax when that parser was decommissioned (its spelling was
+ * {@code (deftype Name sort)}). One case did not survive: the original checked that the alias
+ * KEYWORD could be rebranded through {@code LanguageDef}, which was configuration for that
+ * parser and went with it.
+ *
+ * <p>Each case runs on both engines, which the original did for only one of them.
  */
 class TypeAliasIntegrationTest {
 
     private final PontifCompiler compiler = new PontifCompiler();
     private final PontifRunner runner = new PontifRunner();
 
-    private RunResult run(String src) {
-        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
+    /** Runs on both engines, asserts they agree, and returns the shared answer. */
+    private String value(String src) {
+        PontifCompiler.CompileResult r = compiler.compile(src, "t.ptf");
+        String first = null;
+        for (Engine e : Engine.values()) {
+            RunResult out = runner.run(r, e);
+            assertFalse(out.isError(), () -> "expected success; got: " + out.text());
+            if (first == null) {
+                first = out.text();
+            } else {
+                final String expected = first;
+                assertEquals(expected, out.text(), () -> "engines disagree on: " + src);
+            }
+        }
+        return first;
     }
 
-    private RunResult runTruffle(String src) {
-        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.TRUFFLE);
-    }
-
-    @Test
-    void aliasToStructuralSort_usedAsParamType_dispatchesAndDestructures() throws Exception {
-        String src = """
-                (module m
-                  ((deftype Point (struct P (x Int) (y Int)))
-                   (defn manhattan ((p Point)) Int
-                     (match p
-                       ((struct P (x Int) (y Int)) (+ x y)))))
-                  (call manhattan (record (x 3) (y 4))))
-                """;
-        assertEquals("7", run(src).text());
-        assertEquals("7", runTruffle(src).text());
-    }
-
-    @Test
-    void aliasToRefinedSort_usedAsParamType() throws Exception {
-        String src = """
-                (module m
-                  ((deftype PosInt (refined Int (> self 0)))
-                   (defn double ((n PosInt)) Int (* n 2)))
-                  (call double 5))
-                """;
-        assertEquals("10", run(src).text());
+    private String reject(String src) {
+        PontifCompiler.CompileResult r = compiler.compile(src, "t.ptf");
+        return ((PontifCompiler.CompileResult.Failed) r).error().text();
     }
 
     @Test
-    void aliasUsedInsideAnotherAlias_resolvesTransitively() throws Exception {
-        String src = """
-                (module m
-                  ((deftype Coord Int)
-                   (deftype Point (struct P (x Coord) (y Coord)))
-                   (defn xPlusY ((p Point)) Int
-                     (match p
-                       ((struct P (x Int) (y Int)) (+ x y)))))
-                  (call xPlusY (record (x 10) (y 20))))
-                """;
-        assertEquals("30", run(src).text());
+    void aliasToStructSort_usedAsParamType_dispatchesAndDecomposes() {
+        assertEquals("7", value("""
+                struct P(x:Int, y:Int)
+                let Point:Type[P]
+                function manhattan(p:Point):Int ->
+                  let p.{x, y}
+                  x + y
+                manhattan(P(3, 4))
+                """));
     }
 
     @Test
-    void aliasUsedAsLetBindingDeclaredSort() throws Exception {
-        String src = """
-                (module m
-                  ((deftype Point (struct P (x Int) (y Int))))
-                  (let p Point (record (x 5) (y 7))
-                    (field p y)))
-                """;
-        assertEquals("7", run(src).text());
+    void aliasToRefinedSort_usedAsParamType() {
+        assertEquals("10", value("""
+                let PosInt:Type[[Int:@>0]]
+                function double(n:PosInt):Int -> n * 2
+                double(5)
+                """));
     }
 
     @Test
-    void aliasUsedAsReturnSort() throws Exception {
-        String src = """
-                (module m
-                  ((deftype Point (struct P (x Int) (y Int)))
-                   (defn origin () Point (record (x 0) (y 0))))
-                  (field (call origin) x))
-                """;
-        assertEquals("0", run(src).text());
+    void aliasUsedInsideAnotherDeclaration_resolvesTransitively() {
+        assertEquals("30", value("""
+                let Coord:Type[Int]
+                struct P(x:Coord, y:Coord)
+                function xPlusY(p:P):Int ->
+                  let p.{x, y}
+                  x + y
+                xPlusY(P(10, 20))
+                """));
     }
 
     @Test
-    void aliasInsideFunctionSort_resolvesRecursively() throws Exception {
-        // The function-sort form's param and return positions get resolved.
-        // (Local binding of a closure used, not dispatch — passing a closure
-        // through dispatch hits a separate toSymExpr limitation, see TODO.)
-        String src = """
-                (module m
-                  ((deftype IntFn (function (Int) Int)))
-                  (let inc IntFn (lambda ((n Int)) Int (+ n 1))
-                    (call inc (call inc 5))))
-                """;
-        // inc(inc(5)) = 7
-        assertEquals("7", run(src).text());
+    void aliasUsedAsLetBindingDeclaredSort() {
+        assertEquals("7", value("""
+                struct P(x:Int, y:Int)
+                let Point:Type[P]
+                let p:Point = P(5, 7)
+                p.y
+                """));
     }
 
     @Test
-    void unknownNamedSortIsLeftAlone_notAnError() throws Exception {
-        // Primitive sort names like Int / Bool aren't aliases. The resolver
-        // leaves them as Named sorts. Custom names not declared as aliases
-        // also fall through.
-        String src = """
-                (module m
-                  ((defn id ((n Int)) Int n))
-                  (call id 42))
-                """;
-        assertEquals("42", run(src).text());
+    void aliasUsedAsReturnSort() {
+        // The alias NAME differs from the struct's own name, so this also exercises the rule
+        // that two names for one declaration are one type.
+        assertEquals("0", value("""
+                struct P(x:Int, y:Int)
+                let Point:Type[P]
+                function origin():Point -> P(0, 0)
+                origin().x
+                """));
     }
 
     @Test
-    void cyclicAliasChain_isACompileError() throws Exception {
-        String src = """
-                (module m
-                  ((deftype A B)
-                   (deftype B A))
-                  42)
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected compile error");
-        assertTrue(r.text().toLowerCase().contains("cycl"),
-                "should mention cycle; got: " + r.text());
+    void aliasInsideAFunctionSort_resolvesRecursively() {
+        // inc(inc(5)) = 7 — the alias stands for the whole call signature.
+        assertEquals("7", value("""
+                let IntFn:Type[[Method(Int):Int]]
+                let inc:IntFn = [(n:Int) -> n + 1]
+                inc(inc(5))
+                """));
     }
 
     @Test
-    void duplicateAliasDeclaration_isACompileError() throws Exception {
-        String src = """
-                (module m
-                  ((deftype Foo Int)
-                   (deftype Foo Bool))
-                  42)
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected compile error");
-        assertTrue(r.text().toLowerCase().contains("duplicate"),
-                "should mention duplicate; got: " + r.text());
+    void aliasInAMatchArm_resolvesForMatching() {
+        assertEquals("7", value("""
+                struct P(x:Int, y:Int)
+                let Point:Type[P]
+                let p:Point = P(3, 4)
+                match p { [Point] -> p.x + p.y }
+                """));
     }
 
     @Test
-    void aliasInsideMatchBranchPattern_resolvesForMatching() throws Exception {
-        // The match pattern itself is an IrSort — alias references in branch
-        // patterns resolve at compile time, so the pattern correctly identifies
-        // the record's shape. (Field destructuring through an alias-named
-        // pattern doesn't work — the parser-time destructuring desugar runs
-        // before alias resolution; see TODO. Branch body uses explicit field
-        // access instead.)
-        String src = """
-                (module m
-                  ((deftype Point (struct P (x Int) (y Int))))
-                  (let p Point (record (x 3) (y 4))
-                    (match p
-                      (Point (+ (field p x) (field p y))))))
-                """;
-        assertEquals("7", run(src).text());
+    void aPrimitiveNameIsNotAnAlias() {
+        // Nothing to resolve; a primitive name passes through as itself.
+        assertEquals("42", value("""
+                function id(n:Int):Int -> n
+                id(42)
+                """));
     }
 
     @Test
-    void aliasKeyword_canBeRebrandedViaLanguageDef() throws Exception {
-        sibarum.pontif.parser.LanguageDef def =
-                sibarum.pontif.parser.LanguageDef.defaults().withTypeAliasKeyword("type");
-        PontifCompiler customCompiler = new PontifCompiler(def, PontifCompiler.defaultRules());
-        String src = """
-                (module m
-                  ((type PosInt (refined Int (> self 0)))
-                   (defn double ((n PosInt)) Int (* n 2)))
-                  (call double 5))
-                """;
-        RunResult r = runner.run(customCompiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("10", r.text());
+    void cyclicAliasChain_isACompileError() {
+        String err = reject("""
+                let A:Type[B]
+                let B:Type[A]
+                42
+                """);
+        assertTrue(err.toLowerCase().contains("cycl"), () -> "should mention a cycle; got: " + err);
+    }
+
+    @Test
+    void duplicateAliasDeclaration_isACompileError() {
+        String err = reject("""
+                let Foo:Type[Int]
+                let Foo:Type[Bool]
+                42
+                """);
+        assertTrue(err.toLowerCase().contains("duplicate"),
+                () -> "should mention the duplicate; got: " + err);
     }
 }

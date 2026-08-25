@@ -116,7 +116,7 @@ class PontifParserOperatorOverloadTest {
                 () -> "Unexpected: " + ex.getMessage());
     }
 
-    // --- SexprParser never routes: every operator use stays a BinOp --------------
+    // --- The parser never routes: every operator use stays a BinOp ---------------
 
     @Test
     void structPlusStruct_staysBinOp() throws Exception {

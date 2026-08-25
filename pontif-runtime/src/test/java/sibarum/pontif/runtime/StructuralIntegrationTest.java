@@ -9,275 +9,218 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end coverage for structural sorts + records + field access at the
- * source level. Goes through SexprParser → PontifCompiler → PontifRunner; checks
- * both engines (interpreter and Truffle) where a parity check makes sense.
+ * End-to-end coverage for records, field access and decomposition at the source level — the
+ * value side of structural sorts, and the compile-time checking that follows a field name
+ * through a chain of them.
+ *
+ * <p>Ported from the S-expression syntax when that parser was decommissioned. Two changes in
+ * substance, both improvements, and both noted at the case that shows them: a missing field on
+ * a base whose sort was NOT statically inferable used to be a runtime failure and is caught at
+ * compile time now; and a binding that shadows an outer one of the same name is rejected
+ * outright rather than quietly winning. The original also had two pairs of tests that differed
+ * only in their literal values; each pair is one case here.
+ *
+ * <p>Every case runs on both engines, which the original did for about half of them.
  */
 class StructuralIntegrationTest {
 
     private final PontifCompiler compiler = new PontifCompiler();
     private final PontifRunner runner = new PontifRunner();
 
-    private RunResult run(String source) {
-        return runner.run(compiler.compileSexpr(source, "t.ptf"), Engine.INTERPRETER);
+    /** Runs on both engines, asserts they agree, and returns the shared answer. */
+    private String value(String src) {
+        PontifCompiler.CompileResult r = compiler.compile(src, "t.ptf");
+        assertFalse(r instanceof PontifCompiler.CompileResult.Failed,
+                () -> "expected compile success; got: "
+                        + ((PontifCompiler.CompileResult.Failed) r).error().text());
+        String first = null;
+        for (Engine e : Engine.values()) {
+            RunResult out = runner.run(r, e);
+            assertFalse(out.isError(), () -> "expected success; got: " + out.text());
+            if (first == null) {
+                first = out.text();
+            } else {
+                final String expected = first;
+                assertEquals(expected, out.text(), () -> "engines disagree on: " + src);
+            }
+        }
+        return first;
     }
 
-    private RunResult runTruffle(String source) {
-        return runner.run(compiler.compileSexpr(source, "t.ptf"), Engine.TRUFFLE);
+    /** The compile diagnostic, asserting the program was rejected at compile time. */
+    private String reject(String src) {
+        PontifCompiler.CompileResult r = compiler.compile(src, "t.ptf");
+        assertTrue(r instanceof PontifCompiler.CompileResult.Failed,
+                () -> "expected a compile rejection; got a compiling program");
+        return ((PontifCompiler.CompileResult.Failed) r).error().text();
     }
 
-    // --- Record construction + field access ---
+    // --- construction and field access --------------------------------------------
 
     @Test
-    void recordConstructionAndFieldRead() throws Exception {
-        // Build a point, read its x field.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Point (x Int) (y Int)) (record (x 3) (y 4))
-                    (field p x)))
-                """;
-        assertEquals("3", run(src).text());
-        assertEquals("3", runTruffle(src).text());
-    }
-
-    @Test
-    void recordWithComputedFields_evaluatesEagerly() throws Exception {
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Cell (sum Int)) (record (sum (+ 1 (* 2 3))))
-                    (field p sum)))
-                """;
-        assertEquals("7", run(src).text());
-    }
-
-    @Test
-    void nestedRecord_accessedThroughChainedFieldReads() throws Exception {
-        String src = """
-                (module m
-                  ()
-                  (let o
-                       (struct Outer (inner (struct Inner (n Int))))
-                       (record (inner (record (n 42))))
-                    (field (field o inner) n)))
-                """;
-        assertEquals("42", run(src).text());
-        assertEquals("42", runTruffle(src).text());
+    void recordConstructionAndFieldRead() {
+        assertEquals("3", value("""
+                let p = {x = 3, y = 4}
+                p.x
+                """));
     }
 
     @Test
-    void missingField_isACompileError_caughtBySortPropagation() throws Exception {
-        // The base's sort is statically known via the let-binding's declared
-        // sort, so SortChecker rejects this before runtime.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct P (x Int)) (record (x 1))
-                    (field p missing)))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected error");
-        assertTrue(r.text().toLowerCase().contains("compile"),
-                "should be a compile-time error; got: " + r.text());
-        assertTrue(r.text().contains("missing"),
-                "should name the field; got: " + r.text());
-        assertTrue(r.text().contains("'P'") || r.text().contains("P "),
-                "should name the sort; got: " + r.text());
+    void recordWithComputedFields_evaluatesEagerly() {
+        assertEquals("7", value("""
+                let p = {sum = 1 + 2 * 3}
+                p.sum
+                """));
     }
 
     @Test
-    void missingField_onUntypedBase_stillCaughtAtRuntime() throws Exception {
-        // When the base's sort isn't statically inferable (here: a call result
-        // with no declared sort recorded in scope), the runtime catches it.
-        String src = """
-                (module m
-                  ((defn mkRec () (struct P (x Int))
-                     (record (x 1))))
-                  (field (call mkRec) missing))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected error");
-        assertTrue(r.text().contains("missing"),
-                "should name the field; got: " + r.text());
+    void nestedRecord_accessedThroughChainedFieldReads() {
+        assertEquals("42", value("""
+                let o = {inner = {n = 42}}
+                o.inner.n
+                """));
     }
 
     @Test
-    void missingField_inDestructuringBranch_caughtByCompiler() throws Exception {
-        // Inside the structural-pattern branch, p's sort is narrowed to the
-        // pattern. SortChecker validates that (field p z) — z not in pattern —
-        // is a compile error.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct P (x Int) (y Int)) (record (x 1) (y 2))
-                    (match p
-                      ((struct P (x Int) (y Int)) (field p z)))))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected error");
-        assertTrue(r.text().toLowerCase().contains("compile"),
-                "should be a compile-time error; got: " + r.text());
-        assertTrue(r.text().contains("'z'"),
-                "should name the missing field; got: " + r.text());
+    void aStructsFieldsAreReadTheSameWay() {
+        assertEquals("7", value("""
+                struct Point(x:Int, y:Int)
+                let p = Point(3, 4)
+                p.x + p.y
+                """));
     }
 
     @Test
-    void nestedFieldAccess_chainedThroughKnownStructuralSorts_compiles() throws Exception {
-        // (field (field o inner) n) where both layers' sorts are known —
-        // SortChecker recurses through the chain successfully.
-        String src = """
-                (module m
-                  ()
-                  (let o
-                       (struct Outer (inner (struct Inner (n Int))))
-                       (record (inner (record (n 7))))
-                    (field (field o inner) n)))
-                """;
-        assertEquals("7", run(src).text());
+    void emptyStruct_canBeDeclaredAndConstructed() {
+        assertEquals("42", value("""
+                struct Unit()
+                let u = Unit()
+                42
+                """));
+    }
+
+    // --- a field name that does not exist -----------------------------------------
+
+    @Test
+    void missingField_onADeclaredStruct_isACompileError() {
+        String err = reject("""
+                struct P(x:Int)
+                let p = P(1)
+                p.missing
+                """);
+        assertTrue(err.contains("missing"), () -> "should name the field; got: " + err);
+        assertTrue(err.contains("'P'"), () -> "should name the sort; got: " + err);
     }
 
     @Test
-    void nestedFieldAccess_invalidInnerField_caughtAtCompile() throws Exception {
-        // The inner field name is wrong; SortChecker walks through the chain
-        // and fails on the inner FieldAccess.
-        String src = """
-                (module m
-                  ()
-                  (let o
-                       (struct Outer (inner (struct Inner (n Int))))
-                       (record (inner (record (n 7))))
-                    (field (field o inner) bogus)))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected error");
-        assertTrue(r.text().toLowerCase().contains("compile"));
-        assertTrue(r.text().contains("bogus"));
+    void missingField_onAnAnonymousRecord_isACompileError() {
+        String err = reject("""
+                let p = {x = 1}
+                p.missing
+                """);
+        assertTrue(err.contains("missing") && err.contains("[x]"),
+                () -> "should name the field and what IS available; got: " + err);
     }
 
     @Test
-    void functionParamWithStructuralSort_fieldAccessValidatedInBody() throws Exception {
-        // The function param's structural sort flows into the body's type
-        // environment; field accesses against it validate at compile time.
-        String src = """
-                (module m
-                  ((defn manhattan ((p (struct P (x Int) (y Int)))) Int
-                     (+ (field p x) (field p oops))))
-                  (call manhattan (record (x 3) (y 4))))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected compile error");
-        assertTrue(r.text().toLowerCase().contains("compile"));
-        assertTrue(r.text().contains("oops"));
-    }
-
-    // --- Structural sorts as function parameter types: dispatch on records ---
-
-    @Test
-    void functionDeclaredWithStructuralParam_dispatchesOnRecord() throws Exception {
-        // The dispatcher now lifts RecordValue → SymExpr.Record so structural
-        // refinement matching against an actual record value works at runtime.
-        String src = """
-                (module m
-                  ((defn manhattan ((p (struct P (x Int) (y Int)))) Int
-                     (+ (field p x) (field p y))))
-                  (call manhattan (record (x 3) (y 4))))
-                """;
-        assertEquals("7", run(src).text());
-        assertEquals("7", runTruffle(src).text());
-    }
-
-    // --- Match on a structural sort ---
-
-    @Test
-    void destructuring_structuralPatternBindsFieldNames() throws Exception {
-        // x and y are bound to p's fields automatically inside the branch.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Point (x Int) (y Int)) (record (x 3) (y 4))
-                    (match p
-                      ((struct Point (x Int) (y Int)) (+ x y)))))
-                """;
-        assertEquals("7", run(src).text());
-        assertEquals("7", runTruffle(src).text());
+    void missingField_onACallResult_isACompileErrorToo() {
+        // The S-expr version expected a RUNTIME failure here, because the base's sort was not
+        // statically inferable in that pipeline. It is now: the declared return sort carries.
+        String err = reject("""
+                struct P(x:Int)
+                function mkRec():P -> P(1)
+                mkRec().missing
+                """);
+        assertTrue(err.contains("missing"), () -> "should name the field; got: " + err);
     }
 
     @Test
-    void destructuring_nonVarScrutinee_evaluatedOnce() throws Exception {
-        // A compound scrutinee is wrapped in a synthetic outer let so it
-        // doesn't re-evaluate per field-access. (Result should still be 12.)
-        String src = """
-                (module m
-                  ((defn mkPair ((a Int) (b Int)) (struct Pair (x Int) (y Int))
-                     (record (x a) (y b))))
-                  (match (call mkPair 5 7)
-                    ((struct Pair (x Int) (y Int)) (+ x y))))
-                """;
-        assertEquals("12", run(src).text());
-        assertEquals("12", runTruffle(src).text());
+    void missingField_inTheInnerLayerOfAChain_isCaught() {
+        String err = reject("""
+                let o = {inner = {n = 7}}
+                o.inner.bogus
+                """);
+        assertTrue(err.contains("bogus"), () -> "should name the inner field; got: " + err);
     }
 
     @Test
-    void destructuring_renaming_doesNotConflictWithOuterScope() throws Exception {
-        // Outer let binds x to 100; inner match's structural pattern shadows
-        // it with the field value (10). Result is the inner x.
-        String src = """
-                (module m
-                  ()
-                  (let x Int 100
-                    (let p (struct P (x Int)) (record (x 10))
-                      (match p
-                        ((struct P (x Int)) (+ x 1))))))
-                """;
-        assertEquals("11", run(src).text());
+    void missingField_againstAParametersDeclaredShape_isCaughtInTheBody() {
+        // The parameter's shape flows into the body's environment, so the bad access is caught
+        // at the definition rather than at a call site.
+        String err = reject("""
+                function manhattan(p:[{x:Int, y:Int}]):Int -> p.x + p.oops
+                manhattan({x = 3, y = 4})
+                """);
+        assertTrue(err.contains("oops"), () -> "should name the field; got: " + err);
+    }
+
+    // --- structural sorts as parameters --------------------------------------------
+
+    @Test
+    void functionDeclaredWithAShapeParam_acceptsARecord() {
+        assertEquals("7", value("""
+                function manhattan(p:[{x:Int, y:Int}]):Int -> p.x + p.y
+                manhattan({x = 3, y = 4})
+                """));
+    }
+
+    // --- decomposition --------------------------------------------------------------
+
+    @Test
+    void decompositionBindsFieldNames() {
+        assertEquals("7", value("""
+                struct Point(x:Int, y:Int)
+                let p = Point(3, 4)
+                let p.{x, y}
+                x + y
+                """));
     }
 
     @Test
-    void destructuring_nestedRecord_innerFieldsBoundOneLevel() throws Exception {
-        // Destructuring binds only the top-level field names. To get nested
-        // field values, the branch uses (field inner ...) explicitly.
-        String src = """
-                (module m
-                  ()
-                  (let o
-                       (struct Outer (inner (struct I (n Int))))
-                       (record (inner (record (n 5))))
-                    (match o
-                      ((struct Outer (inner (struct I (n Int))))
-                        (field inner n)))))
-                """;
-        assertEquals("5", run(src).text());
+    void decompositionOverACallResult_evaluatesItOnce() {
+        assertEquals("12", value("""
+                struct Pair(x:Int, y:Int)
+                function mkPair(a:Int, b:Int):Pair -> Pair(a, b)
+                let p = mkPair(5, 7)
+                let p.{x, y}
+                x + y
+                """));
     }
 
     @Test
-    void matchOnRecord_picksBranchByStructuralSort() throws Exception {
-        // Two-branch match where the first sort accepts records with field
-        // `kind` and the alternate fallback catches all Ints. Only one branch
-        // shape applies to the record value.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Tagged (kind Int)) (record (kind 1))
-                    (match p
-                      ((struct Tagged (kind Int)) (field p kind)))))
-                """;
-        RunResult r = run(src);
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("1", r.text());
+    void decompositionRenamesToAvoidACollision() {
+        // The S-expr version let an inner binding shadow an outer `x` silently. Pontif rejects
+        // shadowing outright, so the rename form — which the decomposition grammar has for
+        // exactly this — is how the collision is resolved.
+        assertEquals("11", value("""
+                let x = 100
+                struct P(x:Int)
+                let p = P(10)
+                let p.{x -> inner}
+                inner + 1
+                """));
     }
 
-    // --- Empty struct sort + empty record ---
+    @Test
+    void aBindingThatWouldShadowAnotherIsRejected() {
+        String err = reject("""
+                let x = 100
+                struct P(x:Int)
+                let p = P(10)
+                let p.{x}
+                x + 1
+                """);
+        assertTrue(err.contains("already defined") || err.toLowerCase().contains("shadow"),
+                () -> "should reject the collision; got: " + err);
+    }
 
     @Test
-    void emptyStructSort_canBeDeclared_andEmptyRecordConstructed() throws Exception {
-        String src = """
-                (module m
-                  ()
-                  (let u (struct Unit) (record)
-                    42))
-                """;
-        // The let value is the empty record, the body returns 42.
-        assertEquals("42", run(src).text());
+    void decompositionOfANestedRecord_bindsTheTopLevelFieldOnly() {
+        // The inner value is bound whole; its own fields are read from it.
+        assertEquals("5", value("""
+                let o = {inner = {n = 5}}
+                let o.{inner}
+                inner.n
+                """));
     }
 }
