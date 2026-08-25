@@ -352,11 +352,29 @@ args.
 
 ---
 
+## Family 5b — `(String:value)` ran on one engine only
+
+**Closed 2026-08-25.** The explicit render stopped the Truffle backend with "not yet
+implemented" while the interpreter performed it. That was catalogued as a stated gap rather
+than a divergence — but for a closed built-in render it is family 5's shape exactly: the
+engines must not disagree about what a program means, and "one of them refuses to run it"
+is a disagreement.
+
+`RenderToStringNode` renders through `CanonicalText` — the renderer family 5 put in `core`
+precisely so the two engines could not drift — and fails closed with the interpreter's
+message on a value with no canonical render. A user-defined `cast Target:(x:Source)`
+resolves through dispatch and remains interpreter-only; the error now says which target it
+could not lower rather than implying every cast is unimplemented.
+
+**Tests.** `CastAltTest.truffleBackend_agreesOnTheRenderToString` — every render, the
+compose with concatenation, and the fail-closed, asserted on both engines.
+
+---
+
 ## What is still open
 
-- **`(String:value)` has no Truffle lowering.** It throws an explicit "not yet
-  implemented" — a stated gap rather than a divergence, so it is not in the table above,
-  but family 5 makes it the obvious sibling to finish.
+- **A user-defined coercion cast has no Truffle lowering.** It resolves through dispatch,
+  which is a different lowering; the interpreter path runs it.
 - **The return gate abstains on unions and intersections.** `gated()` accepts a composite
   only if a branch is gated, and the return path takes the base name, which a composite
   does not have. A function declaring `:[A|B]` and returning a `C` is still accepted.

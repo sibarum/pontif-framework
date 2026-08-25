@@ -124,6 +124,35 @@ class CastAltTest {
     }
 
     @Test
+    void truffleBackend_agreesOnTheRenderToString() {
+        // `(String:value)` used to stop the Truffle backend with "not yet implemented" — an
+        // interpreter-only feature, which for the one closed render is the same shape of gap
+        // family 5 closed for String `+`: the engines must not disagree about what a program
+        // MEANS, and "one of them refuses to run it" is a disagreement. Both now render through
+        // the shared CanonicalText, so every case above holds on either engine.
+        PontifCompiler compiler = new PontifCompiler();
+        PontifRunner runner = new PontifRunner();
+        for (PontifRunner.Engine engine : PontifRunner.Engine.values()) {
+            assertEquals("\"12\"", runner.run(
+                    compiler.compile("(String:12)", "t.ptf"), engine).text(), engine::toString);
+            assertEquals("\"1.5\"", runner.run(
+                    compiler.compile("(String:1.5)", "t.ptf"), engine).text(), engine::toString);
+            assertEquals("\"true\"", runner.run(
+                    compiler.compile("(String:true)", "t.ptf"), engine).text(), engine::toString);
+            assertEquals("\"c\"", runner.run(
+                    compiler.compile("(String:'c')", "t.ptf"), engine).text(), engine::toString);
+            // Idempotent on a String, and composes with concatenation.
+            assertEquals("\"n=3\"", runner.run(
+                    compiler.compile("\"n=\" + (String:3)", "t.ptf"), engine).text(), engine::toString);
+            // Fails closed on a value with no canonical render — on both engines, alike.
+            assertTrue(runner.run(compiler.compile("""
+                    struct Point(x:Int, y:Int)
+                    (String:Point(1, 2))
+                    """, "t.ptf"), engine).isError(), engine::toString);
+        }
+    }
+
+    @Test
     void castToTargetWithNoCoercion_failsClosed() {
         // No `cast Int:(…)` is defined, so a non-String target fails closed
         // (fabricate-never) — now reported as a missing coercion.

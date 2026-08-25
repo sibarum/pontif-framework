@@ -160,14 +160,21 @@ public final class TruffleLowering {
             case IrExpr.Iterate it -> throw new UnsupportedOperationException(
                     "Iterate: Truffle lowering not yet implemented (docs/iteration.md §10)");
             // The closed built-in Int→Decimal tower — the one cast the compiler
-            // inserts implicitly (NumericCoercion). Other cast targets (String
-            // render, user coercions) remain interpreter-only for now.
+            // inserts implicitly (NumericCoercion).
             case IrExpr.Cast cast when "Decimal".equals(cast.targetSort().baseName()) ->
                     sibarum.pontif.ast.coerce.IntToDecimalNode.of(
                             lowerExpr(cast.value(), module, registry));
+            // The built-in render to String, through the renderer both engines share
+            // (CanonicalText) — the sibling of the String `+` fix, so an explicit
+            // `(String:value)` is not an interpreter-only feature (docs/soundness-holes.md,
+            // family 5). A USER coercion target stays interpreter-only: it resolves through
+            // dispatch, which is a different lowering.
+            case IrExpr.Cast cast when "String".equals(cast.targetSort().baseName()) ->
+                    sibarum.pontif.ast.coerce.RenderToStringNode.of(
+                            lowerExpr(cast.value(), module, registry));
             case IrExpr.Cast cast -> throw new UnsupportedOperationException(
-                    "Cast (Type:value): Truffle lowering not yet implemented — "
-                            + "the interpreter path is slice 1");
+                    "Cast (Type:value) to '" + cast.targetSort().baseName() + "': Truffle lowering "
+                            + "not yet implemented — a user-defined coercion runs on the interpreter path");
             // The event substrate (emit) runs on the interpreter path (docs/events.md);
             // the Truffle backend does not lower it yet.
             case IrExpr.Emit em -> throw new UnsupportedOperationException(
