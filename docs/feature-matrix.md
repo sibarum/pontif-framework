@@ -15,6 +15,13 @@ are gaps, partials, or deliberate absences are explained in [Notes](#notes).
 column** (scoped, not a full sweep); cosmetic changes trigger nothing. If a cited
 test is renamed or deleted, its cell is stale by construction — that's the detector.
 
+**The detector now runs.** `FeatureMatrixWitnessTest` asserts that every citation below
+resolves to a test class, a test method, or a probe directory that exists. It was written
+after a hand-check found three dead citations, one of which was worse than a rename: the
+`emit` row cited `EventEmitCheck` rejecting a provable non-Event — a pass since RETIRED
+because the rule was reversed, so the ledger asserted the opposite of the language and
+named a witness for it. A detector nothing runs detects nothing.
+
 | Symbol | Description                                         |
 |--------|-----------------------------------------------------|
 | ^^^    | Fully supported, witnessed.                         |
@@ -88,9 +95,11 @@ Each supported cell, with the passing test(s)/probe(s) that witness it. Probes l
 `TypeParameterConstructionTest`, `generics__02_box_construct_open` · Traits:
 `TraitAttributeTest` · TypeFrag: `TypeAliasIntegrationTest` (alias to structural sort)
 · Infer: `inference__01_field_access_typing`, `StructNarrowingTest` · Synth:
-`StructExtensionTest` (promotion) · Proofs: `ConstructionGateTest` · Nominal:
+`StructExtensionTest` (promotion) · Proofs: `ConstructionGateTest`, `BaseTypeGateTest`
+(a field's declared BASE is judged, not only its refinement), `DeclaredSortNameTest`
+(a field sort names a type that exists) · Nominal:
 `StructExtensionTest`, `ClaimRuleTest` · Struct: `StructExtensionTest`,
-`PartialPatternTest`.
+`PartialPatternTest`, `AnonymousTupleSortTest` (a written shape is a claim, member-wise).
 
 **enum** — this: `EnumTest.enum_carriesMethods_whichMayNameSiblingCases` · Refine:
 `EnumTest.match_refinementArm_coversWhateverTheCoverSays`,
@@ -116,7 +125,8 @@ Each supported cell, with the passing test(s)/probe(s) that witness it. Probes l
 **match** — Refine: `MatchTotalityTest`, `inference__08_match_arm_narrowing` · Traits:
 `traits__21_trait_method_in_match_destructure` · Infer: `NarrowingInferenceTest`,
 `IrMatchTest` · Proofs: `MatchTotalityTest` · Nominal:
-`destructure__06_match_struct`, `ClaimRuleTest` · Struct: `StreamQueueTest`
+`destructure__06_match_struct`, `ClaimRuleTest` · Struct:
+`MatchTotalityTest.unionScrutinee_bareArmPerBranch_isTotalByConstruction`
 (bare-arm union), `TupleTest`.
 
 **destructuring** — this: `inference__15…` · Refine:
@@ -141,7 +151,8 @@ see N2): `traits__04_attribute_field`.
 `OperatorBoundPropagationTest` · TypeFrag: `TypeAliasIntegrationTest` (alias in sig) ·
 Infer: `inference__10_return_narrowing_provable`, `NarrowingInferenceDispatchTest` ·
 Synth: `SpecOnlySynthesisTest` · Proofs: `ReturnGateTest`,
-`OverloadedFactorialDischargeTest` · Nominal: `dispatch__01_freefn_specificity`,
+`OverloadedFactorialDischargeTest`, `ReturnBaseGateTest` (the return's declared BASE,
+the half the refinement gate never asked) · Nominal: `dispatch__01_freefn_specificity`,
 `StaticDispatchTest` · Struct: `TypeAliasIntegrationTest`.
 
 **method** — this: `methods__04…`, `FieldReceiverMethodTest`,
@@ -149,16 +160,19 @@ Synth: `SpecOnlySynthesisTest` · Proofs: `ReturnGateTest`,
 · Generic: `generics__27_parametric_method` · Traits:
 `traits__15_crossmodule_call_method` · TypeFrag: `TypeAliasIntegrationTest` · Infer:
 `inference__02_field_method_receiver` · Synth: `StructExtensionTest`
-(promotion via method) · Proofs: `ReturnGateTest` · Nominal: `methods__01_recv_method_basic`,
+(promotion via method) · Proofs: `ReturnGateTest`,
+`ReturnBaseGateTest.aMethodReturnIsJudgedToo` · Nominal: `methods__01_recv_method_basic`,
 `MethodResolutionTest` · Struct: `destructure__24_crossmodule_nested_method_recv`.
 
 **; (synthesize)** — Refine/Synth/Proofs: `SpecOnlySynthesisTest`, `SpecOnlyLetTest`
 · Depend (partial, N1): `SpecOnlySynthesisTest` · Generic: `generics__13…` · TypeFrag
 (N3): `ReusableSortTest` · Infer: `SpecOnlyLetTest` (singleton-interval synthesis).
 
-**Stream** — Refine/Nominal/Struct: `StreamQueueTest` (Element/Leaf, structural
-recursion, shared Leaf) · Iter: `StreamCombinatorTest` (map/partition/concat/exchange),
-plus generator/unfold/takeWhile/concat-`+` (stream war 2e–2f, see `docs/stream-war.md`)
+**Stream** — Refine/Nominal/Struct: `StreamElementCheckTest` (element conformance at the
+autobox), `StreamConcatTypedTest` (structural append on Stream-TYPED operands, not only
+tuple literals) · Iter: `StreamMapTest`, `StreamConcatTest`, `StreamGuardFilterTest`,
+`StreamBreakTest`, plus generator/unfold/takeWhile/concat-`+` (stream war 2e–2f, see
+`docs/stream-war.md`)
 · Generic (partial, N6): `CallDispatchTest` (tuple arg → `Stream[T]` param, element-checked),
 `GenericInstantiationTest` (turbofish `map[Int,String]` + bare-call inference) — the §8.6
 parametric-trait carrier (`Stream[T]` element check) · Infer (partial, N12):
@@ -176,11 +190,12 @@ flow is OPEN · Synth: `StreamRangeSynthesisTest` (finite range `Stream[Int:0<=@
 See N7.
 
 **emit** — this: `^` (statement, no receiver, see N9) · Refine (partial, N9):
-`EventEmitCheck` rejects a provable non-Event (`EventEmitTest.emit_rejectsANonEvent_atCompileTime`)
-— payload two-way sort selection is deferred · Traits (partial, N9): Event marker recognized
+`EventEmitTest.emit_ofANonEvent_isANoOp` (emit accepts ANY value — there is deliberately no
+Event guard) — payload two-way sort selection is deferred · Traits (partial, N9): the builtin
+conduit is not hijackable by name
 (`EventEmitTest.userStructNamedStdOut_doesNotHijackTheBuiltinConduit`) — conduit-fold trait
 deferred · Infer: `EventEmitTest.emit_isWriteOnly_mainValueIsTheTrailingExpr` (narrowing =
-body's; `NarrowingInference:109`) · Proofs (partial, N9): fail-closed routing
+body's; `NarrowingInference:109`) · Proofs (partial, N9): routing by event type
 (`EventEmitTest.emit_routesByEventType_toStderr`) — `!!`-hazard/deterministic-index discharge
 deferred · Nominal: `EventEmitTest.emit_routesByEventType_toStderr` (routes by event type) ·
 Struct: `^` (events are nominal constructions, N9).
@@ -279,10 +294,14 @@ after the brace-aggregates war, `{10,20,30}._0` projects, witnessed by
 **N9 — `emit` (event substrate slice 1b) is landed but partial.** `emit EVENT BODY` is a
 write-only statement (`docs/events.md`): its narrowing/value is the body's
 (`NarrowingInference:109`), so the enclosing function's return gate still sees the body —
-no escape. The only compile-time obligation today is the **honesty guard**
-(`EventEmitCheck`): reject a *provable* non-Event (nominal struct that doesn't
-`assign trait Event`), lenient otherwise, fail-closed at runtime with a "no conduit"
-message. The `Refine`/`Traits`/`Proofs` cells are `/` because the rest of the design is
+no escape. There is **no compile-time obligation at all**, deliberately: `emit` accepts any
+value and an event with no consumer is a silent no-op by design (`docs/reactive-gui.md`),
+because isolation comes from using a distinct type hierarchy, not from an `Event` marker.
+*(This note previously described an "honesty guard" — `EventEmitCheck`, rejecting a provable
+non-Event, fail-closed at runtime on "no conduit". Both halves were reversed when that pass
+was retired, and the citation outliving the rule is exactly what the staleness discipline
+below is for: the cell was witnessed by a test whose successor asserts the opposite,
+`emit_ofANonEvent_isANoOp`.)* The `Refine`/`Traits`/`Proofs` cells are `/` because the rest of the design is
 **deferred to later event slices**: the receiver/conduit machinery (`EventConduit[E,S,R]`,
 `EventStream[R]`), the **two-way payload-sort selection** (receiver payload-sort AND
 conduit receiver-metadata-sort via `Refinements.satisfies`), and the `!!`-hazard failure
