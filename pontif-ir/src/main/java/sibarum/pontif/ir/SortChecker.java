@@ -189,14 +189,19 @@ public final class SortChecker {
                 // of validateSortNames). Catches `[Method():Undeclared]` while
                 // admitting `[Method():T]` for a declared `type T`.
                 validateSortNames(tr, structDefs, Set.of(), traitContracts.keySet());
-            } else if (stmt instanceof IrStmt.TypeAlias ta
-                    && !(ta.sort() instanceof IrSort.Structural)) {
-                // A reusable-sort alias (`let Name:Type[sortExpr]`): its target sort's names must
+            } else if (stmt instanceof IrStmt.TypeAlias ta) {
+                // Every non-trait type declaration's target sort must name only sorts that
                 // resolve — primitives, declared structs/traits, applied type-args. Transparent
                 // aliases are recognized via aliasNames (a `let B:Type[A]` target keeps the name `A`).
-                // Previously unvalidated, so `let A:Type[Garbage]` silently compiled. (Structural
-                // aliases are struct declarations — base validated above, fields via the struct's own
-                // path; trait aliases handled by the branch above.)
+                //
+                // A STRUCT declaration is one of these. It had been excluded here, on the belief
+                // that its fields were validated "via the struct's own path" — but the only
+                // struct-specific path is validateStructBase above, which validates the is-a base
+                // and nothing else, so `struct Status(text:Str)` compiled with `Str` naming
+                // nothing (docs/soundness-holes.md, "what is still open"). The Structural case of
+                // validateSortNames walks exactly the fields and type-param bounds that were being
+                // skipped, and scopes the struct's own `[type T]` binders while it does — so the
+                // fix is to stop excluding structs, not to write a second checker.
                 validateSortNames(ta.sort(), structDefs, aliasNames, traitContracts.keySet());
             }
         }
@@ -1216,6 +1221,13 @@ public final class SortChecker {
                 for (IrSort bound : t.associatedTypes().values()) {
                     if (bound != null) validateSortNames(bound, structDefs, inner, traitNames);
                 }
+                // The arguments APPLIED to the trait are sorts like any other — `Stream[Widgit]`
+                // names a type that must exist. They were unvalidated, which is how an undeclared
+                // element type survived in the linked path: once AliasResolver resolves the bare
+                // `Stream` reference to its trait sort, the argument rides along inside this node
+                // rather than the Named case that does check its args. Validated in the trait's own
+                // scope, so a self-reference to one of its `[type E]` parameters still resolves.
+                for (IrSort arg : t.typeArgs()) validateSortNames(arg, structDefs, inner, traitNames);
                 for (IrSort.CallSig f : t.methods().values()) validateSortNames(f, structDefs, inner, traitNames);
             }
             case IrSort.Union u -> {
