@@ -650,9 +650,7 @@ public final class PontifParser {
     private boolean isMainExpressionStart() {
         PontifToken t = peek();
         if (t.kind() != PontifToken.Kind.IDENT) return true;
-        return !Set.of("module", "requires", "exports",
-                "function", "method", "struct", "enum", "let", "trait", "cast", "assign", "proof",
-                "action", "conduit", "conductor", "spawn").contains(t.text());
+        return !isDeclarationHead(t.text());
     }
 
     private String parseDottedName() throws ParseException {
@@ -698,37 +696,88 @@ public final class PontifParser {
         return name;
     }
 
+    /** One declaration's parse method — the value side of {@link #DECLARATIONS}. */
+    @FunctionalInterface
+    private interface DeclParse {
+        IrStmt parse(PontifParser parser) throws ParseException;
+    }
+
+    /**
+     * Keyword → parse method for every top-level declaration: the ONE list.
+     *
+     * <p>It used to be four, none checked against the others — {@link #KEYWORDS} (the lexical
+     * superset), the decl-head set inside {@link #isMainExpressionStart}, the dispatch switch,
+     * and the prose in that switch's error message. Adding a construct meant updating all four,
+     * and the drift was not hypothetical: adding {@code conductor} to the switch and
+     * {@code KEYWORDS} but not the decl-head set produced "unexpected keyword 'conductor' in
+     * expression position", and by the time this was consolidated the error message had been
+     * out of date since {@code spawn} (docs/parser-linker-refactor.md item 2).
+     *
+     * <p>Now the decl-head test, the dispatch, and the message all read this map, so a new
+     * construct is one entry. {@code module} is deliberately absent — it is a file HEADER
+     * consumed before the declaration loop, not a declaration — and {@link #isDeclarationHead}
+     * adds it back for the one question that needs it.
+     */
+    private static final Map<String, DeclParse> DECLARATIONS = declarations();
+
+    /**
+     * Built by ordered puts into a LinkedHashMap, NOT from {@code Map.ofEntries}: an immutable
+     * Map's iteration order is salted per JVM run, and this map's key order is user-visible —
+     * it is the list the "not a top-level declaration" error prints. A salted map would print
+     * the keywords in a different order every run.
+     */
+    private static Map<String, DeclParse> declarations() {
+        Map<String, DeclParse> m = new LinkedHashMap<>();
+        m.put("requires", PontifParser::parseRequires);
+        m.put("exports", PontifParser::parseExports);
+        m.put("function", PontifParser::parseFunction);
+        m.put("method", PontifParser::parseMethod);
+        m.put("struct", PontifParser::parseStruct);
+        m.put("enum", PontifParser::parseEnum);
+        m.put("trait", PontifParser::parseTrait);
+        m.put("let", PontifParser::parseLet);
+        m.put("cast", PontifParser::parseCoercion);
+        m.put("assign", PontifParser::parseAssign);
+        m.put("proof", PontifParser::parseProof);
+        m.put("action", PontifParser::parseAction);
+        m.put("conduit", PontifParser::parseConduit);
+        m.put("conductor", PontifParser::parseConductor);
+        m.put("spawn", PontifParser::parseSpawn);
+        return java.util.Collections.unmodifiableMap(m);
+    }
+
+    /**
+     * The declaration keywords — the key set of {@link #DECLARATIONS} itself, never a second
+     * list to keep in step. {@code module} is not among them: it is the file header, consumed
+     * before the declaration loop.
+     */
+    public static final Set<String> DECLARATION_KEYWORDS =
+            java.util.Collections.unmodifiableSet(DECLARATIONS.keySet());
+
+    /** Whether {@code word} opens a top-level construct — a declaration, or the module header. */
+    private static boolean isDeclarationHead(String word) {
+        return "module".equals(word) || DECLARATIONS.containsKey(word);
+    }
+
     private IrStmt parseTopLevelDecl() throws ParseException {
         PontifToken head = peek();
         if (head.kind() != PontifToken.Kind.IDENT) {
             throw new ParseException(
-                    "Expected a top-level declaration (function / struct / let / requires / "
-                            + "exports / method); got " + head.kind() + " '" + head.text() + "'",
+                    "Expected a top-level declaration ("
+                            + String.join(" / ", DECLARATION_KEYWORDS)
+                            + "); got " + head.kind() + " '" + head.text() + "'",
                     head.origin());
         }
-        return switch (head.text()) {
-            case "requires" -> parseRequires();
-            case "exports"  -> parseExports();
-            case "function" -> parseFunction();
-            case "struct"   -> parseStruct();
-            case "enum"     -> parseEnum();
-            case "method"   -> parseMethod();
-            case "cast"     -> parseCoercion();
-            case "let"      -> parseLet();
-            case "trait"    -> parseTrait();
-            case "assign"   -> parseAssign();
-            case "proof"    -> parseProof();
-            case "action"   -> parseAction();
-            case "conduit"  -> parseConduit();
-            case "conductor" -> parseConductor();
-            case "spawn"    -> parseSpawn();
-            default -> throw new ParseException(
+        DeclParse parse = DECLARATIONS.get(head.text());
+        if (parse == null) {
+            throw new ParseException(
                     "'" + head.text() + "' is not a top-level declaration. The top level is "
-                            + "declarative only (module / requires / exports / function / method / "
-                            + "struct / enum / let / cast / trait / assign / proof / action / conduit / conductor); executable logic must "
-                            + "live inside a `main { … }` block (docs/events.md Slice 0).",
+                            + "declarative only (module / " + String.join(" / ", DECLARATION_KEYWORDS)
+                            + "); executable logic must live inside a `main { … }` block "
+                            + "(docs/events.md Slice 0).",
                     head.origin());
-        };
+        }
+        return parse.parse(this);
     }
 
     // --- Declarations: requires / exports ---
