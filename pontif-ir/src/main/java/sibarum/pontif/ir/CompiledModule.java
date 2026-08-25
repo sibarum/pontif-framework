@@ -19,7 +19,7 @@ public record CompiledModule(
         List<String> topLevelLets,
         Map<String, List<CompiledAction>> actionsByType,
         java.util.Set<String> algebraicFunctions,
-        Map<Origin.Span, IrSort> effectiveSorts,
+        Map<Origin, IrSort> effectiveSorts,
         Map<String, CompiledConduit> conduitsByType,
         Map<String, List<CompiledIndex>> indexesByType,
         Map<String, CompiledConductor> conductors) {
@@ -72,7 +72,7 @@ public record CompiledModule(
             Map<FunctionDecl, CompiledFunction> functions, IrExpr main,
             Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
             List<String> topLevelLets, Map<String, List<CompiledAction>> actionsByType,
-            java.util.Set<String> algebraicFunctions, Map<Origin.Span, IrSort> effectiveSorts,
+            java.util.Set<String> algebraicFunctions, Map<Origin, IrSort> effectiveSorts,
             Map<String, CompiledConduit> conduitsByType) {
         this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
                 actionsByType, algebraicFunctions, effectiveSorts, conduitsByType, Map.of(), Map.of());
@@ -83,7 +83,7 @@ public record CompiledModule(
             String name, DispatchTable dispatch, Map<FunctionDecl, CompiledFunction> functions,
             IrExpr main, Map<IrSort, Sort> compiledSorts, Map<String, Sort> structRegistry,
             List<String> topLevelLets, Map<String, List<CompiledAction>> actionsByType,
-            java.util.Set<String> algebraicFunctions, Map<Origin.Span, IrSort> effectiveSorts) {
+            java.util.Set<String> algebraicFunctions, Map<Origin, IrSort> effectiveSorts) {
         this(name, dispatch, functions, main, compiledSorts, structRegistry, topLevelLets,
                 actionsByType, algebraicFunctions, effectiveSorts, Map.of());
     }

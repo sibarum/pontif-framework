@@ -142,18 +142,27 @@ class StringAltTest {
     }
 
     @Test
-    void truffleBackend_agreesOnComparisonAndGuard() {
-        // The Truffle path shares the semantics: Cmp accepts strings, the
-        // arithmetic nodes fail closed via the BinaryOp guard.
+    void truffleBackend_agreesOnComparisonAndConcatenation() {
+        // The Truffle path shares the semantics: Cmp accepts strings, Add concatenates
+        // them, and every OTHER operator still fails closed via the BinaryOp guard.
+        //
+        // This test used to assert that `"a" + "b"` failed on Truffle — written when `+`
+        // over strings was read as arithmetic. It is not: `+` concatenates (strings.md
+        // slice 2), which the interpreter has always done, so the assertion was pinning
+        // an engine DIVERGENCE rather than a rule. `"n=" + n` is the most ordinary line
+        // anyone writes with a string, and it produced a value on one engine and an error
+        // on the other.
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
-        PontifRunner.RunResult ok = runner.run(
-                compiler.compile("\"abc\" < \"abd\"", "t.ptf"), PontifRunner.Engine.TRUFFLE);
-        assertEquals("true", ok.text());
-        PontifRunner.RunResult bad = runner.run(
-                compiler.compile("\"a\" + \"b\"", "t.ptf"), PontifRunner.Engine.TRUFFLE);
-        assertTrue(bad.isError(), "string arithmetic must fail closed on Truffle too");
-        assertTrue(bad.text().contains("don't compute"), () -> bad.text());
+        for (PontifRunner.Engine engine : PontifRunner.Engine.values()) {
+            assertEquals("true", runner.run(
+                    compiler.compile("\"abc\" < \"abd\"", "t.ptf"), engine).text(), engine::toString);
+            assertEquals("\"ab\"", runner.run(
+                    compiler.compile("\"a\" + \"b\"", "t.ptf"), engine).text(), engine::toString);
+            // The other operand is rendered canonically, not promoted.
+            assertEquals("\"n=3\"", runner.run(
+                    compiler.compile("\"n=\" + 3", "t.ptf"), engine).text(), engine::toString);
+        }
     }
 
     @Test

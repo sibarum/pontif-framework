@@ -60,9 +60,21 @@ final class ConstructionGate {
     /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
     private static final String RECORD_SENTINEL = "_record";
 
+    /** Structural-sort name marking an anonymous POSITIONAL aggregate (a tuple), whose
+     *  members are keyed {@code _0 .. _n} — so member-wise key-set equality IS the arity
+     *  rule and no separate arity check is needed. */
+    private static final String TUPLE_SENTINEL = "_tuple";
+
+    /** The two anonymous-aggregate shapes: a written one is a CLAIM, not a decoration.
+     *  Both faces of the same thing — {@code [{a:Int}]} by name, {@code [{Int, Int}]} by
+     *  position — so both are gated, member-wise, by the one rule. */
+    private static boolean anonymousShape(String name) {
+        return RECORD_SENTINEL.equals(name) || TUPLE_SENTINEL.equals(name);
+    }
+
     private ConstructionGate() {}
 
-    static IrModule rewrite(IrModule module, Map<Origin.Span, IrSort> lens) throws CompileException {
+    static IrModule rewrite(IrModule module, Map<Origin, IrSort> lens) throws CompileException {
         Map<String, IrSort.Structural> structs =
                 sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
         // The single nominal-subtype decider (roadmap §4.3): the base-name/nominal fit leg of
@@ -98,12 +110,88 @@ final class ConstructionGate {
 
     private static IrStmt.FunctionDecl rewriteFunction(
             IrStmt.FunctionDecl fd, InferenceContext base, Map<String, IrSort.Structural> structs,
-            AssignabilityContext actx, Map<Origin.Span, IrSort> lens) throws CompileException {
+            AssignabilityContext actx, Map<Origin, IrSort> lens) throws CompileException {
         InferenceContext ctx = base.withParams(fd.params());
+        gateReturn(fd, ctx, structs, actx, lens);
         return new IrStmt.FunctionDecl(
                 fd.name(), fd.params(), fd.returnSort(),
                 rewriteExpr(fd.body(), ctx, structs, actx, lens), fd.origin(), fd.topLevelLet(),
                 fd.typeParams());
+    }
+
+    /**
+     * The claim rule's RETURN half: every value a body can produce is judged against the
+     * declared return sort. Construction is where claims are made, and a {@code function
+     * f():Int -> "s"} makes one just as loudly as {@code P("s")} does — the value leaves
+     * the function wearing a label it does not fit.
+     *
+     * <p>DISJOINT only, deliberately. The return REFINEMENT already has a gate of its own
+     * (the receipt graph, via {@code PontifCompiler.firstUnprovableReturn}), which demands
+     * a proof and says so with its own vocabulary; this is the base-type question that gate
+     * never asked. Requiring a provable FIT here as well would be a second, weaker proof
+     * obligation competing with the first — so unprovable stays silent and only the
+     * provable miss is reported.
+     *
+     * <p>Every TAIL position is checked, not just the syntactic last expression: a match
+     * arm returning a String from an {@code :Int} function is the same lie one level in,
+     * and it was accepted for the same reason.
+     *
+     * <p><b>Scope: both sides a bare primitive.</b> Unlike a constructor argument, a return
+     * position is reached through desugars that run AFTER this pass — a decomposition
+     * {@code let d.{a, b}} becomes one declaration per name whose body is still the whole
+     * source, a param-conversion clause is applied by a prologue, a type variable's binding
+     * is a call-site fact — so the tail expression here is often not yet the value the
+     * function returns, and judging it would report a lie the program does not tell. The
+     * closed scalar tower is the fragment with none of that structure: an {@code Int} and a
+     * {@code String} are disjoint under every later rewrite. That is enough for the hole this
+     * closes ({@code function f():Int -> "s"}), and it does not pretend to more. The wider
+     * return-base check waits on those desugars moving ahead of this pass.
+     */
+    private static void gateReturn(
+            IrStmt.FunctionDecl fd, InferenceContext ctx, Map<String, IrSort.Structural> structs,
+            AssignabilityContext actx, Map<Origin, IrSort> lens) throws CompileException {
+        IrSort declared = fd.returnSort();
+        if (declared == null || fd.body() == null) return;
+        // A refined return is the receipt graph's proposition, not ours. Judge only its
+        // BASE, so a provably wrong-based tail is caught without re-deciding the predicate
+        // (which would duplicate that gate, and disagree with it wherever the kernels differ).
+        IrSort base = stripRefinement(declared);
+        if (!barePrimitive(base)) return;
+        for (IrExpr tail : tailPositions(fd.body())) {
+            IrSort arg = effectiveArg(tail, base, lens, ctx, structs);
+            if (!barePrimitive(stripRefinement(arg))) continue;
+            if (classify(arg, base, structs, actx) == Fit.DISJOINT) {
+                throw new CompileException(
+                        "'" + fd.name() + "' returns a value that can never satisfy its declared "
+                                + "return sort " + render(base) + " — the value's sort is "
+                                + render(arg) + ", which is disjoint",
+                        tail.origin() != null && tail.origin().span() != null
+                                ? tail.origin() : fd.origin());
+            }
+        }
+    }
+
+    /**
+     * The expressions a body can actually produce — the leaves of its tail. A match yields
+     * through every arm and a let through its body, so those recurse; an emit's value is
+     * the expression AFTER the event, so that recurses too. Everything else is its own tail.
+     */
+    private static List<IrExpr> tailPositions(IrExpr body) {
+        List<IrExpr> out = new ArrayList<>();
+        collectTails(body, out);
+        return out;
+    }
+
+    private static void collectTails(IrExpr e, List<IrExpr> out) {
+        if (e == null) return;
+        switch (e) {
+            case IrExpr.Match m -> {
+                for (IrExpr.MatchBranch b : m.branches()) collectTails(b.result(), out);
+            }
+            case IrExpr.LetIn l -> collectTails(l.body(), out);
+            case IrExpr.Emit em -> collectTails(em.body(), out);
+            default -> out.add(e);
+        }
     }
 
     /**
@@ -114,7 +202,7 @@ final class ConstructionGate {
      */
     private static IrExpr rewriteExpr(
             IrExpr e, InferenceContext ctx, Map<String, IrSort.Structural> structs,
-            AssignabilityContext actx, Map<Origin.Span, IrSort> lens) throws CompileException {
+            AssignabilityContext actx, Map<Origin, IrSort> lens) throws CompileException {
         return switch (e) {
             case IrExpr.Lit l -> l;
             case IrExpr.Dec d -> d;
@@ -210,14 +298,14 @@ final class ConstructionGate {
      */
     private static IrSort gateClaim(
             IrExpr.LetIn l, IrExpr value, InferenceContext ctx, Map<String, IrSort.Structural> structs,
-            AssignabilityContext actx, Map<Origin.Span, IrSort> lens) throws CompileException {
+            AssignabilityContext actx, Map<Origin, IrSort> lens) throws CompileException {
         IrSort claim = l.claim();
         if (claim == null || !gated(claim, structs)) return null;
         // A parametric Stream[T] claim is kept for the runtime element check (§8.6):
         // the element type of a computed stream isn't statically decidable, so this is
         // always an UNKNOWN — skip classify (which judges base sorts, not elements).
         if (isParametricStream(claim)) return claim;
-        IrSort arg = effectiveArg(value, lens, ctx, structs);
+        IrSort arg = effectiveArg(value, claim, lens, ctx, structs);
         // Dependent refinement: a claim predicate may name a preceding in-scope
         // binding (`let x = 5; let y:[Int:@>=x] = …`). Substitute each referenced
         // binding's pinned value into the predicate before deciding — the same move
@@ -251,12 +339,17 @@ final class ConstructionGate {
                     value.origin());
             // §1d (roadmap §1d): no silent runtime stamp. The parametric-Stream claim (the sole
             // sanctioned defer) already returned early above; an unprovable claim here is a compile
-            // error — the value's sort must be narrowed to entail the claim.
-            case UNKNOWN -> throw new CompileException(
-                    "let '" + l.name() + "' cannot be proved to satisfy its declared sort "
-                            + render(resolved) + " — the value's sort is " + render(arg)
-                            + "; narrow the value so its sort entails the claim.",
-                    value.origin());
+            // error — the value's sort must be narrowed to entail the claim. A bare primitive base
+            // is the one sort with nothing to prove (see barePrimitive), so an abstaining inference
+            // against one is silence, not a failed proof.
+            case UNKNOWN -> {
+                if (barePrimitive(resolved)) yield null;
+                throw new CompileException(
+                        "let '" + l.name() + "' cannot be proved to satisfy its declared sort "
+                                + render(resolved) + " — the value's sort is " + render(arg)
+                                + "; narrow the value so its sort entails the claim.",
+                        value.origin());
+            }
         };
     }
 
@@ -402,7 +495,7 @@ final class ConstructionGate {
 
     private static IrExpr gateRecord(
             IrExpr.Record r, InferenceContext ctx, Map<String, IrSort.Structural> structs,
-            AssignabilityContext actx, Map<Origin.Span, IrSort> lens) throws CompileException {
+            AssignabilityContext actx, Map<Origin, IrSort> lens) throws CompileException {
         Map<String, IrExpr> members = new LinkedHashMap<>();
         for (Map.Entry<String, IrExpr> en : r.members().entrySet()) {
             members.put(en.getKey(), rewriteExpr(en.getValue(), ctx, structs, actx, lens));
@@ -438,7 +531,7 @@ final class ConstructionGate {
             IrSort field = decl.members().get(en.getKey());
             if (field == null) continue;  // arity/field mismatches are the parser's beat
             if (!nativeTarget && !gated(field, structs)) continue;  // bare unregistered names stay lenient
-            IrSort arg = effectiveArg(en.getValue(), lens, ctx, structs);
+            IrSort arg = effectiveArg(en.getValue(), field, lens, ctx, structs);
             switch (classify(arg, field, structs, actx)) {
                 case FITS -> { }
                 case DISJOINT -> throw new CompileException(
@@ -453,6 +546,9 @@ final class ConstructionGate {
                 case UNKNOWN -> {
                     if (isParametricStream(field)) {
                         checks.put(en.getKey(), field);
+                    } else if (barePrimitive(field)) {
+                        // Nothing to prove — a bare base carries no predicate. The DISJOINT
+                        // arm above is the whole of what a primitive field can be wrong about.
                     } else {
                         throw new CompileException(
                                 "Constructor argument '" + en.getKey() + "' of '" + r.typeName()
@@ -486,7 +582,7 @@ final class ConstructionGate {
             IrExpr.Record r, IrSort.Structural decl, Map<String, IrExpr> members,
             Map<String, IrSort> checks, InferenceContext ctx,
             Map<String, IrSort.Structural> structs, AssignabilityContext actx,
-            Map<Origin.Span, IrSort> lens) throws CompileException {
+            Map<Origin, IrSort> lens) throws CompileException {
         List<IrSort.Structural> chain =
                 new ArrayList<>(StructAncestry.selfAndAncestors(structs, decl));
         java.util.Collections.reverse(chain);  // root first — supers' fields bind before subs'
@@ -503,7 +599,7 @@ final class ConstructionGate {
                 }
                 IrSort fieldSort = node.members().get(ext.getKey());
                 if (fieldSort != null && gated(fieldSort, structs)) {
-                    IrSort arg = effectiveArg(value, lens, ctx, structs);
+                    IrSort arg = effectiveArg(value, fieldSort, lens, ctx, structs);
                     switch (classify(arg, fieldSort, structs, actx)) {
                         case FITS -> { }
                         case DISJOINT -> throw new CompileException(
@@ -515,6 +611,10 @@ final class ConstructionGate {
                         case UNKNOWN -> {
                             if (isParametricStream(fieldSort)) {
                                 checks.put(ext.getKey(), fieldSort);
+                            } else if (barePrimitive(fieldSort)) {
+                                // Nothing to prove — see the constructor-argument arm above.
+                                // Never-undefined still holds: the initializer is materialized
+                                // unconditionally, which is the structural half of the promise.
                             } else {
                                 throw new CompileException(
                                         "Extension field '" + ext.getKey() + "' of '" + node.name()
@@ -699,46 +799,97 @@ final class ConstructionGate {
                 && structs.containsKey(rec.typeName())) {
             return IrSort.named(rec.typeName());
         }
-        // An anonymous BY-NAME literal ({property = "s"}) has a shape even though it has
-        // no name: its members' own sorts. Rebuilding it here is what lets an anonymous
-        // record CLAIM be judged member-wise (the shape is the ground truth, so there is
-        // no registry entry to consult). Abstain-never-bluff: one unknown member sort
-        // makes the whole shape unknown rather than inventing a member.
-        if (arg instanceof IrExpr.Record anon && anon.typeName() == null) {
-            Map<String, IrSort> members = new LinkedHashMap<>();
-            for (Map.Entry<String, IrExpr> en : anon.members().entrySet()) {
-                IrSort member = argSort(en.getValue(), ctx, structs);
-                if (member == null) return null;
-                members.put(en.getKey(), member);
-            }
-            return IrSort.structural(RECORD_SENTINEL, members);
-        }
-        return null;
+        return anonymousShapeOf(arg, ctx, structs);
     }
 
     /**
-     * Is this field sort worth gating at all? Bare unregistered names
-     * (unrefined primitives, traits) keep today's leniency; refinements,
-     * registered struct names, and compositions of them are claims the
-     * gate judges. (Bare-primitive legality is decided trait-free at the
-     * parser via {@code Assignability} — roadmap §4.5 item 1 — not here,
-     * so the gate never faces an undetermined-base primitive.)
+     * An anonymous literal's own SHAPE, member-wise — the ground truth an anonymous
+     * claim is judged against, since there is no registry entry to consult. Both faces
+     * qualify: a BY-NAME literal ({@code {property = "s"}}, which carries a null
+     * typeName) and a POSITIONAL one ({@code {1, "s"}}, which the parser already stamps
+     * {@code _tuple} with keys {@code _0 .. _n}). Yields null for anything else.
+     *
+     * <p>This deliberately BYPASSES {@code infer}, which for a positional literal
+     * returns the field-conjunct refinement over the bare {@code _tuple} head
+     * ({@code [_tuple:@._0==1 and @._1==2]}) — the form a NAMED struct wants, where the
+     * <em>name</em> carries the shape and the conjuncts only add pins. A {@code _tuple}
+     * head carries nothing, so after {@code stripRefinement} that form is an
+     * unadorned {@code _tuple} which reflexively is-a every tuple sort — arity, member
+     * base types, and member refinements all unasked. The by-name face never hit this
+     * because {@code infer} abstains on a null typeName and the structural floor was
+     * reached instead; the two faces now take the same road.
+     *
+     * <p>Abstain-never-bluff: one unknown member sort makes the whole shape unknown
+     * rather than inventing a member.
+     */
+    private static IrSort anonymousShapeOf(
+            IrExpr e, InferenceContext ctx, Map<String, IrSort.Structural> structs) {
+        if (!(e instanceof IrExpr.Record rec)) return null;
+        String sentinel = rec.typeName() == null ? RECORD_SENTINEL
+                : TUPLE_SENTINEL.equals(rec.typeName()) ? TUPLE_SENTINEL : null;
+        if (sentinel == null) return null;
+        Map<String, IrSort> members = new LinkedHashMap<>();
+        for (Map.Entry<String, IrExpr> en : rec.members().entrySet()) {
+            // A nested anonymous literal contributes its own shape, for the same reason.
+            IrSort nested = anonymousShapeOf(en.getValue(), ctx, structs);
+            IrSort member = nested != null ? nested : argSort(en.getValue(), ctx, structs);
+            if (member == null) return null;
+            members.put(en.getKey(), member);
+        }
+        return IrSort.structural(sentinel, members);
+    }
+
+    /**
+     * Is this field sort worth gating at all? Refinements, registered struct names,
+     * anonymous shapes, and compositions of them are claims the gate judges in full.
+     * A bare primitive ({@code Int}, {@code Decimal}, {@code Bool}, {@code String},
+     * {@code Char}) is judged too, but only for the provable MISS — see
+     * {@link #barePrimitive}. Bare unregistered NON-primitive names (a trait name, an
+     * unresolved alias) keep today's leniency.
+     *
+     * <p>Primitives used to be excluded outright, on the reasoning that "bare-primitive
+     * legality is decided trait-free at the parser via {@code Assignability}". That is
+     * true of a {@code let} claim and of a trait attribute, and of nothing else: for a
+     * construction, an extension field, or a return, no pass downstream made the check,
+     * so {@code struct P(x:Int)} accepted {@code P("s")} — the refinement half of every
+     * judgment worked and the base-type half was skipped. The two engines then disagreed
+     * about what the resulting program meant ({@code P("s").x + 1} is {@code "s1"} on the
+     * interpreter and a runtime error on Truffle), which is the sharpest possible
+     * statement that the value should never have been constructible.
      */
     private static boolean gated(IrSort field, Map<String, IrSort.Structural> structs) {
         return switch (field) {
             case IrSort.Refined ref -> true;
-            case IrSort.Named n -> structs.containsKey(n.name());
-            // A written ANONYMOUS shape ([{property:String}]) is a real claim: the shape IS
-            // the ground truth, so there is no registry lookup to make it "declared". Without
-            // this the shape would be a decoration — nothing would judge its members, and a
-            // record type would be strictly weaker than the struct it mirrors. Other inline
-            // structurals (named shape requirements) stay ungated, as before.
-            case IrSort.Structural st -> RECORD_SENTINEL.equals(st.name());
+            case IrSort.Named n -> structs.containsKey(n.name()) || barePrimitive(n);
+            // A written ANONYMOUS shape — [{property:String}] by name, [{Int, Int}] by
+            // position — is a real claim: the shape IS the ground truth, so there is no
+            // registry lookup to make it "declared". Without this the shape would be a
+            // decoration: nothing would judge its members, and a record or tuple type
+            // would be strictly weaker than the struct it mirrors. For the positional
+            // face that also buys ARITY, since the members are keyed `_0 .. _n` and
+            // Assignability compares key sets. Other inline structurals (named shape
+            // requirements) stay ungated, as before.
+            case IrSort.Structural st -> anonymousShape(st.name());
             case IrSort.Trait t -> isParametricStream(t);
             case IrSort.Union u -> u.branches().stream().anyMatch(b -> gated(b, structs));
             case IrSort.Intersection i -> i.branches().stream().anyMatch(b -> gated(b, structs));
             default -> false;
         };
+    }
+
+    /**
+     * A bare primitive base — the closed scalar tower, unrefined. Gated for the provable
+     * MISS only: a primitive base carries no predicate, so there is nothing for a value
+     * to <em>prove</em>, and demanding proof would reject every construction whose
+     * argument sort inference abstains on ({@code Vec(a / b)}, a method result resolved
+     * later in the pass order). DISJOINT is still decidable and still a lie — {@code Int}
+     * and {@code String} are disjoint sorts — so that half bites. This is the same split
+     * the §1d rule makes elsewhere, read the other way: §1d forbids deferring an
+     * unprovable REFINEMENT to a runtime stamp, and a bare base has no refinement to
+     * defer.
+     */
+    private static boolean barePrimitive(IrSort sort) {
+        return sort instanceof IrSort.Named n && BuiltinOperators.isPrimitiveBase(n.name());
     }
 
     /**
@@ -766,10 +917,19 @@ final class ConstructionGate {
      * {@code Account(this.balance + n)} — discharge in {@link #classify}.
      */
     private static IrSort effectiveArg(
-            IrExpr e, Map<Origin.Span, IrSort> lens, InferenceContext ctx,
+            IrExpr e, IrSort declared, Map<Origin, IrSort> lens, InferenceContext ctx,
             Map<String, IrSort.Structural> structs) {
-        if (e.origin() != null && e.origin().span() != null) {
-            IrSort eff = lens.get(e.origin().span());
+        // Against an ANONYMOUS shape claim, the literal's own shape is the sort to judge —
+        // the lens's entry for a positional literal is the field-conjunct refinement over a
+        // bare `_tuple` head, which answers none of the questions the shape asks (see
+        // anonymousShapeOf). Only for an anonymous claim: everywhere else the lens's
+        // effective sort is both richer and the one materialized set (roadmap §1b).
+        if (declared instanceof IrSort.Structural st && anonymousShape(st.name())) {
+            IrSort shape = anonymousShapeOf(e, ctx, structs);
+            if (shape != null) return shape;
+        }
+        if (e.origin() != null && e.origin().isPresent()) {
+            IrSort eff = lens.get(e.origin());
             if (eff != null) return eff;
         }
         return argSort(e, ctx, structs);
@@ -899,10 +1059,16 @@ final class ConstructionGate {
                 : s;
     }
 
+    /** The sort's nominal base, or null when there is none to ask about. {@code "_"} is the
+     *  UNKNOWN base and reads as null in BOTH forms — bare and refined. classify's contract
+     *  says so ("never delegate a guess to the engine, which would read `_` as a concrete
+     *  unknown name and rule DISJOINT"), but the refined arm used to return the literal
+     *  {@code "_"}, so a refined-unknown sort ({@code [_:@<=0]}, what a self-recursive
+     *  method's tail infers to) was judged as a named type nothing else is. */
     private static String baseName(IrSort sort) {
         return switch (sort) {
             case IrSort.Named n -> n.name().equals("_") ? null : n.name();
-            case IrSort.Refined r -> r.name();
+            case IrSort.Refined r -> r.name().equals("_") ? null : r.name();
             case IrSort.Structural s -> s.name();
             default -> null;
         };

@@ -6,7 +6,7 @@ import java.util.Map;
 import sibarum.pontif.core.Origin;
 
 /**
- * The module-wide effective-sort lens: {@code span → effective sort} for every position in every
+ * The module-wide effective-sort lens: {@code origin → effective sort} for every position in every
  * function body (and {@code main}), computed once and carried on {@link CompiledModule} so it
  * survives compilation — read by the construction/claim gates and, later, an IDE
  * (docs/type-records.md, the Inferred record).
@@ -20,9 +20,9 @@ final class EffectiveSortLens {
 
     private EffectiveSortLens() {}
 
-    static Map<Origin.Span, IrSort> of(IrModule module) {
+    static Map<Origin, IrSort> of(IrModule module) {
         InferenceContext base = InferenceContext.fromModule(module);
-        Map<Origin.Span, IrSort> lens = new LinkedHashMap<>();
+        Map<Origin, IrSort> lens = new LinkedHashMap<>();
         for (IrStmt stmt : module.statements()) {
             switch (stmt) {
                 case IrStmt.FunctionDecl fd -> addFunction(lens, fd, base);
@@ -40,7 +40,7 @@ final class EffectiveSortLens {
     }
 
     private static void addFunction(
-            Map<Origin.Span, IrSort> lens, IrStmt.FunctionDecl fd, InferenceContext base) {
+            Map<Origin, IrSort> lens, IrStmt.FunctionDecl fd, InferenceContext base) {
         lens.putAll(NarrowingInference.effectiveSorts(fd.body(), base.withParams(fd.params())));
     }
 }

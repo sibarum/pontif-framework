@@ -170,14 +170,19 @@ final class NumericCoercion {
      * {@code Dec} — is left alone).
      */
     private static IrExpr coerce(IrExpr value, IrSort declared, InferenceContext ctx) {
-        // An anonymous BY-NAME shape ([{d:Decimal}]) carries its members' declared sorts,
-        // so it is a value boundary like any other: recurse so `{d = 3}` promotes exactly
-        // as a struct field would. A named struct's members are already coerced from the
-        // registry in the Record case above; this supplies the shape the anonymous face
-        // has no registry entry for.
+        // An anonymous shape carries its members' declared sorts, so it is a value
+        // boundary like any other: recurse so `{d = 3}` promotes exactly as a struct
+        // field would. A named struct's members are already coerced from the registry in
+        // the Record case above; this supplies the shape the anonymous faces have no
+        // registry entry for. BOTH faces — by-name ([{d:Decimal}], a literal with a null
+        // typeName) and positional ([{Decimal, Int}], a literal the parser stamps
+        // `_tuple` with keys `_0 .. _n`) — because a slot is a declared boundary
+        // wherever it is written, and a `Decimal` slot silently holding an Int is the
+        // same lie in either spelling.
         if (declared instanceof IrSort.Structural shape
-                && RECORD_SENTINEL.equals(shape.name())
-                && value instanceof IrExpr.Record rec && rec.typeName() == null) {
+                && anonymousShape(shape.name())
+                && value instanceof IrExpr.Record rec
+                && shape.name().equals(rec.typeName() == null ? RECORD_SENTINEL : rec.typeName())) {
             Map<String, IrExpr> members = new LinkedHashMap<>();
             boolean changed = false;
             for (Map.Entry<String, IrExpr> en : rec.members().entrySet()) {
@@ -199,6 +204,14 @@ final class NumericCoercion {
 
     /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
     private static final String RECORD_SENTINEL = "_record";
+
+    /** Structural-sort name marking an anonymous POSITIONAL aggregate (a tuple). */
+    private static final String TUPLE_SENTINEL = "_tuple";
+
+    /** The two anonymous-aggregate shapes, whose slots are declared value boundaries. */
+    private static boolean anonymousShape(String name) {
+        return RECORD_SENTINEL.equals(name) || TUPLE_SENTINEL.equals(name);
+    }
 
     private static boolean isDecimalSort(IrSort sort) {
         return sort != null && "Decimal".equals(sort.baseName());

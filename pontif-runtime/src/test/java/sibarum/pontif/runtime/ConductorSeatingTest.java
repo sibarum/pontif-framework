@@ -131,7 +131,7 @@ class ConductorSeatingTest {
         Output o = run("""
                 requires pontif.events.{Event, StdOut}
                 struct Command(id:Int)
-                struct Status(text:Str)
+                struct Status(text:String)
                 assign trait Command:Event{}
                 assign trait Status:Event{}
                 conductor App { onCommand(c:Command) -> emit Status("done ")  c }

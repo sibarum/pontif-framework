@@ -1744,21 +1744,15 @@ public final class IrInterpreter {
     }
 
     /**
-     * Canonical string rendering shared by String {@code +} concatenation and
-     * the {@code (String:value)} cast: a String verbatim, an Int/Decimal/Char/
-     * Bool to its display. Decimal uses plain (non-scientific) notation,
-     * matching its literal form. Returns {@code null} for a value with no
-     * canonical render, so each caller can fail closed with its own message.
+     * Canonical string rendering shared by String {@code +} concatenation and the
+     * {@code (String:value)} cast. Delegates to {@link sibarum.pontif.core.types.CanonicalText},
+     * which is where the rule lives so Truffle's {@code Add} node renders identically — the two
+     * engines used to disagree about String {@code +} entirely, and one shared renderer is what
+     * keeps them from disagreeing about its OUTPUT next. Null for a value with no canonical
+     * render, so each caller fails closed with its own message.
      */
     private static String renderToStringOrNull(Object v) {
-        if (v instanceof sibarum.pontif.core.types.StringValue s) return s.content();
-        if (v instanceof Long n) return Long.toString(n);
-        if (v instanceof java.math.BigDecimal d) return d.toPlainString();
-        if (v instanceof sibarum.pontif.core.types.CharValue c) {
-            return new String(Character.toChars(c.codePoint()));
-        }
-        if (v instanceof Boolean b) return b.toString();
-        return null;
+        return sibarum.pontif.core.types.CanonicalText.of(v);
     }
 
     /**

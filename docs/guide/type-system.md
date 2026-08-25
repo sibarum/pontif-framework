@@ -579,12 +579,9 @@ usable in methods, counted by equality — but they can never be *supplied*.
   and judged against its type exactly like a constructor argument, so an
   initializer that cannot satisfy its declared type is a compile error rather than
   a runtime surprise. There is no order in which the field does not yet exist.
-
-  > **Known limitation (pre-1.0):** "exactly like a constructor argument" is
-  > currently exact in both directions — a violated *refinement* is caught, but an
-  > outright *base-type* mismatch (`let this.a:String = this.w` over an `Int` field)
-  > is not, because construction does not yet check bare primitives anywhere. See
-  > [soundness-holes.md](../soundness-holes.md).
+  Both halves of the type are judged: a violated *refinement* is caught, and so is
+  a base-type mismatch — `let this.a:String = this.w` over an `Int` field is a
+  compile error, not a `String`-labelled `Int`.
 - **The type annotation is optional.** It is inferred over the preamble's
   whitelist grammar — field reads carry their declared types, operators stay in the
   primitive tower. Annotate when the operands leave the tower.

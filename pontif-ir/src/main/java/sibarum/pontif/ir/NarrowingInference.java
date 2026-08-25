@@ -1,7 +1,7 @@
 package sibarum.pontif.ir;
 
 import sibarum.pontif.core.Origin;
-import sibarum.pontif.core.Origin.Span;
+import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.Substitute;
 import sibarum.pontif.core.symbolic.SymExpr;
 import sibarum.pontif.predicates.Interval;
@@ -1149,9 +1149,24 @@ public final class NarrowingInference {
                     op.origin());
         }
         if (!isArithmetic(op.op())) return null;
+        // A String operand wins, checked BEFORE Decimal — the same precedence
+        // `IrInterpreter.evalBinOp` runs, where `+` concatenates and renders the other
+        // operand rather than promoting the String. So `"" + count` is a String, and the
+        // Int pin below would be a LIE about its base: it used to mint
+        // `[Int:@== "" + count]` for it, which nothing checked until the construction
+        // gate started judging bare primitives and refused to pass a "String" argument
+        // whose sort said Int. Ordering and equality are not arithmetic and never reach
+        // here. A Char operand has no arithmetic at all (rejected by the operator
+        // completeness check), so abstain rather than claim a base for it.
+        if (isPrimitiveOperand(op.left(), ctx, "String") || isPrimitiveOperand(op.right(), ctx, "String")) {
+            return op.op() == IrExpr.Op.ADD ? IrSort.named("String") : null;
+        }
+        if (isPrimitiveOperand(op.left(), ctx, "Char") || isPrimitiveOperand(op.right(), ctx, "Char")) {
+            return null;
+        }
         // Decimal arithmetic carries no value-level narrowing (the kernel is
         // integer-only) — bare Decimal, matching the parser's maximal shape.
-        if (isDecimalOperand(op.left(), ctx) || isDecimalOperand(op.right(), ctx)) {
+        if (isPrimitiveOperand(op.left(), ctx, "Decimal") || isPrimitiveOperand(op.right(), ctx, "Decimal")) {
             return IrSort.named("Decimal");
         }
         // A user-type operand means this is a USER operator (e.g. +(Vec,Vec):Vec),
@@ -1203,15 +1218,31 @@ public final class NarrowingInference {
         };
     }
 
-    /** Whether an operand's value is Decimal-sorted (any Decimal operand keeps the result Decimal). */
-    private static boolean isDecimalOperand(IrExpr e, InferenceContext ctx) {
+    /**
+     * Whether an operand's value has the given primitive base — a literal of that base, a
+     * variable the env types that way, a cast to it, or an operand of a nested operator
+     * (the bases that "win" propagate outward, which is why one such operand decides the
+     * whole expression). Generalized from a Decimal-only predicate so the String and Char
+     * bases can ask the same question rather than each growing a near-copy.
+     */
+    private static boolean isPrimitiveOperand(IrExpr e, InferenceContext ctx, String base) {
         return switch (e) {
-            case IrExpr.Dec ignored -> true;
-            case IrExpr.Var v -> "Decimal".equals(nullableBaseName(ctx.typeEnv().get(v.name())));
-            case IrExpr.BinOp op -> isDecimalOperand(op.left(), ctx) || isDecimalOperand(op.right(), ctx);
-            case IrExpr.Cast c -> "Decimal".equals(nullableBaseName(c.targetSort()));
+            case IrExpr.Dec ignored -> base.equals("Decimal");
+            case IrExpr.Str ignored -> base.equals("String");
+            case IrExpr.Chr ignored -> base.equals("Char");
+            case IrExpr.Var v -> base.equals(nullableBaseName(ctx.typeEnv().get(v.name())));
+            case IrExpr.BinOp op -> isPrimitiveOperand(op.left(), ctx, base)
+                    || isPrimitiveOperand(op.right(), ctx, base);
+            case IrExpr.Cast c -> base.equals(nullableBaseName(c.targetSort()));
+            case IrExpr.FieldAccess fa -> base.equals(nullableBaseName(fieldSortOf(fa, ctx)));
             default -> false;
         };
+    }
+
+    /** The declared sort of a field access, when the base's struct is resolvable — else null. */
+    private static IrSort fieldSortOf(IrExpr.FieldAccess fa, InferenceContext ctx) {
+        IrSort.Structural owner = resolveNominal(inferFloor(fa.base(), ctx), ctx.structDefs());
+        return owner == null ? null : owner.members().get(fa.fieldName());
     }
 
     private static String nullableBaseName(IrSort s) {
@@ -1318,18 +1349,24 @@ public final class NarrowingInference {
      * ({@link #letBodyCtx} / {@link #matchArmCtx} / {@link #lambdaBodyCtx}) for the domain-specific
      * scoping — only the generic child-walk is local (two cohesive passes over one tree is not
      * duplication). Positions with no source span (synthesized nodes) are omitted.
+     *
+     * <p>Keyed by the whole {@link Origin} — SOURCE plus span — not the span alone. A module can
+     * be assembled from several files (a linked module, an imported builtin), and a bare
+     * {@code (line, column)} key silently merges positions across them: {@code pontif.math}'s
+     * {@code 14:37} and a user file's {@code 14:37} became one entry, so a function's declared
+     * return could be judged against a sort read out of a different file entirely.
      */
-    public static Map<Span, IrSort> effectiveSorts(IrExpr root, InferenceContext ctx) {
-        Map<Span, IrSort> lens = new LinkedHashMap<>();
+    public static Map<Origin, IrSort> effectiveSorts(IrExpr root, InferenceContext ctx) {
+        Map<Origin, IrSort> lens = new LinkedHashMap<>();
         collectEffectiveSorts(root, ctx, lens);
         return lens;
     }
 
-    private static void collectEffectiveSorts(IrExpr e, InferenceContext ctx, Map<Span, IrSort> lens) {
+    private static void collectEffectiveSorts(IrExpr e, InferenceContext ctx, Map<Origin, IrSort> lens) {
         if (e == null) return;
         IrSort effective = effectiveSort(e, ctx);
-        if (effective != null && e.origin() != null && e.origin().span() != null) {
-            lens.put(e.origin().span(), effective);
+        if (effective != null && e.origin() != null && e.origin().isPresent()) {
+            lens.put(e.origin(), effective);
         }
         switch (e) {
             case IrExpr.LetIn let -> {

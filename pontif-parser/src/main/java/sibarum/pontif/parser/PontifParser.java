@@ -1329,11 +1329,20 @@ public final class PontifParser {
         return new ReturnClause(parseSort(), null);
     }
 
-    /** Apply a return-clause transform to a body result (no-op when absent). */
+    /**
+     * Apply a return-clause transform to a body result (no-op when absent).
+     *
+     * <p>The wrapping {@code Apply} is SYNTHESIZED and so carries no source span. It must
+     * not borrow the body's: the effective-sort lens is keyed by span and the walk records
+     * a parent before its children, so the body would overwrite the Apply's entry and the
+     * conversion's RESULT sort would read as its INPUT sort — {@code let x:[Int -> @+"" ->
+     * String] = 12} then looks like a String claim over an Int value, which is a lie about
+     * a program the clause makes true.
+     */
     private static IrExpr applyReturnClause(IrExpr body, IrExpr.Lambda transform) {
         return transform == null
                 ? body
-                : new IrExpr.Apply(transform, List.of(body), body.origin());
+                : new IrExpr.Apply(transform, List.of(body), sibarum.pontif.core.Origin.NONE);
     }
 
     /**
@@ -1790,7 +1799,14 @@ public final class PontifParser {
             if (pinValues.containsKey(f)) {
                 members.put(f, pinValues.get(f));
             } else if (valueStruct != null && valueStruct.members().containsKey(f)) {
-                members.put(f, new IrExpr.FieldAccess(value, f, origin));
+                // SYNTHESIZED, so it carries no source span. The effective-sort lens is keyed
+                // by span and documents that it omits synthesized nodes; stamping these reads
+                // with the enclosing let's span put several distinct nodes under one key, and
+                // whichever wrote last became every one of their "effective sorts" — so the
+                // construction gate read this field's sort as the whole target struct's. With
+                // no span the gate falls back to inferring the read itself, which is what it
+                // should have been doing for a node the user never wrote.
+                members.put(f, new IrExpr.FieldAccess(value, f, sibarum.pontif.core.Origin.NONE));
             } else {
                 throw new ParseException(
                         "promotion to '" + targetName + "' leaves field '" + f

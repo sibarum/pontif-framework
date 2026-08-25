@@ -1,43 +1,44 @@
-# Soundness holes — a bug-squashing marathon
+# Soundness holes — the marathon, run
 
-**Found 2026-08-24 by probing, not by a failing test.** Every item here is a program
-the compiler *accepts* and should not. The suite was green throughout: 5211 tests
-pass with all of this live, which is the point — these are gaps in what is checked,
-so no existing test asks the question.
+**Found 2026-08-24 by probing, not by a failing test. Closed 2026-08-25.** Every item
+here was a program the compiler *accepted* and should not. The suite was green throughout
+the finding: 5211 tests passed with all of this live, which was the point — these were
+gaps in what is checked, so no existing test asked the question.
 
-Three families, one of them a single line. They are ordered below by
-fix-cost-to-value, not by severity.
+Three families were catalogued. Fixing them surfaced three more that nothing had ever
+asked about either, each found the same way: a hole closes, a legitimate program starts
+failing, and the reason it fails turns out to be a second bug. All six are closed; the
+suite is green at 2670 across the reactor, with 54 new tests that ask the questions.
 
-| # | Family | Root cause | Items | Cost |
-|---|--------|-----------|-------|------|
-| 1 | Tuple slots are never judged | `ConstructionGate.gated()` has no `_tuple` case | 5 | one line + tests |
-| 2 | Aggregate `==` crashes one engine | `Cmp.combine` falls through to `(Long)` | 6 | one branch + tests |
-| 3 | The base type is never checked | `gated()` answers false for a bare primitive | 11 | needs care |
-
-Families 1 and 3 are the *same switch*, two lines apart. Family 1 is the cheap half
-and can land first; family 3 is the one with blast radius.
+| # | Family | Root cause | Items | State |
+|---|--------|-----------|-------|-------|
+| 1 | Tuple slots are never judged | the positional face reached the gate as a bare `_tuple` head | 5 | **closed** |
+| 2 | Aggregate `==` crashes one engine | `Cmp.combine` fell through to `(Long)` | 6 | **closed** |
+| 3 | The base type is never checked | `gated()` answered false for a bare primitive | 11 | **closed** |
+| 4 | String `+` inferred as `Int` | `inferBinOp` guarded Decimal and user types, not String | — | **closed** |
+| 5 | String `+` crashes one engine | Truffle's `Add` had no String branch at all | — | **closed** |
+| 6 | The effective-sort lens merged files | keyed by `(line, column)` with no source | — | **closed** |
 
 ## The shape of the thing
 
-Pontif proves refinements everywhere and checks base types almost nowhere.
+Pontif proved refinements everywhere and checked base types almost nowhere.
 
 ```pontif
 struct P(n:[Int:@>0])
 P(0-5)              # correctly REJECTED — the refinement is proved
 
 struct P(x:Int)
-P("s")              # ACCEPTED — the base type is not
+P("s")              # was ACCEPTED — the base type was not
 ```
 
-That asymmetry holds at *every* judgment site: constructor arguments, constructor
-extension fields, function returns, method returns. The refinement half works; the
-base-type half is skipped whenever the declared sort is a bare primitive. Two places
-get it right and are worth studying as the model — a `let` claim
-(`let n:Int = "s"` is rejected at parse time by `Assignability`) and a trait
+That asymmetry held at *every* judgment site: constructor arguments, constructor
+extension fields, function returns, method returns. The refinement half worked; the
+base-type half was skipped whenever the declared sort was a bare primitive. Two places
+got it right and were the model the rest now follow — a `let` claim and a trait
 attribute.
 
-The consequence is not merely a missed error. Because the value is built anyway, the
-two engines then disagree about what the program *means*:
+The consequence was not merely a missed error. Because the value was built anyway, the
+two engines then disagreed about what the program *meant*:
 
 ```pontif
 struct P(x:Int)
@@ -46,126 +47,97 @@ P("s").x + 1
 # TRUFFLE     → runtime error: Operator applied to a String operand
 ```
 
-A compiler-accepted program whose meaning depends on the engine is the clearest
-possible statement that the value should never have been constructible.
-
-## How to reproduce anything here
-
-`AnonymousRecordSortTest` (pontif-runtime) has the harness this sweep was built on —
-its `run` helper executes every `PontifRunner.Engine` and asserts they agree. Reusing
-that helper for existing aggregate tests is the cheapest way to find whatever else is
-hiding; it is how family 2 surfaced.
+A compiler-accepted program whose meaning depends on the engine is the clearest possible
+statement that the value should never have been constructible. That test — *do the two
+engines agree?* — found four of the six families here, and every new test below runs on
+both engines and asserts they do.
 
 ---
 
 ## Family 1 — tuple slots are never judged
 
-`gated()` decides whether a declared sort is a claim worth checking. It has cases for
-`Refined`, `Named`, `Trait`, `Union`, `Intersection`, and (since `10f175b`) an
-anonymous `_record` shape — but none for `_tuple`. So a tuple sort in a declared
-position constrains **nothing**: not arity, not component types, not even component
-refinements, which every other site proves.
+`gated()` decides whether a declared sort is a claim worth checking. A tuple sort in a
+declared position constrained **nothing**: not arity, not component types, not even
+component refinements, which every other site proves.
 
 ```pontif
-let t:[{Int, Int}]        = {1, "s"}     # ACCEPTED — component base type
-let t:[{[Int:@>0], Int}]  = {0-5, 2}     # ACCEPTED — component REFINEMENT violated
-let t:[{Int, Int}]        = {1, 2, 3}    # ACCEPTED — too many slots
-let t:[{Int, Int, Int}]   = {1, 2}       # ACCEPTED — too few slots
+let t:[{Int, Int}]        = {1, "s"}     # was ACCEPTED — component base type
+let t:[{[Int:@>0], Int}]  = {0-5, 2}     # was ACCEPTED — component REFINEMENT violated
+let t:[{Int, Int}]        = {1, 2, 3}    # was ACCEPTED — too many slots
+let t:[{Int, Int, Int}]   = {1, 2}       # was ACCEPTED — too few slots
 struct S(t:[{[Int:@>0], Int}])
-S({0-5, 2})                              # ACCEPTED — same hole through a struct field
+S({0-5, 2})                              # was ACCEPTED — same hole through a struct field
 ```
 
-The refinement case is the sharpest: a tuple slot is the one place in the language
-where `[Int:@>0]` is decoration.
+The refinement case was the sharpest: a tuple slot was the one place in the language
+where `[Int:@>0]` was decoration.
 
-**Root cause** — `ConstructionGate.gated()`
-([ConstructionGate.java:727](../pontif-ir/src/main/java/sibarum/pontif/ir/ConstructionGate.java)),
-the `default -> false` arm swallowing `IrSort.Structural("_tuple", …)`.
+**Root cause — not a missing rule but a shape mismatch.** The obvious diagnosis was the
+missing `_tuple` case in `ConstructionGate.gated()`, and adding it changed nothing.
+`NarrowingInference` gives a NAMED record its field-conjunct refinement (`[P:@.x==1]`) —
+the form where the *name* carries the shape and the conjuncts only add pins — and a tuple
+literal is a named record, stamped `_tuple`. But `_tuple` names no shape, so after
+`stripRefinement` the argument was a bare `_tuple` head, which is reflexively is-a every
+tuple sort whatsoever. The by-name face escaped this only because `infer` abstains on a
+null typeName and the structural floor was reached instead.
 
-**Fix sketch.** Extend the `Structural` case that `10f175b` added for `_record` to
-cover `_tuple` as well. The judgment machinery is already there and already correct:
-`Assignability.structurallySubsumes` compares two `Structural` sorts member-wise
-(key sets equal, then `isA` per member), which is exactly the tuple rule including
-arity. `ConstructionGate.argSort()` already rebuilds an anonymous record literal's
-shape; it needs the same for a tuple literal.
+**What landed.** `ConstructionGate.anonymousShapeOf` reads an anonymous literal's own
+member-wise shape, bypassing `infer` for exactly this reason, and `effectiveArg` prefers
+it when the declared sort is an anonymous shape. `Assignability.structurallySubsumes` then
+compares the two shapes member-wise — key sets first, which for keys `_0 .. _n` IS the
+arity rule, so there is one arity check rather than a second one written for assignment
+position. Both faces now take the same road.
 
-Note the arity check exists and is good — but only in *pattern* position
-(`checkTupleArity`, with a helpful message naming the slot count). Assignment
-position never calls it. Prefer routing both through the one rule rather than
-writing a second arity check.
+`NumericCoercion` had the identical `_record`/`_tuple` asymmetry one pass earlier, and
+judging the slot is what exposed it: `let t:[{Decimal, Int}] = {3, 2}` had been accepted
+*and* left an Int in the Decimal slot, printing `3` rather than `3.0`. The slot is a
+declared value boundary in either spelling; it now coerces in both.
 
-**Tests.** Mirror `AnonymousRecordSortTest`'s structure for the positional face: the
-five rejections above, plus the passing cases (exact arity, satisfied refinements,
-tower coercion into a slot) to prove the fix does not overshoot.
+**Tests.** `AnonymousTupleSortTest` (17), shaped as a sibling of `AnonymousRecordSortTest`
+— the five rejections, the passing cases, and `3.0` asserted rather than mere acceptance.
 
 ---
 
 ## Family 2 — aggregate `==` crashes the Truffle engine
 
-Every aggregate comparison works on the interpreter and dies on Truffle:
+Every aggregate comparison worked on the interpreter and died on Truffle:
 
 ```pontif
 struct P(x:Int)
 match (P(1) == P(1)) { [Bool:true] -> 1  [_] -> 0 }
 # INTERPRETER → 1
-# TRUFFLE     → internal ClassCastException:
-#               RecordValue cannot be cast to java.lang.Long
+# TRUFFLE     → internal ClassCastException: RecordValue cannot be cast to java.lang.Long
 ```
 
-Confirmed identical for a named struct, a tuple, a dictionary, a declared record
-shape, a nested struct, and — most damagingly — an **enum case**:
+Confirmed identical for a named struct, a tuple, a dictionary, a declared record shape, a
+nested struct, and — most damagingly — an **enum case**. Enums had landed two days before
+the sweep, and `Color.Red == Color.Red` is the most natural thing anyone writes with one.
 
-```pontif
-enum Color { Red
-  Green }
-Color.Red == Color.Red      # same crash
-```
+**Root cause** — `Cmp.combine` ran a typed ladder (`CharValue`, `StringValue`,
+`BigDecimal`) and then fell through to `long l = (Long) leftValue`.
 
-Enums landed two days before this sweep (`ffd0499`), and comparing two cases is the
-most natural thing anyone will write with them. That makes this the highest
-*practical* severity item here even though family 3 is the deeper flaw.
+The intended behavior was already ruled in two places that agree, so this was never a
+design question: `IrInterpreter.dispatchOperatorSymbol` ("`==`/`!=` stay built-in
+**structural equality**" — arithmetic and ordering route to user overloads, equality does
+not) and `docs/keyed.md` ("Native `==` on structs is structural + nominal
+(`RecordValue.equals`: same typeName + same members)").
 
-**Root cause** — `Cmp.combine`
-([Cmp.java:94](../pontif-ast/src/main/java/sibarum/pontif/ast/binary/Cmp.java)).
-It runs a typed ladder — `CharValue`, then `StringValue`, then `BigDecimal` — and
-then falls through to `long l = (Long) leftValue`. A `RecordValue` reaches that cast.
+**What landed.** `Cmp.combine` handles `EQ`/`NE`/`APPROX` with `Objects.equals` before the
+numeric fall-through — the same line the interpreter has always run. Ordering stays
+Int-only and an aggregate `<` stays a compile error ("Operator '<' is not defined for
+(P, P)"), which is the boundary the new tests pin.
 
-**The intended behavior is already ruled**, so this is not a design question.
-`IrInterpreter.dispatchOperatorSymbol` states it directly: "`==`/`!=` stay built-in
-**structural equality**" — arithmetic and ordering route to user overloads, equality
-does not. The interpreter implements it as `Objects.equals(l, r)`
-([IrInterpreter.java:1649](../pontif-ir/src/main/java/sibarum/pontif/ir/IrInterpreter.java)),
-which is structural because `RecordValue` is a record.
-
-**Fix sketch.** In `Cmp.combine`, handle `EQ` / `NE` / `APPROX` with
-`Objects.equals` before the numeric fall-through. Ordering (`< <= > >=`) on an
-aggregate must stay an error — and already is, correctly, at compile time:
-`P(1) < P(2)` is rejected with "Operator '<' is not defined for (P, P)". So the new
-branch should cover the three equality ops only and let ordering keep failing.
-
-**Tests.** Both-engine cases for each aggregate kind (struct, tuple, dictionary,
-record shape, nested, enum case), equal and unequal, plus a pin that ordering stays
-rejected. `docs/keyed.md` also promises generated `equals`/`hash` per struct — worth
-checking this fix agrees with the direction recorded there before writing it.
+**Tests.** `AggregateEqualityTest` (16), both engines, one per aggregate kind equal and
+unequal, plus the ordering pin and the scalar-ladder negative controls.
 
 ---
 
 ## Family 3 — the base type is never checked
 
-The deep one. `gated()` asks whether a declared sort is worth judging and answers:
-
-```java
-case IrSort.Named n -> structs.containsKey(n.name());   // ConstructionGate.java:730
-```
-
-`structs` holds *declared structs*. `Int` is not one, so a field declared `Int` is
-never gated, and `classify` — which would return `DISJOINT` immediately — is never
-called. The comment above `gated()` says this is deliberate ("bare-primitive
-legality is decided trait-free at the parser via `Assignability`"), and for a `let`
-claim that is true. For construction and returns it is not: nothing downstream makes
-the check.
-
-Everything below is ACCEPTED today:
+The deep one. `gated()` asked whether a declared sort was worth judging and answered
+`structs.containsKey(n.name())` — and `Int` is not a declared struct, so a field declared
+`Int` was never gated and `classify`, which returns `DISJOINT` immediately, was never
+called. All eleven of these were accepted:
 
 ```pontif
 struct P(x:Int)      P("s").x            # positional constructor
@@ -175,7 +147,7 @@ struct P(x:Int)      P(true).x           # Bool for Int
 struct P(x:String)   P(3).x              # Int for String
 struct P(d:Decimal)  P("s").d            # String for Decimal
 struct P(c:Char)     P(3).c              # Int for Char
-struct Q(a:Int) struct P(x:Int)  P(Q(1)).x   # a whole struct for Int
+struct Q(a:Int) struct P(x:Int)  P(Q(1)).x        # a whole struct for Int
 struct I(n:Int) struct O(i:I)    O(I(true)).i.n   # nested
 
 function f():Int -> "s"                          # function return
@@ -186,77 +158,135 @@ struct R(w:Int) ->
     let this.a:String = this.w                   # constructor EXTENSION field
 ```
 
-That last one matters for the docs as well as the code: the type-system guide's
-constructor-bodies section says an extension field is "judged against its type
-exactly like a constructor argument." That is *literally* true — including the hole —
-but a reader will take it to mean the mismatch above is caught. Fix the sentence when
-the code lands, or before.
+**What landed — and the one design call.** The first attempt was the obvious one: gate
+primitives like anything else. That produced 28 failures, and reading them split cleanly
+in two. Seven were legitimate programs where inference simply abstains (`Vec(a / b)`, a
+method result resolved later in the pass order) — the gate was demanding a *proof* of
+something with nothing to prove.
 
-**What limits the blast radius** — and it is worth knowing before deciding urgency.
-A wrongly-typed value cannot enter a function that declares the type: dispatch
-refuses it (`f(P("s"))` fails to find an overload). So the bad value is *created*
-freely but travels poorly. The damage is field reads, operators, and the engine
-divergence above.
+So the rule is **the provable miss only**. A bare base carries no predicate; DISJOINT is
+still decidable, and that half bites while the other stays silent. This is the §1d rule
+read the other way: §1d forbids deferring an unprovable *refinement* to a runtime stamp,
+and a bare base has no refinement to defer.
 
-**Fix sketch.** Gate a bare primitive: extend the `Named` case to
-`structs.containsKey(n.name()) || isPrimitive(n.name())` over the closed tower
-(`Int`, `Decimal`, `Bool`, `String`, `Char`). `classify` already decides these
-correctly — the sorts are disjoint, so it returns `DISJOINT` and the existing
-diagnostic ("can never satisfy its declared sort … which is disjoint") is the right
-message with no new error text.
+The remaining failures were findings, not nuisances — families 4 and 6 below, plus one
+test with `struct Status(text:Str)`, a type that does not exist.
 
-**Where the care is needed.** This runs on every construction in the codebase, and
-two interactions must be checked before trusting a green suite:
+**Where the care was needed, both checked.** `Int → Decimal` is a ruled feature and
+survives because `NumericCoercion` inserts the `Cast` before the gate judges
+(`AggregatePromotion` → `NumericCoercion` → `ConstructionGate`); `BaseTypeGateTest` now
+pins that ordering, so a later reorder fails there rather than silently. Native
+constructors already gated bare primitives and were the working precedent the fix
+generalizes.
 
-1. **`Int → Decimal` coercion.** `struct P(d:Decimal)` accepting `P(3)` is a ruled
-   language feature, not a hole, and it survives only if `NumericCoercion` has
-   inserted the `Cast` before the gate judges. **Checked — it has.** The pass order in
-   `IrCompiler` is `AggregatePromotion` (:80) → `NumericCoercion` (:93) →
-   `ConstructionGate` (:106), so by the time the gate sees the argument it is already
-   a `Cast` to `Decimal` and classifies as FITS. This was the main risk in family 3
-   and it is not one. Still pin a `P(3)`-into-`d:Decimal` test before starting, so a
-   later reordering cannot silently undo it.
-2. **Native constructors** already gate bare primitives (`nativeTarget` bypasses the
-   leniency at `ConstructionGate.java:440`). That path is the working precedent for
-   what the fix does everywhere else — read it first.
+**The return half.** `PontifCompiler.firstUnprovableReturn` proves the return *refinement*
+via the receipt graph and never asked the base question. A `gateReturn` in
+`ConstructionGate` now judges every TAIL position — through match arms, lets and emits, so
+a match arm returning a String from an `:Int` function is caught one level in.
 
-Then the three call sites at
-[ConstructionGate.java:215, 440, 505](../pontif-ir/src/main/java/sibarum/pontif/ir/ConstructionGate.java)
-(let claim, constructor argument, extension field) all tighten at once, and the
-return-type gate in
-[PontifCompiler.java:619](../pontif-runtime/src/main/java/sibarum/pontif/runtime/PontifCompiler.java)
-needs the same treatment separately — it proves the return refinement but not the
-return base.
+Its scope is deliberately narrow: **both sides a bare primitive**. Unlike a constructor
+argument, a return position is reached through desugars that run *after* this pass — a
+decomposition `let d.{a, b}` becomes one declaration per name whose body is still the
+whole source, a param-conversion clause is applied by a prologue, a type variable's
+binding is a call-site fact — so the tail expression there is often not yet the value the
+function returns, and judging it reports a lie the program does not tell. The closed
+scalar tower is the fragment with none of that structure. That closes the hole and does
+not pretend to more; see **What is still open** below.
 
-**Tests.** One case per row of the table above, both engines. Plus the negative
-controls that must keep passing: `P(3)` into `d:Decimal`, every legitimate
-construction in the existing suite, and the `let`/trait-attribute sites that already
-worked.
+**Also fixed here.** `ConstructionGate.baseName` returned the literal `"_"` for a refined
+unknown base, so `[_:@<=0]` (what a self-recursive method's tail infers to) was judged as
+a named type nothing else is. `classify`'s own contract says `_` must read as unknown
+("never delegate a guess to the engine"); the bare arm did it and the refined arm did not.
+
+**Tests.** `BaseTypeGateTest` (21) — one per row above, plus the negative controls: the
+`Int → Decimal` pin, matching base types, a widen into a field, an abstaining argument
+sort compiling fine, and string concatenation at a `String` boundary.
 
 ---
 
-## Suggested order
+## Family 4 — String `+` inferred as `Int`
 
-1. **Family 2** first. Independent of the others, one branch, and it unbreaks enum
-   equality — which someone will hit this week.
-2. **Family 1** next. One line in the same switch family 3 will touch, so doing it
-   first means the harder change lands against a switch that already has the shape.
-3. **Family 3** last, in two steps: verify the `NumericCoercion` ordering, then gate
-   the primitives and read every new failure carefully. Expect real failures here —
-   a suite that has never checked base types has almost certainly accumulated tests
-   that rely on not checking them, and each one is a finding rather than a nuisance.
+Found by family 3: thirteen conductor and conduit tests started failing with
+*"Constructor argument 'text' of 'StdOut' can never satisfy its declared sort String — the
+argument's sort is Int"*, over `emit StdOut("" + this.count)`.
 
-## Relationship to the existing ledger
+`"" + this.count` is String concatenation, so it is a String. `NarrowingInference.inferBinOp`
+had guards for a Decimal operand and for a user-type operand, and no sibling for String —
+so it minted `[Int:@== "" + count]`, a pin whose *base* was a lie. Nothing checked it,
+because nothing checked base types.
 
-None of these appear in [language-inventory.md](language-inventory.md)'s BUG or
-MISFIRE tables. That file is generated from the probe harness, which asks a different
-question — it compares outcomes against a manifest of expectations, so a hole nobody
-thought to expect stays invisible. Its three "real soundness MISFIREs"
-(`destructure__18`, `methods__17`, `methods__22`) are still open and unrelated to
-these; they belong in the same marathon.
+**What landed.** A String operand wins, checked before Decimal — the same precedence
+`IrInterpreter.evalBinOp` runs — and a Char operand abstains rather than claiming a base.
+The three near-copies of "is this operand a Decimal?" became one `isPrimitiveOperand(e,
+ctx, base)`, which also learned to read a field access's declared sort.
 
-The [feature-matrix](feature-matrix.md) is affected too. Its no-lie rule says a
-`^^^` cell must name a passing witness — but a witness only proves what it asks, and
-none of these cells were ever asked about base types. Worth a pass over the
-`struct` / `function` / `method` rows against the `Nominal` column once family 3
-lands.
+---
+
+## Family 5 — String `+` crashes the Truffle engine
+
+Found by family 4's tests: writing the *correct* program exposed that `"n=" + 3` produced
+`"n=3"` on the interpreter and failed closed on Truffle with "strings order and compare;
+they don't compute". Family 2's shape exactly, on the single most common String operation
+in the language, and pinned in place by a test asserting the Truffle error was correct.
+
+**What landed.** `Add` opts into `acceptsString()` and concatenates, rendering the other
+operand canonically. The rendering itself moved to `sibarum.pontif.core.types.CanonicalText`,
+below both engines, because the interpreter renders in `pontif-ir` and Truffle's `Add`
+renders in `pontif-ast` and neither can see the other — one renderer is what keeps them
+from disagreeing about the *output* next. `StringAltTest.truffleBackend_agreesOnComparisonAndConcatenation`
+now asserts agreement where it used to assert the divergence.
+
+---
+
+## Family 6 — the effective-sort lens merged files
+
+The loudest failure of the family-3 attempt was `'pontif.math/asin' returns a value that
+can never satisfy its declared return sort Decimal — the value's sort is String`, over
+
+```pontif
+function asin(x:Decimal):Decimal -> 0.0
+```
+
+There is no String in that function. `Origin.Span` is `(start, end)` positions with **no
+source file**, and `EffectiveSortLens` built one `Map<Span, IrSort>` per compiled module —
+so in a linked multi-file module, `pontif.math`'s `14:37` and a user file's `14:37` were
+one entry, and a position could be judged against a sort read out of a different file
+entirely. Silent, and invisible to any single-file test.
+
+**What landed.** The lens is keyed by the whole `Origin` — source plus span.
+
+**A related collision, same key.** The walk records a parent before its children, so two
+nodes sharing one span meant the child overwrote the parent. Two parser desugars stamped
+synthesized nodes with a borrowed source span — the S6 promotion's field reads
+(`mergePartialWithPin`) and the clause-chain `Apply` (`applyReturnClause`) — which made a
+field's effective sort read as the whole target struct's, and a conversion's *result* sort
+read as its *input* sort. `collectEffectiveSorts` already documents that it omits
+synthesized nodes; both now carry `Origin.NONE` so it can.
+
+---
+
+## What is still open
+
+- **The return base check is primitives-only.** Extending it to struct, alias, shape and
+  type-variable returns needs the return-position desugars (decomposition lets,
+  param-conversion clauses) to run *before* `ConstructionGate`, or the gate to run after
+  them. That is a pass-ordering change, not a rule change, and it is the natural next step.
+- **An unregistered type name in a field is not an error.** `struct Status(text:Str)`
+  compiles, with `Str` naming nothing. The gate now catches the *consequence* at a call
+  site; the declaration itself should not have been accepted.
+- **`(String:value)` has no Truffle lowering.** It throws an explicit "not yet
+  implemented" — a stated gap rather than a divergence, so it is not in the table above,
+  but family 5 makes it the obvious sibling to finish.
+- The three "real soundness MISFIREs" in [language-inventory.md](language-inventory.md)
+  (`destructure__18`, `methods__17`, `methods__22`) are unrelated to these and still open.
+
+## How this was found, and how to find the rest
+
+`AnonymousRecordSortTest` had the harness the whole sweep was built on: a `run` helper
+that executes every `PontifRunner.Engine` and asserts they agree. Four of the six families
+here are cases where the engines disagreed, and every new suite uses that helper. Reusing
+it on existing aggregate tests is still the cheapest way to find whatever else is hiding.
+
+The [feature-matrix](feature-matrix.md) is worth a pass now. Its no-lie rule says a `^^^`
+cell must name a passing witness — but a witness only proves what it asks, and none of
+these cells were ever asked about base types.

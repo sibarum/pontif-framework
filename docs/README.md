@@ -33,9 +33,10 @@ Look things up here.
   let each design question descend to the deepest layer with jurisdiction.
 - [feature-matrix.md](feature-matrix.md) — feature-by-feature implementation state.
 - [TODO.md](TODO.md) — the running work list.
-- [soundness-holes.md](soundness-holes.md) — programs the compiler accepts and
-  should not, with root causes and a marathon plan. Three families, found by
-  probing on 2026-08-24; the suite is green with all of them live.
+- [soundness-holes.md](soundness-holes.md) — programs the compiler accepted and
+  should not have. Three families found by probing on 2026-08-24 with the suite
+  green; closing them surfaced three more. All six closed 2026-08-25, with what
+  each root cause turned out to be and what the fixes deliberately do not cover.
 
 ## 3. Design notes
 

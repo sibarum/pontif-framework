@@ -91,6 +91,23 @@ public final class Cmp extends BinaryOp {
                 case APPROX -> sibarum.pontif.core.Decimals.approxEqual(a, b);
             };
         }
+        // Equality is BUILT-IN and STRUCTURAL for every remaining operand kind — Int,
+        // Bool, and any aggregate (struct, tuple, dictionary, anonymous record shape,
+        // enum case), all of which arrive here as a value whose `equals` is already the
+        // structural one (`RecordValue` is a record). This is the ruled split, stated in
+        // `IrInterpreter.dispatchOperatorSymbol`: arithmetic and ORDERING route to a user
+        // overload, `==`/`!=`/`~=` never do. Without this branch an aggregate operand fell
+        // into the `(Long)` cast below and died with an internal ClassCastException —
+        // Truffle disagreeing with the interpreter, which has always evaluated these three
+        // ops as `Objects.equals` (IrInterpreter.java, the tail of `evalBinOp`).
+        if (op == Op.EQ || op == Op.NE || op == Op.APPROX) {
+            // No rounding is in play for these operand kinds, so ~= coincides with ==.
+            boolean equal = java.util.Objects.equals(leftValue, rightValue);
+            return op == Op.NE ? !equal : equal;
+        }
+        // Ordering stays Int-only. An aggregate never reaches here through a checked
+        // compile — `P(1) < P(2)` is rejected with "Operator '<' is not defined for
+        // (P, P)" — so the cast below is a backstop for hand-built nodes, not the guard.
         long l = (Long) leftValue;
         long r = (Long) rightValue;
         return switch (op) {
@@ -98,9 +115,8 @@ public final class Cmp extends BinaryOp {
             case LE -> l <= r;
             case GT -> l > r;
             case GE -> l >= r;
-            case EQ -> l == r;
-            case NE -> l != r;
-            case APPROX -> l == r;  // no rounding → ~= is ==
+            case EQ, NE, APPROX -> throw new IllegalStateException(
+                    "equality is handled structurally above");
         };
     }
 
