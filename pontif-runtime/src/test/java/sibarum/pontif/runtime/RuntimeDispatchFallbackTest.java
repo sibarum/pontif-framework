@@ -147,6 +147,44 @@ class RuntimeDispatchFallbackTest {
                 """));
     }
 
+    // --- a closure held by a top-level binding ------------------------------------
+
+    @Test
+    void aTopLevelBindingHoldingAClosureIsInvokableOnBothEngines() {
+        // A top-level `let` lowers to a ZERO-argument function, so `f(5)` finds no
+        // 1-parameter overload and falls to the dispatcher's no-match path — where the
+        // interpreter has always evaluated the binding and invoked what it holds. Truffle
+        // handled only the metareference case there and answered "Dispatch failed for 'f'".
+        // Found by porting the S-expr closure tests, whose lets were all expression-level
+        // (a frame slot, which the closure branch already handled).
+        assertEquals("15", run("""
+                let n = 10
+                let f:[Method(Int):Int] = [(x:Int) -> x + n]
+                f(5)
+                """));
+    }
+
+    @Test
+    void aTopLevelBindingHoldingAReturnedClosureIsInvokableOnBothEngines() {
+        assertEquals("8", run("""
+                function addN(n:Int):[Method(Int):Int] -> [(x:Int) -> x + n]
+                let add5 = addN(5)
+                add5(3)
+                """));
+    }
+
+    @Test
+    void aClosureInsideAFunctionBodyStillWorks() {
+        // The control: an expression-level binding is a frame slot, resolved by the branch
+        // that was already correct — the fix must not have moved that.
+        assertEquals("15", run("""
+                function apply5(n:Int):Int ->
+                  let f:[Method(Int):Int] = [(x:Int) -> x + n]
+                  f(5)
+                apply5(10)
+                """));
+    }
+
     // --- the built-in tuple rule --------------------------------------------------
 
     @Test

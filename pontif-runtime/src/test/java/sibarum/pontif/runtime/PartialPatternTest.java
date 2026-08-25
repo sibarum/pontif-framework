@@ -9,27 +9,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Documents two facts about structural pattern matching that aren't obvious
- * from elsewhere in the test suite:
+ * Naming only SOME of a value's fields — what it means at each site that asks.
  *
- * <ol>
- *   <li>Partial patterns work — a pattern that lists fewer fields than the
- *       value still matches (subset semantics).
- *       {@link sibarum.pontif.core.symbolic.Refinements#satisfiesStructural}
- *       walks the pattern's member set, not the value's, so extra value
- *       fields are ignored. Combined with the parser's destructuring desugar
- *       (which binds only the fields listed in the pattern), this means
- *       partial destructuring is already supported — no underscore-wildcard
- *       syntax needed for the "I want to ignore a field" case.</li>
- *   <li>An <b>inline</b> struct name in a pattern is a shape label — match
- *       success for these is determined entirely by field shape.
- *       {@code (struct AnyName (x Int))} matches anything with a compatible
- *       {@code x} field. <b>Resolved by the claim rule (Slice 3):</b> a name
- *       bites iff it's a DECLARED nominal type (in the struct registry);
- *       inline S-expr structural sorts are never registered, so their labels
- *       stay cosmetic — there is no nominal type to falsely claim. Declared
- *       names are tested in {@code ClaimRuleTest}.</li>
- * </ol>
+ * <p>Ported from the S-expression syntax when that parser was decommissioned. The original
+ * pinned two facts through inline structural sorts: that a pattern listing fewer fields than
+ * the value still matches (subset semantics), and that an inline struct NAME in such a
+ * pattern was cosmetic, since an inline S-expr sort was never registered and so had no
+ * nominal type to claim. The second scenario does not survive the port and should not: an
+ * inline unregistered type name is not spellable in Pontif — a name in a sort position must
+ * resolve, which {@code SortChecker.checkSortNames} now enforces at the declaration.
+ *
+ * <p>The first fact survives at a parameter, and porting it found a gap: the by-name
+ * anonymous shape `[{x:Int}]` never matches as a match ARM — not for a wider record, and not
+ * for an exactly shaped one — while the positional face `[{Int, Int}]` does, and while the
+ * by-name face is judged member-wise everywhere a CLAIM is made (docs/soundness-holes.md
+ * family 1). That dead arm is pinned below as a known limitation, deliberately not as
+ * intended behavior.
  */
 class PartialPatternTest {
 
@@ -37,69 +32,103 @@ class PartialPatternTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String src) {
-        return runner.run(compiler.compileSexpr(src, "t.ptf"), Engine.INTERPRETER);
+        return runner.run(compiler.compile(src, "t.ptf"), Engine.INTERPRETER);
+    }
+
+    private String value(String src) {
+        RunResult r = run(src);
+        assertFalse(r.isError(), () -> "expected success; got: " + r.text());
+        return r.text();
+    }
+
+    // --- naming some fields of a value you hold -----------------------------------
+
+    @Test
+    void decompositionBindsOnlyTheFieldsItNames() {
+        // The value has x AND y; the decomposition names only x, and y is simply not bound.
+        assertEquals("30", value("""
+                let p = {x = 3, y = 4}
+                let p.{x}
+                x * 10
+                """));
     }
 
     @Test
-    void patternListingOnlySomeFields_matchesAndBindsOnlyThose() {
-        // Value has x AND y; pattern lists only x. Pattern should match
-        // (subset), branch binds x, ignores y.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Point (x Int) (y Int)) (record (x 3) (y 4))
-                    (match p
-                      ((struct Point (x Int)) (* x 10)))))
-                """;
-        RunResult r = run(src);
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("30", r.text());
+    void decompositionOverAStructIsTheSame() {
+        // A struct is decomposed by name like any aggregate — the projection does not care
+        // that the value carries more than was asked for.
+        assertEquals("30", value("""
+                struct Point(x:Int, y:Int)
+                let p = Point(3, 4)
+                let p.{x}
+                x * 10
+                """));
     }
 
     @Test
-    void patternStructName_isCosmetic_matchesPurelyByShape() {
-        // The struct's name field is currently just a label; structural
-        // matching is by field shape, not by name. So a pattern named
-        // "AnyName" matches a value declared as "Point" if the fields line
-        // up. Whether this is the desired long-term behavior is captured in
-        // a TODO; this test pins down the current semantics.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Point (x Int) (y Int)) (record (x 3) (y 4))
-                    (match p
-                      ((struct AnyName (x Int)) x))))
-                """;
-        RunResult r = run(src);
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("3", r.text());
+    void namingAFieldTheValueLacksIsRejected() {
+        // The S-expr version of this failed at RUNTIME. Naming a key the source's sort does
+        // not have is caught at parse time now, and the message names the available fields —
+        // a by-name projection is honest-partial, but an unknown key is a lie.
+        PontifCompiler.CompileResult r = compiler.compile("""
+                let p = {x = 3, y = 4}
+                let p.{z}
+                z
+                """, "t.ptf");
+        String err = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(err.contains("no member 'z'"), () -> "expected the unknown key named; got: " + err);
+    }
+
+    // --- naming some fields as a declared SORT ------------------------------------
+
+    @Test
+    void aPartialShapeParameterAcceptsAWiderRecord() {
+        // Subset semantics at the call boundary: `[{x:Int}]` asks for something with an x.
+        assertEquals("7", value("""
+                function justX(p:[{x:Int}]):Int -> p.x
+                justX({x = 7, y = 99})
+                """));
     }
 
     @Test
-    void patternFieldNotInValue_failsAtRuntime() {
-        // Pattern lists a field that doesn't exist in the record.
-        String src = """
-                (module m
-                  ()
-                  (let p (struct Point (x Int) (y Int)) (record (x 3) (y 4))
-                    (match p
-                      ((struct Point (z Int)) z))))
-                """;
-        RunResult r = run(src);
-        assertTrue(r.isError(), "expected error — pattern requires field 'z'");
+    void aPartialShapeParameterAcceptsAStruct() {
+        assertEquals("7", value("""
+                struct Point(x:Int, y:Int)
+                function justX(p:[{x:Int}]):Int -> p.x
+                justX(Point(7, 99))
+                """));
     }
 
     @Test
-    void partialPattern_inDispatch_works() {
-        // Function declares a structural-sorted param with only one field;
-        // pass a record with more fields — dispatch should accept it.
-        String src = """
-                (module m
-                  ((defn justX ((p (struct Point (x Int)))) Int (field p x)))
-                  (call justX (record (x 7) (y 99))))
-                """;
-        RunResult r = run(src);
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("7", r.text());
+    void aPositionalShapeMatchesAsAnArm() {
+        // The positional face works as a match arm, so the arm machinery handles anonymous
+        // shapes in principle — which is what makes the by-name case below a gap rather than
+        // a design choice.
+        assertEquals("1", value("""
+                let p = {3, 4}
+                match p { [{Int, Int}] -> 1  [_] -> 0 }
+                """));
+    }
+
+    @Test
+    void byNameShapeAsAMatchArm_neverMatches_KNOWN_LIMITATION() {
+        // Found by porting this file. `[{x:Int}]` is a real claim everywhere else — it is
+        // judged member-wise at a let, a field, and a parameter (docs/soundness-holes.md
+        // family 1, which fixed exactly this asymmetry on the CLAIM side, for both faces).
+        // As a match ARM it never fires: not for a wider record, and not even for an exactly
+        // shaped one. The arm is silently dead, and `[_]` covers for it so totality is happy.
+        //
+        // Pinned as a limitation, NOT as correct behavior — the lesson of family 5, where a
+        // test asserting an engine divergence made the divergence look intended for months.
+        // When the by-name arm starts matching, this test SHOULD fail; delete it then and
+        // assert the match instead.
+        assertEquals("0", value("""
+                let p = {x = 3}
+                match p { [{x:Int}] -> 1  [_] -> 0 }
+                """));
+        assertEquals("0", value("""
+                let p = {x = 3, y = 4}
+                match p { [{x:Int}] -> 1  [_] -> 0 }
+                """));
     }
 }

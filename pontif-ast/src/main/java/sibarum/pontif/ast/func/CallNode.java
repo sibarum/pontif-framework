@@ -145,9 +145,27 @@ public final class CallNode extends PontifNode {
                         && dispatch.resolve(name, List.of(), simplifier)
                                 instanceof DispatchResult.Resolved z) {
                     CallTarget zt = registry.callTarget(z.decl());
-                    if (zt != null && sibarum.pontif.core.types.Metaref.is(zt.call())) {
+                    Object zeroArg = zt == null ? null : zt.call();
+                    if (sibarum.pontif.core.types.Metaref.is(zeroArg)) {
                         yield executeAsDispatch(
-                                frame, sibarum.pontif.core.types.Metaref.functionName(zt.call()));
+                                frame, sibarum.pontif.core.types.Metaref.functionName(zeroArg));
+                    }
+                    // ...or holding a CLOSURE. A top-level `let f:[Method(Int):Int] = [(x:Int)
+                    // -> …]` lowers to a zero-argument function returning a LambdaValue, so
+                    // `f(5)` finds no 1-parameter overload and lands here. The interpreter has
+                    // always invoked it; without this the Truffle engine answered "Dispatch
+                    // failed for 'f'" for a program the interpreter ran — the same
+                    // engine-disagreement shape as docs/soundness-holes.md family 9. Only a
+                    // top-level binding reaches this path: inside a function body the closure is
+                    // a frame slot and the closureSlot branch above already invokes it.
+                    if (zeroArg instanceof LambdaValue lambda) {
+                        try {
+                            yield lambda.invoke(args);
+                        } catch (RuntimeCheckException rce) {
+                            throw rce.origin().isPresent()
+                                    ? rce
+                                    : new RuntimeCheckException(rce.getMessage(), origin(), rce);
+                        }
                     }
                 }
                 throw new RuntimeCheckException(

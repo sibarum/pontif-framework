@@ -5,14 +5,21 @@ import sibarum.pontif.runtime.PontifRunner.RunResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end coverage for the unified {@code call} form with lambdas:
- * source string → SexprParser → IrCompiler → IrInterpreter, via PontifRunner.
+ * End-to-end coverage for closures: source → parser → IrCompiler → IrInterpreter.
  *
- * <p>The same {@code call} keyword handles both named-function invocation
- * and value-level closure invocation; the runtime picks based on whether the
- * name is locally bound.
+ * <p>Ported from the S-expression syntax when that parser was decommissioned. The original
+ * exercised its unified {@code call} form, which handled both named-function invocation and
+ * value-level closure invocation and picked at runtime by whether the name was locally bound.
+ * Pontif spells application the same way in both cases — {@code f(x)} — so what is worth
+ * pinning is the behavior underneath: an inline clause applies, a bound one invokes, a closure
+ * captures, and a function may return one.
+ *
+ * <p>Two cases came out BETTER in the port and are noted where they appear: applying a literal
+ * is a compile error here rather than a runtime one, and a same-named binding of a different
+ * arity does not shadow a function, it joins its overloads.
  */
 class LambdaParserIntegrationTest {
 
@@ -20,99 +27,72 @@ class LambdaParserIntegrationTest {
     private final PontifRunner runner = new PontifRunner();
 
     private RunResult run(String source, String name) {
-        return runner.run(compiler.compileSexpr(source, name), PontifRunner.Engine.INTERPRETER);
+        return runner.run(compiler.compile(source, name), PontifRunner.Engine.INTERPRETER);
+    }
+
+    private String value(String source, String name) {
+        RunResult r = run(source, name);
+        assertFalse(r.isError(), () -> "expected success; got: " + r.text());
+        return r.text();
     }
 
     @Test
-    void inlineLambdaInvokedViaCall_yieldsExpectedValue() throws Exception {
-        // (\x -> x + 1)(5) = 6  — compound head, parses as IrExpr.Apply
-        RunResult r = run(
-                "(module m () (call (lambda ((x Int)) Int (+ x 1)) 5))",
-                "inline.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("6", r.text());
+    void inlineClauseApplied_yieldsExpectedValue() {
+        assertEquals("6", value("[(x:Int) -> x + 1](5)", "inline.ptf"));
     }
 
     @Test
-    void letBoundLambdaInvokedViaCall_resolvesViaLocalScope() throws Exception {
-        // let f = (x -> x*x) in (call f 7) = 49
-        // 'f' is a bare symbol → IrExpr.Call; runtime finds it in scope and
-        // invokes the closure (skipping the dispatch table).
-        String src = """
-                (module letLambda
-                  ()
-                  (let f (function (Int) Int) (lambda ((x Int)) Int (* x x))
-                    (call f 7)))
-                """;
-        RunResult r = run(src, "letLambda.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("49", r.text());
+    void boundClauseInvokedByName() {
+        assertEquals("49", value("""
+                let f:[Method(Int):Int] = [(x:Int) -> x * x]
+                f(7)
+                """, "letLambda.ptf"));
     }
 
     @Test
-    void closureCapturesEnclosingLetBinding() throws Exception {
-        // let n = 10 in let f = (x -> x + n) in (call f 5) = 15
-        String src = """
-                (module closure
-                  ()
-                  (let n Int 10
-                    (let f (function (Int) Int) (lambda ((x Int)) Int (+ x n))
-                      (call f 5))))
-                """;
-        RunResult r = run(src, "closure.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("15", r.text());
+    void closureCapturesEnclosingBinding() {
+        assertEquals("15", value("""
+                let n = 10
+                let f:[Method(Int):Int] = [(x:Int) -> x + n]
+                f(5)
+                """, "closure.ptf"));
     }
 
     @Test
-    void higherOrder_namedFunctionReturnsLambda() throws Exception {
-        // defn addN(n) = (x -> x + n)
-        // let add5 = (call addN 5) in (call add5 3) = 8
-        //
-        // First (call addN 5) resolves via the dispatch table (addN not in env).
-        // Then (call add5 3) resolves via the local binding for add5.
-        String src = """
-                (module addN
-                  ((defn addN ((n Int)) (function (Int) Int)
-                     (lambda ((x Int)) Int (+ x n))))
-                  (let add5 (function (Int) Int) (call addN 5)
-                    (call add5 3)))
-                """;
-        RunResult r = run(src, "addN.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("8", r.text());
+    void higherOrder_namedFunctionReturnsAClosure() {
+        // `addN` resolves through dispatch; `add5` is a local binding holding the closure it
+        // returned. Both spellings of application are the same syntax.
+        assertEquals("8", value("""
+                function addN(n:Int):[Method(Int):Int] -> [(x:Int) -> x + n]
+                let add5 = addN(5)
+                add5(3)
+                """, "addN.ptf"));
     }
 
     @Test
-    void multiArgLambdaInvokedWithSeveralArgs() throws Exception {
-        // ((x y) -> x * y)(3, 4) = 12
-        RunResult r = run(
-                "(module m () (call (lambda ((x Int) (y Int)) Int (* x y)) 3 4))",
-                "multiArg.ptf");
-        assertFalse(r.isError(), "expected success; got: " + r.text());
-        assertEquals("12", r.text());
+    void multiArgClauseInvokedWithSeveralArgs() {
+        assertEquals("12", value("[(x:Int, y:Int) -> x * y](3, 4)", "multiArg.ptf"));
     }
 
     @Test
-    void localBindingShadowsDispatchTable() throws Exception {
-        // A let-bound 'factorial' shadows the global decl. The let value isn't
-        // a closure → runtime error from the closure-call path.
-        String src = """
-                (module shadow
-                  ((defn factorial ((n Int)) Int 999))
-                  (let factorial Int 5
-                    (call factorial 3)))
-                """;
-        RunResult r = run(src, "shadow.ptf");
-        assertEquals(true, r.isError(),
-                "expected error: a Long value can't be invoked as a closure");
+    void aBindingOfDifferentArityJoinsTheOverloadsRatherThanShadowing() {
+        // The S-expr version asserted an ERROR here: its `let factorial = 5` shadowed the
+        // declared function outright, so `(call factorial 3)` tried to invoke a Long. In
+        // Pontif a top-level binding is a 0-arg member of the same name, so a 1-argument call
+        // still resolves to the 1-parameter function. Nothing is shadowed and nothing throws.
+        assertEquals("999", value("""
+                function factorial(n:Int):Int -> 999
+                let factorial = 5
+                factorial(3)
+                """, "shadow.ptf"));
     }
 
     @Test
-    void callOnLiteralAsCompoundHead_isARuntimeError() throws Exception {
-        // Applying a literal as a function should surface as a runtime error
-        // (the call form parses fine — the failure is at eval time).
-        RunResult r = run("(module m () (call (+ 2 3) 1))", "bad.ptf");
-        assertEquals(true, r.isError());
+    void applyingALiteral_isACompileError() {
+        // Better than the S-expr behavior, which parsed it and failed at eval: a literal is
+        // statically known not to be callable, so it is rejected before the program runs.
+        PontifCompiler.CompileResult r = compiler.compile("5(1)", "bad.ptf");
+        String err = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(err.contains("not callable"), () -> "expected a not-callable error; got: " + err);
     }
 }
