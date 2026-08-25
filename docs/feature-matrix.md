@@ -124,7 +124,8 @@ Each supported cell, with the passing test(s)/probe(s) that witness it. Probes l
 
 **match** — Refine: `MatchTotalityTest`, `inference__08_match_arm_narrowing` · Traits:
 `traits__21_trait_method_in_match_destructure` · Infer: `NarrowingInferenceTest`,
-`IrMatchTest` · Proofs: `MatchTotalityTest` · Nominal:
+`IrMatchTest` · Proofs: `MatchTotalityTest`, `DeadMatchArmTest` (every arm must be
+reachable — totality says no value escapes the arms, this says no arm escapes the values) · Nominal:
 `destructure__06_match_struct`, `ClaimRuleTest` · Struct:
 `MatchTotalityTest.unionScrutinee_bareArmPerBranch_isTotalByConstruction`
 (bare-arm union), `TupleTest`.
