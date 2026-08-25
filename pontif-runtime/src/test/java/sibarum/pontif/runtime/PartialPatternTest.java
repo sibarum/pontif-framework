@@ -19,12 +19,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * inline unregistered type name is not spellable in Pontif — a name in a sort position must
  * resolve, which {@code SortChecker.checkSortNames} now enforces at the declaration.
  *
- * <p>The first fact survives at a parameter, and porting it found a gap: the by-name
- * anonymous shape `[{x:Int}]` never matches as a match ARM — not for a wider record, and not
- * for an exactly shaped one — while the positional face `[{Int, Int}]` does, and while the
- * by-name face is judged member-wise everywhere a CLAIM is made (docs/soundness-holes.md
- * family 1). That dead arm is pinned below as a known limitation, deliberately not as
- * intended behavior.
+ * <p>The first fact survives at a parameter, and porting it found a silent misparse in a match
+ * ARM: a braced `name:Sort` entry there is a POSITIONAL slot bound to the name (unlike a sort
+ * position, where it is a one-field record shape), and for a SINGLE entry the grouping collapse
+ * returned the bare sort and dropped the binder — so `[{x:Int}]` quietly became `[Int]`. It is a
+ * parse error now, since the one-slot tuple pattern that would carry it is backlogged.
  */
 class PartialPatternTest {
 
@@ -39,6 +38,14 @@ class PartialPatternTest {
         RunResult r = run(src);
         assertFalse(r.isError(), () -> "expected success; got: " + r.text());
         return r.text();
+    }
+
+    /** The compile diagnostic, asserting the program was rejected. */
+    private String reject(String src) {
+        PontifCompiler.CompileResult r = compiler.compile(src, "t.ptf");
+        assertTrue(r instanceof PontifCompiler.CompileResult.Failed,
+                "expected a compile rejection; got a compiling program");
+        return ((PontifCompiler.CompileResult.Failed) r).error().text();
     }
 
     // --- naming some fields of a value you hold -----------------------------------
@@ -111,24 +118,38 @@ class PartialPatternTest {
     }
 
     @Test
-    void byNameShapeAsAMatchArm_neverMatches_KNOWN_LIMITATION() {
-        // Found by porting this file. `[{x:Int}]` is a real claim everywhere else — it is
-        // judged member-wise at a let, a field, and a parameter (docs/soundness-holes.md
-        // family 1, which fixed exactly this asymmetry on the CLAIM side, for both faces).
-        // As a match ARM it never fires: not for a wider record, and not even for an exactly
-        // shaped one. The arm is silently dead, and `[_]` covers for it so totality is happy.
-        //
-        // Pinned as a limitation, NOT as correct behavior — the lesson of family 5, where a
-        // test asserting an engine divergence made the divergence look intended for months.
-        // When the by-name arm starts matching, this test SHOULD fail; delete it then and
-        // assert the match instead.
-        assertEquals("0", value("""
+    void aSingleElementBracePattern_isRejected() {
+        // This is what porting the file found. In a match arm — unlike a sort position, where
+        // `{x:Int}` is a one-field record shape — a braced `name:Sort` entry is a POSITIONAL
+        // slot tested as Sort and bound as name. For a single entry the grouping collapse then
+        // returned the bare sort and threw the binder away, so `[{x:Int}]` silently became
+        // `[Int]`: the arm tested something other than what was written, and the body's `x` was
+        // unbound. One-element tuples are backlogged, so the honest answer is to say so.
+        String err = reject("""
                 let p = {x = 3}
                 match p { [{x:Int}] -> 1  [_] -> 0 }
-                """));
+                """);
+        assertTrue(err.contains("single-element brace pattern"),
+                () -> "expected the one-slot pattern to be named; got: " + err);
+        assertTrue(err.contains("let p.{x}"),
+                () -> "the diagnostic should point at by-name decomposition; got: " + err);
+    }
+
+    @Test
+    void aMultiElementBracePatternIsPositional_soARecordDoesNotMatchIt() {
+        // With two entries there is no collapse and the documented pattern reading applies:
+        // `[{x:Int, y:Int}]` is a two-slot TUPLE pattern that binds x and y. A record is not a
+        // tuple, so the arm does not fire — a live arm that this value simply misses, not the
+        // dead one the single-entry form used to be. (Whether an arm that can never match ANY
+        // value of the scrutinee's sort should be rejected as dead code is a separate ruling.)
         assertEquals("0", value("""
                 let p = {x = 3, y = 4}
-                match p { [{x:Int}] -> 1  [_] -> 0 }
+                match p { [{x:Int, y:Int}] -> 1  [_] -> 0 }
+                """));
+        // ...and against an actual two-slot tuple, the same arm fires and binds.
+        assertEquals("3", value("""
+                let p = {3, 4}
+                match p { [{x:Int, y:Int}] -> x  [_] -> 0 }
                 """));
     }
 }

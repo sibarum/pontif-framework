@@ -4534,6 +4534,26 @@ public final class PontifParser {
                     open.origin());
         }
         if (members.size() == 1) {
+            // The collapse below DISCARDS anything recorded against the slot, which is fine
+            // for a bare grouping and a lie for a pattern that binds: `[{x:Int}]` in a match
+            // arm silently became the sort `Int`, its binder gone, so the arm tested something
+            // other than what was written and the body's `x` was unbound. A one-slot tuple
+            // PATTERN is the form that would carry it, and one-element tuples are backlogged
+            // (§7.10) — so say so rather than quietly meaning something else.
+            String only = members.keySet().iterator().next();
+            if (renames.containsKey(only) || discards.contains(only)) {
+                String binder = renames.getOrDefault(only, "_");
+                // `{a}` binds whole; `{a:Sort}` also tests the slot — echo whichever was written.
+                boolean sorted = !(members.get(only) instanceof IrSort.Named n) || !"_".equals(n.name());
+                String written = sorted ? "{" + binder + ":…}" : "{" + binder + "}";
+                throw new ParseException(
+                        "A single-element brace pattern is not supported — `" + written + "` here "
+                                + "would be a one-slot tuple pattern, and one-element tuples are "
+                                + "backlogged (docs/stream-war.md §7.10). To TEST a scalar, write "
+                                + "the sort directly ([Int], [Int:@>0]); to BIND a field of a "
+                                + "record by name, decompose it (`let p.{" + binder + "}`).",
+                        open.origin());
+            }
             // `(S)` is GROUPING, not a 1-tuple — the parenthesized single sort IS S,
             // mirroring the value side where `(x)` is grouping (RULED James 2026-06-22:
             // a 1-tuple is the trailing-comma `(S,)`, a separate §7.10 slice). This makes
