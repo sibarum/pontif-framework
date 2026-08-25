@@ -1,10 +1,10 @@
-trait Heavyish{ ping:[Method():Int], weight:[Int:@>0] }
+trait Weighted{ tare:[Method():Int], weight:[Int:@>0] }
 
-struct Lorem(weight:[Int:@>0], name:Int)
+struct Crate(weight:[Int:@>0], name:Int)
 
-assign trait Lorem:Heavyish {
-  ping():Int -> 7
+assign trait Crate:Weighted {
+  tare():Int -> 7
 }
 
-let l = Lorem(9, 3)
-l.weight
+let crate = Crate(9, 3)
+crate.weight

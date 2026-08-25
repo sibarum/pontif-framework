@@ -245,7 +245,7 @@ through a field read or a let chain, the two paths disagree on how much they car
   not the discharge path. *(BUG)*
 - **`traits__18_producer_violates_refinement_reject`** *(PASS by classification, but
   same machinery)* — the producer-violates-refinement rejection actually fires via the
-  identical "Cannot prove the declared return refinement of 'Ipsum.weight'" path,
+  identical "Cannot prove the declared return refinement of 'Parcel.weight'" path,
   confirming the discharge path is the shared seam: it correctly rejects there and
   wrongly rejects in `inference__21`. The discriminating signal (refined-field
   provenance) lives in the narrowing path and never reaches the gate.

@@ -1,8 +1,8 @@
-trait Heavyish{ weight:[Int:@>0] }
+trait Weighted{ weight:[Int:@>0] }
 
-struct Lorem(weight:[Int:@>0])
+struct Crate(weight:[Int:@>0])
 
-assign trait Lorem:Heavyish {
+assign trait Crate:Weighted {
   weight:Int -> 9
 }
 

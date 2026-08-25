@@ -1,12 +1,12 @@
-trait Heavyish{ weight:[Int:@>0] }
+trait Weighted{ weight:[Int:@>0] }
 
-struct Ipsum(name:Int)
-struct Other(name:Int)
+struct Parcel(name:Int)
+struct Pallet(name:Int)
 
-assign trait Ipsum:Heavyish { weight:Int -> 1 }
-assign trait Other:Heavyish { weight:Int -> 2 }
+assign trait Parcel:Weighted { weight:Int -> 1 }
+assign trait Pallet:Weighted { weight:Int -> 2 }
 
-let i = Ipsum(5)
-let h:Heavyish = i
-let back:Other = h
+let p = Parcel(5)
+let w:Weighted = p
+let back:Pallet = w
 back.name

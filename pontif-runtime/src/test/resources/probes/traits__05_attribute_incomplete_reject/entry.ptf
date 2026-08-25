@@ -1,7 +1,7 @@
-trait Heavyish{ weight:[Int:@>0] }
+trait Weighted{ weight:[Int:@>0] }
 
-struct Sit(name:Int)
+struct Envelope(name:Int)
 
-assign trait Sit:Heavyish { }
+assign trait Envelope:Weighted { }
 
 42

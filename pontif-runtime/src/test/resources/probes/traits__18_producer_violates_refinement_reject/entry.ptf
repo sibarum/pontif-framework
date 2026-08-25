@@ -1,8 +1,8 @@
-trait Heavyish{ weight:[Int:@>0] }
+trait Weighted{ weight:[Int:@>0] }
 
-struct Ipsum(name:Int)
+struct Parcel(name:Int)
 
-assign trait Ipsum:Heavyish {
+assign trait Parcel:Weighted {
   weight:Int -> 0
 }
 
