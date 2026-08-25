@@ -87,4 +87,60 @@ class DispatchSpecificityMatrixTest {
     @Test void s1OrT2_S1_picksStruct() { assertEquals("11", dispatch(F_S1 + F_T2, "S1(0)")); }
     @Test void s1OrT2_S2_picksT2()     { assertEquals("2",  dispatch(F_S1 + F_T2, "S2(0)")); }
     @Test void s1OrT2_S3_picksStruct() { assertEquals("11", dispatch(F_S1 + F_T2, "S3(0)")); }
+
+    // ===== the COMPILE-TIME consequence ======================================
+    //
+    // Everything above observes the winner by its VALUE, which the runtime dispatcher decides.
+    // The audit of duplicated type-system engines flagged that the compile-time side
+    // (StaticDispatch.pickMostSpecific) still calls the specificity kernel without the
+    // nominal-ancestry hook the runtime passes, and predicted it would therefore abstain —
+    // safely, since abstention never misroutes, but abstaining means the winner's RETURN SORT
+    // is unknown to inference, and a claim against it cannot then be judged.
+    //
+    // These pin the consequence rather than the mechanism: when the overloads differ in return
+    // type, the compiler must know which one wins well enough to reject a lie about it. It does.
+    // The flagged gap is real in the code and has no observable effect here — worth knowing
+    // before anyone threads a registry through to close it.
+
+    /** Overloads differing in return type: the specific one wins and returns String. */
+    private static final String RETURN_SPLIT = """
+            function g(x:T1):Int -> 1
+            function g(x:S1):String -> "s"
+            """;
+
+    @Test
+    void theSpecificOverloadsReturnSortReachesALetClaim() {
+        assertEquals("COMPILE_ERR", firstWord(compileOnly(
+                LATTICE + RETURN_SPLIT + "let r:Int = g(S1(0))\nr")));
+    }
+
+    @Test
+    void theSpecificOverloadsReturnSortReachesAReturnGate() {
+        assertEquals("COMPILE_ERR", firstWord(compileOnly(
+                LATTICE + RETURN_SPLIT + "function h():Int -> g(S1(0))\nh()")));
+    }
+
+    @Test
+    void theSpecificOverloadsReturnSortReachesAConstructorArgument() {
+        assertEquals("COMPILE_ERR", firstWord(compileOnly(
+                LATTICE + RETURN_SPLIT + "struct Holder(n:Int)\nHolder(g(S1(0))).n")));
+    }
+
+    @Test
+    void theHonestClaimAgainstThatSameReturnSortCompiles() {
+        // The control: the gate is judging, not blanket-rejecting a call it cannot resolve.
+        assertEquals("\"s\"", compileOnly(LATTICE + RETURN_SPLIT + "let r:String = g(S1(0))\nr"));
+    }
+
+    /** Compiles and runs, or returns {@code "COMPILE_ERR: …"}. */
+    private String compileOnly(String src) {
+        CompileResult r = compiler.compile(src, "spec.ptf");
+        if (r instanceof CompileResult.Failed f) return "COMPILE_ERR: " + f.error().text();
+        return runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER).text();
+    }
+
+    private static String firstWord(String s) {
+        int colon = s.indexOf(':');
+        return colon < 0 ? s : s.substring(0, colon);
+    }
 }
