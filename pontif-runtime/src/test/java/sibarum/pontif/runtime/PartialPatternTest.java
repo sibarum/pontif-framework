@@ -136,17 +136,22 @@ class PartialPatternTest {
     }
 
     @Test
-    void aMultiElementBracePatternIsPositional_soARecordDoesNotMatchIt() {
+    void aMultiElementBracePatternIsPositional_soARecordArmIsRejectedAsDead() {
         // With two entries there is no collapse and the documented pattern reading applies:
         // `[{x:Int, y:Int}]` is a two-slot TUPLE pattern that binds x and y. A record is not a
-        // tuple, so the arm does not fire — a live arm that this value simply misses, not the
-        // dead one the single-entry form used to be. (Whether an arm that can never match ANY
-        // value of the scrutinee's sort should be rejected as dead code is a separate ruling.)
-        assertEquals("0", value("""
+        // tuple, so no value of this scrutinee could reach the arm — and an arm that can never
+        // match is a compile error (RULED James 2026-08-25), rather than a branch that quietly
+        // loses to the default below it.
+        String err = reject("""
                 let p = {x = 3, y = 4}
                 match p { [{x:Int, y:Int}] -> 1  [_] -> 0 }
-                """));
-        // ...and against an actual two-slot tuple, the same arm fires and binds.
+                """);
+        assertTrue(err.contains("can never match"),
+                () -> "expected the dead arm to be named; got: " + err);
+    }
+
+    @Test
+    void thatSamePatternFiresAgainstAnActualTuple() {
         assertEquals("3", value("""
                 let p = {3, 4}
                 match p { [{x:Int, y:Int}] -> x  [_] -> 0 }

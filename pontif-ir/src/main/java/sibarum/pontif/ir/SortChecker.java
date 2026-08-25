@@ -2085,6 +2085,108 @@ public final class SortChecker {
      * kernel {@code Unknown} — is a compile error directing the user to add a
      * {@code _} default.
      */
+    /**
+     * The three shapes a runtime value can have. A value is exactly one of them, so an arm whose
+     * pattern demands a different one than the scrutinee can supply is unreachable — the only
+     * disjointness this check claims, and the one it can be sure of.
+     */
+    private enum ValueKind { PRIMITIVE, TUPLE, RECORD, UNDECIDED }
+
+    /**
+     * The kind of value {@code sort} describes, or {@link ValueKind#UNDECIDED} when the sort does
+     * not pin one — a trait, a type variable, an unregistered name, a union, {@code _}.
+     */
+    private static ValueKind kindOf(IrSort sort, Map<String, IrSort.Structural> structDefs) {
+        if (sort == null) return ValueKind.UNDECIDED;
+        String base = sort.baseName();
+        if (base == null || "_".equals(base)) return ValueKind.UNDECIDED;
+        // A SCALAR whose anatomy is written as a shape — `Decimal` projects to
+        // (unscaled, scale), and inference hands back a Structural named "Decimal" for it. It
+        // is a scalar AND has fields, so it clashes with nothing.
+        if (PRIMITIVE_SORT_NAMES.contains(base) && !base.startsWith("_")) {
+            return sort instanceof IrSort.Structural ? ValueKind.UNDECIDED : ValueKind.PRIMITIVE;
+        }
+        if (sort instanceof IrSort.Structural s) {
+            if (IrSort.TUPLE_SHAPE.equals(s.name())) return ValueKind.TUPLE;
+            // Positional members under a by-name head: a `_record` keyed `_0.._n` IS a tuple
+            // wearing the other face (an Iterate's multi-output, for one). The two faces are
+            // not distinguishable here, so neither can be excluded.
+            return positionallyKeyed(s) ? ValueKind.UNDECIDED : ValueKind.RECORD;
+        }
+        if (IrSort.TUPLE_SHAPE.equals(base)) return ValueKind.TUPLE;
+        if (IrSort.RECORD_SHAPE.equals(base)) return ValueKind.RECORD;
+        // A declared struct is a record. Anything else — a trait, a type parameter, a builtin
+        // parametric like Stream — pins no kind, so it abstains rather than guessing.
+        return structDefs.containsKey(base) ? ValueKind.RECORD : ValueKind.UNDECIDED;
+    }
+
+    /** Whether every member key is a positional slot ({@code _0 .. _n}) — a tuple by any name. */
+    private static boolean positionallyKeyed(IrSort.Structural s) {
+        if (s.members().isEmpty()) return false;
+        for (String key : s.members().keySet()) {
+            if (key.length() < 2 || key.charAt(0) != '_') return false;
+            for (int i = 1; i < key.length(); i++) {
+                if (!Character.isDigit(key.charAt(i))) return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Rejects an arm no value of the scrutinee's sort could ever match.
+     *
+     * <p>Sound in one direction only, like every other gate here: it reports a PROVABLE miss and
+     * stays silent on anything undecided. The proof it uses is the coarsest available and the
+     * only one that needs no reasoning about predicates or ancestry — a runtime value is a
+     * primitive, a positional tuple, or a record, and never two of those. So a tuple pattern over
+     * a record scrutinee is dead, as is an {@code [Int]} arm over a struct. Two records, two
+     * primitives, a trait, a type variable, or a union branch that might match: all abstain.
+     *
+     * <p>A union scrutinee is judged branch by branch — an arm is dead only if it is dead against
+     * every branch, which is what makes the ordinary sum-type match (one arm per member) safe.
+     */
+    private static void checkNoUnmatchableArm(
+            IrExpr.Match m, IrSort scrutinee, Map<String, IrSort.Structural> structDefs)
+            throws CompileException {
+        if (scrutinee == null) return;
+        for (IrExpr.MatchBranch b : m.branches()) {
+            ValueKind armKind = kindOf(b.pattern(), structDefs);
+            if (armKind == ValueKind.UNDECIDED) continue;
+            if (!everyBranchClashes(scrutinee, armKind, structDefs)) continue;
+            throw new CompileException(
+                    "this arm can never match: the scrutinee is " + describeKind(kindOf(scrutinee, structDefs))
+                            + " (" + describeDomain(scrutinee) + ") and the arm requires "
+                            + describeKind(armKind) + " — a value is one or the other, never both, "
+                            + "so the arm is dead code (remove it, or match the sort the scrutinee "
+                            + "actually has)",
+                    b.pattern().origin() != null && b.pattern().origin().isPresent()
+                            ? b.pattern().origin() : m.origin());
+        }
+    }
+
+    /** Whether every branch of {@code scrutinee} (itself, if not a union) clashes with {@code armKind}. */
+    private static boolean everyBranchClashes(
+            IrSort scrutinee, ValueKind armKind, Map<String, IrSort.Structural> structDefs) {
+        if (scrutinee instanceof IrSort.Union u) {
+            if (u.branches().isEmpty()) return false;
+            for (IrSort branch : u.branches()) {
+                if (!everyBranchClashes(branch, armKind, structDefs)) return false;
+            }
+            return true;
+        }
+        ValueKind scrutineeKind = kindOf(scrutinee, structDefs);
+        return scrutineeKind != ValueKind.UNDECIDED && scrutineeKind != armKind;
+    }
+
+    private static String describeKind(ValueKind kind) {
+        return switch (kind) {
+            case PRIMITIVE -> "a scalar";
+            case TUPLE -> "a positional tuple";
+            case RECORD -> "a record";
+            case UNDECIDED -> "an undetermined value";
+        };
+    }
+
     private static void checkMatchTotality(
             IrExpr.Match m,
             Map<String, IrSort> typeEnv,
@@ -2093,6 +2195,13 @@ public final class SortChecker {
             Set<String> algebraicFunctions) throws CompileException {
         IrSort scrutineeIr = widenOpenPinToBase(
                 inferSort(m.scrutinee(), typeEnv, functionReturns, structDefs, algebraicFunctions));
+
+        // An arm no value of the scrutinee can ever reach is dead code, and dead code in a
+        // match is a lie about what the program considers — the author believes a case is
+        // handled and it is not. Checked BEFORE the catch-all return below, because a `[_]`
+        // default is exactly what hides one: it satisfies totality while the arm above it can
+        // never fire (RULED James 2026-08-25).
+        checkNoUnmatchableArm(m, scrutineeIr, structDefs);
 
         // A catch-all arm makes the match total by construction, regardless of
         // what the other arms look like (ordered match: it catches the rest).

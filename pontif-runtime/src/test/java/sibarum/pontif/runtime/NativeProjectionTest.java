@@ -149,15 +149,20 @@ class NativeProjectionTest {
 
     @Test
     void anonymousRecordWithScaleField_doesNotSatisfyDecimalRefinement() {
-        // The refined-primitive kind gate: predicate coincidence is not kind.
-        String src = """
+        // The refined-primitive kind gate: predicate coincidence is not kind. The rule stands;
+        // it is enforced at compile time now — a record can never match a scalar arm, so the
+        // arm is dead code rather than a branch that quietly loses at runtime (RULED
+        // 2026-08-25). The kind gate itself still guards every other site a value meets a sort.
+        PontifCompiler.CompileResult r = compiler.compile("""
                 let d = {scale = 2}
                 match d {
                   [Decimal:@.scale==2] -> 1
                   _ -> 0
                 }
-                """;
-        assertBothEngines(src, "0");
+                """, "t.ptf");
+        String err = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(err.contains("can never match"),
+                () -> "expected the dead arm to be named; got: " + err);
     }
 
     // --- conservation: projection is derived content, not UNTOUCHED ------------

@@ -109,14 +109,20 @@ class NativeConstructorTest {
 
     @Test
     void anonymousAggregate_doesNotMatchDecimal() {
-        String src = """
+        // The rule is unchanged (an anonymous record never matches a nominal Decimal, ruled
+        // 2026-06-06); its enforcement moved earlier. This used to run and take the `_` arm;
+        // an arm that can never match is a compile error now (RULED 2026-08-25), and this is
+        // one — a record is not a scalar, whatever fields it happens to carry.
+        PontifCompiler.CompileResult r = compiler.compile("""
                 let d = {unscaled = 25, scale = 1}
                 match d {
                   [Decimal] -> 1
                   _ -> 0
                 }
-                """;
-        assertBothEngines(src, "0");
+                """, "t.ptf");
+        String err = ((PontifCompiler.CompileResult.Failed) r).error().text();
+        assertTrue(err.contains("can never match"),
+                () -> "expected the dead arm to be named; got: " + err);
     }
 
     @Test
