@@ -86,6 +86,30 @@ class AssignabilityTest {
     }
 
     @Test
+    void twoNamesForOneDeclarationAreOneType() {
+        // `(deftype Point (struct P …))` registers ONE shape under both names — the S-expr form
+        // lets the alias name and the struct's own name differ. A value built as a P is a Point
+        // because there is no second type for it to be. Contrast siblingsAreUnrelated above:
+        // Vec3 and Color are two DECLARATIONS that happen to share a shape, and stay unrelated —
+        // the difference is whether the shape has a name of its own to be identified by.
+        Map<String, IrSort> members = new LinkedHashMap<>();
+        members.put("x", INT);
+        IrSort.Structural shape = (IrSort.Structural) IrSort.structural("P", members);
+        TypeCatalog cat = new TypeCatalog();
+        cat.register("Point", new TypeInfo.Struct(shape));
+        cat.register("P", new TypeInfo.Struct(shape));
+        AssignabilityContext c = AssignabilityContext.of(cat);
+
+        assertTrue(Assignability.isA(named("P"), named("Point"), c));
+        assertTrue(Assignability.isA(named("Point"), named("P"), c));
+        // A refined face still has to prove its predicate — the identity is nominal, not a pass.
+        assertFalse(Assignability.isA(named("P"),
+                IrSort.refined("Point", new IrExpr.BinOp(IrExpr.Op.GT,
+                        new IrExpr.FieldAccess(new IrExpr.SelfRef(Origin.NONE), "x", Origin.NONE),
+                        new IrExpr.Lit(0, Origin.NONE), Origin.NONE)), c));
+    }
+
+    @Test
     void unionMembership() {
         assertTrue(Assignability.isA(INT, named("AnyNumber"), ctx()));       // Int is-a AnyNumber
         assertTrue(Assignability.isA(DECIMAL, named("AnyNumber"), ctx()));

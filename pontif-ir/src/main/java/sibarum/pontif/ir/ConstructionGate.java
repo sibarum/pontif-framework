@@ -57,19 +57,15 @@ import java.util.Set;
  */
 final class ConstructionGate {
 
-    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
-    private static final String RECORD_SENTINEL = "_record";
+    private static final String RECORD_SENTINEL = IrSort.RECORD_SHAPE;
 
-    /** Structural-sort name marking an anonymous POSITIONAL aggregate (a tuple), whose
-     *  members are keyed {@code _0 .. _n} — so member-wise key-set equality IS the arity
-     *  rule and no separate arity check is needed. */
-    private static final String TUPLE_SENTINEL = "_tuple";
+    private static final String TUPLE_SENTINEL = IrSort.TUPLE_SHAPE;
 
     /** The two anonymous-aggregate shapes: a written one is a CLAIM, not a decoration.
      *  Both faces of the same thing — {@code [{a:Int}]} by name, {@code [{Int, Int}]} by
      *  position — so both are gated, member-wise, by the one rule. */
     private static boolean anonymousShape(String name) {
-        return RECORD_SENTINEL.equals(name) || TUPLE_SENTINEL.equals(name);
+        return IrSort.isAnonymousShape(name);
     }
 
     private ConstructionGate() {}
@@ -156,10 +152,20 @@ final class ConstructionGate {
         // BASE, so a provably wrong-based tail is caught without re-deciding the predicate
         // (which would duplicate that gate, and disagree with it wherever the kernels differ).
         IrSort base = stripRefinement(declared);
-        if (!barePrimitive(base)) return;
+        if (!gated(base, structs)) return;
         for (IrExpr tail : tailPositions(fd.body())) {
             IrSort arg = effectiveArg(tail, base, lens, ctx, structs);
-            if (!barePrimitive(stripRefinement(arg))) continue;
+            if (arg == null || !gated(stripRefinement(arg), structs)) continue;
+            // An anonymous aggregate returned at a NOMINAL sort is a construction, not an
+            // assignment: `{w = 3}` at a `Box` return builds a Box, and whether it may is the
+            // construction machinery's question (AggregatePromotion stamps the asserted name,
+            // and the record gate then judges the members). Reading it as an assignment would
+            // ask whether an untagged shape is-a tag, which it is not by design — Vec3 and Color
+            // are distinct tags over one shape — and would reject a program that is fine.
+            if (IrSort.isAnonymousShape(stripRefinement(arg).baseName())
+                    && !IrSort.isAnonymousShape(base.baseName())) {
+                continue;
+            }
             if (classify(arg, base, structs, actx) == Fit.DISJOINT) {
                 throw new CompileException(
                         "'" + fd.name() + "' returns a value that can never satisfy its declared "

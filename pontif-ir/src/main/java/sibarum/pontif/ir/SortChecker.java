@@ -80,7 +80,65 @@ public final class SortChecker {
 
     private SortChecker() {}
 
+    /**
+     * Phase one, separable and run first: every DECLARED sort names a type that resolves.
+     *
+     * <p>This asks nothing of a value, so it depends on nothing the value-level passes do — and
+     * that is why it is worth having on its own. Run ahead of the construction gate
+     * ({@link IrCompiler}), it means a typo in an annotation is reported as a typo. Left where it
+     * used to sit — inside the main {@code check} loop, after the gate — the gate spoke first and
+     * answered a different question about the same mistake: {@code function f(x:Int):Box[Bad] -> x}
+     * came back as "the returned Int is disjoint from Box", which is true, and useless, when what
+     * the author needs to know is that {@code Bad} names nothing.
+     *
+     * <p>Idempotent and cheap; {@link #check} still calls it so a caller invoking only {@code check}
+     * loses nothing.
+     */
+    public static void checkSortNames(IrModule module) throws CompileException {
+        Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
+        Map<String, IrSort.Structural> structDefs =
+                sibarum.pontif.types.TypeCatalog.fromModule(module).structShapes();
+        Set<String> traitNames = traitContracts.keySet();
+        // Declared type-alias names — a reusable-sort alias may reference another alias
+        // (`let B:Type[A]`); AliasResolver does not inline names inside an alias declaration's own
+        // target, so validating those targets must treat a declared alias name as known.
+        Set<String> aliasNames = new HashSet<>();
+        for (IrStmt s : module.statements()) {
+            if (s instanceof IrStmt.TypeAlias ta) aliasNames.add(ta.name());
+        }
+        for (IrStmt stmt : module.statements()) {
+            switch (stmt) {
+                case IrStmt.FunctionDecl fd -> checkDeclaredSortNames(fd, structDefs, traitNames);
+                // A trait IMPL's sorts stay with validateTraitImpl (phase two), which validates the
+                // same names against the trait contract and so has a sharper account of what went
+                // wrong — "the impl binds 2 type parameters, Box declares 1" rather than the bare
+                // arity mismatch this phase would report first.
+                // Every type declaration's target sort — a trait's member sorts, a struct's fields
+                // and type-param bounds, a reusable alias's target. A STRUCT had been excluded on
+                // the belief that its fields were validated "via the struct's own path", but the
+                // only struct-specific path is validateStructBase, which validates the is-a base
+                // and nothing else — so `struct Status(text:Str)` compiled with `Str` naming
+                // nothing (docs/soundness-holes.md, "what is still open").
+                case IrStmt.TypeAlias ta -> validateSortNames(ta.sort(), structDefs, aliasNames, traitNames);
+                default -> { /* proofs, requires, exports, spawns declare no sort */ }
+            }
+        }
+    }
+
+    /** A declaration's param and return sorts, with its own type parameters in scope. */
+    private static void checkDeclaredSortNames(
+            IrStmt.FunctionDecl fd, Map<String, IrSort.Structural> structDefs, Set<String> traitNames)
+            throws CompileException {
+        // The function's `[type E]` parameters are bound type variables in scope for its param and
+        // return sorts (docs/type-parameters.md §2.1), so `x:E` validates — exactly as a
+        // struct/trait scopes its own type params.
+        Set<String> typeVars = fd.typeParams().keySet();
+        for (IrParam p : fd.params()) validateSortNames(p.sort(), structDefs, typeVars, traitNames);
+        validateSortNames(fd.returnSort(), structDefs, typeVars, traitNames);
+    }
+
     public static void check(IrModule module) throws CompileException {
+        checkSortNames(module);
         Map<String, IrSort> functionReturns = collectFunctionReturns(module);
         Map<String, IrSort.Trait> traitContracts = collectTraitContracts(module);
         Map<String, IrSort.Structural> structDefs =
@@ -167,11 +225,7 @@ public final class SortChecker {
                 // §2.1), so `x:E` validates — exactly as a struct/trait scopes its
                 // own type params.
                 Set<String> fnTypeVars = fd.typeParams().keySet();
-                for (IrParam p : fd.params()) {
-                    validateSortNames(p.sort(), structDefs, fnTypeVars, traitContracts.keySet());
-                    typeEnv.put(p.name(), p.sort());
-                }
-                validateSortNames(fd.returnSort(), structDefs, fnTypeVars, traitContracts.keySet());
+                for (IrParam p : fd.params()) typeEnv.put(p.name(), p.sort());
                 checkExpr(fd.body(), typeEnv, functionReturns, structDefs, fnTypeVars, algebraicFunctions);
                 // Operator bound propagation (dispatch-unification B1): an operator
                 // applied to a value of a trait-bounded type parameter is checked
@@ -183,26 +237,7 @@ public final class SortChecker {
             } else if (stmt instanceof IrStmt.TraitImpl ti) {
                 validateTraitImpl(ti, traitContracts, functionReturns, structDefs, satisfies, overloads, algebraicFunctions, traitMethodsByType, methodsByType);
             } else if (stmt instanceof IrStmt.TypeAlias ta && ta.sort() instanceof IrSort.Trait tr) {
-                // Validate a trait DECLARATION end-to-end: its member sorts must
-                // reference only known sorts — primitives, declared types, or the
-                // trait's own `type X` associated types (scoped by the Trait case
-                // of validateSortNames). Catches `[Method():Undeclared]` while
-                // admitting `[Method():T]` for a declared `type T`.
-                validateSortNames(tr, structDefs, Set.of(), traitContracts.keySet());
-            } else if (stmt instanceof IrStmt.TypeAlias ta) {
-                // Every non-trait type declaration's target sort must name only sorts that
-                // resolve — primitives, declared structs/traits, applied type-args. Transparent
-                // aliases are recognized via aliasNames (a `let B:Type[A]` target keeps the name `A`).
-                //
-                // A STRUCT declaration is one of these. It had been excluded here, on the belief
-                // that its fields were validated "via the struct's own path" — but the only
-                // struct-specific path is validateStructBase above, which validates the is-a base
-                // and nothing else, so `struct Status(text:Str)` compiled with `Str` naming
-                // nothing (docs/soundness-holes.md, "what is still open"). The Structural case of
-                // validateSortNames walks exactly the fields and type-param bounds that were being
-                // skipped, and scopes the struct's own `[type T]` binders while it does — so the
-                // fix is to stop excluding structs, not to write a second checker.
-                validateSortNames(ta.sort(), structDefs, aliasNames, traitContracts.keySet());
+                // Trait declarations are name-validated by checkSortNames, up front.
             }
         }
         checkExpr(module.main(), new HashMap<>(), functionReturns, structDefs, algebraicFunctions);

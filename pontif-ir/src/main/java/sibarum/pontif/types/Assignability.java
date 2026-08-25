@@ -82,6 +82,7 @@ public final class Assignability {
         }
 
         if (sameType(sub, sup)) return true;                                // reflexive
+        if (sameDeclaration(sub, sup, ctx)) return true;                    // two names, one declaration
 
         if (sup instanceof IrSort.Union u) {                               // is-a a union: any branch
             return u.branches().stream().anyMatch(b -> isA(sub, b, ctx, subUnfolding, supUnfolding));
@@ -266,6 +267,37 @@ public final class Assignability {
         return ctx.catalog().lookup(name).map(info ->
                 info instanceof TypeInfo.Alias a && !(a.target() instanceof IrSort.Structural)
                         ? a.target() : null).orElse(null);
+    }
+
+    /**
+     * Whether two sorts are two NAMES for one declaration — {@code (deftype Point (struct P …))}
+     * registers the same shape under both {@code Point} and {@code P}, and a value built as a
+     * {@code P} is a {@code Point} because there is no second type to be.
+     *
+     * <p>Distinct from two tags that merely share a shape: {@code Vec3} and {@code Color} are both
+     * {@code {3*Decimal}} and are deliberately unrelated. The difference is the shape's OWN name —
+     * one declaration, so one identity. An anonymous shape has no such name (every {@code _tuple}
+     * would match every other), so it never answers here.
+     */
+    private static boolean sameDeclaration(IrSort a, IrSort b, AssignabilityContext ctx) {
+        // Only for DIFFERENT names: identical names are the reflexive/refinement path's business,
+        // and a refined supertype must keep its predicate proved rather than be waved through on
+        // nominal identity ([Point:@.x>=0] is not [Point:@.x>0], however the base is spelled).
+        if (b instanceof IrSort.Refined) return false;
+        String nameA = baseName(a);
+        String nameB = baseName(b);
+        if (nameA == null || nameA.equals(nameB)) return false;
+        String shapeA = declaredShapeName(a, ctx);
+        return shapeA != null && shapeA.equals(declaredShapeName(b, ctx));
+    }
+
+    /** The name of the shape {@code t}'s nominal head is registered to, when that shape is named. */
+    private static String declaredShapeName(IrSort t, AssignabilityContext ctx) {
+        String name = baseName(t);
+        if (name == null) return null;
+        if (!(ctx.catalog().lookup(name).orElse(null) instanceof TypeInfo.Struct s)) return null;
+        String shapeName = s.shape().name();
+        return IrSort.isAnonymousShape(shapeName) ? null : shapeName;
     }
 
     /**

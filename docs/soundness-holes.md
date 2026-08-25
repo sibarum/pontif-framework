@@ -7,8 +7,10 @@ gaps in what is checked, so no existing test asked the question.
 
 Three families were catalogued. Fixing them surfaced three more that nothing had ever
 asked about either, each found the same way: a hole closes, a legitimate program starts
-failing, and the reason it fails turns out to be a second bug. All six are closed; the
-suite is green at 2670 across the reactor, with 54 new tests that ask the questions.
+failing, and the reason it fails turns out to be a second bug. Then the two items the
+first pass left open (families 7 and 8) closed the same way again — and family 7's turned
+out not to be the pass-ordering problem it had been written down as. All eight are closed;
+the suite is green across the reactor, with 81 new tests that ask the questions.
 
 | # | Family | Root cause | Items | State |
 |---|--------|-----------|-------|-------|
@@ -18,6 +20,8 @@ suite is green at 2670 across the reactor, with 54 new tests that ask the questi
 | 4 | String `+` inferred as `Int` | `inferBinOp` guarded Decimal and user types, not String | — | **closed** |
 | 5 | String `+` crashes one engine | Truffle's `Add` had no String branch at all | — | **closed** |
 | 6 | The effective-sort lens merged files | keyed by `(line, column)` with no source | — | **closed** |
+| 7 | The return check was primitives-only | synthesized nodes borrowed a source span (6, again) | 3 | **closed** |
+| 8 | A struct's fields never named a type | the statement loop excluded struct declarations | 2 | **closed** |
 
 ## The shape of the thing
 
@@ -265,18 +269,97 @@ synthesized nodes; both now carry `Origin.NONE` so it can.
 
 ---
 
+## Family 7 — the return base check was primitives-only
+
+**Closed 2026-08-25.** The return half of family 3 was scoped to "both sides a bare
+primitive", on the reasoning that a return position is reached through desugars that run
+after the gate — a decomposition `let d.{a, b}`, a param-conversion clause applied by a
+prologue — so the tail expression there is often not yet the value the function returns.
+The prediction was that widening it needed a **pass-ordering change**: move those desugars
+ahead of `ConstructionGate`.
+
+That prediction was wrong, and the way it was wrong is the finding. Widening the gate to
+every base the registry knows produced eleven failures. The desugars are in them, but they
+lower **correctly** — `let d.{a, b}` really does become one `FieldAccess` per binder. What
+was wrong is that each synthesized node **borrowed a source span**, and the effective-sort
+lens is keyed by span, so:
+
+- a binder's projection read as the whole record it projects from (`a` read as `{a, b}`);
+- sibling binders read as each other (one span for every binder in a `.{}`);
+- a param conversion's RESULT read as its INPUT (`bar` in the body of
+  `g(bar:[MyStruct.{a,b} -> ProprietaryType{z=a+b}])` read as `MyStruct`).
+
+That is **family 6 again, at three more sites** — and family 6's remedy applied unchanged:
+a synthesized node carries `Origin.NONE`, and the lens omits it by design, so inference
+answers instead. Nothing about pass ordering was involved.
+
+**What landed.** `gateReturn` judges any base `gated()` accepts — the same predicate the
+constructor-argument path uses, so the two halves of the claim rule now ask one question
+instead of two. `Origin.NONE` on the synthesized nodes of `parseDictDecompositionLetTop`,
+`parseDictDecompositionLetExpr`, `wrapParamConversions` and `wrapParamDestructures`.
+
+**Two findings surfaced underneath it**, both in `Assignability`:
+
+1. **Two names for one declaration read as two types.** `(deftype Point (struct P …))`
+   registers one shape under both names, and `P` was not `Point`. Fixed by identifying a
+   nominal head with the *shape it is registered to* when that shape has a name of its own.
+   The boundary matters: `Vec3` and `Color` over one anonymous `{3*Decimal}` are two
+   declarations and stay deliberately unrelated, so an anonymous shape never answers here.
+2. **An anonymous literal at a nominal return is a CONSTRUCTION, not an assignment.**
+   `{w = 3}` at a `Box` return builds a Box; whether it may is the construction machinery's
+   question. Judging it as an assignment asks whether an untagged shape is-a tag — which by
+   design it is not — so the gate abstains there.
+
+**Also landed: the declaration-name phase runs first.** `SortChecker.checkSortNames` is now
+a separable phase called from `IrCompiler` ahead of the value-level passes. It asks nothing
+of a value, so it depends on nothing they do, and running it first means a typo in an
+annotation is reported as a typo: `function f(x:Int):Box[Bad] -> x` says `Bad` names
+nothing, rather than the gate's true-but-useless "the returned Int is disjoint from Box".
+
+**Tests.** `ReturnBaseGateTest` (15) — the lies it now catches (a primitive at a struct
+return, a struct at a primitive return, an unrelated struct, a match arm one level in, a
+method return), the three desugars that must still compile, and the controls: an exact
+return, a widen to the declared base, a satisfied trait, an alias, an anonymous literal at
+a nominal return, a type variable, and an undeclared name reported as a name.
+
+---
+
+## Family 8 — a struct's fields never named a type
+
+**Closed 2026-08-25.** `struct Status(text:Str)` compiled; `Str` names nothing. Family 3
+closed the consequence — a call site passing a value to that field is judged — but judged
+against a name the registry cannot resolve, so it abstains, and the wrong declaration
+stayed silent.
+
+The engine was already there and already correct: `SortChecker.validateSortNames` knows
+primitives, declared structs and traits, native constructors, builtin call-kind heads and
+in-scope type variables. It was never *asked* about a struct's fields — the statement loop
+excluded structural declarations, believing the fields were validated "via the struct's own
+path", when the only struct-specific path validates the is-a base.
+
+**The first attempt was a second pass, and running it is what proved it wrong**: 215
+rejections across the suite, every one a name the existing engine already knew and the new
+one had to be taught. Deleted. The one-site fix rejects the same programs with zero false
+positives — a reminder that the cheapest test of "is this a new rule or a missing call?" is
+to write the new rule and count what it breaks.
+
+A sibling one level over: a trait sort's APPLIED type arguments were never validated, so
+`Stream[Widgit]` survived once `AliasResolver` resolved the bare `Stream` to its trait sort
+and the argument rode along inside a node whose case, unlike `Named`'s, did not check its
+args.
+
+**Tests.** `DeclaredSortNameTest` (12).
+
+---
+
 ## What is still open
 
-- **The return base check is primitives-only.** Extending it to struct, alias, shape and
-  type-variable returns needs the return-position desugars (decomposition lets,
-  param-conversion clauses) to run *before* `ConstructionGate`, or the gate to run after
-  them. That is a pass-ordering change, not a rule change, and it is the natural next step.
-- **An unregistered type name in a field is not an error.** `struct Status(text:Str)`
-  compiles, with `Str` naming nothing. The gate now catches the *consequence* at a call
-  site; the declaration itself should not have been accepted.
 - **`(String:value)` has no Truffle lowering.** It throws an explicit "not yet
   implemented" — a stated gap rather than a divergence, so it is not in the table above,
   but family 5 makes it the obvious sibling to finish.
+- **The return gate abstains on unions and intersections.** `gated()` accepts a composite
+  only if a branch is gated, and the return path takes the base name, which a composite
+  does not have. A function declaring `:[A|B]` and returning a `C` is still accepted.
 - The three "real soundness MISFIREs" in [language-inventory.md](language-inventory.md)
   (`destructure__18`, `methods__17`, `methods__22`) are unrelated to these and still open.
 

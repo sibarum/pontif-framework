@@ -891,7 +891,10 @@ public final class PontifParser {
             result = new IrExpr.LetIn(
                     entry.localName(),
                     memberSortFor(sourceSort, entry.remoteName()),
-                    new IrExpr.FieldAccess(sourceRef, entry.remoteName(), start.origin()),
+                    // Synthesized, so originless — see the top-level twin above: the projections
+                    // for every binder would otherwise share the `let` span with each other and
+                    // with the enclosing LetIn, and collide in the effective-sort lens.
+                    new IrExpr.FieldAccess(sourceRef, entry.remoteName(), Origin.NONE),
                     result,
                     start.origin());
         }
@@ -925,9 +928,16 @@ public final class PontifParser {
         IrStmt first = null;
         for (IrStmt.RequireEntry entry : entries) {
             IrSort memberSort = memberSortFor(sourceSort, entry.remoteName());
+            // Origin.NONE, not the `let` span: every binder's projection is SYNTHESIZED from
+            // one `let d.{a, b}` and there is no distinct source text for `d.a` versus `d.b`.
+            // Borrowing the span made the effective-sort lens (which keys by origin, and whose
+            // walk records a parent before its children) map that one span to whichever node
+            // was recorded last — so `a` read as the whole source record, and the sibling
+            // binders read as each other. The lens omits originless nodes by design, so
+            // inference answers for these instead (docs/soundness-holes.md, family 6).
             IrExpr accessor = new IrExpr.FieldAccess(
-                    new IrExpr.Call(source, List.of(), start.origin()),
-                    entry.remoteName(), start.origin());
+                    new IrExpr.Call(source, List.of(), Origin.NONE),
+                    entry.remoteName(), Origin.NONE);
             declaredTopLevelLets.put(entry.localName(), memberSort);
             IrStmt decl = new IrStmt.FunctionDecl(
                     entry.localName(), List.of(), memberSort, accessor, start.origin(), true);
@@ -1501,14 +1511,23 @@ public final class PontifParser {
         return c.clause().returnSort();
     }
 
-    /** Wraps {@code body} in `let bar = clause(bar)` for each conversion param. */
+    /**
+     * Wraps {@code body} in `let bar = clause(bar)` for each conversion param.
+     *
+     * <p>The prologue's {@code Apply} and its argument {@code Var} are SYNTHESIZED and carry no
+     * source span, for the reason {@link #applyReturnClause} spells out — this is that method's
+     * param-side twin. Borrowing the body's span put the DOMAIN sort (what the caller passes)
+     * into the lens under the body's own position, so the body of {@code g(bar:[MyStruct.{a,b}
+     * -> ProprietaryType{z=a+b}])} read as a {@code MyStruct} even though {@code bar} is the
+     * codomain there — the conversion's input sort standing in for its result, one clause over.
+     */
     private IrExpr wrapParamConversions(IrExpr body, List<ParamConversion> convs) {
         IrExpr out = body;
         for (int i = convs.size() - 1; i >= 0; i--) {
             ParamConversion c = convs.get(i);
             out = new IrExpr.LetIn(c.paramName(), c.clause().returnSort(),
                     new IrExpr.Apply(c.clause(),
-                            List.of(new IrExpr.Var(c.paramName(), body.origin())), body.origin()),
+                            List.of(new IrExpr.Var(c.paramName(), Origin.NONE)), Origin.NONE),
                     out, body.origin());
         }
         return out;
@@ -1528,9 +1547,11 @@ public final class PontifParser {
             // the binding is wrapped post-link by DestructureResolver, which knows
             // the declared field names. Skip it here (only seed scope).
             if (d.fieldName() == null) continue;
+            // Synthesized projection, so originless — the same lens-collision rule as the
+            // conversion prologue above and the decomposition lets.
             out = new IrExpr.LetIn(d.local(), d.fieldSort(),
                     new IrExpr.FieldAccess(
-                            new IrExpr.Var(d.paramName(), body.origin()), d.fieldName(), body.origin()),
+                            new IrExpr.Var(d.paramName(), Origin.NONE), d.fieldName(), Origin.NONE),
                     out, body.origin());
         }
         return out;

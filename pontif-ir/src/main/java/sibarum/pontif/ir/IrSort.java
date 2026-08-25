@@ -18,6 +18,28 @@ public sealed interface IrSort permits IrSort.Named, IrSort.Refined, IrSort.Stru
      */
     String SELF_TYPE = "this.type";
 
+    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
+    String RECORD_SHAPE = "_record";
+
+    /**
+     * Structural-sort name marking an anonymous POSITIONAL aggregate (a tuple), whose members
+     * are keyed {@code _0 .. _n} — so member-wise key-set equality IS the arity rule.
+     */
+    String TUPLE_SHAPE = "_tuple";
+
+    /**
+     * The two anonymous-aggregate shapes — {@code [{a:Int}]} by name, {@code [{Int, Int}]} by
+     * position. Neither NAMES a type: the shape itself is the ground truth, which is why a
+     * written one is a claim rather than a decoration, and why a name bound to one is a
+     * transparent alias rather than a nominal tag.
+     *
+     * <p>The single home for a predicate that had been copy-pasted per pass, alongside
+     * {@link #baseName()} — the same consolidation, for the same reason.
+     */
+    static boolean isAnonymousShape(String name) {
+        return RECORD_SHAPE.equals(name) || TUPLE_SHAPE.equals(name);
+    }
+
     Origin origin();
 
     /**

@@ -52,6 +52,11 @@ public final class IrCompiler {
         // so this re-run over an already-lowered module is a no-op (docs/struct-methods.md).
         resolved = StructTraitLowering.lower(resolved);
 
+        // Declared sort NAMES resolve — phase one of SortChecker, hoisted ahead of the value-level
+        // passes because it asks nothing of a value. A typo in an annotation is then reported as a
+        // typo, rather than as whatever the construction gate makes of the resulting mismatch.
+        SortChecker.checkSortNames(resolved);
+
         // Concurrent runtime (cut 3c): prove the seated conductors form no emit cycle before compiling them —
         // a feedback loop across the hive is exactly what cut 3b's drive-to-quiescence cannot terminate. The
         // first consumer of EmitInterface's statically-extracted emits set (docs/orchestration.md, gap 1).

@@ -182,7 +182,7 @@ final class NumericCoercion {
         if (declared instanceof IrSort.Structural shape
                 && anonymousShape(shape.name())
                 && value instanceof IrExpr.Record rec
-                && shape.name().equals(rec.typeName() == null ? RECORD_SENTINEL : rec.typeName())) {
+                && shape.name().equals(rec.typeName() == null ? IrSort.RECORD_SHAPE : rec.typeName())) {
             Map<String, IrExpr> members = new LinkedHashMap<>();
             boolean changed = false;
             for (Map.Entry<String, IrExpr> en : rec.members().entrySet()) {
@@ -202,15 +202,9 @@ final class NumericCoercion {
         return new IrExpr.Cast(IrSort.named("Decimal"), value, value.origin());
     }
 
-    /** Structural-sort name marking an anonymous BY-NAME aggregate (a record shape). */
-    private static final String RECORD_SENTINEL = "_record";
-
-    /** Structural-sort name marking an anonymous POSITIONAL aggregate (a tuple). */
-    private static final String TUPLE_SENTINEL = "_tuple";
-
     /** The two anonymous-aggregate shapes, whose slots are declared value boundaries. */
     private static boolean anonymousShape(String name) {
-        return RECORD_SENTINEL.equals(name) || TUPLE_SENTINEL.equals(name);
+        return IrSort.isAnonymousShape(name);
     }
 
     private static boolean isDecimalSort(IrSort sort) {
