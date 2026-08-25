@@ -184,33 +184,6 @@ public final class CallNode extends PontifNode {
     }
 
     private static SymExpr toSymExpr(Object value) {
-        if (value instanceof Long l) return SymExpr.lit(l);
-        if (value instanceof Integer i) return SymExpr.lit(i.longValue());
-        if (value instanceof Boolean b) return SymExpr.bool(b);
-        if (value instanceof java.math.BigDecimal d) return SymExpr.dec(d);
-        if (value instanceof sibarum.pontif.core.types.CharValue c) {
-            return SymExpr.chr(c.codePoint());
-        }
-        if (value instanceof sibarum.pontif.core.types.StringValue s) {
-            return SymExpr.str(s.content());
-        }
-        // A metaref record round-trips as a DispatchRef carrying its nominal — caught
-        // before the generic RecordValue case so its dispatch identity is preserved.
-        if (sibarum.pontif.core.types.Metaref.is(value)) {
-            return new SymExpr.DispatchRef(
-                    sibarum.pontif.core.types.Metaref.functionName(value),
-                    sibarum.pontif.core.types.Metaref.keySorts(value),
-                    ((sibarum.pontif.core.types.RecordValue) value).typeName());
-        }
-        if (value instanceof sibarum.pontif.core.types.RecordValue r) {
-            java.util.Map<String, SymExpr> members = new java.util.LinkedHashMap<>();
-            for (java.util.Map.Entry<String, Object> e : r.members().entrySet()) {
-                members.put(e.getKey(), toSymExpr(e.getValue()));
-            }
-            return SymExpr.record(r.typeName(), members);
-        }
-        throw new IllegalArgumentException(
-                "Cannot convert runtime value to SymExpr (type "
-                        + (value == null ? "null" : value.getClass().getSimpleName()) + "): " + value);
+        return RuntimeDispatch.toSymExpr(value);
     }
 }

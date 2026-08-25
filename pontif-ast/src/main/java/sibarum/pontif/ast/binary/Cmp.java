@@ -23,6 +23,23 @@ public final class Cmp extends BinaryOp {
         return op;
     }
 
+    /**
+     * ORDERING routes to a user overload on struct operands; equality does not. That split is
+     * ruled in two places already — {@code IrInterpreter.dispatchOperatorSymbol} and
+     * docs/keyed.md — and it is why an aggregate {@code ==} is structural while an aggregate
+     * {@code <} is a compile error unless the author defines one.
+     */
+    @Override
+    protected String operatorSymbol() {
+        return switch (op) {
+            case LT -> "<";
+            case LE -> "<=";
+            case GT -> ">";
+            case GE -> ">=";
+            case EQ, NE, APPROX -> null;
+        };
+    }
+
     @Override
     protected boolean acceptsChar() {
         return true;

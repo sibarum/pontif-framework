@@ -9,8 +9,9 @@ Three families were catalogued. Fixing them surfaced three more that nothing had
 asked about either, each found the same way: a hole closes, a legitimate program starts
 failing, and the reason it fails turns out to be a second bug. Then the two items the
 first pass left open (families 7 and 8) closed the same way again — and family 7's turned
-out not to be the pass-ordering problem it had been written down as. All eight are closed;
-the suite is green across the reactor, with 81 new tests that ask the questions.
+out not to be the pass-ordering problem it had been written down as. All nine are closed; the suite is
+green across the reactor, with 92 new tests that ask the questions — and family 9 came from
+pointing the existing probe corpus at both engines, which nothing had ever done.
 
 | # | Family | Root cause | Items | State |
 |---|--------|-----------|-------|-------|
@@ -22,6 +23,7 @@ the suite is green across the reactor, with 81 new tests that ask the questions.
 | 6 | The effective-sort lens merged files | keyed by `(line, column)` with no source | — | **closed** |
 | 7 | The return check was primitives-only | synthesized nodes borrowed a source span (6, again) | 3 | **closed** |
 | 8 | A struct's fields never named a type | the statement loop excluded struct declarations | 2 | **closed** |
+| 9 | Three rules only one engine had | the probe corpus only ever ran the interpreter | 3 | **closed** |
 
 ## The shape of the thing
 
@@ -368,6 +370,44 @@ could not lower rather than implying every cast is unimplemented.
 
 **Tests.** `CastAltTest.truffleBackend_agreesOnTheRenderToString` — every render, the
 compose with concatenation, and the fail-closed, asserted on both engines.
+
+---
+
+## Family 9 — three rules only one engine had
+
+**Found 2026-08-25 by pointing the corpus at both engines. Closed same day.** The
+151-probe corpus in `pontif-runtime/src/test/resources/probes/` exists to be the empirical
+works/doesn't inventory, and `ProbeHarnessTest` runs all of it — on the INTERPRETER only,
+recording rather than asserting. So the one artefact built to survey the language could not
+see the one class of bug that makes an accepted program mean two different things.
+
+Running it on every engine found **five divergences across 91 runnable probes**, in two
+groups, plus a third found by asking a question the corpus does not ask:
+
+| Rule | Interpreter | Truffle (before) |
+|---|---|---|
+| A trait-view ATTRIBUTE — a field no stored record carries, computed by a producer resolved on the value's type | resolves it | "Record has no field 'weight'" |
+| An operator over a trait-bounded TYPE VARIABLE — `sum[type E:Numeric](a:E, b:E) -> a + b`, which has no operand sort to route on until the argument arrives | dispatches at runtime | `(Long) leftValue` → ClassCastException |
+| `+` concatenates two positional streams | `{1,2}+{3,4}` = `{1,2,3,4}` | ClassCastException |
+
+**What landed.** None of it is a second dispatcher — both engines already run the same
+`DispatchTable`; it was simply unreachable from the two node kinds that needed it.
+`RuntimeDispatch` (pontif-ast) is that trio in a form a field access or an operator can
+hold, `FieldAccessNode` gains the producer fallback, and `BinaryOp` gains the
+aggregate-operand fallback with the interpreter's own routing table (arithmetic and ordering
+route; `==`/`!=` stay built-in structural equality). The tuple rule moved to
+`core.types.Tuples`, beside `CanonicalText` and for the same reason: a value rule that lives
+in one engine's source tree is a divergence waiting to be found.
+
+`CallNode`'s private value→`SymExpr` conversion moved to `RuntimeDispatch` rather than being
+copied — a second copy of that table is how two callers come to disagree about a value's sort.
+
+**Tests.** `ProbeEngineAgreementTest` asserts every compiling probe agrees across engines —
+the net that keeps these fixed, and one that grows for free, since a probe added for any
+other reason is now also an agreement case. `RuntimeDispatchFallbackTest` (10) pins the three
+rules plus their boundaries: a stored field still beats a producer, a statically routed
+operator is untouched, `==` stays structural, and the built-in tuple rule still beats a user
+`+` in scope (the interpreter's ordering).
 
 ---
 

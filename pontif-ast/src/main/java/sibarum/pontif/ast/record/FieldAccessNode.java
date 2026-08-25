@@ -12,19 +12,34 @@ public final class FieldAccessNode extends PontifNode {
     @Child private PontifNode base;
     private final String fieldName;
 
-    private FieldAccessNode(PontifNode base, String fieldName) {
+    /**
+     * Runtime dispatch for the trait-view attribute fallback, or null when the node was built
+     * without one (a direct unit-test construction) — in which case a missing field is simply a
+     * missing field, as it was before.
+     */
+    private final sibarum.pontif.ast.func.RuntimeDispatch dispatch;
+
+    private FieldAccessNode(
+            PontifNode base, String fieldName, sibarum.pontif.ast.func.RuntimeDispatch dispatch) {
         this.base = base;
         this.fieldName = fieldName;
+        this.dispatch = dispatch;
     }
 
-    public static FieldAccessNode of(PontifNode base, String fieldName) {
+    public static FieldAccessNode of(
+            PontifNode base, String fieldName, sibarum.pontif.ast.func.RuntimeDispatch dispatch) {
         if (base == null) {
             throw new IllegalArgumentException("FieldAccessNode base must be non-null");
         }
         if (fieldName == null || fieldName.isEmpty()) {
             throw new IllegalArgumentException("FieldAccessNode field name must be non-empty");
         }
-        return new FieldAccessNode(base, fieldName);
+        return new FieldAccessNode(base, fieldName, dispatch);
+    }
+
+    /** Without runtime dispatch: a missing field is a missing field, with no producer fallback. */
+    public static FieldAccessNode of(PontifNode base, String fieldName) {
+        return of(base, fieldName, null);
     }
 
     public String fieldName() {
@@ -54,7 +69,40 @@ public final class FieldAccessNode extends PontifNode {
                             + ": " + baseValue,
                     origin());
         }
-        return record.get(fieldName, origin());
+        if (record.members().containsKey(fieldName)) {
+            return record.get(fieldName, origin());
+        }
+        // Trait-view attribute access: the value carries no such STORED field, so resolve a
+        // computed projection — a `Type.attr(this)` producer registered by an `assign trait`
+        // block. This is what lets a struct be viewed through a trait that adds attributes, and
+        // the interpreter has always done it; without it the Truffle engine answered "Record has
+        // no field 'weight'" for a program the interpreter ran (docs/soundness-holes.md — the
+        // engines must agree about what a program means).
+        Object projected = tryAttributeProducer(record);
+        if (projected != sibarum.pontif.ast.func.RuntimeDispatch.NO_MATCH) {
+            return projected;
+        }
+        return record.get(fieldName, origin());   // re-throws the "no field" error
+    }
+
+    /**
+     * The producer's result, or {@code NO_MATCH}. Resolution is tried under both the qualified
+     * and the bare type spelling, because the linker module-qualifies a type name and a producer
+     * declared against the bare one keeps its own key — the same two-spelling lookup the
+     * interpreter makes.
+     */
+    private Object tryAttributeProducer(RecordValue record) {
+        if (dispatch == null || record.typeName() == null) {
+            return sibarum.pontif.ast.func.RuntimeDispatch.NO_MATCH;
+        }
+        String bare = sibarum.pontif.core.QualifiedName.memberOf(record.typeName());
+        for (String key : List.of(record.typeName() + "." + fieldName, bare + "." + fieldName)) {
+            Object result = dispatch.tryInvoke(key, new Object[]{record});
+            if (result != sibarum.pontif.ast.func.RuntimeDispatch.NO_MATCH) {
+                return result;
+            }
+        }
+        return sibarum.pontif.ast.func.RuntimeDispatch.NO_MATCH;
     }
 
     @Override

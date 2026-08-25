@@ -1214,13 +1214,9 @@ public final class IrInterpreter {
         }
     }
 
-    /** Concatenates two positional streams (tuples) into one, renumbering keys _0.._n. */
+    /** Concatenates two positional streams (tuples) into one — the rule both engines share. */
     private static Object concatTuples(RecordValue a, RecordValue b) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        int i = 0;
-        for (Object v : a.members().values()) m.put("_" + i++, v);
-        for (Object v : b.members().values()) m.put("_" + i++, v);
-        return new RecordValue("_tuple", m);
+        return sibarum.pontif.core.types.Tuples.concat(a, b);
     }
 
     /** Seals an accumulated stream into a positional record (tuple) — the native sequence value. */

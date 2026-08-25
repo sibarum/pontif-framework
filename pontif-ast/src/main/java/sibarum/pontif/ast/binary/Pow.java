@@ -22,6 +22,11 @@ public final class Pow extends BinaryOp {
     }
 
     @Override
+    protected String operatorSymbol() {
+        return "^";
+    }
+
+    @Override
     protected Object combine(Object leftValue, Object rightValue) {
         if (leftValue instanceof BigDecimal || rightValue instanceof BigDecimal) {
             BigDecimal base = asDecimal(leftValue, "^");

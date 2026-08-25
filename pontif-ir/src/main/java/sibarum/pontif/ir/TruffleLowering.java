@@ -153,7 +153,13 @@ public final class TruffleLowering {
             case IrExpr.Apply apply -> lowerApply(apply, module, registry);
             case IrExpr.Match m -> lowerMatch(m, module, registry);
             case IrExpr.Record r -> lowerRecord(r, module, registry);
-            case IrExpr.FieldAccess fa -> FieldAccessNode.of(lowerExpr(fa.base(), module, registry), fa.fieldName());
+            // The field access carries runtime dispatch so a trait-view ATTRIBUTE — a field no
+            // stored record holds, computed by a producer resolved on the value's type — resolves
+            // here as it does on the interpreter, instead of reading as a missing field.
+            case IrExpr.FieldAccess fa -> FieldAccessNode.of(
+                    lowerExpr(fa.base(), module, registry), fa.fieldName(),
+                    sibarum.pontif.ast.func.RuntimeDispatch.of(
+                            module.dispatch(), compiler.simplifier(), registry));
             case IrExpr.MethodCall mc -> throw MethodResolver.unresolved(mc, "TruffleLowering");
             // REVISIT (docs/iteration.md §10): the Truffle path does not lower the
             // iteration construct yet; the IrInterpreter path is slice 1.
@@ -227,6 +233,14 @@ public final class TruffleLowering {
     private PontifNode lowerBinOp(IrExpr.BinOp op, CompiledModule module, FunctionRegistry registry) {
         PontifNode l = lowerExpr(op.left(), module, registry);
         PontifNode r = lowerExpr(op.right(), module, registry);
+        // Every operator node carries runtime dispatch, for the operands whose sort is not known
+        // until they arrive — an operator over a trait-bounded type variable never got routed
+        // statically, so the node itself must be able to finish the job (BinaryOp.execute).
+        return binOpNode(op, l, r).withDispatch(sibarum.pontif.ast.func.RuntimeDispatch.of(
+                module.dispatch(), compiler.simplifier(), registry));
+    }
+
+    private sibarum.pontif.ast.binary.BinaryOp binOpNode(IrExpr.BinOp op, PontifNode l, PontifNode r) {
         return switch (op.op()) {
             case ADD -> Add.of(l, r);
             case MUL -> Mul.of(l, r);

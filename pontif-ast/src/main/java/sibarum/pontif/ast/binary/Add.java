@@ -28,7 +28,29 @@ public final class Add extends BinaryOp {
     }
 
     @Override
+    protected String operatorSymbol() {
+        return "+";
+    }
+
+    /** Two positional streams concatenate by the built-in rule, ahead of any user overload. */
+    @Override
+    protected boolean handlesAggregate(Object leftValue, Object rightValue) {
+        return sibarum.pontif.core.types.Tuples.isTuple(leftValue)
+                && sibarum.pontif.core.types.Tuples.isTuple(rightValue);
+    }
+
+    @Override
     protected Object combine(Object leftValue, Object rightValue) {
+        // Two positional streams concatenate — `+` lifted to any Stream (docs/stream-war.md §7,
+        // slice 2e), structural rather than per-element. The rule is the shared one in core, for
+        // the same reason the rendering below is: only the interpreter had it, so `{1, 2} +
+        // {3, 4}` built a tuple on one engine and threw on the other.
+        if (sibarum.pontif.core.types.Tuples.isTuple(leftValue)
+                && sibarum.pontif.core.types.Tuples.isTuple(rightValue)) {
+            return sibarum.pontif.core.types.Tuples.concat(
+                    (sibarum.pontif.core.types.RecordValue) leftValue,
+                    (sibarum.pontif.core.types.RecordValue) rightValue);
+        }
         // A String operand wins, checked BEFORE Decimal — `"x=" + d` concatenates rather
         // than trying to promote the String. Same precedence as the interpreter's
         // evalBinOp ladder; the rendering is the shared one so the two cannot drift.
