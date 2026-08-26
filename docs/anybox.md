@@ -115,12 +115,32 @@ the shapes that trip it (`T(a:Int)` passes, `T(a:String)` does not). `window` th
 `root:Box` rather than `root:_`, which is the more honest signature anyway. The dasum-era surface
 never hit this because it always wrapped children in `{…}`, and aggregates pass.
 
+## The old `pontif.gui` is gone
+
+Cut in the same slice, and it had to be: both extensions declared the module name `pontif.gui`, and
+`Extensions.install` is last-wins, so they could not have shared a classpath.
+
+The cut was smaller than it looked, because the two halves of `pontif-builtin-gui` were already
+independent — `pontif.plot.ptf` does not `requires pontif.gui`, and nothing in the plot path called
+`GuiTree.toComponent`. So `GuiExtension`, the old `pontif.gui.ptf`, and the declarative half of
+`GuiTree` are deleted, while `PlotExtension` and the window loop it shares are untouched. That
+module now exists for one reason: `pontif.shape` does not link without *some* `pontif.plot`
+(docs/plotting.md, §The renderer seam).
+
+Nine examples went with it. Two were already ported (`reactive-counter` → `counter.ptf`,
+`reactive-textfield` → `echo.ptf`); the rest wanted `ExprPlot` or `Status`, which are plot and
+status-bar features rather than GUI ones and return when those slices do.
+
+One capability was deliberately **not** carried over: `Clickable`, where a program subtyped `Button`
+and assigned a trait whose `onClick` emitted. Anybox's answer is the id it already has — give the
+button an id and match on it in the conduit, which is less machinery for the same result, and does
+not require a user struct to determine `Box`'s three fields.
+
 ## Status
 
-Landed: the surface, the walker, the window, the `SetText` sink, `Clicked`/`TextChanged`, and the
-counter example.
+Landed: the surface, the walker, the window, the `SetText` sink, `Clicked`/`TextChanged`, the
+counter and echo examples, and the removal of the surface this replaces.
 
-Not yet: plotting (`pontif.plot` still lives on dasum in `pontif-builtin-gui`, which is what keeps
-that module alive — `pontif.shape` needs two symbols from it), the status ribbon, and the remaining
-vexelray widgets (Slider, Tabs, TreeView, modals, menus). Those are the next slices, and each is an
-atom or a kind rather than a redesign.
+Not yet: plotting, the status ribbon, and the remaining vexelray widgets (Slider, Tabs, TreeView,
+modals, menus). Each of those is an atom or a kind, not a redesign — which was the point of the
+shape.

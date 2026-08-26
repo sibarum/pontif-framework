@@ -58,10 +58,13 @@ side-effect channel. `all()` merges the pure builtins with every installed exten
 
 - **`IoExtension`** (pontif-runtime, builtin, installed by default — no external dependency):
   the `pontif.events` module + `StdOut`/`StdErr` sinks + the `stdin` source. The CLI keeps IO.
-- **`GuiExtension`** (pontif-builtin-gui, the first external one): the `pontif.gui` module +
-  the `window(title)` call backed by `DasumBridge` (the dasum GLFW/OpenGL toolkit). Installed
-  by `GuiLauncher`, the dasum-bearing entry point kept out of the lean CLI. **No core module
-  depends on dasum.**
+- **`AnyboxExtension`** (pontif-builtin-anybox): the `pontif.gui` module + the `window(cfg, root)`
+  call and the `SetText` sink, backed by VexelRay ([`docs/anybox.md`](anybox.md)). Installed by
+  ServiceLoader discovery like every other extension; run a program with `AnyboxLauncher`, which
+  holds the main thread because the window loop needs it.
+- **`PlotExtension`** (pontif-builtin-gui): the `pontif.plot` module, backed by `DasumBridge` (the
+  dasum GLFW/OpenGL toolkit) until its renderer moves too. **No core module depends on dasum** —
+  `ToolkitContainmentTest` fails the build if a third module so much as names it.
 
 ## How to write an extension
 

@@ -1264,33 +1264,6 @@ class PlotExtensionTest {
     }
 
     @Test
-    void svgExportExample_compilesAndTypechecks() {
-        // Guards examples/svg-export.ptf: the embeddable chartView + a Clickable export button whose
-        // onClick calls exportSvg on the same layers. Compiles + links only (a window needs GLFW).
-        Extensions.install(new PlotExtension());
-        Extensions.install(new GuiExtension());
-        var result = new PontifCompiler().compile("""
-                requires pontif.algebra.{Algebraic}
-                requires pontif.plot.{expr, asymptotes, zeros, chartView, exportSvg}
-                requires pontif.gui.{Button, window, Clickable}
-                function f(x:Decimal):Decimal -> (7*x^4 - 5*x^3 + 2*x^2 - 11*x + 3) / (13*x^3 - 5*x^2)
-                assign proof f:Algebraic
-                struct ExportButton:Button(id:String, text:String, data:_)
-                assign trait ExportButton:Clickable {
-                  onClick():_ -> ( let done = exportSvg(this.data)  this )
-                }
-                main (
-                  let e = $f[Decimal].ast
-                  let layers = { expr(e), asymptotes(e), zeros(e) }
-                  window({title = "Reliable plot -> SVG", width = 1100, height = 720},
-                         { chartView({}, layers), ExportButton("export-svg", "Export SVG...", layers) })
-                )""", "svg-export.ptf");
-        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
-                () -> "svg-export example should link; got "
-                        + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
-    }
-
-    @Test
     void titledExportExample_compilesAndTypechecks() {
         // Guards examples/titled-export.ptf: a standalone chart window with a math title and an
         // Export-SVG button (cfg export=true). Compiles + links only (the window needs GLFW).
@@ -1307,22 +1280,6 @@ class PlotExtensionTest {
                 )""", "titled-export.ptf");
         assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
                 () -> "titled-export example should link; got "
-                        + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
-    }
-
-    @Test
-    void calculatorExample_compilesAndTypechecks() throws Exception {
-        // Guards examples/calculator.ptf (the single-expression calculator POC): reads the ACTUAL
-        // example file off disk and links it, so the on-disk POC can't drift out of a working state.
-        // The single-expression pipeline — reflect an Algebraic function's AST, typeset it as the
-        // chartView title, auto-plot with labelled zeros/optima/asymptotes, and an Export-SVG button.
-        // Compiles + links only (the window itself needs GLFW).
-        Extensions.install(new PlotExtension());
-        Extensions.install(new GuiExtension());
-        String source = java.nio.file.Files.readString(java.nio.file.Path.of("examples/calculator.ptf"));
-        var result = new PontifCompiler().compile(source, "calculator.ptf");
-        assertInstanceOf(PontifCompiler.CompileResult.Compiled.class, result,
-                () -> "calculator POC example should link; got "
                         + (result instanceof PontifCompiler.CompileResult.Failed f ? f.error().text() : result));
     }
 

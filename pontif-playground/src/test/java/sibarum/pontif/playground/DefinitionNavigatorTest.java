@@ -206,13 +206,13 @@ class DefinitionNavigatorTest {
 
     @Test
     void resolvesGuiExtensionStruct_withoutGlobalInstall() {
-        // Label lives in the GUI extension, which the editor never installs globally;
+        // Box lives in the GUI extension, which the editor never installs globally;
         // the navigator parses its source locally for lookup.
         Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(
-                "requires pontif.gui.{Label}\n0", "Label", null);
+                "requires pontif.gui.{Box}\n0", "Box", null);
         assertTrue(t.isPresent());
         assertTrue(t.get().moduleLabel().contains("pontif.gui"), () -> t.get().moduleLabel());
-        assertEquals("Label", highlighted(t.get()));
+        assertEquals("Box", highlighted(t.get()));
     }
 
     @Test

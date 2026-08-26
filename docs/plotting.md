@@ -211,6 +211,11 @@ bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif 
 going; VexelRay is arriving; the replacement is deliberately **not a port** — `pontif-builtin-gui` is to be
 deleted rather than rewritten.
 
+**Half of it is already gone (2026-08-26).** The module's other extension, `pontif.gui`, was replaced by Anybox
+on VexelRay ([anybox.md](anybox.md)) and deleted — a clean split, because `pontif.plot.ptf` never required
+`pontif.gui` and no plot path called the declarative walker. What is left of `pontif-builtin-gui` is
+`pontif.plot`, its window loop, and the reason below for why it is still here at all.
+
 **The editor is not part of that deletion** (ruled 2026-08-26, correcting an earlier plan that had the two leave
 together). `pontif-playground` stays, on its own toolkit, for as long as it is the editor — so the cut is
 `pontif-builtin-gui` **alone**, and the editor has to be able to compile and run without it. That is a different
@@ -268,11 +273,15 @@ Delete `pontif-builtin-gui`: the module, its `<module>` entry, and its one `<dep
 `pontif-playground`. The editor stays. **Rehearsed, not assumed** — with the module gone from the reactor and from
 the editor's pom, the editor compiles and 19 of its 20 navigator tests pass. What the day actually costs:
 
-1. **One test goes with it.** `DefinitionNavigatorTest.resolvesGuiExtensionStruct_withoutGlobalInstall` asserts
-   that `requires pontif.gui.{Label}` resolves `Label`. That is a feature of the deleted module, so the test is
-   deleted rather than fixed — the one failure in the rehearsal, and the right one.
-2. **The Run-as-GUI action stops working and says so**, via `OptionalGui.present()`. Ordinary Run is unaffected:
-   it goes through `ProgramLauncher`, which is `pontif-builtin-net` and stays.
+1. ~~One test goes with it.~~ **Settled 2026-08-26, and not the way the rehearsal predicted.**
+   `DefinitionNavigatorTest.resolvesGuiExtensionStruct_withoutGlobalInstall` was expected to be deleted with
+   `pontif.gui`. But `pontif.gui` did not vanish — it *moved*, to `pontif-builtin-anybox` — so the test was
+   re-pointed at a symbol that still exists (`Box`) and keeps guarding what it always guarded: that the editor can
+   navigate into a windowed extension it never installs. A rehearsal predicts what breaks, not what the fix is.
+2. ~~The Run-as-GUI action stops working and says so.~~ **Also settled**: `OptionalGui`'s two class names now
+   resolve to `AnyboxLauncher` / `AnyboxExtension`, and the editor carries `pontif-builtin-anybox` at runtime
+   scope in place of the block it used to carry for this module. Run-as-GUI is unaffected by this module's
+   removal, and so is ordinary Run (`ProgramLauncher`, in `pontif-builtin-net`, which stays).
 3. **`pontif.shape` stops linking entirely** — not just `render`. Its third line is
    `requires pontif.plot.{Volume, scene}`, and without *some* `pontif.plot` the module does not resolve even for
    `distanceAt`, which touches no renderer. Shape's own tests are unaffected (they run against `StubRenderer`),

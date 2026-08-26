@@ -56,10 +56,19 @@
             <artifactId>pontif-builtin-net</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- RUNTIME scope, and that is the whole decoupling: the windowed extension is being deleted rather
-             than ported (docs/plotting.md, §The renderer seam) and this editor is not, so the editor must be
-             able to compile without it. Nothing here names it except OptionalGui, by string, at runtime — so
-             removing this one block is the entire cut, and until then GUI programs keep running. -->
+        <!-- The GUI a program runs in: Anybox, on VexelRay (docs/anybox.md). RUNTIME scope, and that is the
+             whole decoupling — the editor must compile with no windowed extension at all, and nothing here
+             names this one except OptionalGui, by string, at runtime. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-anybox</artifactId>
+            <version>${project.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- `pontif.plot` only — its `pontif.gui` half is gone, replaced by the module above. This one is still
+             here because `pontif.shape` does not link without some `pontif.plot` (docs/plotting.md, §The
+             renderer seam) and the editor's examples plot. It leaves when that renderer moves; removing this
+             one block is the whole cut. -->
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-builtin-gui</artifactId>

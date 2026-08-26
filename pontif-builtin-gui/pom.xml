@@ -11,10 +11,14 @@
     <artifactId>pontif-builtin-gui</artifactId>
 
     <!--
-      The GUI extension (docs/extensions.md): the first EXTERNAL Pontif extension. It is the
-      only module that depends on the dasum GUI toolkit (GLFW/OpenGL) — core stays dasum-free.
-      G1 opens a titled window from a `.ptf`; richer surface (text/widgets, needing font atlases)
-      and interactivity (click → emit → action → Property) are later slices.
+      The `pontif.plot` extension (docs/plotting.md), and one of the two modules that may name the
+      dasum GUI toolkit (GLFW/OpenGL) — the framework outside them stays dasum-free, which
+      ToolkitContainmentTest enforces.
+
+      It used to carry `pontif.gui` as well. That surface is gone: the GUI is now Anybox, on
+      VexelRay, in pontif-builtin-anybox (docs/anybox.md). What keeps THIS module alive is that
+      `pontif.shape` does not link without some `pontif.plot` at all — see docs/plotting.md,
+      §The renderer seam, which is also where the procedure for dropping it is written down.
     -->
     <properties>
         <main.class>sibarum.pontif.gui.GuiLauncher</main.class>

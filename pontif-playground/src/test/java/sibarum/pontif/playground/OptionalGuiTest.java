@@ -25,7 +25,7 @@ class OptionalGuiTest {
     @Test
     void theLauncherNameResolves() {
         assertTrue(OptionalGui.present(),
-                () -> OptionalGui.LAUNCHER + " is not on the classpath. If pontif-builtin-gui was deliberately "
+                () -> OptionalGui.LAUNCHER + " is not on the classpath. If pontif-builtin-anybox was deliberately "
                         + "removed, delete this test with it; if it was renamed or moved, fix the constant — the "
                         + "editor's GUI-run path is resolved by that exact name and nothing else checks it.");
     }
@@ -37,7 +37,7 @@ class OptionalGuiTest {
         String src = OptionalGui.moduleSource();
         assertNotNull(src, "the windowed extension must answer with its Pontif module source");
         assertTrue(src.contains("exports"), () -> "not a module source: " + head(src));
-        assertTrue(src.contains("Label"), () -> "pontif.gui should declare Label: " + head(src));
+        assertTrue(src.contains("Box"), () -> "pontif.gui should declare Box: " + head(src));
     }
 
     private static String head(String s) {

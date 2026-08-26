@@ -8,11 +8,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Runs a GUI Pontif program (docs/extensions.md). Installs the {@link GuiExtension} (the builtin
- * IO extension is already installed by default), then compiles and runs the given {@code .ptf}
- * <b>on the main thread</b> — so a {@code window(...)} call's blocking GLFW loop owns the root
- * thread, satisfying GLFW's thread affinity. This is the dasum-bearing entry point, kept out of
- * the lean CLI so the CLI/native-image stay GUI-free.
+ * Runs a plotting Pontif program (docs/plotting.md). Compiles and runs the given {@code .ptf}
+ * <b>on the main thread</b> — so a render call's blocking GLFW loop owns the root
+ * thread, satisfying GLFW's thread affinity. This is the dasum-bearing entry point, kept out of the
+ * lean CLI so the CLI/native-image stay GUI-free.
+ *
+ * <p>The windowed {@code pontif.gui} it used to launch is now Anybox, on VexelRay: see
+ * {@code sibarum.pontif.anybox.AnyboxLauncher} and docs/anybox.md. {@code pontif.plot} stays here
+ * until its renderer moves too.
  *
  * <p>Args: {@code <program.ptf> [resolveDir] [displayName]}. The editor runs an unsaved buffer
  * from a temp file, so it passes the ORIGINAL file's directory as {@code resolveDir} (where
@@ -27,7 +30,7 @@ public final class GuiLauncher {
             System.exit(2);
             return;
         }
-        // pontif.gui / pontif.plot / pontif.net / pontif.shape and any other extension on the
+        // pontif.plot / pontif.net / pontif.shape and any other extension on the
         // classpath self-register via ServiceLoader discovery (BuiltinModules → installDiscovered),
         // which runs before the compile below resolves any module — no per-extension wiring here.
 

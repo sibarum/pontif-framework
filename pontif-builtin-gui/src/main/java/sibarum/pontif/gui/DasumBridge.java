@@ -16,33 +16,16 @@ import java.util.Optional;
 import static sibarum.pontif.gui.GuiShared.*;
 
 /**
- * The native façade of the GUI/plot extension (docs/extensions.md, docs/plotting.md): each public
- * method is a native call registered by {@link GuiExtension}/{@link PlotExtension}. It parses the
- * primitives-only argument records and delegates the actual work to the cohesive collaborators —
- * {@link GuiTree} (declarative UI + window loop), {@link ChartBuilder}/{@link ReliableSeries} (2D
- * charts), {@link SceneBuilder} (3D scenes), {@link MathText} (typesetting), {@link PlotSvg} (SVG
- * export), and {@link LiveEdit} (interactive windows). Only Pontif primitives cross the boundary; the
- * former god-class body now lives in those classes. Shared leaves are in {@link GuiShared}.
+ * The native façade of the plot extension (docs/plotting.md): each public method is a native call
+ * registered by {@link PlotExtension}. It parses the primitives-only argument records and delegates
+ * the actual work to the cohesive collaborators — {@link GuiTree} (the window loop), {@link
+ * ChartBuilder}/{@link ReliableSeries} (2D charts), {@link SceneBuilder} (3D scenes), {@link
+ * MathText} (typesetting), {@link PlotSvg} (SVG export), and {@link LiveEdit} (interactive
+ * windows). Only Pontif primitives cross the boundary; the former god-class body now lives in those
+ * classes. Shared leaves are in {@link GuiShared}.
  */
 public final class DasumBridge {
     private DasumBridge() {}
-
-    /**
-     * {@code window({title = …}, {root…})}: build the dasum tree from the root record(s), open the
-     * window, and block in the loop (root thread) until closed. Returns the inert for-effect result.
-     */
-    public static Object openWindow(List<Object> args, NativeCalls.Context ctx) {
-        String title = cfgStr(args, 0, "title");
-        if (title.isEmpty()) title = "Pontif";
-        Object rootTree = args.size() > 1 ? args.get(1) : emptyTuple();
-        // Retained reactive host (docs/reactive-gui.md): build the id'd widget tree ONCE and render
-        // it; interactivity is isolated updates (a click fires Clicked; the conduit emits SetText,
-        // which mutates one retained widget). Thread ctx so the build + the click handlers'
-        // fireEvent run on the root thread.
-        RecordValue tree = rootTree instanceof RecordValue rv ? rv : emptyTuple();
-        return GuiTree.openWindow(title, cfgInt(args, 0, "width", WIDTH),
-                cfgInt(args, 0, "height", HEIGHT), tree, ctx);
-    }
 
     /**
      * {@code renderCurve(xs, ys)} (pontif.plot, docs/plotting.md): opens a window showing a line

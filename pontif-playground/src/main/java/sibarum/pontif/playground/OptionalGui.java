@@ -26,10 +26,10 @@ final class OptionalGui {
      * and as the child JVM's main class, which was always a string (a GUI program runs out of process so it owns
      * its own window and root thread).
      */
-    static final String LAUNCHER = "sibarum.pontif.gui.GuiLauncher";
+    static final String LAUNCHER = "sibarum.pontif.anybox.AnyboxLauncher";
 
     /** The extension itself, whose {@code pontifSource()} is what makes {@code pontif.gui} names navigable. */
-    private static final String EXTENSION = "sibarum.pontif.gui.GuiExtension";
+    private static final String EXTENSION = "sibarum.pontif.anybox.AnyboxExtension";
 
     private OptionalGui() {
     }
@@ -49,7 +49,7 @@ final class OptionalGui {
         Class<?> launcher = load(LAUNCHER);
         if (launcher == null) {
             System.err.println("no windowed extension on the classpath: " + LAUNCHER + " not found. "
-                    + "GUI programs need pontif-builtin-gui (or its successor) to run.");
+                    + "GUI programs need pontif-builtin-anybox to run.");
             return;
         }
         try {

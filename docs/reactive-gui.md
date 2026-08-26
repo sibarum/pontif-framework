@@ -1,5 +1,13 @@
 # The reactive GUI — the conduit, and pontif.gui on it
 
+> **The loop below is live; the widgets it is written against are not.** As of 2026-08-26 the
+> `pontif.gui` in this document — `Label`, `Button`, `TextField`, `Column`, `ExprPlot`, `Clickable`
+> — is deleted, replaced by Anybox on VexelRay ([`docs/anybox.md`](anybox.md)). What carried over
+> unchanged is everything this doc is actually about: notification → conduit → command, isolated
+> id-addressed updates, a tree walked once, and uncontrolled text fields. Read the widget names as
+> the shape of the argument rather than the current API. The status ribbon (§`Status`) and the
+> retained expression plot (`ExprPlot`/`SetPlot`) have not been rebuilt yet.
+
 Status: **LANDED (2026-07-28).** The conduit substrate (commit `feat(events): conduits`) and the
 first interactive `pontif.gui` window (commit `feat(gui): reactive pontif.gui`) are on `master`.
 This doc describes the design as built; it supersedes an earlier draft that framed the loop as
