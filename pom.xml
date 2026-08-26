@@ -45,14 +45,13 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <truffle.version>25.0.1</truffle.version>
         <junit.version>5.11.3</junit.version>
-        <dasum.version>1.0-SNAPSHOT</dasum.version>
         <picocli.version>4.7.6</picocli.version>
         <!-- Pin the compiler plugin: Maven's default binding is 3.1, which predates
              (and silently ignores) <annotationProcessorPaths> — that quietly breaks the
              elektro-Q / picocli codegen in pontif-builtin-net and pontif-cli when built
              from the CLI (IntelliJ's bundled Maven happens to default to a newer plugin,
              which is why it only bites on the command line). Matches the sibling repos
-             (elektroq, dasum, supirvast). -->
+             (elektroq, supirvast). -->
         <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
     </properties>
 

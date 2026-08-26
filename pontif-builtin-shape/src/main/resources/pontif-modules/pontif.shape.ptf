@@ -153,7 +153,7 @@ function gradientFieldGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
 
 # --- GPU render (docs/sdf-glsl.md) -------------------------------------------------
 # `render` lowers the shape's signed-distance function to a GLSL `float map(vec3 p)`
-# (native `sdfMap`, generated interpreter-side) and hands it to Dasum's raymarch
+# (native `sdfMap`, generated interpreter-side) and hands it to the renderer's raymarch
 # layer with the shape's world-space bounding box — a real sphere-traced surface,
 # not the sampled glow of `preview`. The GLSL crosses the boundary as inert text.
 

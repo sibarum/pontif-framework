@@ -204,3 +204,58 @@ bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif 
 - Keep the bare `plot` (single-rendering shapes only) or drop it for explicit names + `plotAll`?
 - Module placement: a dedicated `pontif.plot` module vs folding into `pontif.gui` (leaning
   dedicated, per the module-granularity preference).
+
+## The renderer seam
+
+`pontif.plot` is the toolkit's face to the language, and the toolkit is being replaced. Dasum (GLFW/OpenGL) is
+going; VexelRay is arriving; the replacement is deliberately **not a port** — `pontif-builtin-gui` is to be
+deleted rather than rewritten, and `pontif-playground`, which is transitional, goes with it.
+
+So the state worth being in *before* that day is one where **those two leave together and nothing else has to
+change**. That is what this section records, and `ToolkitContainmentTest` is what keeps it true: no module outside
+`pontif-builtin-gui` and `pontif-playground` may so much as name the toolkit, in code, in a pom, or in a comment.
+
+### What the seam actually is
+
+Two modules needed the renderer and neither needed the toolkit, which is the whole finding.
+
+- **`pontif-builtin-shape`** asked for exactly `Volume(vs, box…, opacity, normals, stride)` and
+  `scene(cfg, layers)`. It reached them by depending on `pontif-builtin-gui`, so a pure SDF-algebra assertion —
+  `distanceAt(Box(1,1,1), 2, 0, 0) == 1` — pulled a window toolkit onto the test classpath, and one of its tests
+  went on to assert things about the renderer's own layer objects, which is the renderer's contract asserted
+  through shape. The dependency is gone: `RenderLoweringTest` runs against `StubRenderer`, a six-line
+  `pontif.plot` registered as an ordinary service, and asserts only what shape produces — the sampled grid, the
+  lowered GLSL, the world box.
+
+  **`pontif.shape` still says `requires pontif.plot.{Volume, scene}`**, and that line is the seam rather than a
+  leak: any renderer satisfying it will do, and `StubRenderer`'s six lines are that contract written down. Worth
+  knowing, though: without *some* `pontif.plot` the shape module does not link **at all**, not even for
+  `distanceAt`. The honest end state is `render(shape)` returning a value a renderer consumes rather than calling
+  one — the dependency pointing from the renderer to shape, not back. That is a language-surface change, and it
+  is the thing to do when the VexelRay path lands, not before.
+
+- **The root pom** carried `<dasum.version>`. A build declaring the version of a GUI toolkit is a build that knows
+  a GUI toolkit exists; the property now lives in the two poms that use one, and the reactor is toolkit-free.
+
+`pontif-cli` and `pontif-builtin-net` only mentioned it in prose (a JVM flag's comment, a "counterpart to
+`GuiLauncher`" note) — reworded, because after the deletion they would be explaining themselves in terms of
+something that no longer exists.
+
+### The drop, when it comes
+
+Delete `pontif-builtin-gui` and `pontif-playground` together, plus their two `<module>` entries. Then:
+
+1. Nothing else in the reactor fails to compile. Rehearsed, not assumed: with both `<module>` entries removed the
+   remaining eighteen modules build and every test passes.
+2. `pontif-cli`'s `EditorLauncher` still resolves an editor binary by name and env var, and finds none. Its
+   contract already covers that (it returns `null` and the CLI says so).
+3. `pontif.shape`'s `render` and `previewGradientField` lose their renderer. Nothing breaks at build time — the
+   stub keeps the tests linking — and both functions stop having anywhere to draw until they are re-pointed at
+   the VexelRay path. That is the one piece of language surface the drop takes with it, and it is named here so
+   it is a decision rather than a discovery.
+4. Widen `ToolkitContainmentTest.MAY_NAME_IT` to nothing, or delete the test: with the toolkit gone the rule has
+   nothing left to protect.
+
+The three `sibarum.pontif.gui` call sites in the editor (`App` twice, `DefinitionNavigator` once) are inside the
+module that leaves, so they are not work — they are the reason the two are one cut. Nothing has been invested in
+making the editor survive without them, on purpose: it is transitional, and its successor is MainFrame.

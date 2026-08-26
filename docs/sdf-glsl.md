@@ -89,14 +89,14 @@ and a point expression `p`, emit a GLSL expression for its distance:
   `sqrt((p.x*p.x)+…) - r` (not a hand-written `length`), union→`min`, transforms inline the
   point, smoothUnion/rotateY use `mix`/`clamp`/`sin`/`cos`/`radians`, and a **user-defined
   `assign trait Slab:SdfShape` renders** (`p.y - 0.5`) — dissolving the docs/shapes.md "user
-  SDF can only be sampled" blocker (we ship GLSL text, not a function). `ShapeExtensionTest`
-  (7), examples `render-sphere.ptf` / `render-csg.ptf`.
+  SDF can only be sampled" blocker (we ship GLSL text, not a function). `RenderLoweringTest`
+  (9), examples `render-sphere.ptf` / `render-csg.ptf`.
 - **Slice 2 — SDF library. LANDED 2026-07-05.** Since the lowerer reads each shape's real
   `distance` IR, growing the library is pure Pontif source in `ShapeExtension` — no Java
   change, and every addition renders on the GPU for free. Added primitives `Box`, `Torus`,
   `Cylinder`, `Capsule`, `Plane` (scalar analytic SDFs) and smooth boolean modifiers
   `smoothIntersect`, `smoothDifference` (rounding out `smoothUnion`). `PrimitiveTest` (5,
-  numeric SDF checks), `BooleanTest` (+smooth), `ShapeExtensionTest` render-for-free checks;
+  numeric SDF checks), `BooleanTest` (+smooth), `RenderLoweringTest` render-for-free checks;
   examples `render-primitives.ptf`. `Cone` deferred (fiddly SDF). RULED (James): this was the
   chosen next step over generalizing the macro (concept 1/2 below) or iteration/fractals.
 

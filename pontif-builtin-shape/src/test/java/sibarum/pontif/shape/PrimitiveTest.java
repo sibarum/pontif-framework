@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * at points chosen so every distance is exact (no irrational lengths → no tolerance). A negative
  * expected value {@code -v} is checked as {@code (d + v) == 0.0} to avoid a negative literal. Each
  * primitive also renders on the GPU for free (the general lowerer reads these same bodies) — see
- * {@code ShapeExtensionTest}.
+ * {@code RenderLoweringTest}.
  */
 class PrimitiveTest {
 

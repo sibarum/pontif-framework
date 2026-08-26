@@ -354,10 +354,10 @@ previewed field is a caught lie).
   Pontif-side, **clamps it to a surface band** so the reused `pontif.plot` volumetric renderer lights
   the surface shell (not the whole box — see §Live preview (a)), and hands it over as a `Volume`
   layer. **No new native code**; `ShapeExtension` declares no `calls()` of its own (composes existing
-  `pontif.plot` functions). Witness: `ShapeExtensionTest.previewGradientField_samplesSphereSdfOverGrid_inPontif`
-  runs `previewGradientField(Sphere(1.0))` with `renderScene` stubbed (no window) and asserts the clamped 24³
+  `pontif.plot` functions). Witness: `RenderLoweringTest.previewGradientField_samplesSphereSdfOverGrid_inPontif`
+  runs `previewGradientField(Sphere(1.0))` against a stub renderer (no window) and asserts the clamped 24³
   grid — corner clamped to `+band` (outside), near-centre to `−band` (inside), and a near-surface
-  voxel carrying the exact `√(x²+y²+z²)−r`, plus one 24³ `VolumeLayer` built. Example:
+  voxel carrying the exact `√(x²+y²+z²)−r`, plus the box it was sampled over. Example:
   `pontif-builtin-shape/examples/sphere.ptf`. (Build with `-am`; the render path lives in
   `pontif-builtin-gui`.)
 - **S2 — LANDED 2026-07-03.** Transforms + adjustable **anchor**: `translate`, `scale`, and

@@ -1,0 +1,4 @@
+# Test-scope only: the pontif.plot seam pontif.shape requires, stubbed (see StubRenderer). The real
+# renderer is not a test dependency of this module -- a pure SDF-algebra assertion must not need a
+# window toolkit on the classpath to link.
+sibarum.pontif.shape.StubRenderer

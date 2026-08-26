@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * S2 transforms (docs/shapes.md) — {@code translate} / {@code scale} / {@code rotate} return
- * composable {@code SdfShape}s. Pure SDF-algebra checks (no rendering, no dasum): evaluate
+ * composable {@code SdfShape}s. Pure SDF-algebra checks (no rendering, no renderer): evaluate
  * {@code distanceAt} on a transformed shape and confirm the surface moved / scaled / rotated as
  * expected. A comparison yields a {@code Bool}, printed as {@code "true"}/{@code "false"};
  * expected-negative distances are checked as {@code (d + k) == 0.0} to avoid a negative literal in

@@ -104,7 +104,7 @@ final class EditorLauncher {
             cmd.add(target.path().toString());
         } else {
             cmd.add(javaExecutable());
-            cmd.add("--enable-native-access=ALL-UNNAMED");   // dasum-glfw FFM bindings
+            cmd.add("--enable-native-access=ALL-UNNAMED");   // the editor's window toolkit binds natively
             cmd.add("-jar");
             cmd.add(target.path().toString());
         }

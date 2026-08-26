@@ -12,6 +12,11 @@
 
     <properties>
         <main.class>sibarum.pontif.playground.App</main.class>
+        <!-- The window toolkit's version, declared HERE and not in the parent: the framework build must not
+             know that a GUI toolkit exists, so the coordinate lives in the modules that actually use one
+             (this and pontif-playground). Both leave together (docs/plotting.md, §The renderer seam), and
+             this is what makes that a clean cut rather than a hunt through the reactor. -->
+        <dasum.version>1.0-SNAPSHOT</dasum.version>
     </properties>
 
     <dependencies>

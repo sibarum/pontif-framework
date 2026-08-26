@@ -1,62 +1,90 @@
-package sibarum.pontif.gui;
+package sibarum.pontif.shape;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.types.RecordValue;
+import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
-import sibarum.pontif.shape.ShapeExtension;
-import sibarum.dasum.gui.vis.scene.VolumeLayer;
+
+import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Headless verification of the shape extension (docs/shapes.md S1). A {@code Sphere} satisfies the
- * {@code SdfShape} trait; {@code previewGradientField} dispatches on the trait and samples its signed distance
- * field <b>in Pontif</b> (range synthesis + map + {@code distance} method dispatch), handing the
- * sampled grid to {@code pontif.plot}'s {@code renderScene}. The test overrides that native with a
- * capturing stub, so it exercises the full pipeline — trait dispatch, the Pontif sampling loop, and
- * the stream→aggregate boundary crossing — <b>without opening a window</b>. Lives in the
- * {@code sibarum.pontif.gui} package to reuse {@link DasumBridge}'s package-private test seam
- * ({@code doubles} / {@code buildSceneLayers}). The actual render is verified manually:
+ * Headless verification of the shape extension (docs/shapes.md S1): what {@code render} and
+ * {@code previewGradientField} hand to a renderer.
+ *
+ * <h2>The renderer is a stub, and that is the point</h2>
+ * {@code pontif.shape} needs {@code Volume} and {@code scene} from {@code pontif.plot} — a renderer, any
+ * renderer — and the one on the test classpath is {@link StubRenderer}, six lines of Pontif. So what is asserted
+ * here is <b>shape's</b> contract at that seam: the sampled grid, the lowered GLSL, and the world box.
+ *
+ * <p>It used to install {@code pontif-builtin-gui}'s {@code PlotExtension} and then assert that the tuple built
+ * into the renderer's own {@code VolumeLayer} / {@code RaymarchLayer} — which is that renderer's contract, asserted
+ * through shape, and the only reason this module reached into the GUI stack at all. Those two assertions are
+ * gone rather than moved: they were claims about a renderer that is being replaced.
+ *
+ * <p>Everything below runs <b>in Pontif</b> — trait dispatch, the sampling loop, `distanceAt` recursion, the
+ * stream→aggregate crossing — and no window opens. The actual render is verified manually:
  * {@code mvn -pl pontif-builtin-shape -am exec:exec -Dptf=examples/sphere.ptf}.
  */
-class ShapeExtensionTest {
+class RenderLoweringTest {
 
-    @Test
-    void previewGradientField_samplesSphereSdfOverGrid_inPontif() {
-        Extensions.install(new PlotExtension());
+    /** Install shape over the stub renderer, run {@code src}, and return the layers tuple {@code scene} got. */
+    private static RecordValue layersOf(String src, String name) {
         Extensions.install(new ShapeExtension());
-
-        // Override the plot native with a capturing stub so NO window opens; capture the {layers}
-        // tuple previewGradientField() hands to renderScene. Register both the bare and qualified names.
-        Object[] capturedLayers = new Object[1];
+        Object[] captured = new Object[1];
         NativeCalls.NativeCall stub = (args, ctx) -> {
-            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
+            captured[0] = args.size() > 1 ? args.get(1) : null;
             return new IrInterpreter.DriveResult();
         };
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
         PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compile("""
-                        requires pontif.shape.{Sphere, previewGradientField}
-                        previewGradientField(Sphere(1.0))""", "sphere.ptf"),
-                PontifRunner.Engine.INTERPRETER);
+                new PontifCompiler().compile(src, name), PontifRunner.Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> name + " should run; got " + r.text());
+        assertNotNull(captured[0], "renderScene should have received the {layers} tuple");
+        return (RecordValue) captured[0];
+    }
 
-        assertFalse(r.isError(), () -> "previewGradientField program should run; got " + r.text());
-        assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
+    /** The one layer in a single-layer scene. */
+    private static RecordValue onlyLayer(RecordValue layers) {
+        return (RecordValue) layers.members().values().iterator().next();
+    }
 
-        // The single Volume layer carries the raw signed-distance grid the SDF was sampled into.
-        RecordValue tuple = (RecordValue) capturedLayers[0];
-        RecordValue vol = (RecordValue) tuple.members().values().iterator().next();
-        double[] vs = GuiShared.doubles(vol.members().get("vs"));
+    /** A Pontif aggregate of numbers as a {@code double[]}, in member order. */
+    private static double[] doubles(Object value) {
+        if (!(value instanceof RecordValue rv)) {
+            return new double[0];
+        }
+        double[] out = new double[rv.members().size()];
+        int i = 0;
+        for (Object member : rv.members().values()) {
+            out[i++] = member instanceof BigDecimal d ? d.doubleValue()
+                    : member instanceof Long l ? l
+                    : member instanceof Integer n ? n
+                    : 0.0;
+        }
+        return out;
+    }
+
+    private static double decimal(RecordValue r, String member) {
+        return ((BigDecimal) r.members().get(member)).doubleValue();
+    }
+
+    @Test
+    void previewGradientField_samplesSphereSdfOverGrid_inPontif() {
+        RecordValue vol = onlyLayer(layersOf("""
+                requires pontif.shape.{Sphere, previewGradientField}
+                previewGradientField(Sphere(1.0))""", "sphere.ptf"));
+        double[] vs = doubles(vol.members().get("vs"));
 
         // 24^3 samples over the sphere's bounds [-2,2]^3 (radius 1, box padded to 2r). The grid is
         // clamped to a surface band (±2·dx) so the volumetric render lights the surface shell, not
@@ -78,55 +106,25 @@ class ShapeExtensionTest {
         assertTrue(Math.abs(exact) < band, "test fixture: chosen voxel is within the unclamped band");
         assertEquals(exact, vs[17 + 12 * 24 + 12 * 576], 1e-9, "near-surface voxel carries the exact sdf");
 
-        // The same layers build into one raymarched 24^3 VolumeLayer (the reused plot path).
-        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
-        assertEquals(1, build.layers().size(), "one volumetric layer");
-        assertInstanceOf(VolumeLayer.class, build.layers().get(0));
-        assertEquals(24, ((VolumeLayer) build.layers().get(0)).nx(), "24^3 sampling grid");
+        // And the box it was sampled over travels with it, or the renderer cannot place the grid.
+        assertEquals(-2.0, decimal(vol, "xlo"), 1e-9);
+        assertEquals(2.0, decimal(vol, "xhi"), 1e-9);
     }
 
     @Test
-    void render_lowersSphereSdfToGlslMap_andBuildsRaymarchLayer() {
-        Extensions.install(new PlotExtension());
-        Extensions.install(new ShapeExtension());
+    void render_lowersSphereSdfToGlslMap_withItsWorldBox() {
+        RecordValue ray = onlyLayer(layersOf("""
+                requires pontif.shape.{Sphere, render}
+                render(Sphere(1.0))""", "render.ptf"));
 
-        Object[] capturedLayers = new Object[1];
-        NativeCalls.NativeCall stub = (args, ctx) -> {
-            capturedLayers[0] = args.size() > 1 ? args.get(1) : null;
-            return new IrInterpreter.DriveResult();
-        };
-        NativeCalls.register("renderScene", stub);
-        NativeCalls.register("pontif.plot/renderScene", stub);
-
-        PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compile("""
-                        requires pontif.shape.{Sphere, render}
-                        render(Sphere(1.0))""", "render.ptf"),
-                PontifRunner.Engine.INTERPRETER);
-
-        assertFalse(r.isError(), () -> "render program should run; got " + r.text());
-        assertNotNull(capturedLayers[0], "renderScene should have received the {layers} tuple");
-
-        // The single Raymarch layer carries the GLSL `map` (Sphere → length(p) - r) + the world
-        // AABB from bounds() (radius 1 → box [-2,2]^3 → center 0, half-extent 2).
-        RecordValue tuple = (RecordValue) capturedLayers[0];
-        RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
         // The general lowerer inlines the SHAPE's OWN distance body (sqrt(x²+y²+z²) - r), so it
         // can't drift from the Pontif formula — not a hand-written `length(p) - r`.
         assertEquals("float map(vec3 p){ return (sqrt((((p.x * p.x) + (p.y * p.y)) + (p.z * p.z))) - 1.0); }",
-                ((sibarum.pontif.core.types.StringValue) ray.members().get("map")).content(),
+                ((StringValue) ray.members().get("map")).content(),
                 "Sphere SDF lowered from its real distance body");
-        assertEquals(0.0, ((java.math.BigDecimal) ray.members().get("cx")).doubleValue(), 1e-9, "box center x");
-        assertEquals(2.0, ((java.math.BigDecimal) ray.members().get("hx")).doubleValue(), 1e-9, "box half-extent x");
-
-        // The same layers build into one dasum RaymarchLayer with the spliced shader + AABB.
-        SceneBuilder.SceneBuild build = SceneBuilder.buildSceneLayers(capturedLayers[0]);
-        assertEquals(1, build.layers().size(), "one raymarch layer");
-        sibarum.dasum.gui.vis.scene.RaymarchLayer layer =
-                assertInstanceOf(sibarum.dasum.gui.vis.scene.RaymarchLayer.class, build.layers().get(0));
-        assertTrue(layer.fragmentSource().contains("(p.x * p.x)"),
-                "the SDF map is spliced into the raymarch harness");
-        assertEquals(2.0f, layer.halfExtent().x(), 1e-6f, "half-extent carried to the layer");
+        // The world AABB from bounds() (radius 1 → box [-2,2]^3 → center 0, half-extent 2).
+        assertEquals(0.0, decimal(ray, "cx"), 1e-9, "box center x");
+        assertEquals(2.0, decimal(ray, "hx"), 1e-9, "box half-extent x");
     }
 
     /** The general lowerer inlines each shape's real `distance` IR: composites + transforms. */
@@ -222,66 +220,43 @@ class ShapeExtensionTest {
                 () -> "no Pontif residue: " + map);
     }
 
-    /** Runs {@code src} with renderScene stubbed and returns the emitted `float map(...)` string. */
+    /** Runs {@code src} with the renderer stubbed and returns the emitted `float map(…)` string. */
     private static String renderMap(String src) {
-        Extensions.install(new PlotExtension());
-        Extensions.install(new ShapeExtension());
-        Object[] captured = new Object[1];
-        NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = args.size() > 1 ? args.get(1) : null;
-            return new IrInterpreter.DriveResult();
-        };
-        NativeCalls.register("renderScene", stub);
-        NativeCalls.register("pontif.plot/renderScene", stub);
-        PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compile(src, "render.ptf"), PontifRunner.Engine.INTERPRETER);
-        assertFalse(r.isError(), () -> "render program should run; got " + r.text());
-        RecordValue tuple = (RecordValue) captured[0];
-        RecordValue ray = (RecordValue) tuple.members().values().iterator().next();
-        return ((sibarum.pontif.core.types.StringValue) ray.members().get("map")).content();
-    }
-
-    /** Installs the extensions and runs {@code src} with {@code renderScene} stubbed (no window). */
-    private static PontifRunner.RunResult runNoWindow(String src, String name) {
-        Extensions.install(new PlotExtension());
-        Extensions.install(new ShapeExtension());
-        NativeCalls.NativeCall stub = (args, ctx) -> new IrInterpreter.DriveResult();
-        NativeCalls.register("renderScene", stub);
-        NativeCalls.register("pontif.plot/renderScene", stub);
-        return new PontifRunner().run(
-                new PontifCompiler().compile(src, name), PontifRunner.Engine.INTERPRETER);
+        RecordValue ray = onlyLayer(layersOf(src, "render.ptf"));
+        return ((StringValue) ray.members().get("map")).content();
     }
 
     /** Pins the README "3D shapes" CSG + transforms snippet (verbatim, minus the comments). */
     @Test
     void readmeSnippet_csgComposePreviews() {
-        PontifRunner.RunResult r = runNoWindow("""
+        layersOf("""
                 requires pontif.shape.{Sphere, translate, rotateY, difference, render}
 
                 main ( render(rotateY(
                   difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
                   30.0, {0.0, 0.0, 0.0})) )""", "readme-csg.ptf");
-        assertFalse(r.isError(), () -> "README CSG snippet should run; got " + r.text());
     }
 
     /** Pins the README "3D shapes" attribute-field snippet, plus the value its comment claims. */
     @Test
     void readmeSnippet_attributeField() {
-        PontifRunner.RunResult r = runNoWindow("""
+        layersOf("""
                 requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, render}
 
                 struct Height()
                 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
 
                 main ( render(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
-        assertFalse(r.isError(), () -> "README attribute snippet should run; got " + r.text());
 
-        // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it.
-        PontifRunner.RunResult v = runNoWindow("""
+        // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it. No layer here: the
+        // program is a comparison, so it never reaches the renderer.
+        Extensions.install(new ShapeExtension());
+        PontifRunner.RunResult v = new PontifRunner().run(new PontifCompiler().compile("""
                 requires pontif.shape.{Sphere, ScalarField, attr, attrAt}
                 struct Height()
                 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
-                attrAt(attr(Sphere(1.0), "height", Height()), 0.0, 0.0, 0.5) == 0.5""", "readme-attr-val.ptf");
+                attrAt(attr(Sphere(1.0), "height", Height()), 0.0, 0.0, 0.5) == 0.5""",
+                "readme-attr-val.ptf"), PontifRunner.Engine.INTERPRETER);
         assertEquals("true", v.text(), () -> "attrAt should sample the field; got " + v.text());
     }
 }

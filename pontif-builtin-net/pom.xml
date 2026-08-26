@@ -16,7 +16,7 @@
       one bridge: (1) the Pontif Editor's debug port — a running program streams typed telemetry back
       to the editor over TCP loopback; and (2) the `pontif.net` builtin module — cross-thread /
       cross-process / cross-network EventConduits with the SAME program code. The RecordValue<->wire
-      converter (PontifDyn) is the shared crux. Depends on elektro-Q, not on dasum.
+      converter (PontifDyn) is the shared crux. Depends on elektro-Q, and on no window toolkit.
     -->
     <properties>
         <elektroq.version>1.0-SNAPSHOT</elektroq.version>

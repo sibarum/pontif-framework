@@ -15,7 +15,7 @@ import java.util.Set;
 
 /**
  * Lowers a {@code pontif.shape} {@code SdfShape} value to a GLSL {@code float map(vec3 p)} for
- * Dasum's {@code RaymarchLayer} (docs/sdf-glsl.md) — a real GPU sphere-traced surface instead of
+ * the renderer's raymarch layer (docs/sdf-glsl.md) — a real GPU sphere-traced surface instead of
  * the sampled 24³ glow of {@code previewGradientField}.
  *
  * <p><b>The general body-inlining lowerer (slice 1).</b> It reads each shape's <em>actual</em>

@@ -13,8 +13,10 @@
     <!--
       SDF shape composition (docs/shapes.md). S1: parameterized primitives + the `SdfShape` trait
       + live preview. The preview reuses pontif.plot's volumetric renderer (no new native code),
-      so this module depends on pontif-builtin-gui ONLY to borrow that render path — core stays
-      shape-free. Meshing, attributes, and PLY export are later slices.
+      which the `pontif.shape` module reaches by `requires` — a renderer, any renderer, at the
+      `Volume` + `scene` seam. No dependency on a renderer MODULE, deliberately: the tests supply
+      their own six-line `pontif.plot` (RenderLoweringTest.PlotStub), so nothing here compiles or
+      tests against the GUI stack. Meshing, attributes, and PLY export are later slices.
     -->
     <properties>
         <main.class>sibarum.pontif.shape.ShapeLauncher</main.class>
@@ -32,12 +34,6 @@
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-runtime</artifactId>
-        </dependency>
-        <!-- Borrow the plot render path (PlotExtension / DasumBridge) for the live preview. -->
-        <dependency>
-            <groupId>sibarum.pontif</groupId>
-            <artifactId>pontif-builtin-gui</artifactId>
-            <version>${project.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

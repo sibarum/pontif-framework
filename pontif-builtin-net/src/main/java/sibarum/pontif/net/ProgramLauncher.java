@@ -9,8 +9,8 @@ import java.nio.file.Path;
 
 /**
  * Runs a non-GUI Pontif program in its own JVM, streaming telemetry back to the editor over the
- * debug port. This is the headless counterpart to {@code sibarum.pontif.gui.GuiLauncher}: same
- * contract, but it installs no windowed extension and runs on an ordinary thread (there is no GLFW
+ * debug port. This is the headless counterpart to the editor's GUI launcher: same contract, but it
+ * installs no windowed extension and runs on an ordinary thread (there is no window-toolkit
  * root-thread affinity to honor). The editor spawns it for every ordinary {@code Run} so a program
  * crash (uncaught exception, {@code System.exit}, OOM) is isolated from the editor and witnessed by
  * the process exit code, and so all of its stdout/stderr flows to the editor's event log.
