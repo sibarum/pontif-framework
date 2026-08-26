@@ -128,33 +128,30 @@ assign trait Shows:Style{}
 # ---------------------------------------------------------------------------- the box
 # `style` and `children` are `_` so any aggregate fits — the atoms are heterogeneous by design,
 # and children are Boxes however you gathered them.
-struct Box(kind:Kind, style:_, children:_)
+# The block is one primitive move plus a list of names: `styled` appends an atom, keeping kind and
+# children, and every other method is one of those. That is why the list grows without the struct
+# doing so — and why a new renderer property costs a struct, a line here, and a case in the fold.
+struct Box(kind:Kind, style:_, children:_) {
+  styled(s:Style):Box -> Box(this.kind, this.style + {s}, this.children)
 
-# The one primitive move: append an atom, keeping kind and children. Every method below is one of
-# these, which is why the list grows without the struct doing so.
-#
-# (These are standalone `method` decls rather than a `{ … }` member block because a struct cannot
-# yet name its own constructor inside its own block — the parser registers a struct only once its
-# declaration is complete. See the forward-reference restriction on PontifParser.types.)
-method Box.styled(s:Style):Box -> Box(this.kind, this.style + {s}, this.children)
-
-method Box.id(name:String):Box          -> this.styled(Ident(name))
-method Box.gap(g:Length):Box            -> this.styled(Gap(g))
-method Box.padding(p:Length):Box        -> this.styled(Pad(p))
-method Box.width(w:Length):Box          -> this.styled(Wide(w))
-method Box.height(h:Length):Box         -> this.styled(Tall(h))
-method Box.background(r:Role):Box       -> this.styled(Fills(r))
-method Box.textColor(r:Role):Box        -> this.styled(Inks(r))
-method Box.textSize(s:Length):Box       -> this.styled(Sized(s))
-method Box.corner(r:Length):Box         -> this.styled(Rounds(r))
-method Box.border(w:Length, r:Role):Box -> this.styled(Edged(w, r))
-method Box.elevation(b:Length):Box      -> this.styled(Raises(b))
-method Box.lit(on:Bool):Box             -> this.styled(Glows(on))
-method Box.justify(w:Placement):Box     -> this.styled(Runs(w))
-method Box.align(w:Placement):Box       -> this.styled(Lines(w))
-method Box.scroll(x:Bool, y:Bool):Box   -> this.styled(Scrolls(x, y))
-method Box.visible(on:Bool):Box         -> this.styled(Shows(on))
-method Box.text(s:String):Box           -> this.styled(Content(s))
+  id(name:String):Box          -> this.styled(Ident(name))
+  gap(g:Length):Box            -> this.styled(Gap(g))
+  padding(p:Length):Box        -> this.styled(Pad(p))
+  width(w:Length):Box          -> this.styled(Wide(w))
+  height(h:Length):Box         -> this.styled(Tall(h))
+  background(r:Role):Box       -> this.styled(Fills(r))
+  textColor(r:Role):Box        -> this.styled(Inks(r))
+  textSize(s:Length):Box       -> this.styled(Sized(s))
+  corner(r:Length):Box         -> this.styled(Rounds(r))
+  border(w:Length, r:Role):Box -> this.styled(Edged(w, r))
+  elevation(b:Length):Box      -> this.styled(Raises(b))
+  lit(on:Bool):Box             -> this.styled(Glows(on))
+  justify(w:Placement):Box     -> this.styled(Runs(w))
+  align(w:Placement):Box       -> this.styled(Lines(w))
+  scroll(x:Bool, y:Bool):Box   -> this.styled(Scrolls(x, y))
+  visible(on:Bool):Box         -> this.styled(Shows(on))
+  text(s:String):Box           -> this.styled(Content(s))
+}
 
 # The constructors. Each is a Box with its kind and whatever atoms the kind implies — nothing
 # more, so every look is chosen by the caller rather than inherited from a widget's opinion.
