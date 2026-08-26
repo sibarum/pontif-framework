@@ -62,6 +62,20 @@ public final class Refinements {
      * own members stay by-reference and are resolved lazily one level at a time,
      * so this never unrolls a recursive type.
      */
+    /**
+     * Whether {@code sort} is the bare unknown sort {@code _} — the sort a parameter written
+     * {@code x:_} carries, and what an inference that reached no conclusion leaves behind.
+     *
+     * <p><b>Bare</b> is the whole of it: only a name and nothing else. A <em>refined</em> unknown
+     * ({@code [_:@>0]}, what a self-recursive hypothesis narrows to) still carries a predicate to
+     * discharge, so it is emphatically not top and must keep going through the ordinary path.
+     */
+    private static boolean isUnknown(Sort sort) {
+        return "_".equals(sort.name())
+                && !sort.isRefined() && !sort.isStructural() && !sort.isMethod()
+                && !sort.isUnion() && !sort.isIntersection() && !sort.isDispatch();
+    }
+
     private static Sort resolveNominal(Sort sort, java.util.Map<String, Sort> registry) {
         if (sort.isRefined() || sort.isStructural() || sort.isMethod()
                 || sort.isDispatch() || sort.isUnion() || sort.isIntersection()) {
@@ -493,6 +507,22 @@ public final class Refinements {
         // Resolve by-reference struct sorts so subsumption compares structure.
         tighter = resolveNominal(tighter, simplifier.registry());
         looser = resolveNominal(looser, simplifier.registry());
+        // `_` is the UNKNOWN sort, not a nominal type whose name happens to be "_". Without saying so
+        // here, the nominal comparison below reads `T` and `_` as two different names and reports
+        // Failed — which by this method's contract means PROVABLY DISJOINT, and is a lie: `_` excludes
+        // nothing. Downstream that lie became a compile error, so `f(x:_)` rejected any argument whose
+        // sort reached here as a bare name (the call gate's false rejection, docs/anybox.md).
+        //
+        // The two directions are not symmetric. As the LOOSER sort `_` is TOP — every sort implies it,
+        // totally, with no predicate left to discharge. As the TIGHTER sort it is genuinely undecided:
+        // an unknown sort is not proof of fitting anything, but it is not disjoint from anything
+        // either, so residual (abstain) is the only honest verdict.
+        if (isUnknown(looser)) {
+            return ProofResult.passed();
+        }
+        if (isUnknown(tighter)) {
+            return ProofResult.residual(SymExpr.var(tighter + " ⊑ " + looser));
+        }
         if (tighter.isStructural() && looser.isStructural()) {
             return implyStructural(tighter, looser, simplifier, assumed);
         }

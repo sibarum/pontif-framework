@@ -80,10 +80,12 @@ rule applies one level up:
 So `TextField` is not rebuilt on top of `Box` and events — it is vexelray's widget, wrapped. A Box
 kind exists precisely for the leaves that carry machinery of their own.
 
-## Two compiler defects this surfaced
+## Three compiler defects this surfaced
 
-Building the surface ran into two real holes, both instances of the same thing — **the parser only
-knows types declared in the current file**:
+Building the surface ran into three real holes. The first two are the same thing — **the parser only
+knows types declared in the current file** — and the third is a lie in the refinement kernel. All
+three are now fixed; they are recorded because each was invisible until a fairly ordinary piece of
+Pontif ran into it, and because two of them had a guard nearby that already knew about the trap:
 
 1. **Cross-module enum members** (`Role.Panel` from an importing program) read as `Unbound variable
    'Role'` — which made `enum` a same-file-only feature the moment a program had more than one file.
@@ -101,19 +103,26 @@ knows types declared in the current file**:
    patterns, a match over an imported enum goes through a function in the enum's own module. The gap
    is pinned by a test that asserts the current error, so closing it fails loudly.
 
-2. **Forward references to structs.** A struct's constructor resolves only for code appearing
-   *after* its declaration — so a struct can never construct itself inside its own member block,
-   and the most ordinary method on an immutable struct (one returning a modified copy) cannot be
-   written there. This is a documented single-pass restriction (`PontifParser.types`), left alone
-   here: the surface uses standalone `method Box.gap(…)` declarations, which work. It wants a
-   declaration pre-pass, and probably belongs with the open item in
-   [parser-linker-refactor.md](parser-linker-refactor.md).
+2. **Forward references to structs.** A struct's constructor resolved only for code appearing
+   *after* its declaration — so a struct could never construct itself inside its own member block,
+   and the most ordinary method on an immutable struct (one returning a modified copy) was
+   unwritable there. The surface shipped with standalone `method Box.gap(…)` declarations as a
+   workaround. **Fixed shortly after** (a declaration pre-pass; `ef6b31c`), and the surface now uses
+   the member block it was designed for.
 
-A third was worked around rather than fixed: a struct value passed to a `_` (wildcard) parameter is
-rejected by the call gate as "provably violates the parameter refinement", with no obvious rule to
-the shapes that trip it (`T(a:Int)` passes, `T(a:String)` does not). `window` therefore declares
-`root:Box` rather than `root:_`, which is the more honest signature anyway. The dasum-era surface
-never hit this because it always wrapped children in `{…}`, and aggregates pass.
+3. **`_` was compared as a nominal type** whose name happened to be `"_"`, so `imply(T, _)` reported
+   Failed — which by that kernel's own contract means *provably disjoint* — and the call gate turned
+   that lie into a compile error. A parameter written `x:_` therefore rejected any argument whose
+   sort reached the kernel as a bare name. What hid it is that most arguments infer to something
+   structural, and structural-vs-name is merely undecided, so the gate abstained; it took a struct
+   whose fields were *all* `String` (which infers to a bare name where one `Int` field does not) to
+   make it fire. **Fixed** in `Refinements.imply`, in the kernel rather than in the gate, so the
+   gate, dispatch specificity and assignability all get the same answer: as the looser sort `_` is
+   **top** (everything implies it, totally); as the tighter sort it is **residual** (an unknown sort
+   proves nothing, but is disjoint from nothing either). `CallGateTest` guards both directions.
+
+   `window` still declares `root:Box` rather than `root:_` — not a workaround any more, just the
+   more honest signature.
 
 ## The old `pontif.gui` is gone
 

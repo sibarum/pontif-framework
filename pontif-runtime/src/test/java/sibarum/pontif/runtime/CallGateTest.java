@@ -128,4 +128,80 @@ class CallGateTest {
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "a residual (undecided) call must not be rejected yet; got " + r);
     }
+
+    // ---------------------------------------------------------------- the wildcard is not a name
+
+    /**
+     * A parameter written {@code x:_} accepts anything, including a value whose sort reaches the
+     * kernel as a bare nominal name.
+     *
+     * <p>It used not to. {@code _} was compared as a nominal type whose name happened to be
+     * {@code "_"}, so {@code imply(T, _)} reported Failed — which by that method's contract means
+     * PROVABLY DISJOINT — and the gate turned that into a compile error. `_` excludes nothing, so
+     * the claim was a lie and the rejection was of valid code.
+     *
+     * <p>What made it hard to see is that it only fired when the argument's sort arrived as a bare
+     * {@code Named}. Most arguments infer to something structural, and a structural-vs-name pairing
+     * is merely undecided, so the gate abstained and the bug stayed hidden. The three below are the
+     * ways a bare name shows up.
+     */
+    @Test
+    void acceptsAnyArgumentAtAWildcardParam_declaredStructParam() {
+        // The plainest one: a value typed by a declared struct, arriving through a parameter.
+        CompileResult r = compiler.compile("""
+                module m
+                struct T(a:Int)
+                function w(r:_):Int -> 0
+                function pass(t:T):Int -> w(t)
+                pass(T(1))""", "wildcard-named.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "`_` accepts every sort; got: "
+                        + (r instanceof CompileResult.Failed f ? f.error().text() : r));
+    }
+
+    @Test
+    void acceptsAnyArgumentAtAWildcardParam_allStringFieldedStruct() {
+        // The one that surfaced it (docs/anybox.md): a struct whose fields are all String infers to
+        // a bare name rather than a shape, where the same struct with an Int field does not. The
+        // difference is inference's, and it should not decide whether `_` accepts the value.
+        CompileResult r = compiler.compile("""
+                module m
+                struct T(a:String, b:String)
+                function w(r:_):Int -> 0
+                w(T("x", "y"))""", "wildcard-strings.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "`_` accepts every sort; got: "
+                        + (r instanceof CompileResult.Failed f ? f.error().text() : r));
+    }
+
+    @Test
+    void acceptsAnyArgumentAtAWildcardParam_wildcardFieldedStruct() {
+        // The shape `window(cfg:_, root:_)` is written in: wildcards on both sides.
+        CompileResult r = compiler.compile("""
+                module m
+                struct Box(style:_, children:_)
+                function w(cfg:_, root:_):Int -> 0
+                w({}, Box({}, {}))""", "wildcard-both.ptf");
+        assertInstanceOf(CompileResult.Compiled.class, r,
+                () -> "`_` accepts every sort; got: "
+                        + (r instanceof CompileResult.Failed f ? f.error().text() : r));
+    }
+
+    /**
+     * The wildcard is top, not a hole in the gate: a genuine misroute between two unrelated structs
+     * is still a rejection. Without this, "everything passes" would also make the tests above green.
+     */
+    @Test
+    void stillRejectsAGenuineMisrouteBetweenStructs() {
+        CompileResult r = compiler.compile("""
+                module m
+                struct A(x:Int)
+                struct B(y:String)
+                function w(r:A):Int -> 0
+                w(B("q"))""", "misroute.ptf");
+        CompileResult.Failed f =
+                assertInstanceOf(CompileResult.Failed.class, r, "expected a compile rejection");
+        assertTrue(f.error().text().contains("Cannot prove the call to"),
+                () -> "unexpected gate message: " + f.error().text());
+    }
 }
