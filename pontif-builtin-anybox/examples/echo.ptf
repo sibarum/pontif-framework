@@ -1,0 +1,45 @@
+# The second half of the reactive loop (docs/anybox.md): an editable field, and a label that follows
+# it. Where counter.ptf shows a NOTIFICATION with no payload (Clicked), this shows one that carries
+# state (TextChanged) — and the rule that goes with it.
+#
+# The field is UNCONTROLLED: it owns its buffer once built, and "type here" is a seed rather than a
+# binding. So the conduit folds each edit and drives the OTHER widget; writing the field back on
+# every keystroke would fight its own caret. The Clear button is the exception that proves it — a
+# programmatic SetText on a field the user is not mid-edit in is fine, which is why it can exist.
+#
+# Run it (needs a Vulkan-capable GPU):
+#   mvn -pl pontif-builtin-anybox -am exec:exec -Dptf=examples/echo.ptf
+requires pontif.gui.{column, row, text, button, field, Rem, Dp, Fill, Role, Placement, window,
+                     GuiEvent, Clicked, TextChanged, SetText}
+
+# The model is just the last thing typed — a Pontif value, threaded as the conduit's state.
+struct Model(said:String)
+
+# One fold over every GUI event. A TextChanged binds its payload and echoes it; a Clicked is the
+# Clear button, which empties both the field and the echo. `[_]` is the catch-all the open GuiEvent
+# trait requires.
+conduit app(e:GuiEvent, s:Model):Model from Model("") -> (
+  let m2 = match e {
+    [TextChanged(id, said)] -> Model(said)
+    [Clicked]               -> Model("")
+    [_]                     -> s
+  }
+  emit SetText("echo", m2.said)
+  m2
+)
+
+# A column of two rows. The field takes the remaining width with Fill, so the layout follows the
+# window rather than a number chosen here; Dp for the gutters (they should not zoom) and Rem for
+# anything sizing text (it should).
+main ( window({title = "Echo", width = 700, height = 320},
+  column({
+      row({
+          field("input", "type here").width(Fill()),
+          button("clear", "clear")
+        }).gap(Dp(10.0)).align(Placement.Center),
+      text("").id("echo").textSize(Rem(1.75)).textColor(Role.Accent)
+    })
+    .background(Role.Panel).corner(Rem(0.75)).border(Rem(0.1), Role.Line)
+    .lit(true).elevation(Rem(1.0))
+    .padding(Dp(20.0)).gap(Dp(16.0))
+    .justify(Placement.Center)) )

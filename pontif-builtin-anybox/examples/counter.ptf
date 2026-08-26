@@ -1,0 +1,37 @@
+# The first Anybox program (docs/anybox.md): a counter whose label increments on every click, with
+# ZERO app state held in Java — the model is a Pontif value threaded as the conduit's state S.
+#
+# The loop:
+#   click the button -> the bridge fires Clicked{id = "inc"}   (an inbound emit)
+#   -> the `app` conduit folds it into the Model and emits a TARGETED command, SetText("count", …)
+#   -> the sink posts ONE mutation for ONE node. The tree is never rebuilt.
+#
+# Run it (needs a Vulkan-capable GPU):
+#   mvn -pl pontif-builtin-anybox -am exec:exec -Dptf=examples/counter.ptf
+requires pontif.gui.{column, text, button, Rem, Dp, Role, Placement, window,
+                     GuiEvent, Clicked, SetText}
+
+# The app model — a Pontif value, threaded as the conduit's state S.
+struct Model(count:Int)
+
+# The stateful fold: every GUI event folds the Model and emits an isolated update for what changed.
+# `[_]` is the open-world catch-all the open GuiEvent trait requires. `n + ""` is int->string (a
+# String operand makes + concatenate).
+conduit app(e:GuiEvent, s:Model):Model from Model(0) -> (
+  let m2 = match e { [Clicked] -> Model(s.count + 1)  [_] -> s }
+  emit SetText("count", m2.count + "")
+  m2
+)
+
+# Build the retained tree ONCE. Every look is chosen here — a card that stands off the page, lit and
+# raised, its two children centred with a gap between them. Rem zooms with the type; Dp does not,
+# which is why the card's inset is Dp and its text is Rem.
+main ( window({title = "Counter"},
+  column({
+      text("0").id("count").textSize(Rem(3.0)).textColor(Role.Accent),
+      button("inc", "increment")
+    })
+    .background(Role.Panel).corner(Rem(1.0)).border(Rem(0.1), Role.Line)
+    .lit(true).elevation(Rem(1.25))
+    .padding(Dp(24.0)).gap(Rem(1.0))
+    .justify(Placement.Center).align(Placement.Center)) )

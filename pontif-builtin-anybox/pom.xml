@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-builtin-anybox</artifactId>
+
+    <!--
+      Anybox: the `pontif.gui` extension on vexelray-gui (docs/anybox.md). The Pontif-facing surface is
+      ONE element — a Box — carrying an aggregate of style atoms; row/column/text/button/field are Boxes
+      with a kind and some atoms already appended. The framework itself is written in Pontif
+      (pontif.gui.ptf); the Java here is a one-pass walker that folds a record tree onto vexelray Nodes,
+      plus the window loop and the isolated-update sinks.
+
+      This module owns the only dependency on a window toolkit in the framework build, so the vexelray
+      coordinates are declared HERE and not in the parent: the framework build must not know that a GUI
+      toolkit exists. That is what keeps its eventual departure a clean cut rather than a hunt through
+      the reactor (docs/anybox.md).
+    -->
+    <properties>
+        <main.class>sibarum.pontif.anybox.AnyboxLauncher</main.class>
+        <vexelray.version>0.1.0-SNAPSHOT</vexelray.version>
+        <tactroller.version>1.0-SNAPSHOT</tactroller.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <!-- The retained Node tree, Length/flex layout, Theme roles, input dispatch, GuiApp loop. -->
+        <dependency>
+            <groupId>dev.vexelray.gui</groupId>
+            <artifactId>vexelray-gui-core</artifactId>
+            <version>${vexelray.version}</version>
+        </dependency>
+        <!-- Widgets whose machinery we must not re-derive: TextField (caret/selection/undo), Slider. -->
+        <dependency>
+            <groupId>dev.vexelray.gui</groupId>
+            <artifactId>vexelray-gui-widget</artifactId>
+            <version>${vexelray.version}</version>
+        </dependency>
+        <!-- Input: every device event reaches the GUI as Atchung traffic published by this bridge. -->
+        <dependency>
+            <groupId>sibarum.tactroller</groupId>
+            <artifactId>tactroller-atchung</artifactId>
+            <version>${tactroller.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.tactroller</groupId>
+            <artifactId>tactroller-clipboard</artifactId>
+            <version>${tactroller.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Launch an Anybox .ptf:
+                 mvn -pl pontif-builtin-anybox -am exec:exec -Dptf=examples/counter.ptf
+                 A fresh JVM with native access enabled (Vulkan + the input backend need it). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <executable>${java.home}/bin/java</executable>
+                    <arguments>
+                        <argument>--enable-native-access=ALL-UNNAMED</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>${main.class}</argument>
+                        <argument>${ptf}</argument>
+                    </arguments>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Build-time platform selection: exactly one activates from the host OS, adding VexelRay's
+             window provider and tactroller's input backend for it (both found via ServiceLoader). -->
+        <profile>
+            <id>platform-windows</id>
+            <activation><os><family>windows</family></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.vexelray</groupId>
+                    <artifactId>vexelray-os-windows</artifactId>
+                    <version>${vexelray.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>sibarum.tactroller</groupId>
+                    <artifactId>tactroller-windows</artifactId>
+                    <version>${tactroller.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>platform-linux</id>
+            <activation><os><family>unix</family><name>linux</name></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.vexelray</groupId>
+                    <artifactId>vexelray-os-linux</artifactId>
+                    <version>${vexelray.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>sibarum.tactroller</groupId>
+                    <artifactId>tactroller-linux</artifactId>
+                    <version>${tactroller.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>platform-macos</id>
+            <activation><os><family>mac</family></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.vexelray</groupId>
+                    <artifactId>vexelray-os-macos</artifactId>
+                    <version>${vexelray.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>sibarum.tactroller</groupId>
+                    <artifactId>tactroller-macos</artifactId>
+                    <version>${tactroller.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+</project>

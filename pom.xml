@@ -23,6 +23,7 @@
         <module>pontif-playground</module>
         <module>pontif-cli</module>
         <module>pontif-builtin-gui</module>
+        <module>pontif-builtin-anybox</module>
         <module>pontif-builtin-net</module>
         <module>pontif-builtin-shape</module>
         <module>pontif-builtin-regex</module>

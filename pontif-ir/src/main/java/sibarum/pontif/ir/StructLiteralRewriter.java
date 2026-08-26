@@ -169,8 +169,21 @@ public final class StructLiteralRewriter {
                 }
                 yield new IrExpr.Record(r.typeName(), mem, r.origin());
             }
-            case IrExpr.FieldAccess fa -> new IrExpr.FieldAccess(
-                    rewriteExpr(fa.base(), structs), fa.fieldName(), fa.origin());
+            case IrExpr.FieldAccess fa -> {
+                // `Enum.Case` in a VALUE position, for an IMPORTED enum — the same
+                // parser-blindness as an imported struct literal. Locally the parser
+                // rewrites the case name to the zero-field construction of its case
+                // struct; for an imported enum it cannot see the declaration, so the
+                // spelling survives as a field read of a variable that does not exist
+                // and would fail as "Unbound variable 'Enum'". Now the enum is FQN'd
+                // and visible: read it as the inhabitant, exactly as the parser does.
+                String caseType = enumCaseIfAny(fa, structs);
+                if (caseType != null) {
+                    yield new IrExpr.Record(caseType, new LinkedHashMap<>(), fa.origin());
+                }
+                yield new IrExpr.FieldAccess(
+                        rewriteExpr(fa.base(), structs), fa.fieldName(), fa.origin());
+            }
             case IrExpr.MethodCall mc -> {
                 List<IrExpr> args = new ArrayList<>(mc.args().size());
                 for (IrExpr a : mc.args()) args.add(rewriteExpr(a, structs));
@@ -261,5 +274,31 @@ public final class StructLiteralRewriter {
             ordered.put(field, value);
         }
         return new IrExpr.Record(typeName, ordered, origin);
+    }
+
+    /**
+     * The internal case-type name if {@code fa} spells {@code Enum.Case} over a sealed type in
+     * {@code structs}, else null.
+     *
+     * <p>The base must be a bare {@link IrExpr.Var}: {@code Role.Panel} is a type-level member, not a
+     * field read, so only the un-navigated spelling qualifies. The one thing this cannot see is a
+     * <em>local</em> binding named after the enum — the parser skips its own rewrite when the name is
+     * in scope, and by here the scope is gone. A let-binding named like an imported enum, read with
+     * one of that enum's case names, would therefore resolve to the case rather than the binding;
+     * every same-file instance is already settled by the parser, where the scope still exists.
+     */
+    private static String enumCaseIfAny(IrExpr.FieldAccess fa, Map<String, IrSort.Structural> structs) {
+        if (!(fa.base() instanceof IrExpr.Var v)) return null;
+        IrSort.Structural e = structs.get(v.name());
+        if (e == null || !e.isSealed()) return null;
+        // Match on the case LABEL rather than rebuilding the internal name. Three spellings of the
+        // enum are in play by here — the call site's, the map key's, and the structural's own — and
+        // they need not agree once the linker has FQN'd some of them; the label is the one part that
+        // is the same in all three. The case type returned is the sealed list's own spelling, which
+        // is the one every downstream pass expects.
+        for (String caseType : e.sealedCases()) {
+            if (EnumCover.caseLabel(caseType).equals(fa.fieldName())) return caseType;
+        }
+        return null;
     }
 }

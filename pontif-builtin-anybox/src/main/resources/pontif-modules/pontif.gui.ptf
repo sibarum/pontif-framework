@@ -1,0 +1,200 @@
+requires pontif.core.{Stream}
+requires pontif.events.{Event}
+exports @.{Box, Kind, Role, Placement, Length, Style,
+           Rem, Em, Dp, Percent, Grow, Fill, Auto,
+           Ident, Content, Gap, Pad, Wide, Tall, Fills, Inks, Rounds, Edged, Raises, Glows,
+           Sized, Runs, Lines, Scrolls, Shows,
+           box, row, column, text, button, field, window,
+           GuiEvent, Clicked, TextChanged, SetText}
+
+# Anybox — the Pontif GUI on vexelray-gui (docs/anybox.md).
+#
+# There is ONE element: a Box. A row is a Box with a direction, a text is a Box that carries a
+# string, a button is a Box that reports being clicked. Everything else a Box can look like is a
+# STYLE ATOM appended to it — one small value per property, in an ordinary aggregate. The bridge
+# folds that aggregate onto a vexelray Node in order, so the last atom of a kind wins.
+#
+# That is the whole design, and it is what makes the surface open: teaching Pontif a new vexelray
+# property is one struct, one method, and one case in the fold — never a wider Box.
+
+# ---------------------------------------------------------------------------- lengths
+# A size along one axis, resolved to pixels only at layout time (vexelray's Length). There is
+# deliberately NO pixel unit: sizes are relative to the root em, the viewport, or the containing
+# box, so a UI scales with font size, zoom and DPI instead of being pinned to device pixels.
+trait Length{}
+
+# `v` root-ems — the type-relative unit. This is what ZOOMS: anything sizing or containing glyphs
+# belongs here, or at 3x you get triple-height text inside an unchanged inset.
+struct Rem(v:Decimal)
+assign trait Rem:Length{}
+struct Em(v:Decimal)
+assign trait Em:Length{}
+# Density-independent pixels: honours display density, ignores zoom. For chrome that is not
+# proportional to text — card padding, gutters, separators. Zoom is a request to make CONTENT
+# legible, and tripling the frame around it means seeing less of what you zoomed in to read.
+struct Dp(v:Decimal)
+assign trait Dp:Length{}
+struct Percent(v:Decimal)
+assign trait Percent:Length{}
+# Flex weight: takes remaining main-axis space in proportion to `factor`.
+struct Grow(factor:Decimal)
+assign trait Grow:Length{}
+# All remaining main-axis space (Grow(1)).
+struct Fill()
+assign trait Fill:Length{}
+# Size to intrinsic content.
+struct Auto()
+assign trait Auto:Length{}
+
+# ---------------------------------------------------------------------------- roles
+# A colour is a ROLE, never a literal: what a thing IS in the interface, resolved against the
+# theme's palette. `Panel` is "a block of content standing off the page"; whether that is dark
+# slate or warm paper is the palette's business, and switching the palette re-colours every
+# widget at once. A UI that names literals cannot be themed.
+enum Role(key:String) {
+  # surfaces, sunken to floating
+  Well("WELL"); Page("PAGE"); Chrome("CHROME"); Panel("PANEL"); Raised("RAISED")
+  Line("LINE"); Track("TRACK"); Selection("SELECTION"); Edge("EDGE"); Grip("GRIP")
+  # ink
+  Ink("INK"); Dim("DIM"); Faint("FAINT")
+  # chromatic
+  Accent("ACCENT"); Action("ACTION"); OnAction("ON_ACTION")
+  Danger("DANGER"); OnDanger("ON_DANGER"); Highlight("HIGHLIGHT")
+  # depth
+  Shadow("SHADOW"); Scrim("SCRIM"); None("NONE")
+}
+
+# What a Box fundamentally is. Row and Column are Plain boxes with a direction; the rest are the
+# leaves that carry their own machinery (a caret, a click) and so cannot be composed from atoms.
+enum Kind(key:String) {
+  Plain("BOX"); Row("ROW"); Column("COLUMN"); Text("TEXT"); Button("BUTTON"); Field("FIELD")
+}
+
+# Where children sit along an axis. `Runs` is the main axis (justify), `Lines` the cross axis
+# (align) — one vocabulary for both, since a placement is a placement.
+enum Placement(key:String) {
+  Start("START"); Center("CENTER"); End("END"); Between("SPACE_BETWEEN"); Stretch("STRETCH")
+}
+
+# ---------------------------------------------------------------------------- style atoms
+# One value per property. A Box holds an aggregate of these; the bridge folds them left to right,
+# so `.padding(Rem(1)).padding(Rem(2))` is 2 rem — last wins, like a stylesheet.
+trait Style{}
+
+# The stable handle. `id` is what an isolated update addresses (`SetText(id, …)`) and what a
+# Button's `Clicked` carries back. A Box with no Ident is not addressable, which is the right
+# default — most boxes are pure layout.
+struct Ident(name:String)
+assign trait Ident:Style{}
+# The string a Text draws, a Button labels itself with, or a Field starts out holding.
+struct Content(text:String)
+assign trait Content:Style{}
+struct Gap(size:Length)
+assign trait Gap:Style{}
+struct Pad(size:Length)
+assign trait Pad:Style{}
+struct Wide(size:Length)
+assign trait Wide:Style{}
+struct Tall(size:Length)
+assign trait Tall:Style{}
+struct Fills(role:Role)
+assign trait Fills:Style{}
+struct Inks(role:Role)
+assign trait Inks:Style{}
+struct Rounds(radius:Length)
+assign trait Rounds:Style{}
+struct Edged(width:Length, role:Role)
+assign trait Edged:Style{}
+# An analytic soft shadow underneath — the box reads as standing off the surface behind it.
+struct Raises(blur:Length)
+assign trait Raises:Style{}
+# SDF edge light + vertical luminance gradient. Free: it is another transfer function over the
+# distance the renderer already evaluates for the box's own shape.
+struct Glows(on:Bool)
+assign trait Glows:Style{}
+struct Sized(size:Length)
+assign trait Sized:Style{}
+struct Runs(way:Placement)
+assign trait Runs:Style{}
+struct Lines(way:Placement)
+assign trait Lines:Style{}
+struct Scrolls(x:Bool, y:Bool)
+assign trait Scrolls:Style{}
+# Hiding KEEPS identity, handlers and widget state — the right tool for a tab page or anything
+# shown one at a time. Removing and rebuilding loses the caret, the selection, the scroll offset.
+struct Shows(on:Bool)
+assign trait Shows:Style{}
+
+# ---------------------------------------------------------------------------- the box
+# `style` and `children` are `_` so any aggregate fits — the atoms are heterogeneous by design,
+# and children are Boxes however you gathered them.
+struct Box(kind:Kind, style:_, children:_)
+
+# The one primitive move: append an atom, keeping kind and children. Every method below is one of
+# these, which is why the list grows without the struct doing so.
+#
+# (These are standalone `method` decls rather than a `{ … }` member block because a struct cannot
+# yet name its own constructor inside its own block — the parser registers a struct only once its
+# declaration is complete. See the forward-reference restriction on PontifParser.types.)
+method Box.styled(s:Style):Box -> Box(this.kind, this.style + {s}, this.children)
+
+method Box.id(name:String):Box          -> this.styled(Ident(name))
+method Box.gap(g:Length):Box            -> this.styled(Gap(g))
+method Box.padding(p:Length):Box        -> this.styled(Pad(p))
+method Box.width(w:Length):Box          -> this.styled(Wide(w))
+method Box.height(h:Length):Box         -> this.styled(Tall(h))
+method Box.background(r:Role):Box       -> this.styled(Fills(r))
+method Box.textColor(r:Role):Box        -> this.styled(Inks(r))
+method Box.textSize(s:Length):Box       -> this.styled(Sized(s))
+method Box.corner(r:Length):Box         -> this.styled(Rounds(r))
+method Box.border(w:Length, r:Role):Box -> this.styled(Edged(w, r))
+method Box.elevation(b:Length):Box      -> this.styled(Raises(b))
+method Box.lit(on:Bool):Box             -> this.styled(Glows(on))
+method Box.justify(w:Placement):Box     -> this.styled(Runs(w))
+method Box.align(w:Placement):Box       -> this.styled(Lines(w))
+method Box.scroll(x:Bool, y:Bool):Box   -> this.styled(Scrolls(x, y))
+method Box.visible(on:Bool):Box         -> this.styled(Shows(on))
+method Box.text(s:String):Box           -> this.styled(Content(s))
+
+# The constructors. Each is a Box with its kind and whatever atoms the kind implies — nothing
+# more, so every look is chosen by the caller rather than inherited from a widget's opinion.
+function box(children:_):Box    -> Box(Kind.Plain, {}, children)
+function row(children:_):Box    -> Box(Kind.Row, {}, children)
+function column(children:_):Box -> Box(Kind.Column, {}, children)
+function text(s:String):Box     -> Box(Kind.Text, {Content(s)}, {})
+
+# A Button reports a click as `Clicked{id}` — the inbound-emit door. Give it an id you match on.
+function button(id:String, label:String):Box ->
+  Box(Kind.Button, {Ident(id), Content(label)}, {})
+
+# An editable single-line field. `initial` is the STARTING content; thereafter the field OWNS its
+# buffer (uncontrolled input) — vexelray manages caret, selection, undo and the clipboard, and
+# every edit fires `TextChanged{id, text}`. Fold that in the conduit and drive OTHER widgets; do
+# not `SetText` the field being typed into (that fights the caret).
+function field(id:String, initial:String):Box ->
+  Box(Kind.Field, {Ident(id), Content(initial)}, {})
+
+# ---------------------------------------------------------------------------- the reactive loop
+# One conduit folds ALL GUI events into the app model by matching this umbrella trait (via
+# ancestry), so an app writes a single stateful fold over `GuiEvent` rather than one per widget.
+trait GuiEvent{}
+assign trait GuiEvent:Event{}
+
+# A NOTIFICATION (past tense: "it happened"): the widget with this `id` was clicked.
+struct Clicked(id:String)
+assign trait Clicked:GuiEvent{}
+
+# A NOTIFICATION: the field with this `id` now holds `text`. Fired on every edit.
+struct TextChanged(id:String, text:String)
+assign trait TextChanged:GuiEvent{}
+
+# A COMMAND (imperative: "cause it"): set the text of the retained Box with this `id`. This is an
+# ISOLATED update — it posts one mutation for one node, and the tree is never rebuilt. Handles in
+# vexelray are write-only and thread-safe, so this is safe from wherever the conduit runs.
+struct SetText(id:String, text:String)
+assign trait SetText:Event{}
+
+# The window (native; this placeholder body is never run): opens a window rendering `root` and
+# runs the GUI loop on the root thread until it closes. `cfg` is a record — {title = …, width = …,
+# height = …}; absent keys take their defaults. `root` is a Box — the one element there is.
+function window(cfg:_, root:Box):Stream[String] -> {}
