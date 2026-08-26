@@ -144,12 +144,19 @@ public final class PontifParser {
     private final Deque<String> contextualBaseStack = new ArrayDeque<>();
 
     /**
-     * The types declared so far in the current parse — structs, traits, and sort aliases — in the
-     * consolidated {@link TypeCatalog} (the single registry shared with the IR side). Populated as each
-     * declaration is parsed; consulted to resolve struct field sorts (e.g. {@code [Point(x, y)]}),
-     * classify annotation names, and answer coercion queries. A name absent here is not (yet) declared
-     * in this file — a forward or cross-module reference, deferred to link time. Required to be populated
-     * BEFORE a struct is used by name — slice-5 restriction.
+     * The types this file declares — structs, traits, and sort aliases — in the consolidated
+     * {@link TypeCatalog} (the single registry shared with the IR side). Consulted to resolve struct
+     * field sorts (e.g. {@code [Point(x, y)]}), classify annotation names, and answer coercion
+     * queries. A name absent here is not declared in this file — a cross-module reference, deferred
+     * to link time.
+     *
+     * <p>Populated in FULL before any body is parsed, by {@link #prescanTypeDeclarations()}: a type is
+     * visible from the first line of the file regardless of where in it the declaration sits. It used
+     * to be filled one declaration at a time as the parse reached them, which made construction
+     * order-dependent — and left the ordinary immutable-copy method
+     * ({@code struct Box(k:String) &#123; dup():Box -> Box(this.k) &#125;}) impossible to write, since
+     * a struct is never declared before itself. Each declaration still re-registers when the real
+     * parse reaches it, so a pre-registered shape is never authoritative over a parsed one.
      */
     private final TypeCatalog types = new TypeCatalog();
 
@@ -367,7 +374,93 @@ public final class PontifParser {
 
     // --- Top-level ---
 
+    /**
+     * True on the throwaway parser instance driven by {@link #prescanTypeDeclarations()}. It is
+     * the recursion guard: the scout scans for declarations, it does not scan for a scout.
+     */
+    private boolean scouting = false;
+
+    /**
+     * The declaration pre-pass: registers every type the file declares — {@code struct},
+     * {@code enum}, {@code trait}, and the {@code let N:Type[…]} sort alias — into {@link #types}
+     * BEFORE any body is parsed, so a type is visible from the first line of the file no matter
+     * where it is declared.
+     *
+     * <p><b>Why.</b> {@code types} used to be populated only as each declaration was reached,
+     * which made construction order-dependent: {@code Point(1, 2)} was a struct literal only if
+     * {@code struct Point} appeared ABOVE it, and otherwise stayed an {@code IrExpr.Call} that
+     * {@code CallNameCheck} later rejected as "Unknown function 'Point'". That restriction had no
+     * upside and one indefensible consequence — a struct is never declared before ITSELF, so the
+     * most ordinary method on an immutable struct, the one returning a modified copy
+     * ({@code struct Box(kind:String) &#123; dup():Box -> Box(this.kind) &#125;}), could not be
+     * written in a member block at all. Order-independence also reaches the decisions only the
+     * parser can make: {@code Color("red")} on a later {@code enum} is a case LOOKUP, never a
+     * construction, and {@code [Color.Red]} in a match pattern did not even parse.
+     *
+     * <p><b>How.</b> The scan reuses the real grammar — {@link #parseTopLevelDecl} on a throwaway
+     * parser over the same tokens — rather than a second, approximate reading of a declaration
+     * head. Only type-declaring heads are visited: function bodies are where forward references
+     * live, so parsing them here would be both wasted work and the one thing likely to fail.
+     *
+     * <p>The scout is allowed to be sloppy, and that is what makes it safe. Its only product is
+     * the catalog; every statement it builds is discarded, and a declaration it cannot parse is
+     * simply not pre-registered (the real pass then reports the genuine error at the genuine
+     * position). It never reports an error of its own.
+     *
+     * <p>This is the same move {@link #parseEnum} already makes inside one declaration — read the
+     * cases, register the seal, then parse the method bodies that name the cases — lifted to the
+     * whole file.
+     */
+    private void prescanTypeDeclarations() {
+        if (scouting) return;
+        PontifParser scout = new PontifParser(tokens);
+        scout.scouting = true;
+        scout.scanTypeDeclarations();
+        types.seedFrom(scout.types);
+    }
+
+    /**
+     * Walks the token stream registering each type declaration it can parse, in source order.
+     * Runs only on a scouting instance (see {@link #prescanTypeDeclarations()}).
+     */
+    private void scanTypeDeclarations() {
+        while (peek().kind() != PontifToken.Kind.EOF) {
+            int head = pos;
+            if (!atTypeDeclarationHead()) {
+                pos++;
+                continue;
+            }
+            try {
+                parseTopLevelDecl();
+                pendingTopLevelDecls.clear();  // the scout keeps the catalog, never the statements
+            } catch (ParseException | RuntimeException e) {
+                // Sloppy is safe here: a declaration the scout can't read just isn't
+                // pre-registered, and the real pass reports the error.
+            }
+            if (pos <= head) pos = head + 1;  // never stall, however the parse ended
+        }
+    }
+
+    /** Whether the cursor sits on a declaration that registers a TYPE. */
+    private boolean atTypeDeclarationHead() {
+        PontifToken t = peek();
+        if (t.kind() != PontifToken.Kind.IDENT) return false;
+        return switch (t.text()) {
+            // These three are reserved words that only ever open a top-level declaration, so
+            // every occurrence in the token stream is a head — no statement-start test needed.
+            case "struct", "enum", "trait" -> true;
+            // The sort alias is the one type declaration whose keyword also opens value bindings
+            // everywhere; `let NAME:Type[` is what tells the two apart (see parseLet).
+            case "let" -> peek(1).kind() == PontifToken.Kind.IDENT
+                    && peek(2).kind() == PontifToken.Kind.COLON
+                    && peek(3).text().equals("Type")
+                    && peek(4).kind() == PontifToken.Kind.LBRACKET;
+            default -> false;
+        };
+    }
+
     public IrModule parseModule() throws ParseException {
+        prescanTypeDeclarations();
         String moduleName = "_anonymous";
         if (checkKeyword("module")) {
             consume();
@@ -2727,6 +2820,23 @@ public final class PontifParser {
                         arrow.origin());
             }
         }
+        if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
+            throw new ParseException(
+                    "'" + nameTok.text() + "' is a native type — its constructor "
+                            + "is built in and cannot be redeclared",
+                    nameTok.origin());
+        }
+        // Register BEFORE the member block, whose bodies may name the struct itself — the
+        // immutable-copy method `dup():Box -> Box(this.kind)` is the ordinary case, and a struct
+        // is never declared before itself. Everything the shape is made of is already read: the
+        // constructor fields, and any extension fields the `-> let this.…` body added. (Bodies in
+        // the block may still name types declared LATER in the file; those are covered by the
+        // file-wide pre-pass, prescanTypeDeclarations.) Same shape as parseEnum, which registers
+        // its seal before parsing the methods that name its cases.
+        Origin headOrigin = start.spanTo(end);
+        IrSort.Structural structSort = new IrSort.Structural(
+                nameTok.text(), members, baseSort, typeParams, extensions, headOrigin);
+        types.register(nameTok.text(), new TypeInfo.Struct(structSort));
         // Optional member block `{ methods… }` (docs/struct-methods.md).
         if (peek().kind() == PontifToken.Kind.LBRACE) {
             consume();  // {
@@ -2734,22 +2844,17 @@ public final class PontifParser {
                 blockMethods.add(parseTraitImplMethod(nameTok.text(), selfSort));
             }
             end = expect(PontifToken.Kind.RBRACE);
+            // The declaration's span now includes the block; the shape carries it, so re-register
+            // under the full origin rather than leave the head-only one on the recorded type.
+            structSort = new IrSort.Structural(
+                    nameTok.text(), members, baseSort, typeParams, extensions, start.spanTo(end));
+            types.register(nameTok.text(), new TypeInfo.Struct(structSort));
         }
-        Origin origin = start.spanTo(end);
-        if (sibarum.pontif.ir.NativeConstructors.has(nameTok.text())) {
-            throw new ParseException(
-                    "'" + nameTok.text() + "' is a native type — its constructor "
-                            + "is built in and cannot be redeclared",
-                    nameTok.origin());
-        }
-        IrSort.Structural structSort = new IrSort.Structural(
-                nameTok.text(), members, baseSort, typeParams, extensions, origin);
-        types.register(nameTok.text(), new TypeInfo.Struct(structSort));
         // The struct decl is returned as the statement; its block methods ride
         // the pending-decl channel so they land right after it (drained by the
         // top-level loop in declaration order).
         pendingTopLevelDecls.addAll(blockMethods);
-        return new IrStmt.TypeAlias(nameTok.text(), structSort, origin);
+        return new IrStmt.TypeAlias(nameTok.text(), structSort, structSort.origin());
     }
 
     /** The enum base's shape if {@code name} names a sealed enum, else null. */
@@ -4804,7 +4909,8 @@ public final class PontifParser {
         if (decl == null) {
             throw new ParseException(
                     "A positional pattern inside [" + typeName + "(...)] requires '"
-                            + typeName + "' to be declared before this point", o);
+                            + typeName + "' to be declared in this file — an imported "
+                                    + "struct's field order isn't visible at parse time", o);
         }
         List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
         if (clauseIndex >= order.size()) {
@@ -4858,7 +4964,8 @@ public final class PontifParser {
                 if (decl == null) {
                     throw new ParseException(
                             "A literal field pattern inside [" + typeName + "(...)] requires '"
-                                    + typeName + "' to be declared before this point",
+                                    + typeName + "' to be declared in this file — an imported "
+                                    + "struct's field order isn't visible at parse time",
                             t.origin());
                 }
                 List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
@@ -4946,7 +5053,8 @@ public final class PontifParser {
                 if (decl == null) {
                     throw new ParseException(
                             "A '_' discard inside [" + typeName + "(...)] requires '"
-                                    + typeName + "' to be declared before this point",
+                                    + typeName + "' to be declared in this file — an imported "
+                                    + "struct's field order isn't visible at parse time",
                             fieldName.origin());
                 }
                 List<String> order = new ArrayList<>(decl.constructorMembers().keySet());
@@ -4990,8 +5098,9 @@ public final class PontifParser {
                 if (decl == null) {
                     throw new ParseException(
                             "Bare field name '" + fieldName.text() + "' inside [" + typeName
-                                    + "(...)] requires '" + typeName + "' to be declared before this point "
-                                    + "(struct decl not found)",
+                                    + "(...)] requires '" + typeName + "' to be declared in this "
+                                    + "file — an imported struct's field order isn't visible at "
+                                    + "parse time",
                             fieldName.origin());
                 }
                 IrSort declSort = decl.members().get(fieldName.text());

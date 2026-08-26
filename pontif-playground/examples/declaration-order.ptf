@@ -1,0 +1,63 @@
+module examples.declaration_order
+
+# A type is visible everywhere in the file that declares it. Where a `struct`,
+# `enum`, `trait` or sort alias SITS in the file has no bearing on what its name
+# means above that point — the parser registers every declaration before it
+# parses a single body, so nothing here has to be sorted bottom-up to compile.
+
+# 1. The immutable-copy method: a struct constructing ITSELF from inside its own
+#    member block. This is the form the old declaration-order rule made
+#    impossible — a struct is never declared before itself — so the most ordinary
+#    method on an immutable value had to be exiled to a standalone
+#    `method Box.withKind` below the declaration.
+struct Box(kind:String, size:Int) {
+  withKind(k:String):Box -> Box(k, this.size)
+  grown():Box            -> Box(this.kind, this.size + 1)
+}
+
+# 2. Mutual reference. Neither of two structs can be declared first, so there is
+#    no ordering that would have made this pair legal under the old rule.
+struct Celsius(deg:Decimal) {
+  toF():Fahrenheit -> Fahrenheit(this.deg * 1.8 + 32.0)
+}
+
+struct Fahrenheit(deg:Decimal) {
+  toC():Celsius -> Celsius((this.deg - 32.0) / 1.8)
+}
+
+# 3. A forward reference from a plain function, to a struct declared later.
+function origin():Point -> Point(0, 0)
+
+struct Point(x:Int, y:Int) {
+  shifted(dx:Int, dy:Int):Point -> Point(this.x + dx, this.y + dy)
+}
+
+# 4. Forward references to an `enum` — and these are decisions only the parser
+#    can make, which is why order-independence belongs there and not in a later
+#    repair pass. `ResourceType(literal)` is a case LOOKUP (a sealed type has
+#    exactly the values its cases name, so it is never a construction), and a
+#    case named in a match PATTERN did not previously even parse this far up.
+function driverOf(r:ResourceType):String -> r.driver
+
+function rank(r:ResourceType):Int -> match r {
+  [ResourceType.DatabaseTable] -> 1
+  [ResourceType.LocalFilesystem] -> 2
+  [ResourceType.RemoteHttp] -> 3
+}
+
+let overTheWire = ResourceType("tcp/ip")
+
+enum ResourceType(driver:String) {
+  DatabaseTable("postgres")
+  LocalFilesystem("NTFS")
+  RemoteHttp("tcp/ip")
+}
+
+main
+  let box = Box("tin", 1).withKind("brass").grown()
+  let warm = Celsius(100.0).toF()
+  let p = origin().shifted(3, 4)
+  box.kind + "/" + ("" + box.size)
+    + " " + ("" + warm.deg)
+    + " " + ("" + p.x) + "," + ("" + p.y)
+    + " " + driverOf(overTheWire) + "=" + ("" + rank(overTheWire))

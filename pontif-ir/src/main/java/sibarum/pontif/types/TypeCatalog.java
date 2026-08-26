@@ -48,6 +48,17 @@ public final class TypeCatalog {
     }
 
     /**
+     * Copies every entry of {@code other} into this catalog, in {@code other}'s registration order —
+     * the parser's declaration pre-pass seeding the catalog it will parse bodies against, so a type
+     * is visible from the first line of the file regardless of where it is declared. Entries are
+     * <em>replaced</em> as the real pass re-reaches each declaration (last declaration wins, exactly
+     * as {@link #register}), so a seeded shape is never authoritative over a parsed one.
+     */
+    public void seedFrom(TypeCatalog other) {
+        byName.putAll(other.byName);
+    }
+
+    /**
      * Builds a catalog from a finished module's preserved declarations — the single interpretation of
      * struct / trait / alias type-aliases, in source order. A struct is registered under both the alias
      * name and its own internal name (they coincide in the Pontif syntax; the S-expr {@code deftype} form

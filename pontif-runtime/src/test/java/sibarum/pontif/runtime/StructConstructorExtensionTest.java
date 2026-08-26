@@ -5,6 +5,7 @@ import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
 import sibarum.pontif.runtime.PontifRunner.RunResult;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -176,6 +177,28 @@ class StructConstructorExtensionTest {
         assertFalse(r.isError(), () -> "expected clean run; got: " + r.text());
         assertTrue(r.text().trim().startsWith("9"),
                 () -> "expected area 9; got: " + r.text());
+    }
+
+    /**
+     * A member-block method constructing its OWN type, on a struct that also has extension fields.
+     * The arguments mention the method's {@code this}, and the extension initializer mentions the
+     * new value's — two different {@code this}es. Materialization substitutes the initializer's
+     * {@code this.f} with the argument bound to {@code f}, so the argument's own {@code this}
+     * survives into the result; the never-undefined guard has to be asked of the initializer BEFORE
+     * that substitution, or it mistakes the argument's {@code this} for an unbindable reference.
+     */
+    @Test
+    void extensionField_materializesForAConstructionInsideTheMemberBlock() {
+        RunResult r = run("""
+                struct Span(lo:Int, hi:Int) ->
+                    let this.width:Int = this.hi - this.lo
+                  {
+                    stretched():Span -> Span(this.lo, this.hi + this.width)
+                  }
+                Span(0, 5).stretched().width
+                """, Engine.INTERPRETER);
+        assertFalse(r.isError(), () -> "expected clean run; got: " + r.text());
+        assertEquals("10", r.text().trim());
     }
 
     @Test

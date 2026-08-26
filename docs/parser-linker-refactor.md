@@ -211,6 +211,81 @@ cannot get it without adding an accessor. Low priority; noted so it isn't redisc
 
 ---
 
+## Item 6 — declaration ORDER was part of the dispatch — DONE (2026-08-26)
+
+**Symptom:** a struct constructor resolved only for a struct declared EARLIER in the same file.
+`types` (the parser's `TypeCatalog`) was filled one declaration at a time as the parse reached
+them, so the construction decision — `types.isStruct(v.name())` → `parsePositionalStructLiteral`,
+else leave an `IrExpr.Call` — read a catalog that depended on where in the file it was asked. A
+name not yet declared stayed a Call and `CallNameCheck` later rejected it: *"Unknown function
+'Point'"*. The restriction was documented on the `types` field as a "slice-5 restriction".
+
+**The consequence that made it indefensible:** a struct is never declared before ITSELF, so the
+most ordinary method on an immutable struct — the one returning a modified copy —
+
+```
+struct Box(kind:String) { dup():Box -> Box(this.kind) }
+```
+
+could not be written in a member block at all. Member blocks had just landed; the workaround was
+a standalone `method Box.dup` below the struct, saying the same thing somewhere else. Mutual
+reference between two structs had no legal ordering at all.
+
+**It was not only construction, and that decided where the fix goes.** The catalog also drives
+decisions no later pass can revisit, because they are choices about what the tokens MEAN:
+
+- `Color("red")` on an enum declared below is a case **lookup** — a sealed type has exactly the
+  values its cases name — and a repair pass rewriting the Call to a Record would have built the
+  sealed base instead, which the seal forbids;
+- `Color.Red` read as a value became *"Unbound variable 'Color'"*;
+- `[Color.Red]` in a match pattern did not **parse** (`Expected RBRACKET but got DOT`);
+- a struct pattern over a later struct was deferred as an imported one and died as
+  *"Unknown sort '_$bind$v'"* — the single-file path never runs `DestructureResolver`.
+
+So the one existing repair pass, `StructLiteralRewriter` (whose whole reason for existing is this
+"parser-blindness", for genuinely IMPORTED structs), could have covered the first family and
+nothing else, while mis-handling the enum. Same-file order had to stop mattering at parse time.
+
+**What landed.** `PontifParser.prescanTypeDeclarations` — a declaration pre-pass. A throwaway
+scouting parser walks the token stream and runs the REAL parse method for each type-declaring
+head (`struct` / `enum` / `trait` / the `let N:Type[…]` alias), and its catalog seeds the real
+parse before a single body is read (`TypeCatalog.seedFrom`). Every declaration still re-registers
+when the real parse reaches it, so a pre-registered shape is never authoritative over a parsed one.
+
+Two properties keep it honest:
+
+- **The scout is allowed to be sloppy, and that is what makes it safe.** Its only product is the
+  catalog; every statement it builds is discarded, it never reports an error, and a declaration it
+  cannot parse is simply not pre-registered — the real pass then reports the genuine error at the
+  genuine position. `DeclarationOrderTest.aMalformedDeclarationIsReportedOnceByTheRealParse` pins
+  that a bad declaration is reported once, at its own position.
+- **Only type-declaring heads are visited.** Function bodies are where forward references live, so
+  parsing them in the scout would be both wasted work and the one thing likely to fail. `struct` /
+  `enum` / `trait` are reserved words that only ever open a top-level declaration, so every
+  occurrence in the token stream is a head with no statement-start heuristic needed; the alias is
+  the one form whose keyword (`let`) also opens value bindings, and `let NAME:Type[` tells them
+  apart.
+
+`parseStruct` also now registers the struct BEFORE parsing its member block (everything the shape
+is made of — constructor fields, plus any extension fields the `-> let this.…` body added — is
+already read by then). This is the same move `parseEnum` already made INSIDE one declaration:
+read the cases, register the seal, then parse the method bodies that name the cases. Item 6 is
+that move lifted to the whole file.
+
+**One defect fell out, in code the old rule had made unreachable.** `ConstructionGate`'s
+never-undefined guard for extension fields asked "does any `this` remain?" of the SUBSTITUTED
+initializer. But substitution splices in the constructor's argument expressions, and once a
+member-block method can construct its own type those arguments legitimately mention the METHOD's
+`this` — two different `this`es, and the guard blamed the initializer for the arguments'. It now
+asks the question of the initializer BEFORE substituting (`unboundSelfReference`), and names the
+offending field in the message. Witness:
+`StructConstructorExtensionTest.extensionField_materializesForAConstructionInsideTheMemberBlock`.
+
+**Tests:** `DeclarationOrderTest` (14, both engines), which includes the showcase
+`pontif-playground/examples/declaration-order.ptf`.
+
+---
+
 ## How to verify a fix here
 
 - Item 1/2/3 fixes should be provable by the compiler: after the change, adding a throwaway

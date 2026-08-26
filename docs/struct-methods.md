@@ -41,6 +41,23 @@ requires it, so it is simply a method on `Ace`.
   block omits that method, the default is inherited (as with `assign trait`); if
   the block provides it, the block wins.
 
+- **A block method may construct its own struct**, which is what makes the
+  immutable-copy method — the most ordinary method on an immutable value — writable
+  where it belongs:
+
+  ```
+  struct Box(kind:String, size:Int) {
+    withKind(k:String):Box -> Box(k, this.size)
+  }
+  ```
+
+  This needs no special rule: no type's visibility depends on where in the file it
+  is declared (`PontifParser.prescanTypeDeclarations` registers every declaration
+  before any body is parsed), and a struct is simply the first type its own block
+  can name. Before that, the form was impossible — a struct is never declared before
+  itself — and the method had to be exiled to a standalone `method Box.withKind`
+  below the declaration.
+
 Methods are declared **once** in the block. There is no separate `assign trait`
 block to write and no method is repeated per trait — the single method set is the
 one thing every declared trait is checked against.
@@ -74,4 +91,7 @@ is untouched — the intersection never reaches it, because the split happens fi
 
 ## Example
 
-See [`pontif-playground/examples/struct-member-block.ptf`](../pontif-playground/examples/struct-member-block.ptf).
+See [`pontif-playground/examples/struct-member-block.ptf`](../pontif-playground/examples/struct-member-block.ptf),
+and [`declaration-order.ptf`](../pontif-playground/examples/declaration-order.ptf) for
+the immutable-copy method and the other forms that stop depending on where a type is
+declared (docs/parser-linker-refactor.md item 6).

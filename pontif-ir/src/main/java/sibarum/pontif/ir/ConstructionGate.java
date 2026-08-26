@@ -595,14 +595,15 @@ final class ConstructionGate {
         for (IrSort.Structural node : chain) {
             for (Map.Entry<String, IrExpr> ext : node.extensions().entrySet()) {
                 if (members.containsKey(ext.getKey())) continue;  // already materialized
-                IrExpr value = substituteThisFields(ext.getValue(), members);
-                if (mentionsSelf(value) || mentionsThis(value)) {
+                String unbound = unboundSelfReference(ext.getValue(), members);
+                if (unbound != null) {
                     throw new CompileException(
                             "Extension field '" + ext.getKey() + "' of '" + node.name()
-                                    + "' references a field that is not bound at construction "
-                                    + "of '" + r.typeName() + "'",
+                                    + "' references '" + unbound + "', which is not bound at "
+                                    + "construction of '" + r.typeName() + "'",
                             ext.getValue().origin());
                 }
+                IrExpr value = substituteThisFields(ext.getValue(), members);
                 IrSort fieldSort = node.members().get(ext.getKey());
                 if (fieldSort != null && gated(fieldSort, structs)) {
                     IrSort arg = effectiveArg(value, fieldSort, lens, ctx, structs);
@@ -645,6 +646,33 @@ final class ConstructionGate {
      * The parser's whitelist guarantees the initializer is built from exactly
      * these node kinds.
      */
+    /**
+     * The reference in an extension initializer that construction cannot bind — a {@code this.f}
+     * (or {@code @.f}) whose field is not bound yet, or a bare {@code this}/{@code @} — or null
+     * when every reference resolves.
+     *
+     * <p>Asked of the initializer BEFORE {@link #substituteThisFields}, never after. Substitution
+     * splices in the constructor's ARGUMENT expressions, and those legitimately mention the
+     * {@code this} of an enclosing method: the immutable-copy method inside the struct's own member
+     * block ({@code struct Span(lo:Int, hi:Int) -> let this.origin:Int = this.lo} constructed by
+     * {@code Span(this.lo, this.hi)}) is the ordinary case. Judging the substituted expression
+     * mistook the arguments' {@code this} for the initializer's own and rejected it.
+     */
+    private static String unboundSelfReference(IrExpr e, Map<String, IrExpr> members) {
+        return switch (e) {
+            case IrExpr.FieldAccess fa when isThis(fa.base()) ->
+                    members.containsKey(fa.fieldName()) ? null : fa.fieldName();
+            case IrExpr.FieldAccess fa -> unboundSelfReference(fa.base(), members);
+            case IrExpr.BinOp op -> {
+                String left = unboundSelfReference(op.left(), members);
+                yield left != null ? left : unboundSelfReference(op.right(), members);
+            }
+            case IrExpr.SelfRef s -> "@";
+            case IrExpr.Var v when v.name().equals("this") -> "this";
+            default -> null;
+        };
+    }
+
     private static IrExpr substituteThisFields(IrExpr e, Map<String, IrExpr> members) {
         return switch (e) {
             case IrExpr.FieldAccess fa when isThis(fa.base()) && members.containsKey(fa.fieldName()) ->
