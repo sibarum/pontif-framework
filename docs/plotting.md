@@ -207,13 +207,20 @@ bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif 
 
 ## The renderer seam
 
-`pontif.plot` is the toolkit's face to the language, and the toolkit is being replaced. Dasum (GLFW/OpenGL) is
+`pontif.plot` is the toolkit's face to the language, and that face is being replaced. Dasum (GLFW/OpenGL) is
 going; VexelRay is arriving; the replacement is deliberately **not a port** — `pontif-builtin-gui` is to be
-deleted rather than rewritten, and `pontif-playground`, which is transitional, goes with it.
+deleted rather than rewritten.
 
-So the state worth being in *before* that day is one where **those two leave together and nothing else has to
-change**. That is what this section records, and `ToolkitContainmentTest` is what keeps it true: no module outside
-`pontif-builtin-gui` and `pontif-playground` may so much as name the toolkit, in code, in a pom, or in a comment.
+**The editor is not part of that deletion** (ruled 2026-08-26, correcting an earlier plan that had the two leave
+together). `pontif-playground` stays, on its own toolkit, for as long as it is the editor — so the cut is
+`pontif-builtin-gui` **alone**, and the editor has to be able to compile and run without it. That is a different
+and stricter requirement than "they go together", and it is what §[The cut](#the-cut-when-it-comes) below is
+rehearsed against.
+
+So the state worth being in is one where **the windowed extension can leave on its own and nothing else has to
+change**. `ToolkitContainmentTest` is what keeps it true: no module outside `pontif-builtin-gui` and
+`pontif-playground` may so much as name the toolkit, in code, in a pom, or in a comment. The editor is on that
+list permanently rather than pending its own deletion — it is a toolkit consumer, and allowed to be one.
 
 ### What the seam actually is
 
@@ -237,25 +244,43 @@ Two modules needed the renderer and neither needed the toolkit, which is the who
 - **The root pom** carried `<dasum.version>`. A build declaring the version of a GUI toolkit is a build that knows
   a GUI toolkit exists; the property now lives in the two poms that use one, and the reactor is toolkit-free.
 
+- **The editor** compiled against the windowed extension in three places: `App` twice (the `--run-gui` flag path
+  and the Run-as-GUI action) and `DefinitionNavigator` once (parsing `pontif.gui`'s source so its names stay
+  navigable). All three now go through `OptionalGui`, which resolves the two class names at runtime, so the
+  extension is **a capability the editor may or may not have**: it compiles without it, runs without it, and the
+  Run-as-GUI action reports that it cannot rather than spawning a child JVM that dies of a missing main class.
+  The dependency is `runtime`-scoped for exactly that reason — it must be on the classpath, and nothing may
+  compile against it. The cost, stated: a reflective call is not a native-image reachability anchor, so the
+  `-Pnative` editor needs `OptionalGui.LAUNCHER` in its reflection config to keep that path working.
+
+  Making it runtime-scoped immediately exposed a second hidden coupling: **the editor's debug port was resting on
+  the doomed module.** `App` imports `DebugServer`, `DebugSession` and `ProgramLauncher` directly and never
+  declared `pontif-builtin-net` — it arrived transitively *through* `pontif-builtin-gui`. Now declared, at compile
+  scope, where it always belonged.
+
 `pontif-cli` and `pontif-builtin-net` only mentioned it in prose (a JVM flag's comment, a "counterpart to
 `GuiLauncher`" note) — reworded, because after the deletion they would be explaining themselves in terms of
 something that no longer exists.
 
-### The drop, when it comes
+### The cut, when it comes
 
-Delete `pontif-builtin-gui` and `pontif-playground` together, plus their two `<module>` entries. Then:
+Delete `pontif-builtin-gui`: the module, its `<module>` entry, and its one `<dependency>` block in
+`pontif-playground`. The editor stays. **Rehearsed, not assumed** — with the module gone from the reactor and from
+the editor's pom, the editor compiles and 19 of its 20 navigator tests pass. What the day actually costs:
 
-1. Nothing else in the reactor fails to compile. Rehearsed, not assumed: with both `<module>` entries removed the
-   remaining eighteen modules build and every test passes.
-2. `pontif-cli`'s `EditorLauncher` still resolves an editor binary by name and env var, and finds none. Its
-   contract already covers that (it returns `null` and the CLI says so).
-3. `pontif.shape`'s `render` and `previewGradientField` lose their renderer. Nothing breaks at build time — the
-   stub keeps the tests linking — and both functions stop having anywhere to draw until they are re-pointed at
-   the VexelRay path. That is the one piece of language surface the drop takes with it, and it is named here so
-   it is a decision rather than a discovery.
-4. Widen `ToolkitContainmentTest.MAY_NAME_IT` to nothing, or delete the test: with the toolkit gone the rule has
-   nothing left to protect.
-
-The three `sibarum.pontif.gui` call sites in the editor (`App` twice, `DefinitionNavigator` once) are inside the
-module that leaves, so they are not work — they are the reason the two are one cut. Nothing has been invested in
-making the editor survive without them, on purpose: it is transitional, and its successor is MainFrame.
+1. **One test goes with it.** `DefinitionNavigatorTest.resolvesGuiExtensionStruct_withoutGlobalInstall` asserts
+   that `requires pontif.gui.{Label}` resolves `Label`. That is a feature of the deleted module, so the test is
+   deleted rather than fixed — the one failure in the rehearsal, and the right one.
+2. **The Run-as-GUI action stops working and says so**, via `OptionalGui.present()`. Ordinary Run is unaffected:
+   it goes through `ProgramLauncher`, which is `pontif-builtin-net` and stays.
+3. **`pontif.shape` stops linking entirely** — not just `render`. Its third line is
+   `requires pontif.plot.{Volume, scene}`, and without *some* `pontif.plot` the module does not resolve even for
+   `distanceAt`, which touches no renderer. Shape's own tests are unaffected (they run against `StubRenderer`),
+   but any program the editor runs that requires `pontif.shape` fails to link. **This is the one thing on this
+   list that needs a decision rather than a deletion**, and there are two answers: ship a non-drawing
+   `pontif.plot` for the seam, or make `render(shape)` return a value a renderer consumes so the dependency points
+   renderer→shape. The second is the honest one and is the natural companion to the VexelRay renderer landing.
+4. `pontif-cli`'s `EditorLauncher` is unaffected — it resolves an editor binary by name and env var, and the
+   editor is still there.
+5. Drop `pontif-builtin-gui` from `ToolkitContainmentTest.MAY_NAME_IT`, leaving the editor as the sole entry.
+   The rule still has something to protect: the editor keeps its toolkit, and nothing else may acquire one.

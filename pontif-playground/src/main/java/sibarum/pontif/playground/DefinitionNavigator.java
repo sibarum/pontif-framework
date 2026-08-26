@@ -4,6 +4,7 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrSourcePrinter;
 import sibarum.pontif.ir.IrStmt;
+import sibarum.pontif.parser.ParseException;
 import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.module.BuiltinModules;
 
@@ -317,11 +318,18 @@ public final class DefinitionNavigator {
             out.put(e.getKey(), new Builtin(e.getValue(), BuiltinModules.sourceOf(e.getKey())));
         }
         out.computeIfAbsent("pontif.gui", k -> {
+            // Through OptionalGui: the windowed extension is optional (and outlived by this editor), so its
+            // absence costs one navigable module rather than a NoClassDefFoundError on startup. The parse is
+            // caught separately and narrowly — a module that is present but does not parse is a different
+            // fact from one that is not here, and the old catch-all could not tell them apart.
+            String src = OptionalGui.moduleSource();
+            if (src == null) {
+                return null;
+            }
             try {
-                String src = new sibarum.pontif.gui.GuiExtension().pontifSource();
                 return new Builtin(PontifParser.parseModule(src, "pontif.gui"), src);
-            } catch (Exception e) {
-                return null;  // GUI module unavailable — skip it
+            } catch (ParseException e) {
+                return null;
             }
         });
         return out;

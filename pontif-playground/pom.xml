@@ -46,16 +46,31 @@
              resolves their modules, and the "Run" subprocess inherits this classpath (App spawns
              `java -cp <inherited> …`). They then self-register via ServiceLoader (docs/extensions.md)
              — adding a new extension is just a new dependency here, no code wiring. pontif-builtin-gui
-             pulls -net transitively; -shape reuses the plot render path. -->
+             pulls -net transitively. -->
+        <!-- Compile scope, and declared rather than inherited: the editor imports DebugServer, DebugSession
+             and ProgramLauncher directly (the debug port every Run streams telemetry over). It used to arrive
+             transitively THROUGH pontif-builtin-gui, so the editor's own debug machinery was resting on a
+             module scheduled for deletion — found by making that one runtime-scoped and watching this break. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-builtin-net</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- RUNTIME scope, and that is the whole decoupling: the windowed extension is being deleted rather
+             than ported (docs/plotting.md, §The renderer seam) and this editor is not, so the editor must be
+             able to compile without it. Nothing here names it except OptionalGui, by string, at runtime — so
+             removing this one block is the entire cut, and until then GUI programs keep running. -->
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-builtin-gui</artifactId>
             <version>${project.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-builtin-shape</artifactId>
             <version>${project.version}</version>
+            <scope>runtime</scope>
         </dependency>
         <!-- GPU compute (`… on Gpu`, docs/gpu-kernels.md): self-registers via ServiceLoader like the
              other builtin extensions, so the editor's live compiler + the "Run" subprocess resolve

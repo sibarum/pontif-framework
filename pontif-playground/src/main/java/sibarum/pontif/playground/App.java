@@ -283,7 +283,8 @@ public final class App {
             return;
         }
         if (args.length >= 1 && RUN_GUI_FLAG.equals(args[0])) {
-            sibarum.pontif.gui.GuiLauncher.main(java.util.Arrays.copyOfRange(args, 1, args.length));
+            // Through OptionalGui, because the windowed extension is optional and this editor outlives it.
+            OptionalGui.runLauncher(java.util.Arrays.copyOfRange(args, 1, args.length));
             return;
         }
 
@@ -653,9 +654,17 @@ public final class App {
      * installs the windowed extensions) and the completion wording.
      */
     private static void onRunGuiClicked() {
+        // Say so here rather than spawning a child that dies of a missing main class: the windowed extension is
+        // a capability the editor may not have (see OptionalGui), and a clear line beats an exit code.
+        if (!OptionalGui.present()) {
+            Status.bad("no windowed extension on the classpath",
+                    "GUI programs need pontif-builtin-gui (or its successor); " + OptionalGui.LAUNCHER
+                            + " was not found. Ordinary Run is unaffected.");
+            return;
+        }
         String code = TextStates.contentOf(codeText);
         String sourceName = currentFile != null ? currentFile.getFileName().toString() : "editor.ptf";
-        launchProgram("sibarum.pontif.gui.GuiLauncher", RUN_GUI_FLAG, sourceName, code, resolveDir(),
+        launchProgram(OptionalGui.LAUNCHER, RUN_GUI_FLAG, sourceName, code, resolveDir(),
                 "GUI window closed (" + sourceName + ")");
     }
 

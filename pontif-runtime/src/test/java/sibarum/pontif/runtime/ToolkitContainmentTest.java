@@ -18,9 +18,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Dasum — the GLFW/OpenGL toolkit the editor and the {@code pontif.gui} / {@code pontif.plot} modules were
  * built on — is being replaced by VexelRay. The replacement is not a port: {@code pontif-builtin-gui} is to be
- * deleted, and {@code pontif-playground} is transitional and goes with it. So the useful state to be in
- * <b>before</b> that happens is one where the two leave together and nothing else has to change, and the useful
- * thing to know is the moment that stops being true.
+ * deleted. <b>The editor is not</b> (ruled 2026-08-26): it stays, on that toolkit, for as long as it is the
+ * editor. So the windowed extension has to be able to leave <em>on its own</em>, which makes the useful state one
+ * where nothing outside these two names the toolkit at all — and the useful thing to know is the moment that
+ * stops being true.
  *
  * <p>It stopped being true twice already, quietly. {@code pontif-builtin-shape} depended on
  * {@code pontif-builtin-gui} to borrow its render path — so a pure SDF-algebra assertion pulled a window toolkit
@@ -48,7 +49,10 @@ class ToolkitContainmentTest {
      * <ul>
      *   <li>{@code pontif-builtin-gui} — the {@code pontif.gui} / {@code pontif.plot} extension. It <em>is</em>
      *       the toolkit's face to the language; there is nothing to isolate it from itself.</li>
-     *   <li>{@code pontif-playground} — the editor, its only consumer, and transitional.</li>
+     *   <li>{@code pontif-playground} — the editor. Its only application consumer, and on this list
+ *       <b>permanently</b> rather than pending its own removal: it is allowed to be a toolkit consumer, which is
+ *       precisely why nothing else is. It reaches the windowed extension only through {@code OptionalGui}, by
+ *       name at runtime, so it compiles and runs with that extension absent.</li>
      * </ul>
      * <b>Adding a third entry is not how a failure of this test is fixed.</b> A module that needs to draw needs
      * the drawing to reach it as data — a string, a grid of numbers, a value — which is what the two modules that
