@@ -1,5 +1,31 @@
 # Reliable plotting — interval arithmetic as the no-lie law at the pixel
 
+> **RULED 2026-08-26 (James): the enclosure algebra's home is `vexelray-gui-plot`, not Pontif.**
+> It exists in both — this doc's design, implemented in `pontif.plot.ptf`, and independently in
+> Java as `Expr` / `Enclosure` / `Cell` / `Interval` / `Framing` / `Landmarks`, which is what the
+> working VexelRay calculator (`calculator-vexel-demo`) actually plots through. One of them had to
+> be the implementation. It is the Java one.
+>
+> **What this does and does not move:**
+>
+> - **Moves.** The plotting *policy* built on the evaluator, all of it in `pontif.plot.ptf`:
+>   column rasterization (§Reliable plotting), the subdivision probe separating a resolvable pole
+>   from a genuinely dense region, auto-framing, and landmark finding (`zeros`, `optima`,
+>   `asymptotes`, `intersections`). When `pontif.plot` is rebuilt, these become natives over
+>   `Framing.automatic` / `Landmarks.survey` rather than ~780 lines of Pontif.
+> - **Stays, and was never duplicated.** `evalInterval`, `Interval`, `Unbounded`, `Undefined` are
+>   **`pontif.algebra`**'s, in `pontif-runtime` — a core-language feature (the no-lie law over the
+>   algebraic AST) that plotting happens to use. Nothing about this ruling touches them.
+> - **Stays, and is the part that was distinctively Pontif.** The trait-directed projection model:
+>   a *type* becomes plottable by assigning `Curve2D` / `HeightMap3D` / `Cloud3D` / `Volume3D` and
+>   implementing its projection, with no function-passing. That is a language-surface idea, not an
+>   algebra. So is the layer vocabulary (`fade`, `cmap`, `wire`, `zIndex`, `onTop`, `behind`).
+>
+> **What Pontif gains by taking the Java side.** Three things it does not have: `Expr.derivative`
+> (symbolic differentiation), 3D `Volume` framing where `autoFrame` is 2D only, and
+> `Landmarks.Survey` — which reports what it *suppressed* and why (`notice()`). That last one is
+> the no-lie law applied to the landmark pass itself, and Pontif is the side missing it.
+
 Status: **DESIGN (2026-07-21).** Successor to docs/plotting.md's Slice 5 ("adaptive sampling +
 derivative honesty"), now reframed: point sampling cannot be made honest for asymptotes, so the
 honest renderer is *interval-arithmetic reliable graphing* (Tupper). Builds directly on the

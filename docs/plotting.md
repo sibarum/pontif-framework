@@ -205,6 +205,15 @@ bounds — so a fully-dynamic sample count `N` isn't expressible in pure Pontif 
 - Module placement: a dedicated `pontif.plot` module vs folding into `pontif.gui` (leaning
   dedicated, per the module-granularity preference).
 
+**RULED 2026-08-26 — when this module is rebuilt, the numerics come from `vexelray-gui-plot`.**
+The enclosure algebra, auto-framing and landmark finding exist twice: as ~780 lines of Pontif here,
+and independently in Java, which is what the working VexelRay calculator plots through. The Java one
+is the implementation; this module's rebuild is a surface over it. What stays Pontif's is the part
+that was always the point — the trait-directed projection model (a *type* becomes plottable) and the
+layer vocabulary — and `pontif.algebra`'s `evalInterval`, which is core-language and was never
+duplicated. Details and what the trade buys in
+[reliable-plotting.md](reliable-plotting.md).
+
 ## The renderer seam
 
 `pontif.plot` is the toolkit's face to the language, and that face is being replaced. Dasum (GLFW/OpenGL) is
