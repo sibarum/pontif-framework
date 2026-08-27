@@ -1,7 +1,9 @@
-requires pontif.shape.{Sphere, previewGradientField}
+requires pontif.shape.{Sphere, gradientField}
 
-# docs/shapes.md S1 — the first SDF primitive, shown as its gradient field. `previewGradientField`
-# samples the sphere's signed distance field on a 24^3 grid and renders it volumetrically (soft /
-# voxelized), glowing across the surface shell tinted by gradient direction. For a crisp solid
-# surface use `render` instead (see render-sphere.ptf).
-main ( previewGradientField(Sphere(1.0)) )
+# docs/shapes.md S1 — the first SDF primitive, as its gradient field. `gradientField` samples the
+# sphere's signed distance on a 24^3 grid and clamps it to a thin band around the surface, so a
+# volumetric renderer lights the surface shell (tinted by gradient direction) rather than the whole
+# box. For a crisp solid surface use `raymarch` instead (see render-sphere.ptf).
+#
+# The sampling is Pontif's; the result is a value. Nothing here draws.
+main ( gradientField(Sphere(1.0)) )

@@ -12,8 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * {@code pontif.shape} because it wasn't hand-installed there. This test deliberately does NOT call
  * {@code Extensions.install}: it relies purely on ServiceLoader auto-discovery ({@code BuiltinModules}
  * installs every {@code Extension} on the classpath). A program that {@code requires pontif.shape}
- * — which itself {@code requires pontif.plot} — must compile and run, proving both the shape module
- * and its transitive plot dependency self-register with no wiring at any entry point.
+ * must compile and run with no wiring at any entry point.
+ *
+ * <p>It used to prove one thing more — that shape's <em>transitive plot dependency</em> self-registered too,
+ * because shape did not link without a renderer module present. It has no such dependency now: the views are
+ * values it returns. So this is back to asserting one module, which is what it was always about.
  */
 class DiscoveryTest {
 

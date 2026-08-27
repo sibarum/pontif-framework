@@ -1,5 +1,17 @@
 # Shapes — SDF composition, field-attributes, topologize, export
 
+> **RULED 2026-08-26 — a view is a value, and this module names no renderer.** `render(s)` and
+> `previewGradientField(s)` used to *call* `pontif.plot`'s `scene`. They are now `raymarch(s)` and
+> `gradientField(s)`, returning a `Raymarch` and a `GradientField`, and `pontif.shape` no longer
+> `requires pontif.plot` at all. The dependency points **renderer → shape**.
+>
+> The reason is not tidiness. Line 3 of the module was `requires pontif.plot.{Volume, scene}`, so
+> `distanceAt` — pure SDF algebra, touching no pixels — would not *link* without a windowing
+> toolkit on the classpath. That also cost a whole test-scope stub extension standing in for a
+> renderer nobody was testing; it is deleted, and `RenderLoweringTest` now reads the program's own
+> result. Names below still say `render` / `previewGradientField` in the history sections; read
+> them as the functions they became.
+
 Status: **BUILDING (2026-07-03).** Scoped, ratified, **S1–S4 LANDED** (module + `SdfShape` +
 `Sphere` + live preview; transforms + adjustable anchor; boolean CSG modifiers; attribute fields;
 see Slices). Originally net-new; scoped
@@ -121,7 +133,7 @@ trait ScalarField{ valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal }
 struct Height() ; assign trait Height:ScalarField { valueAt(x,y,z) -> z }
 
 let a = attr(Sphere(1.0), "height", Height())   # bundle: geometry + one named field
-render(shapeOf(a))                               # geometry, unchanged
+raymarch(shapeOf(a))                             # geometry, unchanged
 attrAt(a, 0.0, 0.0, 5.0)                         # 5.0 — the field, evaluated on demand
 ```
 A field is defined by a method (a `ScalarField`), not a first-class function value, to stay on the
@@ -354,8 +366,8 @@ previewed field is a caught lie).
   Pontif-side, **clamps it to a surface band** so the reused `pontif.plot` volumetric renderer lights
   the surface shell (not the whole box — see §Live preview (a)), and hands it over as a `Volume`
   layer. **No new native code**; `ShapeExtension` declares no `calls()` of its own (composes existing
-  `pontif.plot` functions). Witness: `RenderLoweringTest.previewGradientField_samplesSphereSdfOverGrid_inPontif`
-  runs `previewGradientField(Sphere(1.0))` against a stub renderer (no window) and asserts the clamped 24³
+  `pontif.plot` functions). Witness: `RenderLoweringTest.gradientField_samplesSphereSdfOverGrid_inPontif`
+  runs `gradientField(Sphere(1.0))` (no renderer at all, since it returns a value) and asserts the clamped 24³
   grid — corner clamped to `+band` (outside), near-centre to `−band` (inside), and a near-surface
   voxel carrying the exact `√(x²+y²+z²)−r`, plus the box it was sampled over. Example:
   `pontif-builtin-shape/examples/sphere.ptf`. (Build with `-am`; the render path lives in

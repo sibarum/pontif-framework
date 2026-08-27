@@ -1,8 +1,7 @@
 requires pontif.core.{Stream}
 requires pontif.math.{sqrt, abs, clamp, sin, cos, radians, min, max, mix}
-requires pontif.plot.{Volume, scene}
 exports @.{SdfShape, Sphere, Box, Torus, Cylinder, Capsule, Plane,
-           previewGradientField, render, distanceAt,
+           GradientField, Raymarch, gradientField, raymarch, distanceAt,
            translate, scale, rotateX, rotateY, rotateZ,
            union, difference, intersect,
            smoothUnion, smoothIntersect, smoothDifference,
@@ -119,27 +118,38 @@ let sdfIndices:Stream[Int:0 <= @ < 13824];
 # fragment calls this instead (the same workaround pontif.plot uses for volumeAt).
 function distanceAt(s:[SdfShape], x:Decimal, y:Decimal, z:Decimal):Decimal -> s.distance(x, y, z)
 
-# Gradient-field preview (docs/shapes.md S1, sampled path (a)): visualize the shape's
-# SDF as a VOLUMETRIC GRADIENT FIELD — sample the signed distance on a 24^3 grid over
-# the shape's bounds, CLAMP it to a thin band around the surface, and hand it to
-# pontif.plot's volumetric renderer. That renderer lights each voxel by its gradient
+# --- The two views, as VALUES -------------------------------------------------------
+# Neither of the functions below draws anything. Each RETURNS a description of a view,
+# and a renderer — any renderer — consumes it. That is what keeps this module a library:
+# `pontif.shape` names no renderer, so it links, runs and is testable with none on the
+# classpath, and the dependency points renderer → shape rather than the other way about.
+# (It used to point the other way, and the cost was that `distanceAt` — which touches no
+# pixels at all — would not link without a windowing toolkit present.)
+
+# A sampled scalar field over an axis-aligned box: `vs` is the 24^3 grid row-major in
+# x,y,z, and `opacity` is how strongly the shell should glow. What a renderer does with
+# it is the renderer's business; nothing here is a display setting.
+struct GradientField(vs:_, xlo:Decimal, xhi:Decimal, ylo:Decimal, yhi:Decimal,
+                     zlo:Decimal, zhi:Decimal, opacity:Decimal)
+
+# Gradient-field view (docs/shapes.md S1, sampled path (a)): the shape's SDF sampled on
+# a 24^3 grid over its own bounds and CLAMPED to a thin band around the surface.
+#
+# The clamp is the whole trick. A volumetric renderer lights each voxel by gradient
 # MAGNITUDE and tints it by gradient DIRECTION — and a raw SDF has unit gradient
 # everywhere, so it would glow as a solid box. Clamping flattens the field outside
-# |sdf| <= band (gradient 0 → transparent) and leaves it varying only across the
-# surface shell (gradient 1 → lit), so what glows is the surface shell, tinted by its
-# normal. This is NOT a solid-surface view — use `render` for a crisp sphere-traced
-# surface; this shows the gradient field itself. Only the sampled numbers cross to the
-# native renderer.
+# |sdf| <= band (gradient 0 → transparent) and leaves it varying only across the surface
+# shell (gradient 1 → lit), so what glows is the shell, tinted by its normal. This is NOT
+# a solid-surface view — `raymarch` is that; this shows the gradient field itself.
 #
-# `opacity` is the shell's glow intensity (the Volume layer's additive alpha); lower
-# is subtler. The one-arg form uses a sensible default; pass a second argument to tune
-# it, e.g. previewGradientField(Sphere(1.0), 0.05).
-function previewGradientField(s:[SdfShape]):Stream[String] -> gradientFieldGlow(s, 0.1)
+# The one-arg form takes a sensible opacity; pass a second to tune it, e.g.
+# gradientField(Sphere(1.0), 0.05).
+function gradientField(s:[SdfShape]):GradientField -> sampledShell(s, 0.1)
 
-function previewGradientField(s:[SdfShape], opacity:Decimal):Stream[String] -> gradientFieldGlow(s, opacity)
+function gradientField(s:[SdfShape], opacity:Decimal):GradientField -> sampledShell(s, opacity)
 
-# (internal) shared body: sample + clamp the SDF shell, render the gradient field at `opacity`.
-function gradientFieldGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
+# (internal) shared body: sample + clamp the SDF shell at `opacity`.
+function sampledShell(s:[SdfShape], opacity:Decimal):GradientField -> (
   let [{xlo, xhi, ylo, yhi, zlo, zhi}] = s.bounds()
   let dx = (xhi - xlo) / 23.0
   let dy = (yhi - ylo) / 23.0
@@ -148,14 +158,14 @@ function gradientFieldGlow(s:[SdfShape], opacity:Decimal):Stream[String] -> (
   let vs = &sdfIndices:[ (i:Int) ->
     clamp(distanceAt(s, xlo + (i % 24) * dx, ylo + ((i / 24) % 24) * dy, zlo + (i / 576) * dz),
           0.0 - band, band) ]
-  scene({title = "shape"}, {Volume(vs, xlo, xhi, ylo, yhi, zlo, zhi, opacity, false, 3)})
+  GradientField(vs, xlo, xhi, ylo, yhi, zlo, zhi, opacity)
 )
 
-# --- GPU render (docs/sdf-glsl.md) -------------------------------------------------
-# `render` lowers the shape's signed-distance function to a GLSL `float map(vec3 p)`
-# (native `sdfMap`, generated interpreter-side) and hands it to the renderer's raymarch
-# layer with the shape's world-space bounding box — a real sphere-traced surface,
-# not the sampled glow of `preview`. The GLSL crosses the boundary as inert text.
+# --- GPU view (docs/sdf-glsl.md) ---------------------------------------------------
+# `raymarch` lowers the shape's signed-distance function to a GLSL `float map(vec3 p)`
+# (native `sdfMap`, generated interpreter-side) and pairs it with the shape's world-space
+# bounding box — everything a renderer needs for a real sphere-traced surface, rather
+# than the sampled glow of `gradientField`. The GLSL crosses the boundary as inert text.
 
 # A raymarch layer: a GLSL `map` shader + the world AABB (center ± half-extent).
 struct Raymarch(map:String,
@@ -165,7 +175,7 @@ struct Raymarch(map:String,
 # (native) Lower a shape to GLSL `float map(vec3 p){…}`. Backed by SdfGlsl::map.
 function sdfMap(s:[SdfShape]):String -> ""
 
-function render(s:[SdfShape]):Stream[String] -> (
+function raymarch(s:[SdfShape]):Raymarch -> (
   let [{xlo, xhi, ylo, yhi, zlo, zhi}] = s.bounds()
   let cx = (xlo + xhi) / 2.0
   let cy = (ylo + yhi) / 2.0
@@ -173,7 +183,7 @@ function render(s:[SdfShape]):Stream[String] -> (
   let hx = (xhi - xlo) / 2.0
   let hy = (yhi - ylo) / 2.0
   let hz = (zhi - zlo) / 2.0
-  scene({title = "shape"}, {Raymarch(sdfMap(s), cx, cy, cz, hx, hy, hz)})
+  Raymarch(sdfMap(s), cx, cy, cz, hx, hy, hz)
 )
 
 # --- Transforms (docs/shapes.md S2) ------------------------------------------------

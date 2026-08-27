@@ -1,8 +1,7 @@
-requires pontif.shape.{Sphere, translate, difference, previewGradientField}
+requires pontif.shape.{Sphere, translate, difference, gradientField}
 
-# docs/shapes.md S3 — constructive solid geometry. A sphere with a smaller sphere carved out of
-# it (a bite), shown as its gradient field (a glowing shell). Booleans are min/max over signed
-# distances; this is the first genuinely non-symmetric shape (a lone sphere looked the same under
-# any transform). Try union / intersect / smoothUnion in place of difference; use `render` for a
-# solid surface.
-main ( previewGradientField(difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0}))) )
+# docs/shapes.md S3 — constructive solid geometry. A sphere with a smaller sphere carved out of it
+# (a bite), as its gradient field. Booleans are min/max over signed distances; this is the first
+# genuinely non-symmetric shape (a lone sphere looked the same under any transform). Try union /
+# intersect / smoothUnion in place of difference; use `raymarch` for a solid surface.
+main ( gradientField(difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0}))) )

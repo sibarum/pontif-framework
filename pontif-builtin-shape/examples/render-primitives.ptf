@@ -1,9 +1,9 @@
-requires pontif.shape.{Box, Cylinder, Torus, difference, smoothUnion, rotateX, render}
+requires pontif.shape.{Box, Cylinder, Torus, difference, smoothUnion, rotateX, raymarch}
 
 # docs/shapes.md primitive roster + docs/sdf-glsl.md — a rounded cube with a cylindrical bore,
-# blended with a torus collar. Box, Cylinder, and Torus are new primitives; each renders on the
-# GPU with no Java change, because the lowerer reads each shape's own analytic distance body.
-main ( render(smoothUnion(
+# blended with a torus collar. Box, Cylinder and Torus are primitives; each reaches the GPU with no
+# Java change, because the lowerer reads each shape's own analytic distance body.
+main ( raymarch(smoothUnion(
   difference(Box(1.0, 1.0, 1.0), Cylinder(0.55, 2.0)),
   rotateX(Torus(1.15, 0.18), 90.0, {0.0, 0.0, 0.0}),
   0.1)) )

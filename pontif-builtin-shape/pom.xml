@@ -11,12 +11,15 @@
     <artifactId>pontif-builtin-shape</artifactId>
 
     <!--
-      SDF shape composition (docs/shapes.md). S1: parameterized primitives + the `SdfShape` trait
-      + live preview. The preview reuses pontif.plot's volumetric renderer (no new native code),
-      which the `pontif.shape` module reaches by `requires` — a renderer, any renderer, at the
-      `Volume` + `scene` seam. No dependency on a renderer MODULE, deliberately: the tests supply
-      their own six-line `pontif.plot` (RenderLoweringTest.PlotStub), so nothing here compiles or
-      tests against the GUI stack. Meshing, attributes, and PLY export are later slices.
+      SDF shape composition (docs/shapes.md). S1: parameterized primitives + the `SdfShape` trait,
+      and two ways to view one: `raymarch` (the field lowered to GLSL, paired with its world box)
+      and `gradientField` (the field sampled Pontif-side and clamped to a shell).
+
+      Both RETURN their view rather than drawing it, so this module names no renderer and depends on
+      none — not in the pom, not in `requires`, not in the tests. That is what lets a pure SDF-algebra
+      assertion run without a window toolkit anywhere near the classpath. It was not always so, and
+      the cost was real: `distanceAt` would not link without one. Meshing, attributes and PLY export
+      are later slices.
     -->
     <properties>
         <main.class>sibarum.pontif.shape.ShapeLauncher</main.class>
@@ -43,7 +46,7 @@
 
     <build>
         <plugins>
-            <!-- Launch a shape .ptf (opens a preview window; GLFW needs native access):
+            <!-- Run a shape .ptf and print the value it evaluates to:
                  mvn -pl pontif-builtin-shape -am exec:exec -Dptf=examples/sphere.ptf -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>

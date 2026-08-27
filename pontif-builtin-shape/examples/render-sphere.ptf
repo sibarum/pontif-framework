@@ -1,6 +1,11 @@
-requires pontif.shape.{Sphere, render}
+requires pontif.shape.{Sphere, raymarch}
 
-# docs/sdf-glsl.md slice 0 — the same sphere as sphere.ptf, but `render` lowers its
-# signed-distance function to a GLSL `float map(vec3 p)` and hands it to the renderer's raymarch
-# layer: a real GPU sphere-traced surface (crisp, lit), not the sampled glow of `previewGradientField`.
-main ( render(Sphere(1.0)) )
+# docs/sdf-glsl.md slice 0 — the same sphere as sphere.ptf, but as a GPU view. `raymarch` lowers
+# the shape's signed-distance function to a GLSL `float map(vec3 p)` and pairs it with the shape's
+# world box: everything a renderer needs for a crisp sphere-traced surface, rather than the sampled
+# glow of `gradientField`.
+#
+# It RETURNS that pairing rather than drawing it, so with no renderer on the classpath what you see
+# is the value itself — which is its own demonstration, since the GLSL in it was written by nobody:
+# it is this program's `distance` body, partially evaluated.
+main ( raymarch(Sphere(1.0)) )

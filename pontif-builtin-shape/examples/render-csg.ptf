@@ -1,11 +1,11 @@
-requires pontif.shape.{Sphere, translate, rotateY, difference, smoothUnion, render}
+requires pontif.shape.{Sphere, translate, rotateY, difference, smoothUnion, raymarch}
 
-# docs/sdf-glsl.md slice 1 — the general lowerer inlines each shape's own `distance` body,
-# so composites and transforms render on the GPU too: a sphere with a smaller sphere bitten
-# out, smoothly blended, then rotated. Every node (difference, smoothUnion, translate,
-# rotateY, Sphere) lowers to GLSL by partial evaluation of the shape tree — no per-node
-# special-casing, and user-defined `assign trait X:SdfShape` shapes render the same way.
-main ( render(rotateY(
+# docs/sdf-glsl.md slice 1 — the general lowerer inlines each shape's own `distance` body, so
+# composites and transforms reach the GPU too: a sphere with a smaller sphere bitten out, smoothly
+# blended, then rotated. Every node (difference, smoothUnion, translate, rotateY, Sphere) lowers to
+# GLSL by partial evaluation of the shape tree — no per-node special-casing, and a user-defined
+# `assign trait X:SdfShape` shape lowers the same way.
+main ( raymarch(rotateY(
   smoothUnion(
     difference(Sphere(1.2), translate(Sphere(0.9), {0.8, 0.4, 0.4})),
     translate(Sphere(0.6), {0.0, 0.0 - 1.1, 0.0}),

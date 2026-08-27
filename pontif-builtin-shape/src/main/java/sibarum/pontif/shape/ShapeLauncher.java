@@ -7,11 +7,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Runs a shape Pontif program (docs/shapes.md). Extensions on the classpath ({@code pontif.shape}
- * and the {@code pontif.plot} render path it reuses) self-register via ServiceLoader discovery, so
- * this just compiles and runs the given {@code .ptf} <b>on the main thread</b> — so a
- * {@code render(...)} / {@code previewGradientField(...)} call's blocking GLFW loop owns the root
- * thread, satisfying GLFW's thread affinity (mirrors {@code GuiLauncher}).
+ * Runs a shape Pontif program (docs/shapes.md). Extensions on the classpath self-register via
+ * ServiceLoader discovery, so this just compiles and runs the given {@code .ptf} <b>on the main
+ * thread</b> — kept that way because a renderer's window loop, if one is present, needs the root
+ * thread.
+ *
+ * <p>{@code pontif.shape} itself draws nothing: {@code raymarch} and {@code gradientField} return
+ * views, so a program run here evaluates to a value. Seeing one is a renderer's job.
  *
  * <p>Args: {@code <program.ptf> [resolveDir] [displayName]} — {@code resolveDir} is where sibling
  * {@code requires} modules live (the editor passes the original file's directory when running an
@@ -25,8 +27,8 @@ public final class ShapeLauncher {
             System.exit(2);
             return;
         }
-        // pontif.shape (and the pontif.plot path it reuses) self-register via ServiceLoader
-        // discovery (BuiltinModules → installDiscovered) before the compile below — no wiring here.
+        // pontif.shape self-registers via ServiceLoader discovery (BuiltinModules → installDiscovered)
+        // before the compile below — no wiring here, and no renderer required for it to resolve.
 
         Path target = Path.of(args[0]);
         Path resolveDir = args.length > 1 && !args[1].isBlank() ? Path.of(args[1]) : null;
@@ -42,7 +44,9 @@ public final class ShapeLauncher {
             System.err.println(result.text());
             System.exit(1);
         }
-        // Success: the shape window has opened and been closed; the render/previewGradientField call's
-        // result is the inert for-effect placeholder, so there is nothing to print.
+        // A shape program evaluates to a VALUE — a Raymarch or a GradientField, or a plain number from
+        // distanceAt — so print it. It used to end in a native that opened a window and returned an
+        // inert placeholder, and there was nothing to say; now the result is the whole output.
+        System.out.println(result.text());
     }
 }

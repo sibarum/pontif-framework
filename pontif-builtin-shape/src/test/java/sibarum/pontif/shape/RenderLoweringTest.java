@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.IrInterpreter;
-import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 import sibarum.pontif.runtime.module.Extensions;
@@ -13,50 +12,48 @@ import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Headless verification of the shape extension (docs/shapes.md S1): what {@code render} and
- * {@code previewGradientField} hand to a renderer.
+ * Headless verification of the shape extension (docs/shapes.md S1): what {@code raymarch} and
+ * {@code gradientField} produce.
  *
- * <h2>The renderer is a stub, and that is the point</h2>
- * {@code pontif.shape} needs {@code Volume} and {@code scene} from {@code pontif.plot} — a renderer, any
- * renderer — and the one on the test classpath is {@link StubRenderer}, six lines of Pontif. So what is asserted
- * here is <b>shape's</b> contract at that seam: the sampled grid, the lowered GLSL, and the world box.
+ * <h2>There is no renderer here, and that is the point</h2>
+ * Both functions <b>return</b> their view — a {@code Raymarch} or a {@code GradientField} — so what is asserted
+ * is the program's own result: the sampled grid, the lowered GLSL, and the world box. Shape's contract, read
+ * directly, with nothing standing in for anything.
  *
- * <p>It used to install {@code pontif-builtin-gui}'s {@code PlotExtension} and then assert that the tuple built
- * into the renderer's own {@code VolumeLayer} / {@code RaymarchLayer} — which is that renderer's contract, asserted
- * through shape, and the only reason this module reached into the GUI stack at all. Those two assertions are
- * gone rather than moved: they were claims about a renderer that is being replaced.
+ * <p>It took two rounds to get here. First this test installed {@code pontif-builtin-gui}'s {@code PlotExtension}
+ * and asserted things about the renderer's own layer objects — that renderer's contract, asserted through shape.
+ * Then it installed a six-line {@code StubRenderer}, which was better but still a whole extension existing only
+ * because {@code pontif.shape} would not link without <em>some</em> {@code pontif.plot}. Now shape names no
+ * renderer at all and the stub is gone with the requirement that created it.
  *
- * <p>Everything below runs <b>in Pontif</b> — trait dispatch, the sampling loop, `distanceAt` recursion, the
- * stream→aggregate crossing — and no window opens. The actual render is verified manually:
- * {@code mvn -pl pontif-builtin-shape -am exec:exec -Dptf=examples/sphere.ptf}.
+ * <p>Everything below runs <b>in Pontif</b> — trait dispatch, the sampling loop, {@code distanceAt} recursion,
+ * the stream→aggregate crossing — and no window opens. Drawing one of these views is a renderer's business, and
+ * is verified wherever that renderer lives.
  */
 class RenderLoweringTest {
 
-    /** Install shape over the stub renderer, run {@code src}, and return the layers tuple {@code scene} got. */
-    private static RecordValue layersOf(String src, String name) {
+    /**
+     * Run {@code src} and return the view value it evaluated to.
+     *
+     * <p>There is nothing to stub. {@code gradientField} and {@code raymarch} <em>return</em> their
+     * view, so the assertion reads the program's own result — no renderer, no capturing native, and
+     * no second module on the classpath. That is the point of the seam, and this harness shrinking
+     * to three lines is the evidence for it: what used to be needed here was a whole stub extension
+     * standing in for a renderer nobody was testing.
+     */
+    private static RecordValue viewOf(String src, String name) {
         Extensions.install(new ShapeExtension());
-        Object[] captured = new Object[1];
-        NativeCalls.NativeCall stub = (args, ctx) -> {
-            captured[0] = args.size() > 1 ? args.get(1) : null;
-            return new IrInterpreter.DriveResult();
-        };
-        NativeCalls.register("renderScene", stub);
-        NativeCalls.register("pontif.plot/renderScene", stub);
-
-        PontifRunner.RunResult r = new PontifRunner().run(
-                new PontifCompiler().compile(src, name), PontifRunner.Engine.INTERPRETER);
-        assertFalse(r.isError(), () -> name + " should run; got " + r.text());
-        assertNotNull(captured[0], "renderScene should have received the {layers} tuple");
-        return (RecordValue) captured[0];
-    }
-
-    /** The one layer in a single-layer scene. */
-    private static RecordValue onlyLayer(RecordValue layers) {
-        return (RecordValue) layers.members().values().iterator().next();
+        PontifCompiler.CompileResult compiled = new PontifCompiler().compile(src, name);
+        PontifCompiler.CompileResult.Compiled ok = assertInstanceOf(
+                PontifCompiler.CompileResult.Compiled.class, compiled,
+                () -> name + " should compile; got " + compiled);
+        Object value = new IrInterpreter(ok.program().simplifier()).eval(ok.program().module());
+        return assertInstanceOf(RecordValue.class, value,
+                () -> name + " should evaluate to a view record; got " + value);
     }
 
     /** A Pontif aggregate of numbers as a {@code double[]}, in member order. */
@@ -80,15 +77,15 @@ class RenderLoweringTest {
     }
 
     @Test
-    void previewGradientField_samplesSphereSdfOverGrid_inPontif() {
-        RecordValue vol = onlyLayer(layersOf("""
-                requires pontif.shape.{Sphere, previewGradientField}
-                previewGradientField(Sphere(1.0))""", "sphere.ptf"));
+    void gradientField_samplesSphereSdfOverGrid_inPontif() {
+        RecordValue vol = viewOf("""
+                requires pontif.shape.{Sphere, gradientField}
+                gradientField(Sphere(1.0))""", "sphere.ptf");
         double[] vs = doubles(vol.members().get("vs"));
 
         // 24^3 samples over the sphere's bounds [-2,2]^3 (radius 1, box padded to 2r). The grid is
         // clamped to a surface band (±2·dx) so the volumetric render lights the surface shell, not
-        // the whole box (an SDF has unit gradient everywhere — see ShapeExtension.previewGradientField).
+        // the whole box (an SDF has unit gradient everywhere — see ShapeExtension.gradientField).
         double dx = 4.0 / 23.0;          // (xhi - xlo) / 23 for bounds [-2, 2]
         double band = 2.0 * dx;
         assertEquals(13824, vs.length, "24^3 SDF sample grid");
@@ -112,10 +109,10 @@ class RenderLoweringTest {
     }
 
     @Test
-    void render_lowersSphereSdfToGlslMap_withItsWorldBox() {
-        RecordValue ray = onlyLayer(layersOf("""
-                requires pontif.shape.{Sphere, render}
-                render(Sphere(1.0))""", "render.ptf"));
+    void raymarch_lowersSphereSdfToGlslMap_withItsWorldBox() {
+        RecordValue ray = viewOf("""
+                requires pontif.shape.{Sphere, raymarch}
+                raymarch(Sphere(1.0))""", "render.ptf");
 
         // The general lowerer inlines the SHAPE's OWN distance body (sqrt(x²+y²+z²) - r), so it
         // can't drift from the Pontif formula — not a hand-written `length(p) - r`.
@@ -129,12 +126,12 @@ class RenderLoweringTest {
 
     /** The general lowerer inlines each shape's real `distance` IR: composites + transforms. */
     @Test
-    void render_lowersCsgAndTransforms() {
+    void raymarch_lowersCsgAndTransforms() {
         // union(Sphere, translate(Sphere)) → min over the two children, the translate inlined as
         // a back-shifted point. Proves distanceAt recursion + this.<field> literals + math calls.
-        String map = renderMap("""
-                requires pontif.shape.{Sphere, translate, union, render}
-                render(union(Sphere(1.0), translate(Sphere(0.8), {0.9, 0.0, 0.0})))""");
+        String map = mapOf("""
+                requires pontif.shape.{Sphere, translate, union, raymarch}
+                raymarch(union(Sphere(1.0), translate(Sphere(0.8), {0.9, 0.0, 0.0})))""");
         // union → min; sphere A at p; sphere B at p - (0.9,0,0); radii 1.0 and 0.8 inlined.
         assertTrue(map.startsWith("float map(vec3 p){ return min("), () -> "union → min: " + map);
         assertTrue(map.contains("- 1.0"), () -> "sphere A radius inlined: " + map);
@@ -147,10 +144,10 @@ class RenderLoweringTest {
 
     /** The render-csg.ptf example: difference + smoothUnion + rotateY + translate all lower. */
     @Test
-    void render_lowersTheFullCsgExample() {
-        String map = renderMap("""
-                requires pontif.shape.{Sphere, translate, rotateY, difference, smoothUnion, render}
-                render(rotateY(
+    void raymarch_lowersTheFullCsgExample() {
+        String map = mapOf("""
+                requires pontif.shape.{Sphere, translate, rotateY, difference, smoothUnion, raymarch}
+                raymarch(rotateY(
                   smoothUnion(
                     difference(Sphere(1.2), translate(Sphere(0.9), {0.8, 0.4, 0.4})),
                     translate(Sphere(0.6), {0.0, 0.0 - 1.1, 0.0}),
@@ -166,41 +163,41 @@ class RenderLoweringTest {
 
     /** THE payoff: a user-defined SdfShape lowers to GLSL (no built-in special-casing). */
     @Test
-    void render_lowersUserDefinedShape() {
+    void raymarch_lowersUserDefinedShape() {
         // A ground plane at height 0: distance = y. Entirely user code, no built-in node.
-        String map = renderMap("""
-                requires pontif.shape.{SdfShape, render}
+        String map = mapOf("""
+                requires pontif.shape.{SdfShape, raymarch}
                 struct Slab(h:Decimal)
                 assign trait Slab:SdfShape {
                   distance(x:Decimal, y:Decimal, z:Decimal):Decimal -> y - this.h
                   bounds():[{Decimal,Decimal,Decimal,Decimal,Decimal,Decimal}] ->
                     {0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0, 0.0 - 4.0, 4.0}
                 }
-                render(Slab(0.5))""");
+                raymarch(Slab(0.5))""");
         assertEquals("float map(vec3 p){ return (p.y - 0.5); }", map,
                 "user shape's own distance body lowered to GLSL");
     }
 
     /** The library primitives render for free — the lowerer reads their real distance IR. */
     @Test
-    void render_lowersNewPrimitivesWithNoJavaChange() {
+    void raymarch_lowersNewPrimitivesWithNoJavaChange() {
         // Box: abs + max/min + sqrt, no residue. Torus: nested sqrt. Neither has a hand-written
         // GLSL template — both come straight from the Pontif distance bodies.
-        String box = renderMap("requires pontif.shape.{Box, render}\nrender(Box(1.0, 0.5, 2.0))");
+        String box = mapOf("requires pontif.shape.{Box, raymarch}\nraymarch(Box(1.0, 0.5, 2.0))");
         assertTrue(box.contains("abs(p.x)") && box.contains("sqrt(") && box.contains("max("),
                 () -> "box lowered from its distance body: " + box);
         assertFalse(box.contains("distanceAt") || box.contains("this.") || box.contains("pontif."),
                 () -> "no Pontif residue: " + box);
 
-        String torus = renderMap("requires pontif.shape.{Torus, render}\nrender(Torus(2.0, 0.5))");
+        String torus = mapOf("requires pontif.shape.{Torus, raymarch}\nraymarch(Torus(2.0, 0.5))");
         assertTrue(torus.contains("sqrt(") && torus.contains("- 2.0") && torus.contains("- 0.5"),
                 () -> "torus major/minor inlined: " + torus);
 
         // The render-primitives.ptf example: Box+Cylinder+Torus+difference+smoothUnion+rotateX
         // all lower together, no residue.
-        String combo = renderMap("""
-                requires pontif.shape.{Box, Cylinder, Torus, difference, smoothUnion, rotateX, render}
-                render(smoothUnion(
+        String combo = mapOf("""
+                requires pontif.shape.{Box, Cylinder, Torus, difference, smoothUnion, rotateX, raymarch}
+                raymarch(smoothUnion(
                   difference(Box(1.0, 1.0, 1.0), Cylinder(0.55, 2.0)),
                   rotateX(Torus(1.15, 0.18), 90.0, {0.0, 0.0, 0.0}),
                   0.1))""");
@@ -210,10 +207,10 @@ class RenderLoweringTest {
 
     /** Smooth boolean modifiers lower too (clamp/mix over the two children). */
     @Test
-    void render_lowersSmoothBooleans() {
-        String map = renderMap("""
-                requires pontif.shape.{Sphere, translate, smoothDifference, render}
-                render(smoothDifference(Sphere(1.2), translate(Sphere(0.8), {0.7, 0.0, 0.0}), 0.3))""");
+    void raymarch_lowersSmoothBooleans() {
+        String map = mapOf("""
+                requires pontif.shape.{Sphere, translate, smoothDifference, raymarch}
+                raymarch(smoothDifference(Sphere(1.2), translate(Sphere(0.8), {0.7, 0.0, 0.0}), 0.3))""");
         assertTrue(map.contains("clamp(") && map.contains("mix("),
                 () -> "smoothDifference uses clamp/mix: " + map);
         assertFalse(map.contains("distanceAt") || map.contains("this."),
@@ -221,18 +218,18 @@ class RenderLoweringTest {
     }
 
     /** Runs {@code src} with the renderer stubbed and returns the emitted `float map(…)` string. */
-    private static String renderMap(String src) {
-        RecordValue ray = onlyLayer(layersOf(src, "render.ptf"));
+    private static String mapOf(String src) {
+        RecordValue ray = viewOf(src, "render.ptf");
         return ((StringValue) ray.members().get("map")).content();
     }
 
     /** Pins the README "3D shapes" CSG + transforms snippet (verbatim, minus the comments). */
     @Test
     void readmeSnippet_csgComposePreviews() {
-        layersOf("""
-                requires pontif.shape.{Sphere, translate, rotateY, difference, render}
+        viewOf("""
+                requires pontif.shape.{Sphere, translate, rotateY, difference, raymarch}
 
-                main ( render(rotateY(
+                main ( raymarch(rotateY(
                   difference(Sphere(1.2), translate(Sphere(0.8), {0.9, 0.0, 0.0})),
                   30.0, {0.0, 0.0, 0.0})) )""", "readme-csg.ptf");
     }
@@ -240,13 +237,13 @@ class RenderLoweringTest {
     /** Pins the README "3D shapes" attribute-field snippet, plus the value its comment claims. */
     @Test
     void readmeSnippet_attributeField() {
-        layersOf("""
-                requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, render}
+        viewOf("""
+                requires pontif.shape.{Sphere, ScalarField, attr, shapeOf, attrAt, raymarch}
 
                 struct Height()
                 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }
 
-                main ( render(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
+                main ( raymarch(shapeOf(attr(Sphere(1.0), "height", Height()))) )""", "readme-attr.ptf");
 
         // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it. No layer here: the
         // program is a comparison, so it never reaches the renderer.

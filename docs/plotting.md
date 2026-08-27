@@ -282,13 +282,13 @@ the editor's pom, the editor compiles and 19 of its 20 navigator tests pass. Wha
    resolve to `AnyboxLauncher` / `AnyboxExtension`, and the editor carries `pontif-builtin-anybox` at runtime
    scope in place of the block it used to carry for this module. Run-as-GUI is unaffected by this module's
    removal, and so is ordinary Run (`ProgramLauncher`, in `pontif-builtin-net`, which stays).
-3. **`pontif.shape` stops linking entirely** — not just `render`. Its third line is
-   `requires pontif.plot.{Volume, scene}`, and without *some* `pontif.plot` the module does not resolve even for
-   `distanceAt`, which touches no renderer. Shape's own tests are unaffected (they run against `StubRenderer`),
-   but any program the editor runs that requires `pontif.shape` fails to link. **This is the one thing on this
-   list that needs a decision rather than a deletion**, and there are two answers: ship a non-drawing
-   `pontif.plot` for the seam, or make `render(shape)` return a value a renderer consumes so the dependency points
-   renderer→shape. The second is the honest one and is the natural companion to the VexelRay renderer landing.
+3. ~~**`pontif.shape` stops linking entirely.**~~ **SETTLED 2026-08-26 — the honest answer, taken.**
+   `render(shape)` and `previewGradientField(shape)` are now `raymarch(shape)` and `gradientField(shape)`,
+   returning a `Raymarch` and a `GradientField` instead of calling `scene`. `pontif.shape` no longer names
+   `pontif.plot` anywhere, so the dependency points **renderer → shape** and shape links, runs and tests with no
+   renderer present. `StubRenderer` went with the requirement that created it, and `RenderLoweringTest`'s harness
+   collapsed to three lines that read the program's own result. This was the one item on this list that needed a
+   decision rather than a deletion; it no longer needs either.
 4. `pontif-cli`'s `EditorLauncher` is unaffected — it resolves an editor binary by name and env var, and the
    editor is still there.
 5. Drop `pontif-builtin-gui` from `ToolkitContainmentTest.MAY_NAME_IT`, leaving the editor as the sole entry.
