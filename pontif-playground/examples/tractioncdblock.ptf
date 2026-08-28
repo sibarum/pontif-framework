@@ -1,0 +1,285 @@
+module cott.traction.cd.block
+
+# The Traction-CD block: a drop-in MLP replacement with three orthogonal knobs.
+#   1. mixed-level Cayley–Dickson structure  (a weight-tying prior)   §1
+#   2. S_p parameterized addition            (the power-mean family)  §2
+#   3. norm parameterization                 (radial / alpha gates)   §3
+#
+# Design sketch. A level-k CD element IS a binary tree (§3.2), so the core runs
+# on that tree rather than a flat vector: it makes the §1 mean and the §3 gates
+# fall out of the structure instead of being faked. Numerics are stubbed where
+# the runtime has no opcode (marked STUB); the recursion is the reference impl.
+
+requires pontif.math.{pow, sign, abs}
+requires cott.traction.{Traction}
+
+exports @.{CD, Leaf, Node, PAddition, RadialGate, CDCore, TractionCDBlock,
+           BlockStack, StackNil, forward, stackDegree}
+
+# ---------------------------------------------------------------------------
+# The CD element: a balanced binary tree of Decimal leaves.
+#   Leaf         = level 0 (a real scalar)
+#   Node(lo, hi) = level j, its two halves at level j-1  ((a,b) in the recursion)
+# ---------------------------------------------------------------------------
+
+struct Leaf(v:Decimal)
+struct Node(lo:[Leaf|Node], hi:[Leaf|Node])
+
+# The tree's tower level = its height.
+function heightOf(t:[Leaf|Node]):[Int:@>=0] -> match t {
+  [Leaf(_)]    -> 0
+  [Node(a, _)] -> 1 + heightOf(a)
+}
+
+# CD conjugation: (a,b)* = (a*, -b), identity on the reals (§0).
+function conj(t:[Leaf|Node]):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(v)
+  [Node(a, b)] -> Node(conj(a), negTree(b))
+}
+
+function negTree(t:[Leaf|Node]):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(-v)
+  [Node(a, b)] -> Node(negTree(a), negTree(b))
+}
+
+function addTree(x:[Leaf|Node], y:[Leaf|Node]):[Leaf|Node] -> match {x, y} {
+  [{Leaf(a), Leaf(b)}]     -> Leaf(a + b)
+  [{Node(a, b), Node(c, d)}] -> Node(addTree(a, c), addTree(b, d))
+  [_]                      -> x        # shapes always match by construction
+}
+
+function subTree(x:[Leaf|Node], y:[Leaf|Node]):[Leaf|Node] -> addTree(x, negTree(y))
+
+function scaleTree(t:[Leaf|Node], s:Decimal):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(v * s)
+  [Node(a, b)] -> Node(scaleTree(a, s), scaleTree(b, s))
+}
+
+# Squared Euclidean norm of a sub-block — the invariant of that block's level.
+function normSq(t:[Leaf|Node]):[Decimal:@>=0] -> match t {
+  [Leaf(v)]    -> v * v
+  [Node(a, b)] -> normSq(a) + normSq(b)
+}
+
+# The Cayley–Dickson product, the FULL recursion (§1.1):
+#   (a,b) ⊛ (c,d) = ( a⊛c − d⊛b* , d⊛a + b⊛c* )
+# This is the reference implementation tests #1/#2 need. The FAST path (§1.3)
+# never runs this: it assembles the structured matrix M(w) once by gather-and-sign
+# from an index/sign table and does one GEMM over the batch (on Gpu). Same result.
+function cdProduct(x:[Leaf|Node], w:[Leaf|Node]):[Leaf|Node] -> match {x, w} {
+  [{Leaf(a), Leaf(c)}]        -> Leaf(a * c)
+  [{Node(a, b), Node(c, d)}]  ->
+    Node(
+      subTree(cdProduct(a, c), cdProduct(d, conj(b))),
+      addTree(cdProduct(d, a), cdProduct(b, conj(c)))
+    )
+  [_] -> x                             # levels always match by construction
+}
+
+# ---------------------------------------------------------------------------
+# §2. S_p: parameterized addition — the power-mean family
+# ---------------------------------------------------------------------------
+
+# A learned scalar behind a soft bound (§"Initialization and ranges"):
+#   p = center + amplitude * tanh(u),  u init 0.  A soft bound, not a clamp, so
+#   there is gradient at the boundary you want to interrogate.
+struct Learned(u:Decimal, center:Decimal, amplitude:Decimal)
+function Learned.of(center:Decimal, amplitude:Decimal):Learned -> Learned(0.0, center, amplitude)
+function tanh(x:Decimal):Decimal -> x / (1.0 + abs(x))         # STUB: no tanh opcode; right shape
+method Learned.value():Decimal -> this.center + this.amplitude * tanh(this.u)
+
+struct PAddition(p:Learned)
+
+# eps MUST scale with p, not be a fixed constant. phi's slope at the origin is
+# p*eps^(p-1); a fixed 1e-4 reshapes the map badly for small p. For a slope
+# target L, eps >= (p/L)^(1/(1-p)); derived per forward pass, gradient detached.
+method PAddition.eps():Decimal ->
+  let p = this.p.value()
+  match (abs(p - 1.0) < 0.01) {
+    [true]  -> 0.0001                                          # p≈1: 1/(1-p) blows up
+    [false] -> pow(p / 10.0, 1.0 / (1.0 - p))                  # slope target L = 10
+  }
+
+# phi_p(x) = sgn(x)|x|^p, eps-regularized so phi(0)=0 with finite slope (§2.3).
+method PAddition.phi(x:Decimal):Decimal ->
+  let p = this.p.value()
+  let e = this.eps()
+  sign(x) * (pow(abs(x) + e, p) - pow(e, p))
+
+method PAddition.phiInv(y:Decimal):Decimal ->
+  let p = this.p.value()
+  let e = this.eps()
+  sign(y) * (pow(abs(y) + pow(e, p), 1.0 / p) - e)
+
+# REFERENCE ONLY — the layer is DEFINED by the transported form (§2.3), so these
+# are dead in the forward pass. Kept as the recursive side of test #2: comparing
+# phi^{-1}(phi(x) ⊛ phi(w) / 2^m) against the recursion with ⊕_p at each add.
+method PAddition.add(x:Decimal, y:Decimal):Decimal -> this.phiInv((this.phi(x) + this.phi(y)) / 2.0)
+method PAddition.sub(x:Decimal, y:Decimal):Decimal -> this.add(x, -y)
+
+# ---------------------------------------------------------------------------
+# §3. Norm parameterization: the nonlinearity
+# ---------------------------------------------------------------------------
+
+# alpha in (-1, 1) is a DELIBERATE choice, carried in the SORT: r ↦ r^(1-alpha)
+# is a bijection iff alpha != 1, and |alpha|<1 forbids exactly the erasing point
+# alpha=1. So information conservation is a type-level fact here, not test #6 —
+# this is the one invariant the block genuinely wants Pontif for. (It also forbids
+# pure-direction layers, alpha=1, on purpose: those are lossy and must opt in.)
+struct RadialGate(alpha:[Decimal:@abs<1])
+
+let gateEps:Decimal = 0.0001
+
+# G_alpha(z) = z * (|z|^2 + eps^2)^(-alpha/2), homogeneous of degree (1 - alpha).
+# normSq is the WHOLE sub-block's norm (the level's invariant), applied to every
+# component of it — NOT a per-component rescale (that would just duplicate phi_p
+# and break norm-group equivariance, §3.1).
+method RadialGate.apply(normSq:[Decimal:@>=0], component:Decimal):Decimal ->
+  component * pow(normSq + gateEps * gateEps, -this.alpha / 2.0)
+
+# One exponent per level, held as an inductive list so the recursion can index it.
+struct GateNil()
+struct GateList(head:RadialGate, tail:[GateList|GateNil])
+
+function gateAtLevel(g:[GateList|GateNil], j:[Int:@>=1]):RadialGate -> match {g, j} {
+  [{GateList(h, _), Int:1}] -> h
+  [{GateList(_, t), @>1}]   -> gateAtLevel(t, j - 1)
+  [{GateNil(), _}]          -> RadialGate(0.0)      # no gate at this level = identity
+}
+
+# Radial gates, ascending j, in ONE post-order pass: a node's children are
+# rescaled BEFORE its own norm is taken, which is exactly what makes the degrees
+# multiply as §3.4 says. At each node, scale the entire sub-block by its level's
+# gate factor G_{alpha_j}(|z|^2).
+function radial(t:[Leaf|Node], gates:[GateList|GateNil]):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(v)
+  [Node(a, b)] ->
+    let n = Node(radial(a, gates), radial(b, gates))
+    let g = gateAtLevel(gates, heightOf(n))
+    scaleTree(n, g.apply(normSq(n), 1.0))            # apply(nsq, 1) = the scalar factor
+}
+
+# ---------------------------------------------------------------------------
+# §1. Mixed-level CD core
+# ---------------------------------------------------------------------------
+
+# Input at level m, parameters at level k, m <= k. Weights stored in phi-space
+# (§2.2): parameterize phi_p(w), never apply phi_p to weights, so p's gradient
+# doesn't drag weight magnitudes around.
+struct CDCore(
+  m:[Int:@>=0],          # input tower level  — sets FLOPs/parameter = 2^m
+  k:[Int:@>=0],          # parameter tower level (@>=m)
+  wPhi:[Leaf|Node],      # weights, in phi-space, a level-k tree
+  pAdd:PAddition
+)
+
+function twoTo(n:[Int:@>=0]):[Int:@>=1] -> match n {
+  [Int:0] -> 1
+  [@>0]   -> 2 * twoTo(n - 1)
+}
+
+# The deformed mixed-level product, DEFINED by the transported form (§2.2/§2.3):
+#   x ⊛_p w := phi^{-1}( phi(x) ⊛ w~ / 2^m )
+#
+# The divisor is 2^m, NOT 2^k. The embedded recursion (a,0)⊛(c,d) = (a⊛c, d⊛a)
+# has NO additions above level m — the subtraction term vanishes with b=0 — so
+# every output component is a mean over 2^m leaf terms, set by the SMALLER level.
+# Consequence: p only acts within the input's level. Raising k adds structure and
+# parameters but gives p nothing new to do, so p is near-vestigial at m<=1 and
+# only earns its keep at m>=2. (Two knobs I'd called orthogonal, coupled.)
+# Edge check: m=0 => divide by 1 => pure scaling, no addition. Correct.
+method CDCore.product(x:[Leaf|Node]):[Leaf|Node] ->
+  let denom = 0.0 + twoTo(this.m)
+  let xPhi  = mapPhi(x, this.pAdd)
+  let raw   = cdProduct(xPhi, this.wPhi)
+  mapPhiInvScaled(raw, this.pAdd, denom)
+
+function mapPhi(t:[Leaf|Node], pa:PAddition):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(pa.phi(v))
+  [Node(a, b)] -> Node(mapPhi(a, pa), mapPhi(b, pa))
+}
+
+function mapPhiInvScaled(t:[Leaf|Node], pa:PAddition, denom:Decimal):[Leaf|Node] -> match t {
+  [Leaf(v)]    -> Leaf(pa.phiInv(v / denom))
+  [Node(a, b)] -> Node(mapPhiInvScaled(a, pa, denom), mapPhiInvScaled(b, pa, denom))
+}
+
+# ---------------------------------------------------------------------------
+# §4. The block
+# ---------------------------------------------------------------------------
+
+struct TractionCDBlock(
+  core:CDCore,
+  gates:[GateList|GateNil],   # one RadialGate per tower level, level 1 at head
+  refW:[Leaf|Node],           # separate params for the direction-gate frame
+  useDirectionGate:Bool
+)
+
+# Direction (Vector-Neurons) gate — REQUIRES ASSOCIATIVITY, so levels <= 2 only
+# (§3.5/§5.1). The associativity requirement lives in directionGateImpl's PARAMETER
+# SORT [Int:@<=2] where it can be read, and the one guarded clause dispatches to it.
+method TractionCDBlock.directionGate(h:[Leaf|Node]):[Leaf|Node] -> match {this.useDirectionGate, this.core.k} {
+  [{true, [Int:@<=2]}] -> directionGateImpl(h, this.core.k, this.refW)
+  [_]                  -> h
+}
+
+# u = x ⊛ w_ref (the co-transforming frame); gate(x) = x − min(0,<x,û>)·û. STUB: identity.
+function directionGateImpl(h:[Leaf|Node], k:[Int:@<=2], refW:[Leaf|Node]):[Leaf|Node] -> h
+
+method TractionCDBlock.forward(x:[Leaf|Node]):[Leaf|Node] ->
+  # 1. unconstrained pre-mix (Linear W_in -> C*2^m) — STUB: identity
+  let h0 = x
+  # 2. deformed mixed-level CD product
+  let h1 = this.core.product(h0)
+  # 3. radial gates, one exponent per level, ascending
+  let h2 = radial(h1, this.gates)
+  # 4. optional direction gate, levels <= 2 only
+  let h3 = this.directionGate(h2)
+  # 5. unconstrained post-mix (Linear C*2^k -> W_out) — STUB: identity
+  h3
+
+function forward(block:TractionCDBlock, x:[Leaf|Node]):[Leaf|Node] -> block.forward(x)
+
+# ---------------------------------------------------------------------------
+# The homogeneity budget (§3.4) — the piece that makes this a Pontif program.
+# ---------------------------------------------------------------------------
+
+# A stack's total homogeneity degree is prod(1 - alpha_{l,j}) over every block and
+# level: a static product of scalars each already known to be positive from the
+# gate sort |alpha|<1. So the degree is PROVABLY > 0 — the network can never
+# collapse to exactly spherical (degree 0). That's a conservation receipt on a
+# scalar, discharged at elaboration, not a training mystery. Degree underflow
+# toward (not to) zero is still possible and is the thing to budget; §3.4's
+# mitigation 2 (alpha<0 to buy degree back) is exactly a factor (1-alpha) > 1.
+struct StackNil()
+struct BlockStack(head:TractionCDBlock, tail:[BlockStack|StackNil])
+
+function blockDegree(g:[GateList|GateNil]):[Decimal:@>0] -> match g {
+  [GateNil()]      -> 1.0
+  [GateList(h, t)] -> (1.0 - h.alpha) * blockDegree(t)         # 1-alpha in (0,2) since |alpha|<1
+}
+
+function stackDegree(s:[BlockStack|StackNil]):[Decimal:@>0] -> match s {
+  [StackNil()]          -> 1.0
+  [BlockStack(b, rest)] -> blockDegree(b.gates) * stackDegree(rest)
+}
+
+# ---------------------------------------------------------------------------
+# Showcase — a level-2 (quaternion) block. m=2 so input length 2^2=4 AND p has
+# something to act on; p init 1 and alpha init 0, so it starts structured-linear.
+# ---------------------------------------------------------------------------
+
+function treeOf4(a:Decimal, b:Decimal, c:Decimal, d:Decimal):[Leaf|Node] ->
+  Node(Node(Leaf(a), Leaf(b)), Node(Leaf(c), Leaf(d)))
+
+let pKnob  = PAddition(Learned.of(1.1, 0.9))              # p in [0.2, 2]: reaches quadrature, clears the 0.2 floor
+let wUnit  = treeOf4(1.0, 0.0, 0.0, 0.0)                  # the real unit, in phi-space (p=1 => phi≈id)
+let core   = CDCore(2, 2, wUnit, pKnob)
+let gates  = GateList(RadialGate(0.0), GateList(RadialGate(0.0), GateNil()))
+let block  = TractionCDBlock(core, gates, wUnit, true)
+
+let input  = treeOf4(0.3, -0.7, 1.1, 0.2)
+let out    = forward(block, input)
+let stack  = BlockStack(block, StackNil())
+
+{ normSq(out), stackDegree(stack) }                       # {output energy, provably-positive degree}
