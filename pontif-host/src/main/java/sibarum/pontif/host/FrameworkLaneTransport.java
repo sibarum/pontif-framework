@@ -143,6 +143,12 @@ public final class FrameworkLaneTransport implements LaneTransport, WakeSource, 
         this.wake = onWake == null ? () -> { } : onWake;
     }
 
+    /** The frame loop outlives {@code main}: a click after it returns must still reach the lane that owns it. */
+    @Override
+    public boolean survivesMain() {
+        return true;
+    }
+
     /** Nothing to do: the loop is the framework's and is already serving the main lane. */
     @Override
     public void drive() {

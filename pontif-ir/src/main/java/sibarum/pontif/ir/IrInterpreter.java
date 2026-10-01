@@ -270,11 +270,15 @@ public final class IrInterpreter {
     private void driveLanes() {
         LaneTransport t = lanes;
         if (t == null) return;
+        boolean survives = false;
         try {
             t.drive();
+            survives = t.survivesMain();
         } finally {
-            lanes = null;   // torn down; a re-eval rebuilds
-            threadedSeats = Set.of();
+            if (!survives) {
+                lanes = null;   // torn down; a re-eval rebuilds
+                threadedSeats = Set.of();
+            }
         }
     }
 

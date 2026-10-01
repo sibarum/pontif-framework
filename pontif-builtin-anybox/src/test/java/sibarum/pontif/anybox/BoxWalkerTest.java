@@ -72,7 +72,7 @@ class BoxWalkerTest {
         return rec("pontif.gui/Box", "kind", kind(kindKey), "style", style, "children", children);
     }
 
-    private static RetainedNode frame(Gui gui) {
+    static RetainedNode frame(Gui gui) {
         return gui.frame(800f, 600f, MEASURER);
     }
 
@@ -92,11 +92,11 @@ class BoxWalkerTest {
             gui.root().children(root);
 
             RetainedNode column = only(frame(gui));
-            assertEquals(NodeKind.BOX, column.kind);
+            assertEquals(NodeKind.BOX, column.kind());
             assertEquals(2, column.children.size());
             assertEquals("first", column.children.get(0).textString());
             assertEquals("second", column.children.get(1).textString());
-            assertEquals(NodeKind.TEXT, column.children.get(0).kind);
+            assertEquals(NodeKind.TEXT, column.children.get(0).kind());
         }
     }
 
@@ -171,7 +171,7 @@ class BoxWalkerTest {
             gui.root().children(root);
 
             RetainedNode n = only(frame(gui));
-            assertEquals(NodeKind.TEXT, n.kind);
+            assertEquals(NodeKind.TEXT, n.kind());
             assertTrue(n.textString().startsWith("not a Box:"));
         }
     }

@@ -7,6 +7,8 @@ import dev.vexelray.framework.shell.Wiring;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.runtime.CompiledProgram;
 
+import java.util.function.Consumer;
+
 /**
  * A compiled Pontif program as a framework application - the wiring a processor would generate, written by
  * hand because the program is only known at run time (the lane names are a property of the {@code .ptf}, not
@@ -21,18 +23,30 @@ import sibarum.pontif.runtime.CompiledProgram;
  *       to it from another thread wakes the loop. The framework then starts every lane together.</li>
  * </ul>
  *
- * <p>The program's {@code window} native does not yet mount into this application: it still opens a loop of
- * its own, so a GUI program runs through its own launcher until the Anybox window is hosted here.
+ * <p>A program's {@code window} call does not open a loop: the loop is the framework's. A GUI extension hands
+ * the wiring a {@code beforeMain} that installs its window host, and {@code window} then mounts the program's
+ * tree into the application's own {@code Gui}.
  */
 public final class PontifWiring extends Wiring {
 
     private final AppInfo info;
     private final CompiledProgram program;
+    private final Consumer<Shell> beforeMain;
     private FrameworkLaneTransport lanes;
 
     public PontifWiring(AppInfo info, CompiledProgram program) {
+        this(info, program, shell -> { });
+    }
+
+    /**
+     * @param beforeMain runs in {@code TREE}, before the program's {@code main}, with the application's
+     *                   {@code Shell}: the place a GUI extension installs the host its {@code window} call
+     *                   mounts into, without this module knowing that a GUI toolkit exists
+     */
+    public PontifWiring(AppInfo info, CompiledProgram program, Consumer<Shell> beforeMain) {
         this.info = info;
         this.program = program;
+        this.beforeMain = beforeMain;
     }
 
     @Override
@@ -52,6 +66,7 @@ public final class PontifWiring extends Wiring {
 
     @Override
     public void tree(Shell shell) {
+        beforeMain.accept(shell);
         new IrInterpreter(program.simplifier()).laneTransport(() -> lanes).eval(program.module());
     }
 

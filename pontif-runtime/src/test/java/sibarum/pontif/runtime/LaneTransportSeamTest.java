@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
@@ -49,6 +50,7 @@ class LaneTransportSeamTest {
         private final Queue<Task> pending = new ArrayDeque<>();
         private String serving;   // the lane whose task is running now — the only lane the caller is on
         private Fire fire;
+        boolean survives;
 
         @Override public void start(Set<String> conductors, Fire fire) {
             seated.addAll(conductors);
@@ -62,6 +64,10 @@ class LaneTransportSeamTest {
         @Override public void send(String lane, RecordValue event, Origin origin) {
             sentTo.add(lane);
             pending.add(new Task(lane, () -> fire.fire(event, origin)));
+        }
+
+        @Override public boolean survivesMain() {
+            return survives;
         }
 
         @Override public void drive() {
@@ -99,5 +105,39 @@ class LaneTransportSeamTest {
         assertFalse(Thread.getAllStackTraces().keySet().stream()
                         .anyMatch(t -> !before.contains(t) && t.getName().startsWith("pontif-conductor-")),
                 "the default thread tier was never stood up");
+    }
+
+    /** What a GUI hands the interpreter after main has returned: an event from a handler thread, a click. */
+    private static final RecordValue COMMAND = new RecordValue("Command", Map.of("n", 10L));
+
+    private int sendsToAppAfterMainReturns(boolean survives) {
+        var compiled = new PontifCompiler().compile(PROGRAM, "seam.ptf");
+        var program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
+        Cooperative transport = new Cooperative();
+        transport.survives = survives;
+        IrInterpreter interpreter = new IrInterpreter(program.simplifier()).laneTransport(() -> transport);
+
+        PrintStream orig = System.out;
+        try {
+            System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+            interpreter.eval(program.module());
+            long before = transport.sentTo.stream().filter("App"::equals).count();
+            interpreter.fireEvent(COMMAND, program.module(), Origin.NONE);
+            return (int) (transport.sentTo.stream().filter("App"::equals).count() - before);
+        } finally {
+            System.setOut(orig);
+        }
+    }
+
+    @Test
+    void aHostWhoseLoopOutlivesMain_keepsRoutingToLanesAfterMainReturns() {
+        assertEquals(1, sendsToAppAfterMainReturns(true),
+                "a click after main must still be handed to the lane that owns the event, not folded on the clicker's thread");
+    }
+
+    @Test
+    void aTransportThatEndsWithMain_isTornDownSoLaterEventsFoldInline() {
+        assertEquals(0, sendsToAppAfterMainReturns(false),
+                "the thread tier is over when the orchestra drains; nothing is routed after it");
     }
 }

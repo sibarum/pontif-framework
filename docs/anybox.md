@@ -153,3 +153,24 @@ counter and echo examples, and the removal of the surface this replaces.
 Not yet: plotting, the status ribbon, and the remaining vexelray widgets (Slider, Tabs, TreeView,
 modals, menus). Each of those is an atom or a kind, not a redesign — which was the point of the
 shape.
+
+## Hosted on vexelray-framework
+
+Anybox no longer opens a window of its own. `AnyboxLauncher` runs a program as a **vexelray-framework
+application** (`pontif-host`'s `PontifWiring`): the program's `main` runs in the framework's `TREE` phase,
+`window(cfg, root)` mounts the walked tree into the application's own `Gui` and **returns**, and everything the
+old hand-wired edge opened — the input backend and its coordinate space, the clipboard, the frame loop, the zoom
+range, the window's size and where it was left — is the framework's. The hand-written window (`AnyboxWindow`,
+with its static single-window registries and its `System.err` logging) is deleted.
+
+- **Where `window` lands** is `Mounts.Host`, installed by the launcher; there is no default, because a window that
+  opens a loop of its own is the second composition root this replaced.
+- **Ids are per window.** Each mounted window keeps its own id registries and takes them out when it closes. A
+  command addresses an id, not a window: the first mounted window that has it answers. A program has one window
+  for now (a second `window` call is an error), and that rule is the one to revisit with several.
+- **Size and title.** The framework sizes and remembers the window from the application's facts, fixed before the
+  program runs, so a program's `width`/`height` no longer apply and a window comes back where the user left it.
+  The program's `title` is shown in the framework's title bar.
+- **A program is an application:** its settings directory is `pontif-<program>`, so each program remembers its own
+  window, and everything after the positional arguments on the launcher's command line (`--automation`, ...) is
+  the framework's own.

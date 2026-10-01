@@ -50,4 +50,13 @@ public interface LaneTransport {
      * the window closes.
      */
     void drive();
+
+    /**
+     * Whether the run continues after {@link #drive} returns. The thread tier is over when the orchestra
+     * drains, so the interpreter tears its lanes down and later events fold inline. A windowed host is not:
+     * the loop outlives {@code main}, and a click arriving afterwards must still reach the lane that owns it.
+     */
+    default boolean survivesMain() {
+        return false;
+    }
 }

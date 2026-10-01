@@ -37,6 +37,12 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-runtime</artifactId>
         </dependency>
+        <!-- The application: conductors as framework components, the loop, input, clipboard, memory. -->
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-host</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- The retained Node tree, Length/flex layout, Theme roles, input dispatch, GuiApp loop. -->
         <dependency>
             <groupId>dev.vexelray.gui</groupId>

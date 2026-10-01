@@ -60,8 +60,9 @@ side-effect channel. `all()` merges the pure builtins with every installed exten
   the `pontif.events` module + `StdOut`/`StdErr` sinks + the `stdin` source. The CLI keeps IO.
 - **`AnyboxExtension`** (pontif-builtin-anybox): the `pontif.gui` module + the `window(cfg, root)`
   call and the `SetText` sink, backed by VexelRay ([`docs/anybox.md`](anybox.md)). Installed by
-  ServiceLoader discovery like every other extension; run a program with `AnyboxLauncher`, which
-  holds the main thread because the window loop needs it.
+  ServiceLoader discovery like every other extension; run a program with `AnyboxLauncher`, which runs it as a
+  vexelray-framework application (`PontifWiring`, in `pontif-host`): `window` mounts into the framework's `Gui` and
+  returns, and the loop, input, clipboard and window memory are the framework's rather than this module's.
 - **`PlotExtension`** (pontif-builtin-gui): the `pontif.plot` module, backed by `DasumBridge` (the
   dasum GLFW/OpenGL toolkit) until its renderer moves too. **No core module depends on dasum** —
   `ToolkitContainmentTest` fails the build if a third module so much as names it.

@@ -53,20 +53,19 @@ public final class AnyboxExtension implements Extension {
     @Override
     public Map<String, NativeFunctions.Effect> effects() {
         return Map.of("SetText",
-                (event, origin) -> AnyboxWindow.setText(Atoms.str(event, "id"), Atoms.str(event, "text")));
+                (event, origin) -> Mounts.setText(Atoms.str(event, "id"), Atoms.str(event, "text")));
     }
 
     /**
-     * {@code window(cfg, root)}: build the tree from {@code root}, open the window, and block in the
-     * loop on the root thread until it closes. Absent {@code cfg} keys take their defaults.
+     * {@code window(cfg, root)}: mount the tree from {@code root} into the host application's window and
+     * return - the loop is the framework's, so this neither opens one nor blocks. The title is the program's;
+     * size and placement belong to the framework (see {@link FrameworkWindowHost}).
      */
-    private static Object openWindow(List<Object> args, NativeCalls.Context ctx) {
+    static Object openWindow(List<Object> args, NativeCalls.Context ctx) {
         Object cfg = args.isEmpty() ? null : args.get(0);
         Object root = args.size() > 1 ? args.get(1) : null;
-        return AnyboxWindow.open(
+        return Mounts.host().open(
                 Atoms.cfgStr(cfg, "title", "Pontif"),
-                Atoms.cfgInt(cfg, "width", 900),
-                Atoms.cfgInt(cfg, "height", 600),
                 root, ctx);
     }
 }
