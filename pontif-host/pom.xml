@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>sibarum.pontif</groupId>
+        <artifactId>pontif-framework</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pontif-host</artifactId>
+
+    <!--
+      The Pontif host on vexelray-framework: a Pontif program's conductors are the framework's components.
+      A seated conductor is a lane (a thread and a mailbox), the main conductor is the main thread's
+      FrameStage.APP drain, and the program lives as long as the window does rather than until the
+      orchestra drains. The interpreter stays ignorant of all of it - it only decides which lane owns an
+      event, through IrInterpreter.laneTransport (pontif-ir, LaneTransport).
+
+      Like pontif-builtin-anybox, this module owns the dependency on the framework so the compiler build
+      never learns that a container exists.
+    -->
+    <properties>
+        <framework.version>0.1.0-SNAPSHOT</framework.version>
+        <atchung.version>1.0-SNAPSHOT</atchung.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-runtime</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.vexelray.framework</groupId>
+            <artifactId>vexelray-framework-shell</artifactId>
+            <version>${framework.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.atchung</groupId>
+            <artifactId>atchung-core</artifactId>
+            <version>${atchung.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+        </dependency>
+    </dependencies>
+</project>
