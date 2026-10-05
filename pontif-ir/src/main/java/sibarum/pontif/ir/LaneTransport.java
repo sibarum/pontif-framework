@@ -40,8 +40,19 @@ public interface LaneTransport {
     /** Whether the calling thread is the one that owns {@code lane}; if so the interpreter folds inline. */
     boolean onLane(String lane);
 
+    /**
+     * What losing an event costs, which decides what a transport may do when a lane cannot keep up
+     * (docs/orchestration.md, "Loss classes"). Declared by the event's sort, never by a transport.
+     */
+    enum Loss {
+        /** Nothing supersedes it and nothing downstream can reconstruct it: never dropped, and a lane that cannot hold it is a fault. */
+        EDGE,
+        /** The next event of this type supersedes it, so a queued one may be replaced by a newer one without anything observing the loss. */
+        SAMPLE
+    }
+
     /** Hand an immutable event to {@code lane}'s inbox and return; the owner fires it on its own thread. */
-    void send(String lane, RecordValue event, Origin origin);
+    void send(String lane, RecordValue event, Origin origin, Loss loss);
 
     /**
      * Called on the main thread once {@code main} has returned: serve the main lane until the program is

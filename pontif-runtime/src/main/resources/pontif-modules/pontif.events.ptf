@@ -1,7 +1,15 @@
 requires pontif.core.{Stream}
-exports @.{Event, EventConduit, EventStream, StdOut, StdErr, stdin}
+exports @.{Event, Sample, EventConduit, EventStream, StdOut, StdErr, stdin}
 
 trait Event{}
+
+# A loss class, declared by the event's sort: `assign trait Moved:Sample{}`. A Sample is a reading - a pointer
+# position, a window size, a clock tick - whose next value supersedes it, so when a conductor cannot keep up
+# the runtime may replace a queued Moved with a newer Moved and nothing could ever have seen the difference.
+# Every other event is an edge: never dropped, and a conductor that cannot hold one halts the program
+# rather than lose it. A sample's type is its cell - the latest Moved supersedes any queued Moved - so a
+# reading that must not be merged (one per sensor) is a different type per source, or an edge.
+trait Sample{}
 
 trait EventConduit[type E, type S, type R]{}
 

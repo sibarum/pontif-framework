@@ -2,8 +2,10 @@ package sibarum.pontif.host;
 
 import dev.vexelray.framework.core.WakeSource;
 import dev.vexelray.framework.shell.Placement;
+import dev.vexelray.framework.shell.Placements;
 import sibarum.atchung.Atchung;
 import sibarum.atchung.Backpressure;
+import sibarum.atchung.Fold;
 import sibarum.atchung.Pump;
 import sibarum.atchung.Subscription;
 import sibarum.atchung.Topic;
@@ -37,11 +39,18 @@ import java.util.function.Function;
  * same one for a mailbox that cannot keep up, so both go through {@code onCrash}, which is the process-wide
  * {@code Fatal} by default. {@code Placement} would otherwise catch the throw and keep draining.
  *
- * <p><b>Capacity and loss are a placeholder.</b> Every lane is one FAIL mailbox of {@link #DEFAULT_CAPACITY}:
- * an overflow halts, which is the framework's contract for an edge. That is right for an event nothing can
- * reconstruct and wrong for a sample, and the language cannot yet say which an event is - a declared loss class
- * on the event's sort is the next step. The bound is deliberately large so that a burst of {@code emit}s from
- * {@code main} before the lanes start is not mistaken for a component falling behind.
+ * <p><b>Loss is the event's declaration.</b> A lane is one mailbox that never drops an edge: an overflow halts,
+ * which is the framework's contract for an event nothing can reconstruct. An event whose sort satisfies
+ * {@code pontif.events.Sample} is a reading its next value supersedes, so it folds - the mailbox is an atchung
+ * {@code Fold} keyed on the event's type, and a queued {@code Moved} is replaced by a newer {@code Moved} without
+ * disturbing anything else. One mailbox rather than one per class, because folding moves the survivor to the
+ * back of the queue, which keeps a lane's events in arrival order across both classes; folding is lossless
+ * here for the reason it is only conditionally so elsewhere: a conductor's state is single-owner, so nothing
+ * can observe it between a publish and its drain.
+ *
+ * <p><b>The capacity is for edges.</b> It is deliberately large so that a burst of {@code emit}s from
+ * {@code main} before the lanes start is not mistaken for a component falling behind; it is not yet settable
+ * from the program.
  *
  * <p><b>The lifetime is the framework's.</b> {@link #drive} has nothing to do: the frame loop is already
  * serving the main lane, and the program ends when the window closes, not when events stop flowing.
@@ -52,7 +61,14 @@ public final class FrameworkLaneTransport implements LaneTransport, WakeSource, 
     public static final int DEFAULT_CAPACITY = 65_536;
 
     /** What crosses a lane: an immutable event and where it came from. Deeply immutable, so it is never copied. */
-    public record Message(RecordValue event, Origin origin) {}
+    public record Message(RecordValue event, Origin origin, Loss loss) {}
+
+    /**
+     * Which queued message a new one supersedes: a sample's cell is its event type, so the latest {@code Moved}
+     * replaces a queued {@code Moved} and nothing else; an edge names no cell and queues on its own.
+     */
+    private static final Fold<Message> SAMPLES_BY_TYPE =
+            m -> m.loss() == Loss.SAMPLE ? m.event().typeName() : null;
 
     private final Atchung bus;
     private final Function<String, Placement> place;
@@ -98,11 +114,12 @@ public final class FrameworkLaneTransport implements LaneTransport, WakeSource, 
         // Every mailbox exists before the first message flows, so the init race is designed out; the
         // placements are STARTED later, by the container, once everything that might publish to them exists.
         for (String conductor : conductors) {
-            place.apply(conductor).subscribe(topic(conductor), m -> deliver(conductor, fire, m),
-                    capacity, Backpressure.FAIL);
+            Placements.mailbox(place.apply(conductor), topic(conductor), m -> deliver(conductor, fire, m),
+                    capacity, Backpressure.FAIL, SAMPLES_BY_TYPE);
         }
         mainPump = bus.pump();
-        mainMailbox = mainPump.subscribe(topic(MAIN), m -> deliver(MAIN, fire, m), capacity, Backpressure.FAIL);
+        mainMailbox = mainPump.subscribe(topic(MAIN), m -> deliver(MAIN, fire, m),
+                capacity, Backpressure.FAIL, SAMPLES_BY_TYPE);
     }
 
     private void deliver(String lane, Fire fire, Message m) {
@@ -125,8 +142,8 @@ public final class FrameworkLaneTransport implements LaneTransport, WakeSource, 
     }
 
     @Override
-    public void send(String lane, RecordValue event, Origin origin) {
-        bus.publish(topic(lane), new Message(event, origin));
+    public void send(String lane, RecordValue event, Origin origin, Loss loss) {
+        bus.publish(topic(lane), new Message(event, origin, loss));
         if (MAIN.equals(lane)) wake.run();
     }
 

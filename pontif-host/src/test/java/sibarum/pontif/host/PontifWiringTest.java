@@ -69,4 +69,55 @@ class PontifWiringTest {
     private static String printed(ByteArrayOutputStream out) {
         return out.toString(StandardCharsets.UTF_8);
     }
+
+    /**
+     * Loss classes end to end. {@code main} emits before any lane runs, so the pointer's mailbox holds the whole
+     * burst when the framework starts it; {@code Moved} declares itself a {@code Sample} and {@code Pressed} does
+     * not, so the readings collapse to the newest while the press survives, in the order the survivors were written.
+     */
+    private static final String SAMPLED = """
+            requires pontif.events.{Event, Sample, StdOut}
+            struct Moved(x:Int)
+            assign trait Moved:Event{}
+            assign trait Moved:Sample{}
+            struct Pressed(n:Int)
+            assign trait Pressed:Event{}
+            conductor Pointer {
+              onMoved(m:Moved) -> emit StdOut("m" + m.x + " ")  m
+              onPressed(p:Pressed) -> emit StdOut("p" + p.n + " ")  p
+            }
+            spawn Pointer over thread
+            main ( emit Moved(1)  emit Moved(2)  emit Pressed(1)  emit Moved(3)  0 )
+            """;
+
+    @Test
+    void aSampleIsSupersededInAQueuedLane_andAnEdgeIsNot() throws Exception {
+        var compiled = new PontifCompiler().compile(SAMPLED, "sampled.ptf");
+        if (compiled instanceof PontifCompiler.CompileResult.Failed f) throw new AssertionError(f.error().text());
+        CompiledProgram program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
+        PontifWiring wiring = new PontifWiring(new AppInfo("pontif-host-test", "Pontif", 640, 480), program);
+
+        PrintStream orig = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Shell shell = null;
+        try {
+            System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+            shell = VexelApplication.tree(wiring, new String[0]);
+
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (printed(out).split(" ", -1).length - 1 < 2 && System.nanoTime() < deadline) {
+                wiring.lanes().mainDrain().run();
+                Thread.sleep(2);
+            }
+            Thread.sleep(50);
+            wiring.lanes().mainDrain().run();
+        } finally {
+            System.setOut(orig);
+            if (shell != null) shell.disposer().close();
+        }
+
+        assertEquals("p1 m3 ", printed(out),
+                "Moved(1) and Moved(2) were superseded by Moved(3); the press was an edge and arrived, first, "
+                        + "because the surviving reading sits where its newest write was");
+    }
 }

@@ -569,7 +569,8 @@ public final class IrInterpreter {
         if (transport != null) {
             String owner = ownerLane(typeName, module, threadedSeats);
             if (!transport.onLane(owner)) {
-                transport.send(owner, rec, origin);
+                transport.send(owner, rec, origin,
+                        satisfiesTrait(rec, "Sample", module) ? LaneTransport.Loss.SAMPLE : LaneTransport.Loss.EDGE);
                 return;
             }
         }

@@ -61,7 +61,10 @@ class LaneTransportSeamTest {
             return lane.equals(serving);   // a lane is the caller's only while its own task runs
         }
 
-        @Override public void send(String lane, RecordValue event, Origin origin) {
+        final List<String> classified = new ArrayList<>();
+
+        @Override public void send(String lane, RecordValue event, Origin origin, Loss loss) {
+            classified.add(event.typeName() + ":" + loss);
             sentTo.add(lane);
             pending.add(new Task(lane, () -> fire.fire(event, origin)));
         }
@@ -139,5 +142,38 @@ class LaneTransportSeamTest {
     void aTransportThatEndsWithMain_isTornDownSoLaterEventsFoldInline() {
         assertEquals(0, sendsToAppAfterMainReturns(false),
                 "the thread tier is over when the orchestra drains; nothing is routed after it");
+    }
+
+    @Test
+    void anEventIsAnEdgeUnlessItsSortSaysItIsASample() {
+        var compiled = new PontifCompiler().compile("""
+                requires pontif.events.{Event, Sample, StdOut}
+                struct Moved(x:Int)
+                assign trait Moved:Event{}
+                assign trait Moved:Sample{}
+                struct Pressed(n:Int)
+                assign trait Pressed:Event{}
+                conductor Pointer {
+                  onMoved(m:Moved) -> emit StdOut("m ")  m
+                  onPressed(p:Pressed) -> emit StdOut("p ")  p
+                }
+                spawn Pointer over thread
+                main ( emit Moved(1)  emit Pressed(1)  emit Moved(2)  0 )
+                """, "loss.ptf");
+        if (compiled instanceof PontifCompiler.CompileResult.Failed f) throw new AssertionError(f.error().text());
+        var program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
+        Cooperative transport = new Cooperative();
+
+        PrintStream orig = System.out;
+        try {
+            System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+            new IrInterpreter(program.simplifier()).laneTransport(() -> transport).eval(program.module());
+        } finally {
+            System.setOut(orig);
+        }
+
+        assertEquals(List.of("Moved:SAMPLE", "Pressed:EDGE", "Moved:SAMPLE"),
+                transport.classified.subList(0, 3).stream().map(s -> s.replace("_anonymous/", "")).toList(),
+                "the interpreter tells the transport each event's loss class, read from the event's own sort");
     }
 }

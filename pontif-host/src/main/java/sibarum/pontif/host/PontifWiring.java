@@ -2,6 +2,7 @@ package sibarum.pontif.host;
 
 import dev.vexelray.framework.api.FrameStage;
 import dev.vexelray.framework.shell.AppInfo;
+import dev.vexelray.framework.shell.Placements;
 import dev.vexelray.framework.shell.Shell;
 import dev.vexelray.framework.shell.Wiring;
 import sibarum.pontif.ir.IrInterpreter;
@@ -61,7 +62,7 @@ public final class PontifWiring extends Wiring {
 
     @Override
     public void model(Shell shell) {
-        lanes = shell.disposer().register(new FrameworkLaneTransport(shell.bus(), shell::place));
+        lanes = shell.disposer().register(new FrameworkLaneTransport(shell.bus(), lane -> Placements.of(shell, lane)));
     }
 
     @Override

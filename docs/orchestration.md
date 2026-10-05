@@ -564,6 +564,45 @@ load-scaled pools — the deliberate trade against Erlang). Dynamic *compute* pa
 axis: data-parallel fan-out (`… on Gpu`) runs *within* a conductor and is unaffected. Nothing you
 actually need is in the forbidden gap.
 
+### Loss classes — an event says whether losing it matters (2026-10-05)
+
+A lane that cannot keep up has to do something with the events queued for it, and what it may do depends on
+what an event *is*, which only the event's sort can say. There are two classes and the default is the strict one:
+
+- **Edge** — a command, a keystroke, a state change. Nothing supersedes it and nothing downstream can
+  reconstruct it. Never dropped; a lane that cannot hold one is a **fault** and the program halts, which is the
+  same ruling as a handler crash (*Failure*, above) and the framework's own contract for a mailbox that
+  overflows. This is every event unless it says otherwise.
+- **Sample** — a reading: a pointer position, a window size, a clock tick. The next value supersedes it, so a
+  queued one may be replaced by a newer one of its type and nothing could have observed the difference.
+  Declared by the sort, in the language and not in a transport's configuration:
+
+  ```
+  struct Moved(x:Int)
+  assign trait Moved:Event{}
+  assign trait Moved:Sample{}     # pontif.events.Sample
+  ```
+
+**Why folding is lossless here** when it is only conditionally so in general: a conductor's state is
+single-owner and a `Cell` is not sendable, so *nothing can observe a conductor between a publish and its drain*
+— which is exactly the condition atchung's `Fold` states for dropping a superseded write to be invisible. The
+language already guarantees it, so the declaration is sound by construction rather than by review.
+
+**A sample's type is its cell.** The newest `Moved` supersedes any queued `Moved` and nothing else; `Moved` and
+`Resized` never merge. A reading that must not be merged — one per sensor — is a different type per source, or
+an edge. (A key field in the declaration is the obvious refinement, and unbuilt on purpose: the cell is the
+type until a program needs more.)
+
+**Ordering.** One mailbox per lane, not one per class, because superseding moves the surviving event to the
+back of the queue, at the position of its newest write: the lane still sees its events in arrival order across
+both classes, with the superseded ones simply absent.
+
+**What a transport does with it** is the transport's. `LaneTransport.send` carries the class; the interpreter
+reads it off the event's sort (`satisfies pontif.events.Sample`) on the cross-lane path only, so an inline fold
+pays nothing. The framework host folds as above. The thread tier queues everything and never drops: it has no
+bounded queue to fall behind into, and an author must not depend on a sample being delivered, which is the
+contract of the word.
+
 ### Honest edges
 
 - **Dead letters — the config gap.** An emitted event whose type falls outside the union of the

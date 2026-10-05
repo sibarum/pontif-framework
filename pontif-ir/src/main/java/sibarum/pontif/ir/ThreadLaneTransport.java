@@ -73,7 +73,7 @@ public final class ThreadLaneTransport implements LaneTransport {
     }
 
     @Override
-    public void send(String lane, RecordValue event, Origin origin) {
+    public void send(String lane, RecordValue event, Origin origin, Loss loss) {   // a thread tier queues everything: it never falls behind into a loss
         inFlight.incrementAndGet();
         lane(lane).inbox.add(new LaneTask(event, origin));   // unbounded — bounded backpressure is a refinement
     }
