@@ -40,11 +40,19 @@ class BoxSurfaceTest {
     private static RecordValue rootOf(String src, String name) {
         PontifCompiler.CompileResult compiled = new PontifCompiler().compile(src, name);
         Object[] captured = new Object[1];
+        // The real native, registered by the compile above; put back afterwards because the registry is
+        // JVM-wide and a stub left behind makes every later test's `window` a no-op.
+        NativeCalls.NativeCall real = NativeCalls.get("pontif.gui/window");
         NativeCalls.register("pontif.gui/window", (args, ctx) -> {
             captured[0] = args.size() > 1 ? args.get(1) : null;
             return new IrInterpreter.DriveResult();
         });
-        PontifRunner.RunResult r = new PontifRunner().run(compiled, PontifRunner.Engine.INTERPRETER);
+        PontifRunner.RunResult r;
+        try {
+            r = new PontifRunner().run(compiled, PontifRunner.Engine.INTERPRETER);
+        } finally {
+            NativeCalls.register("pontif.gui/window", real);
+        }
         assertFalse(r.isError(), () -> name + " should run; got " + r.text());
         assertNotNull(captured[0], "window should have received a root Box");
         return (RecordValue) captured[0];

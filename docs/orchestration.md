@@ -674,7 +674,7 @@ contract of the word.
     and it is the GUI-framework thesis (display single-threaded on main, logic parallel off it). The
     cut-2 `Conductor` is retained as the **main-thread lane**; thread placement is added around it. So
     2b's remaining work is folded into the tiered plan below, not a cooperative co-run.
-- **Tier-1 mailbox spike — DONE (host-level, the same-process-thread row).** `runtime.module.Mailbox`
+- **Tier-1 mailbox spike — DONE, then RETIRED 2026-10-05 (its job is done by the framework's placements and the bus's mailboxes; `Mailbox`, `MailboxSpike` and their test are deleted).** `runtime.module.Mailbox`
   (the bounded, thread-safe inbox — the sole shared object) + `MailboxSpike` (the harness): display on
   the calling thread, application logic on a spawned daemon, communicating *only* through two mailboxes
   of immutable messages. A `Press` (input) flows display → logic, a `Render` (frame) flows back; the
@@ -693,7 +693,7 @@ contract of the word.
   `EventJournalTest` covers the marker split, dead-lettering, and capture-in-order of a real conduit
   program's emits. Thread-safe (`CopyOnWriteArrayList` + atomic marker) for when Players journal
   concurrently; per-inbox partitioning waits for real mailboxes (below).
-- **`Mailbox` is the agnostic boundary — DONE.** Backed by a `LinkedBlockingQueue` (the two-lock queue
+- **`Mailbox` is the agnostic boundary — DONE, RETIRED 2026-10-05 with the spike above; the boundary is now `LaneTransport`.** Backed by a `LinkedBlockingQueue` (the two-lock queue
   — separate put/take locks), so the many producers and the single draining owner never contend on the
   same lock. Bounded (backpressure) + blocking (parks the consumer); the JDK has no lock-free queue
   that is *also* bounded-and-blocking, so this is the right backpressured pick without an external SPSC
@@ -706,7 +706,7 @@ contract of the word.
   that wants per-Player state ownership, and it is a later refinement — *not* a blocker for spawning a
   routine onto a thread. So `fireEvent` stays synchronous on the main lane; only a conduit *placed*
   off-thread needs its own state cell, built when placement puts it there.
-- **Conductor-graph runtime shape — DONE (host-level spike).** `ConductorGraphSpike` realizes the
+- **Conductor-graph runtime shape — DONE (host-level spike), RETIRED 2026-10-05: the interpreter's own lanes superseded it (cut 3b) and `ConductorGraphSpike` is deleted.** `ConductorGraphSpike` realizes the
   hive-mind at the host level (à la Slice 1): two conductors on their own threads, each owning its
   conduits + state, a **static routing table** (event type → owning conductor), and events flowing
   forward across conductors. An `app` conductor folds `Command`→counter and **emits `Status`**, which

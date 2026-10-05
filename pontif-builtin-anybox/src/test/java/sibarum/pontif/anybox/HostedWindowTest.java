@@ -5,7 +5,6 @@ import dev.vexelray.framework.shell.VexelApplication;
 import dev.vexelray.gui.core.model.RetainedNode;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.host.PontifWiring;
-import sibarum.pontif.ir.NativeCalls;
 import sibarum.pontif.runtime.PontifCompiler;
 
 import java.io.ByteArrayOutputStream;
@@ -48,8 +47,6 @@ class HostedWindowTest {
         var compiled = new PontifCompiler().compile(PROGRAM, "hosted.ptf");
         if (compiled instanceof PontifCompiler.CompileResult.Failed f) throw new AssertionError(f.error().text());
         var program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
-        // BoxSurfaceTest leaves a stub window native registered for the whole JVM; this test is about the real one.
-        NativeCalls.register("pontif.gui/window", AnyboxExtension::openWindow);
         PontifWiring wiring = new PontifWiring(AnyboxLauncher.appInfo("hosted.ptf"), program,
                 shell -> Mounts.install(new FrameworkWindowHost(shell)));
 

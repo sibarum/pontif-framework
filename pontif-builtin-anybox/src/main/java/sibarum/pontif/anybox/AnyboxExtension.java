@@ -61,7 +61,7 @@ public final class AnyboxExtension implements Extension {
      * return - the loop is the framework's, so this neither opens one nor blocks. The title is the program's;
      * size and placement belong to the framework (see {@link FrameworkWindowHost}).
      */
-    static Object openWindow(List<Object> args, NativeCalls.Context ctx) {
+    private static Object openWindow(List<Object> args, NativeCalls.Context ctx) {
         Object cfg = args.isEmpty() ? null : args.get(0);
         Object root = args.size() > 1 ? args.get(1) : null;
         return Mounts.host().open(

@@ -55,17 +55,6 @@
             <artifactId>vexelray-gui-widget</artifactId>
             <version>${vexelray.version}</version>
         </dependency>
-        <!-- Input: every device event reaches the GUI as Atchung traffic published by this bridge. -->
-        <dependency>
-            <groupId>sibarum.tactroller</groupId>
-            <artifactId>tactroller-atchung</artifactId>
-            <version>${tactroller.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>sibarum.tactroller</groupId>
-            <artifactId>tactroller-clipboard</artifactId>
-            <version>${tactroller.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
