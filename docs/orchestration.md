@@ -120,6 +120,20 @@ But strictness needs **one** master clock — two independent hardware clocks (a
 **Non-negotiable:** the graphics cadence must be **non-blocking** (zero-timeout acquire / MAILBOX,
 pace by deadline). A blocking FIFO-vsync present hoards the thread and starves every sibling.
 
+
+**On the framework's loop (2026-10-05).** A cadence is the framework's pacing contract, not a timeline, and not
+kronometer's (that is the animation clock): `conduct` registers a frame hook that fires a beat when one is due
+and a `DeadlineSource` that tells the parked loop when to wake, then returns. Because there is now a display and
+an event source, `Vsync` and `Retained` — which the headless conductor refuses — are honoured:
+
+| Cadence | Beat | Deadline the loop parks to |
+| --- | --- | --- |
+| `Fixed(dt)` | at least `dt` ms after the last; a late frame fires one and re-anchors, never a burst | `dt` ahead |
+| `Eager` / `Vsync` | every frame (the loop's own ceiling is the display's refresh, so the two coincide) | now, while beats remain |
+| `Retained` | on any frame something else caused | none: zero frames when idle |
+
+`Tick` is a `Sample`: a conductor that falls behind sees the newest beat and never a backlog, so a slow handler
+cannot make a clock halt the program. The headless conductor is unchanged and still the default without a host.
 ## Authoring — three types, one member block (RULED 2026-08-02)
 
 `struct`, `trait`, and `conductor` are the **three kinds of authorable type**, and they share **one member

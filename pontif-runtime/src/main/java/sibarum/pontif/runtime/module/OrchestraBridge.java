@@ -21,6 +21,42 @@ public final class OrchestraBridge {
     private OrchestraBridge() {
     }
 
+    /** How a {@code Cadence} paces its beats. */
+    public enum Pace {
+        /** {@code Fixed(dt)}: beats at least {@code dt} ms apart. */
+        FIXED,
+        /** {@code Eager}: a beat every pass, uncapped by anything but the loop's own ceiling. */
+        EAGER,
+        /** {@code Vsync}: a beat each display refresh. */
+        VSYNC,
+        /** {@code Retained}: a beat only on a pass something else caused - zero while idle. */
+        RETAINED
+    }
+
+    /**
+     * Where beats are paced when the program runs inside an application that owns the loop. Without one the
+     * headless Conductor below blocks the calling thread and paces itself; with one, {@code conduct} hands the
+     * schedule over and returns, because the loop - the window, the display, the input - is not this native's
+     * to run, and a cadence that needs a display ({@code Vsync}) or an event source ({@code Retained}) can only
+     * be honoured by a host that has one.
+     */
+    public interface TickHost {
+        /** Pace {@code ticks} beats; each beat is {@link OrchestraBridge#beat}. Returns at once. */
+        void drive(long ticks, Pace pace, long periodNanos, NativeCalls.Context ctx);
+    }
+
+    private static volatile TickHost host;
+
+    /** Install the application's tick host, or {@code null} to return to the headless Conductor. */
+    public static void host(TickHost tickHost) {
+        host = tickHost;
+    }
+
+    /** Fire beat {@code n} - milliseconds {@code elapsedMillis} since the first - into the running program. */
+    public static void beat(NativeCalls.Context ctx, long n, long elapsedMillis) {
+        ctx.fireEvent(tickEvent(n, elapsedMillis));
+    }
+
     /** The fully-qualified type of the clock event; conduits match it by its bare name {@code Tick}. */
     private static final String TICK_TYPE = "pontif.orchestra/Tick";
 
@@ -35,9 +71,31 @@ public final class OrchestraBridge {
      */
     public static Object conduct(List<Object> args, NativeCalls.Context ctx) {
         long ticks = longArg(args, 0, 1);
-        long periodNanos = periodNanos(args.size() > 1 ? args.get(1) : null);
+        Object cadence = args.size() > 1 ? args.get(1) : null;
+        TickHost tickHost = host;
+        if (tickHost != null) {
+            Pace pace = pace(cadence);
+            long dt = cadence instanceof RecordValue rec && pace == Pace.FIXED
+                    ? Math.max(0, longMember(rec, "dt", 500)) * 1_000_000L : 0L;
+            tickHost.drive(ticks, pace, dt, ctx);
+            return new IrInterpreter.DriveResult();
+        }
+        long periodNanos = periodNanos(cadence);
         new Conductor().seat(clock(ticks, ctx), periodNanos).run();
         return new IrInterpreter.DriveResult();
+    }
+
+    /** The pace a {@code Cadence} value asks for; a missing or unrecognised one is the {@code Fixed(500)} default. */
+    private static Pace pace(Object cadence) {
+        if (!(cadence instanceof RecordValue rec)) {
+            return Pace.FIXED;
+        }
+        return switch (bareType(rec)) {
+            case "Eager" -> Pace.EAGER;
+            case "Vsync" -> Pace.VSYNC;
+            case "Retained" -> Pace.RETAINED;
+            default -> Pace.FIXED;
+        };
     }
 
     /**

@@ -1,4 +1,4 @@
-requires pontif.events.{Event}
+requires pontif.events.{Event, Sample}
 
 exports @.{conduct, Tick, Cadence, Fixed, Eager, Vsync, Retained}
 
@@ -6,6 +6,9 @@ exports @.{conduct, Tick, Cadence, Fixed, Eager, Vsync, Retained}
 # since the orchestra started. A program writes a `conduit c(e:Tick, s:S)` to be driven by it.
 struct Tick(n:Int, elapsed:Decimal)
 assign trait Tick:Event{}
+# A clock tick is a reading, not an occurrence: the next beat supersedes one a slow conductor has not reached yet,
+# so a lane that falls behind sees the newest beat rather than a backlog (and never a halt over a late clock).
+assign trait Tick:Sample{}
 
 # Cadence — the frame-advancement policy a Player is ticked on (docs/orchestration.md §Cadence). Frame
 # advancement is a parameterized algorithm, not one loop; the Conductor merges each Player's deadline.

@@ -120,4 +120,42 @@ class PontifWiringTest {
                 "Moved(1) and Moved(2) were superseded by Moved(3); the press was an edge and arrived, first, "
                         + "because the surviving reading sits where its newest write was");
     }
+
+    private static final String CONDUCTED = """
+            requires pontif.events.{Event, StdOut}
+            requires pontif.orchestra.{conduct, Tick, Fixed}
+            conductor Clock { onTick(t:Tick) -> emit StdOut("t" + t.n + " ")  t }
+            spawn Clock over thread
+            main ( conduct(3, Fixed(30)) )
+            """;
+
+    @Test
+    void conductPacesOnTheFrameworksLoop_insteadOfBlockingOneOfItsOwn() throws Exception {
+        var compiled = new PontifCompiler().compile(CONDUCTED, "conducted.ptf");
+        if (compiled instanceof PontifCompiler.CompileResult.Failed f) throw new AssertionError(f.error().text());
+        CompiledProgram program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
+        PontifWiring wiring = new PontifWiring(new AppInfo("pontif-host-test", "Pontif", 640, 480), program);
+
+        PrintStream orig = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Shell shell = null;
+        try {
+            System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+            // Returns: a blocking conduct would never have come back, the headless Conductor being the whole loop.
+            shell = VexelApplication.tree(wiring, new String[0]);
+            shell.hooks().seal();
+
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (printed(out).split(" ", -1).length - 1 < 3 && System.nanoTime() < deadline) {
+                shell.hooks().run();            // the frame: fires a beat when one is due
+                wiring.lanes().mainDrain().run();
+                Thread.sleep(2);
+            }
+        } finally {
+            System.setOut(orig);
+            if (shell != null) shell.disposer().close();
+        }
+
+        assertEquals("t1 t2 t3 ", printed(out), "three beats, 30 ms apart, each reaching the clock's conductor");
+    }
 }

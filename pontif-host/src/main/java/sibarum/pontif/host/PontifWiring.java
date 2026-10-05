@@ -7,6 +7,7 @@ import dev.vexelray.framework.shell.Shell;
 import dev.vexelray.framework.shell.Wiring;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.runtime.CompiledProgram;
+import sibarum.pontif.runtime.module.OrchestraBridge;
 
 import java.util.function.Consumer;
 
@@ -68,6 +69,10 @@ public final class PontifWiring extends Wiring {
     @Override
     public void tree(Shell shell) {
         beforeMain.accept(shell);
+        // conduct() paces on this application's loop instead of blocking one of its own; cleared with the
+        // application so a later run in the same JVM meets the headless Conductor again.
+        OrchestraBridge.host(new FrameworkTickHost(shell));
+        shell.disposer().register(() -> OrchestraBridge.host(null));
         new IrInterpreter(program.simplifier()).laneTransport(() -> lanes).eval(program.module());
     }
 
