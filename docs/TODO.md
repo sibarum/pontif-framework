@@ -11,6 +11,20 @@ Regression meter: `mvn install -Dmaven.test.skip=true -q` then
 
 ---
 
+## Update all sibling-repo version numbers
+
+Pontif's references to the sibling repos lag behind their current versions, so builds resolve
+whatever stale jars are still in `~/.m2`. Bring every one up to the sibling's current version
+(or to the ecosystem-wide bump, if that has landed by then). As of 2026-10-14:
+- `vexelray.version` (`pontif-builtin-anybox`) and `framework.version` (`pontif-host`):
+  0.1.0-SNAPSHOT → 0.1.1-SNAPSHOT.
+- `tactroller.version` (`pontif-builtin-anybox`), `atchung.version` (`pontif-host`),
+  `elektroq.version` (`pontif-builtin-net`): 1.0-SNAPSHOT → 1.1-SNAPSHOT.
+- SupirVast in `pontif-supirvast` and `pontif-builtin-vulkan`: hard-coded 0.1.0-SNAPSHOT →
+  0.2.1-SNAPSHOT. Make it a property while there; 0.1 → 0.2 may need API changes.
+
+---
+
 ## Bracket/paren law: migrate `match` from `{ }` to `( )` — pre-launch requirement (low priority)
 
 RULED 2026-06-24 (with the main-block design, docs/events.md): under the bracket/paren law
