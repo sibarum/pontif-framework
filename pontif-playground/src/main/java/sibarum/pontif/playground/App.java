@@ -2,6 +2,8 @@ package sibarum.pontif.playground;
 
 import sibarum.pontif.runtime.RunResult;
 import sibarum.pontif.tooling.DefinitionNavigator;
+import sibarum.pontif.tooling.PontifProblems;
+import sibarum.pontif.tooling.PontifProblems.Problem;
 import sibarum.dasum.gui.core.GlfwContext;
 import sibarum.dasum.gui.core.component.AlignItems;
 import sibarum.dasum.gui.core.component.Component;
@@ -204,18 +206,12 @@ public final class App {
     /** Recompile this long after the last edit settles. */
     private static final long COMPILE_DEBOUNCE_MS = 400L;
 
-    /**
-     * One error to surface: a half-open {@code [start, end)} char range in the
-     * editor buffer and the message shown when the caret is near it.
-     * {@code fromImport} records that the failure came from an imported module —
-     * the range then points at the offending {@code requires} statement, not a
-     * foreign offset that can't be mapped into this buffer.
-     */
-    record ErrorMark(int start, int end, String message, boolean fromImport) {}
+    // An error mark is a PontifProblems.Problem: [start, end) in the buffer, the compiler's message, and whether
+    // it came from an imported module (then the range is the requires statement).
 
     /** Latest compile's error marks; read each frame by the underline + caret
      *  hooks. Single-writer (the debounce worker) / many-reader (GLFW thread). */
-    private static volatile List<ErrorMark> errorMarks = List.of();
+    private static volatile List<Problem> errorMarks = List.of();
 
     /** Monotonic edit counter, bumped on every content change. A compile captures
      *  it at schedule time and discards its result if a newer edit has landed, so
@@ -2109,134 +2105,10 @@ public final class App {
         Invalidator.invalidate();
     }
 
-    /** Translate a failed compile into editor underlines. Precedence:
-     *  <ol>
-     *    <li>an error whose origin points into <b>this buffer</b> underlines the
-     *        offending token — even a "Link error" for an unresolved name used here
-     *        (its origin is the in-buffer use site, not an import problem);</li>
-     *    <li>otherwise a link error, or an origin from another module's source, maps
-     *        to the offending {@code requires} statement;</li>
-     *    <li>otherwise no mark.</li>
-     *  </ol>
-     *  Package-visible for {@code LiveCompileMarksTest}. */
-    static List<ErrorMark> computeMarks(String content, String sourceName,
-                                        RunResult error) {
-        String message = error.text();
-        Optional<Origin> originOpt = error.origin();
-        // (1) A precise in-buffer origin wins over the "Link error" prefix: an
-        // unresolved name used here is anchored at its use site, not the imports.
-        if (originOpt.isPresent() && originOpt.get().isPresent()
-                && sourceName.equals(originOpt.get().source())) {
-            int[] span = spanOffsets(content, originOpt.get());
-            if (span != null) {
-                span = callNameSpan(content, span);   // pull left onto the callee name
-                return List.of(new ErrorMark(span[0], span[1], message, false));
-            }
-        }
-        // (2) A genuine import/link problem in another module (or an origin-less link
-        // error): flag the requires area so the import site is surfaced.
-        if (message.startsWith("Link error")
-                || (originOpt.isPresent() && originOpt.get().isPresent()
-                    && !sourceName.equals(originOpt.get().source()))) {
-            return requiresMarks(content, message, originOpt.orElse(null));
-        }
-        return List.of();
-    }
-
-    /** The compiler anchors a call error at the application ({@code (args)}), so the
-     *  offending name sits immediately to its left. When {@code [start, end)} begins
-     *  right after an identifier, return that identifier's span instead — the name the
-     *  user actually needs to see underlined. Otherwise the span is returned unchanged. */
-    private static int[] callNameSpan(String content, int[] span) {
-        int start = span[0];
-        if (start <= 0 || !isIdentChar(content.charAt(start - 1))) return span;
-        int nameStart = start;
-        while (nameStart > 0 && isIdentChar(content.charAt(nameStart - 1))) nameStart--;
-        return new int[]{nameStart, start};
-    }
-
-    /** Char offsets {@code [start, end)} for an origin span, clamped to the start
-     *  line so a multi-line span underlines just its first line. A point span
-     *  (start == end) is widened over the token that begins there. Null if it
-     *  doesn't map into {@code content}. */
-    private static int[] spanOffsets(String content, Origin o) {
-        int start = offsetOf(content, o.span().start().line(), o.span().start().column());
-        if (start < 0) return null;
-        int end = offsetOf(content, o.span().end().line(), o.span().end().column());
-        if (end <= start) end = wordEnd(content, start);
-        int lineEnd = content.indexOf('\n', start);
-        if (lineEnd < 0) lineEnd = content.length();
-        end = Math.min(end, lineEnd);
-        if (end <= start) end = Math.min(start + 1, content.length());
-        return start >= end ? null : new int[]{start, end};
-    }
-
-    /** Char offset of 1-based {@code (line, column)}, or -1 if the line is out of
-     *  range. The column is clamped to the buffer length. */
-    private static int offsetOf(String content, int line, int column) {
-        int idx = 0, ln = 1;
-        while (ln < line && idx < content.length()) {
-            if (content.charAt(idx) == '\n') ln++;
-            idx++;
-        }
-        if (ln != line) return -1;
-        return Math.min(idx + (column - 1), content.length());
-    }
-
-    /** End of the identifier token starting at {@code start} (at least one char). */
-    private static int wordEnd(String content, int start) {
-        int i = start;
-        while (i < content.length()) {
-            char c = content.charAt(i);
-            if (Character.isLetterOrDigit(c) || c == '_' || c == '$') i++;
-            else break;
-        }
-        return i > start ? i : Math.min(start + 1, content.length());
-    }
-
-    /** Underlines over the {@code requires} statement(s) implicated by an import
-     *  error. Prefers the one whose module name appears in the error message or
-     *  matches the foreign origin's source; falls back to every {@code requires}
-     *  line so the import area is still flagged when no single one can be pinned. */
-    private static List<ErrorMark> requiresMarks(String content, String message, Origin origin) {
-        String foreign = origin != null && origin.isPresent() ? stripExt(origin.source()) : null;
-        List<ErrorMark> all = new ArrayList<>();
-        List<ErrorMark> matched = new ArrayList<>();
-        int offset = 0;
-        for (String line : content.split("\n", -1)) {
-            String t = line.strip();
-            if (t.startsWith("requires ")) {
-                int lead = line.length() - line.stripLeading().length();
-                int start = offset + lead;
-                int end = offset + line.length();
-                if (end > start) {
-                    ErrorMark mark = new ErrorMark(start, end, message, true);
-                    all.add(mark);
-                    String module = requiresModule(t);
-                    if (module != null && (message.contains(module) || (foreign != null
-                            && (foreign.equals(module) || foreign.contains(module) || module.contains(foreign))))) {
-                        matched.add(mark);
-                    }
-                }
-            }
-            offset += line.length() + 1;   // + the '\n' that split removed
-        }
-        return List.copyOf(matched.isEmpty() ? all : matched);
-    }
-
-    /** The module name in a {@code requires <module>.{…}} (or {@code requires <module>}) line. */
-    private static String requiresModule(String strippedLine) {
-        String rest = strippedLine.substring("requires ".length()).strip();
-        int db = rest.indexOf(".{");
-        if (db > 0) return rest.substring(0, db).strip();
-        int sp = rest.indexOf(' ');
-        return sp > 0 ? rest.substring(0, sp).strip() : rest;
-    }
-
-    private static String stripExt(String source) {
-        if (source == null) return null;
-        int dot = source.lastIndexOf('.');
-        return dot > 0 ? source.substring(0, dot) : source;
+    /** Translate a failed compile into editor underlines: {@link PontifProblems#of}, shared with every
+     *  editor that checks Pontif as it is typed. Package-visible for {@code LiveCompileMarksTest}. */
+    static List<Problem> computeMarks(String content, String sourceName, RunResult error) {
+        return PontifProblems.of(content, sourceName, error);
     }
 
     /** Write {@code content} to {@code file} after a clean compile — the autosave-
@@ -2267,7 +2139,7 @@ public final class App {
         if (codeText == null) return;
         int caret = TextStates.of(codeText).caretIndex;
         String near = null;
-        for (ErrorMark m : errorMarks) {
+        for (Problem m : errorMarks) {
             if (caret >= m.start() && caret <= m.end()) { near = m.message(); break; }
         }
         // Surface the nearest caret error (plus its Auto-Action hint when the token offers
@@ -2332,13 +2204,13 @@ public final class App {
      *  clipped to the editor viewport — the error analogue of {@link
      *  #drawLinkUnderline}. No-op unless the Editor tab is showing. */
     private static void drawErrorUnderlines(LayoutResult layout, Batcher batcher) {
-        List<ErrorMark> marks = errorMarks;
+        List<Problem> marks = errorMarks;
         if (marks.isEmpty() || codeText == null) return;
         PixelRect tr = layout.rectOf(codeText);
         if (tr == null) return;   // Editor tab not active
         String content = TextStates.contentOf(codeText);
         PixelRect vp = codeScroll == null ? null : layout.rectOf(codeScroll);
-        for (ErrorMark m : marks) {
+        for (Problem m : marks) {
             if (m.start() >= m.end() || m.end() > content.length()) continue;
             PixelRect a = TextGeometry.caretBounds(codeText, content, tr, m.start());
             PixelRect b = TextGeometry.caretBounds(codeText, content, tr, m.end());
