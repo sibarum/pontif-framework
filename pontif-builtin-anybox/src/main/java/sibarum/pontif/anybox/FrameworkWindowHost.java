@@ -4,11 +4,14 @@ import dev.vexelray.framework.shell.Shell;
 import dev.vexelray.framework.shell.Views;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.Node;
+import dev.vexelray.gui.core.NodeEvent;
 import dev.vexelray.gui.core.layout.LayoutEnums.Direction;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.style.Role;
+import dev.vexelray.gui.widget.TextField;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.host.FrameworkLaneTransport;
+import sibarum.pontif.host.PontifBusGraph;
 import sibarum.pontif.ir.NativeCalls;
 
 /**
@@ -44,6 +47,33 @@ final class FrameworkWindowHost implements Mounts.Host {
         this.shell = shell;
         this.setText = lanes.outlet(SetText.TOPIC);
         Views.mailbox(shell.gui(), "pontif.gui#SetText", SetText.TOPIC, c -> Mounts.apply(c.id(), c.text()), CAPACITY);
+    }
+
+    /** The window's part in the bus graph. */
+    static final String PART = "pontif.gui";
+
+    /** How many edges the widget library's routed mailboxes (a field's {@code CHANGED}, a node's events) hold. */
+    private static final int ROUTED = 4096;
+
+    /**
+     * What the window adds to the program's message graph: it is a view that hears {@code SetText}, its buttons'
+     * clicks and looks and its fields' edits, and sends what it hears into the program, to whichever lane owns the
+     * event; and every lane may send {@code SetText}. The node topics are named by the window's tree, which is the
+     * framework's main window: one window per program for now.
+     */
+    static void declare(PontifBusGraph graph) {
+        String tree = dev.vexelray.framework.core.CloseRequested.MAIN;
+        @SuppressWarnings("unchecked")
+        Class<NodeEvent.Message<Object>> message = (Class<NodeEvent.Message<Object>>) (Class<?>) NodeEvent.Message.class;
+        graph.view(PART)
+                .hears(PART + "#SetText", SetText.TOPIC, CAPACITY)
+                .hears(PART + "#TextChanged", TextField.CHANGED, ROUTED)
+                .hears(PART + "#Clicked", sibarum.atchung.Topic.edge("vexelray.gui." + tree + ".node."
+                        + NodeEvent.CLICK.name(), message), ROUTED)
+                .hears(PART + "#look", sibarum.atchung.Topic.state("vexelray.gui." + tree + ".node."
+                        + NodeEvent.STATE.name(), message, NodeEvent.Message::node), ROUTED)
+                .sendsToLanes(PART)
+                .instrument(SetText.TOPIC);
     }
 
     @Override

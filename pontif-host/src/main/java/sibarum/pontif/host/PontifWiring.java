@@ -9,6 +9,7 @@ import sibarum.pontif.runtime.CompiledProgram;
 import sibarum.pontif.runtime.module.OrchestraBridge;
 
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /**
  * A compiled Pontif program as a framework application - the wiring a processor would generate, written by
@@ -39,6 +40,7 @@ public final class PontifWiring extends Wiring {
     private final AppInfo info;
     private final CompiledProgram program;
     private final BiConsumer<Shell, FrameworkLaneTransport> beforeMain;
+    private final Consumer<PontifBusGraph> declares;
     private FrameworkLaneTransport lanes;
 
     public PontifWiring(AppInfo info, CompiledProgram program) {
@@ -52,9 +54,31 @@ public final class PontifWiring extends Wiring {
      *                   so the host's commands leave through them ({@link FrameworkLaneTransport#outlet})
      */
     public PontifWiring(AppInfo info, CompiledProgram program, BiConsumer<Shell, FrameworkLaneTransport> beforeMain) {
+        this(info, program, beforeMain, graph -> { });
+    }
+
+    /**
+     * @param declares adds what the extension's host contributes to the message graph (its view, its Instruments'
+     *                 topics), beside the lanes this wiring declares itself
+     */
+    public PontifWiring(AppInfo info, CompiledProgram program, BiConsumer<Shell, FrameworkLaneTransport> beforeMain,
+                        Consumer<PontifBusGraph> declares) {
         this.info = info;
         this.program = program;
         this.beforeMain = beforeMain;
+        this.declares = declares;
+    }
+
+    /**
+     * The program's message graph: its lanes, and whatever the extension declared. Known before anything is built,
+     * because the conductor graph is fixed when the program compiles.
+     */
+    @Override
+    public String busGraph() {
+        PontifBusGraph graph = new PontifBusGraph(program.module().threadedConductors(),
+                FrameworkLaneTransport.DEFAULT_CAPACITY);
+        declares.accept(graph);
+        return graph.text();
     }
 
     @Override

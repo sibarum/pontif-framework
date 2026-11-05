@@ -500,6 +500,14 @@ taken when the host moved to 0.2:
    lane of its own (`vexel-component-<name>`), in the same rounds. A conductor asks for a core, and is never
    handed one by default.
 
+**The graph is declared.** A hosted program answers the framework's bus graph (vexelray-inspector
+`docs/bus-graph.md`, version 2), as generated wiring does, so the Inspector draws it and `ottermate bus graph`
+prints it: each lane is a `component` part (`pontif.main` on `logic`, `pontif.<conductor>` on its own lane)
+hearing its edge and sample topics, an extension's window is a `view`, and an Instrument's topic is sent by every
+lane. A lane's `sends` are what its wiring hands it (a sender to every lane), not what its handlers happen to emit:
+an emit in a helper, or of a computed event, is not visible without following calls, and a graph that
+under-declares would hide exactly the flow someone opened the Inspector to find.
+
 The thread tier (`ThreadLaneTransport`, the CLI and headless default) is unchanged.
 
 ### The journal is the wire format

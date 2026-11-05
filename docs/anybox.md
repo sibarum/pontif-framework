@@ -180,4 +180,5 @@ with its static single-window registries and its `System.err` logging) is delete
 - **A program is an application:** its settings directory is `pontif-<program>`, so each program remembers its own
   window, and everything after the positional arguments on the launcher's command line (`--automation`, ...) is
   the framework's own. With `--automation=0` the program can be driven by `ottermate` like any framework
-  application.
+  application, and `ottermate bus graph` shows its declared message graph: the window is the view `pontif.gui`,
+  hearing `SetText`, its buttons' clicks and looks and its fields' edits.

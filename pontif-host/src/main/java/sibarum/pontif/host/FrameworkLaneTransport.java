@@ -84,10 +84,24 @@ public final class FrameworkLaneTransport implements LaneTransport {
 
         Lane(String name) {
             this.name = name;
-            String topic = "pontif.lane." + (MAIN.equals(name) ? "main" : name);
-            this.edges = Topic.edge(topic, Message.class);
-            this.samples = Topic.state(topic + ".samples", Message.class, m -> m.event().typeName());
+            this.edges = edges(name);
+            this.samples = samples(name);
         }
+    }
+
+    /** {@code lane}'s edge topic: every message, in order, and an overflow is a fault. */
+    public static Topic<Message> edges(String lane) {
+        return Topic.edge("pontif.lane." + (MAIN.equals(lane) ? "main" : lane), Message.class);
+    }
+
+    /** {@code lane}'s state topic: a {@code Sample}, keyed by its event type, so a newer one replaces a queued one. */
+    public static Topic<Message> samples(String lane) {
+        return Topic.state(edges(lane).name() + ".samples", Message.class, m -> m.event().typeName());
+    }
+
+    /** The thread a lane's deliveries run on, as the bus graph names it: the logic lane's, or its own declared one. */
+    public static String seat(String lane) {
+        return MAIN.equals(lane) ? Component.DEFAULT_LANE : lane;
     }
 
     private final Map<String, Lane> lanes = new TreeMap<>();
@@ -112,8 +126,7 @@ public final class FrameworkLaneTransport implements LaneTransport {
 
         for (Lane lane : lanes.values()) {
             String inbox = inboxName(lane.name);
-            String seat = MAIN.equals(lane.name) ? Component.DEFAULT_LANE : lane.name;
-            lane.inbox = seats.inbox(inbox, seat, lane.edges, lane.samples);
+            lane.inbox = seats.inbox(inbox, seat(lane.name), lane.edges, lane.samples);
             lane.inbox.subscribe(inbox + "#edges", lane.edges, m -> deliver(lane, m), capacity, null);
             lane.inbox.subscribe(inbox + "#samples", lane.samples, m -> deliver(lane, m), capacity, null);
         }
