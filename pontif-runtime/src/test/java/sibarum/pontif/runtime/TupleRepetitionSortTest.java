@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class TupleRepetitionSortTest {
 
     private String run(String src) {
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(src, "reps.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "should run; got " + r.text());
         return r.text();

@@ -1,12 +1,10 @@
 package sibarum.pontif.runtime;
 
-import sibarum.pontif.core.Origin;
 import sibarum.pontif.core.symbolic.RuntimeCheckException;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.TruffleLowering;
 import sibarum.pontif.ir.TruffleProgram;
 
-import java.util.Optional;
 
 /**
  * Executes an already-{@link CompiledProgram compiled} program through one of
@@ -101,28 +99,4 @@ public final class PontifRunner {
         return value.toString();
     }
 
-    public record RunResult(String text, boolean isError, Optional<Origin> origin) {
-
-        public RunResult {
-            if (text == null) {
-                throw new IllegalArgumentException("RunResult text must be non-null");
-            }
-            if (origin == null) {
-                origin = Optional.empty();
-            }
-        }
-
-        public static RunResult success(String text) {
-            return new RunResult(text, false, Optional.empty());
-        }
-
-        public static RunResult error(String text, Origin origin) {
-            return new RunResult(text, true,
-                    origin != null && origin.isPresent() ? Optional.of(origin) : Optional.empty());
-        }
-
-        public static RunResult error(String text) {
-            return new RunResult(text, true, Optional.empty());
-        }
-    }
 }

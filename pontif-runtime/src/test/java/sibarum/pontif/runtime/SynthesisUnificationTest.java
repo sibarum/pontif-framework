@@ -26,13 +26,13 @@ class SynthesisUnificationTest {
     private static final String PRELUDE =
             "module examples.synth\nrequires pontif.core.{Stream}\n";
 
-    private PontifRunner.RunResult run(String src) {
+    private RunResult run(String src) {
         return new PontifRunner().run(
                 new PontifCompiler().compile(src, "synth.ptf"), PontifRunner.Engine.INTERPRETER);
     }
 
     private String value(String src) {
-        PontifRunner.RunResult r = run(src);
+        RunResult r = run(src);
         assertTrue(!r.isError(), () -> "expected success; got " + r.text());
         return r.text();
     }
@@ -74,7 +74,7 @@ class SynthesisUnificationTest {
     void guardRejectsTheExcludedMember() {
         // 5 is excluded by the predicate, so the guard rejects it — the value that
         // the synthesis correspondingly drops.
-        PontifRunner.RunResult r = run(PRELUDE
+        RunResult r = run(PRELUDE
                 + "function ok(x:[Int:0 <= @ < 10 & @ != 5]):[Int] -> x\n"
                 + "ok(5)");
         assertTrue(r.isError(), () -> "5 is out of the set; the guard must reject it; got " + r.text());

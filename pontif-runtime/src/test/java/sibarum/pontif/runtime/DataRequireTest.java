@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 
 import java.io.IOException;
 import java.nio.file.Files;

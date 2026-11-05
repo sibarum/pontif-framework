@@ -29,7 +29,7 @@ class AliasTraitCombinationTest {
         CompileResult r = compiler.compile(src, "combo.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
-        PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
+        RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
         assertTrue(!rr.isError(), () -> "run error: " + rr.text());
         return rr.text();
     }
@@ -38,7 +38,7 @@ class AliasTraitCombinationTest {
         CompileResult r = compiler.compile(src, "combo.ptf");
         if (r instanceof CompileResult.Failed f) return f.error().text();
         // A compile that "succeeds" may still error at runtime — surface either.
-        PontifRunner.RunResult rr = runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER);
+        RunResult rr = runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER);
         if (rr.isError()) return rr.text();
         return fail("expected a rejection but it ran to: " + rr.text());
     }

@@ -1,5 +1,6 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.runtime.RunResult;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
 
@@ -36,7 +37,7 @@ public final class ShapeLauncher {
         String displayName = args.length > 2 && !args[2].isBlank()
                 ? args[2] : target.getFileName().toString();
 
-        PontifRunner.RunResult result = new PontifRunner().run(
+        RunResult result = new PontifRunner().run(
                 new PontifCompiler().compile(source, displayName, resolveDir),
                 PontifRunner.Engine.INTERPRETER);
 

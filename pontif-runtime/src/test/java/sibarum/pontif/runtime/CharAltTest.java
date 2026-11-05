@@ -141,10 +141,10 @@ class CharAltTest {
         // backstop), so the bad program fails closed before it ever runs.
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
-        PontifRunner.RunResult eq = runner.run(
+        RunResult eq = runner.run(
                 compiler.compile("'a' < 'b'", "t.ptf"), PontifRunner.Engine.TRUFFLE);
         assertEquals("true", eq.text());
-        PontifRunner.RunResult bad = runner.run(
+        RunResult bad = runner.run(
                 compiler.compile("'a' + 'b'", "t.ptf"), PontifRunner.Engine.TRUFFLE);
         assertTrue(bad.isError(), "char arithmetic must fail closed on Truffle too");
         assertTrue(bad.text().contains("don't compute"), () -> bad.text());

@@ -47,7 +47,7 @@ class StreamQueryTest {
 
     private String runLinked(String src) {
         PontifCompiler.CompileResult r = compiler.compile(src, "m.ptf");
-        PontifRunner.RunResult res = runner.run(r, PontifRunner.Engine.INTERPRETER);
+        RunResult res = runner.run(r, PontifRunner.Engine.INTERPRETER);
         org.junit.jupiter.api.Assertions.assertFalse(
                 res.isError(), () -> "expected success; got: " + res.text());
         return res.text();

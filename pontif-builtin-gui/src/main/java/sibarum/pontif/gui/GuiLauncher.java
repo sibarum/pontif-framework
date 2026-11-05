@@ -1,5 +1,6 @@
 package sibarum.pontif.gui;
 
+import sibarum.pontif.runtime.RunResult;
 import sibarum.pontif.net.debug.DebugSession;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
@@ -47,7 +48,7 @@ public final class GuiLauncher {
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
 
-        PontifRunner.RunResult result = runner.run(
+        RunResult result = runner.run(
                 compiler.compile(source, displayName, resolveDir),
                 PontifRunner.Engine.INTERPRETER);
 

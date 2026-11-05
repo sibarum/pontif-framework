@@ -1,5 +1,6 @@
 package sibarum.pontif.net.debug;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.elektro.queue.dyn.DynValue;
 import sibarum.pontif.runtime.PontifCompiler;
@@ -62,7 +63,7 @@ class DebugPortIntegrationTest {
             try {
                 PontifCompiler compiler = new PontifCompiler();
                 PontifRunner runner = new PontifRunner();
-                PontifRunner.RunResult result =
+                RunResult result =
                         runner.run(compiler.compile(PROGRAM, "test.ptf"), PontifRunner.Engine.INTERPRETER);
                 if (result.isError()) {
                     session.runFailed(result.text(), 0, 0);

@@ -5,7 +5,7 @@ import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
 import sibarum.pontif.ir.NativeFunctions;
 import sibarum.pontif.runtime.PontifRunner.Engine;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 import sibarum.pontif.runtime.module.Extension;
 import sibarum.pontif.runtime.module.Extensions;
 

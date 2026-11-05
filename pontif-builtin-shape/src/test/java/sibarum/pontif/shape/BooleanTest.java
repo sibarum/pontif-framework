@@ -1,5 +1,6 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
@@ -22,7 +23,7 @@ class BooleanTest {
             + " smoothUnion, smoothIntersect, smoothDifference, distanceAt}\n";
 
     private static String eval(String expr) {
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(IMPORTS + expr, "csg.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());

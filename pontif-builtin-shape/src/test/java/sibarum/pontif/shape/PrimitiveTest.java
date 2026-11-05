@@ -1,5 +1,6 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
@@ -23,7 +24,7 @@ class PrimitiveTest {
 
     private static String eval(String expr) {
         Extensions.install(new ShapeExtension());
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(IMPORTS + expr, "prim.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "program should run; got " + r.text());

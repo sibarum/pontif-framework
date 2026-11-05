@@ -24,7 +24,7 @@ class FieldSatisfactionImplicationTest {
         CompileResult r = compiler.compile(src, "fieldsat.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
-        PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
+        RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
         assertTrue(!rr.isError(), () -> "run error: " + rr.text());
         return rr.text();
     }

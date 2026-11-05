@@ -42,6 +42,11 @@
             <groupId>sibarum.pontif</groupId>
             <artifactId>pontif-parser</artifactId>
         </dependency>
+        <dependency>
+            <!-- the token scan and go to definition, shared with the VexelRay IDE -->
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-tooling</artifactId>
+        </dependency>
         <!-- The builtin extensions must be on the editor's classpath: the live in-process compiler
              resolves their modules, and the "Run" subprocess inherits this classpath (App spawns
              `java -cp <inherited> …`). They then self-register via ServiceLoader (docs/extensions.md)

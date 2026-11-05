@@ -143,7 +143,7 @@ class MetareferenceTest {
     void trufflePath_agrees() {
         PontifCompiler compiler = new PontifCompiler();
         PontifRunner runner = new PontifRunner();
-        PontifRunner.RunResult r = runner.run(compiler.compile("""
+        RunResult r = runner.run(compiler.compile("""
                 function inc(x:[Int:@>=1]):[Int:@>1] -> x + 1
                 let incDispatch:[Dispatch(Int):Int] = $inc[Int]
                 incDispatch(2)

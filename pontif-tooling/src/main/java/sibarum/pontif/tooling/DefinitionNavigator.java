@@ -1,4 +1,4 @@
-package sibarum.pontif.playground;
+package sibarum.pontif.tooling;
 
 import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrModule;
@@ -22,7 +22,7 @@ import java.util.TreeMap;
 import java.util.stream.Stream;
 
 /**
- * "Go to definition" for the Pontif Editor: resolve a clicked identifier (a
+ * "Go to definition" for an editor: resolve a clicked identifier (a
  * type / function / method / let name) to the SOURCE of the module that
  * declares it, plus the character span of the name within that source so the
  * caller can highlight it.
@@ -35,14 +35,23 @@ import java.util.stream.Stream;
  *   <li><b>This file</b> — the editor buffer's own declarations (shown verbatim).</li>
  *   <li><b>Sibling modules</b> — {@code .ptf} files in the open file's directory,
  *       shown as their real on-disk source.</li>
- *   <li><b>Builtins</b> — {@link BuiltinModules#all()}; these have no shipped
- *       {@code .ptf}, so the {@link IrPrinter} dump of the module stands in.</li>
+ *   <li><b>Builtins</b> — {@link BuiltinModules#all()}, then the extra modules
+ *       this navigator was made with. A builtin with real source shows it;
+ *       one built from IR is reflected back to Pontif source.</li>
  * </ol>
  *
  * <p>Names match a declaration when they equal it OR are its last dotted
  * segment (so clicking {@code zero} finds {@code let Traction.zero}, and
  * clicking {@code inv} finds {@code method Ternion.inv}). Primitives carry no
  * source and are reported separately ({@link #isPrimitive}).
+ *
+ * <p><b>Static or not.</b> What reads only the buffer ({@link #inScope},
+ * {@link #localDeclaration}, {@link #insertRequires}, {@link #references}) is
+ * static. What searches modules ({@link #resolve}, {@link #exporters},
+ * {@link #allModules}) is on an instance, because which modules there are
+ * depends on the editor: the Pontif Editor adds {@code pontif.gui}, which it
+ * parses for lookup without installing, and an editor that knows of no
+ * extension uses {@link #builtinsOnly()}. Immutable and thread-safe.
  */
 public final class DefinitionNavigator {
 
@@ -53,7 +62,32 @@ public final class DefinitionNavigator {
     private static final Set<String> PRIMITIVES =
             Set.of("Int", "Bool", "Decimal", "Frac", "Char", "String", "_");
 
-    private DefinitionNavigator() {}
+    /** Extra modules, by name, parsed once. A name {@link BuiltinModules#all()} already has is not here. */
+    private final Map<String, Builtin> extras;
+
+    /**
+     * A navigator that also searches {@code extraModuleSources} (module name → its Pontif source) after
+     * the registered builtins, for modules an editor knows of but has not installed. One whose source does
+     * not parse is left out: navigation loses that module, which is not worth a failure.
+     */
+    public DefinitionNavigator(Map<String, String> extraModuleSources) {
+        Map<String, Builtin> parsed = new LinkedHashMap<>();
+        Set<String> registered = BuiltinModules.all().keySet();
+        extraModuleSources.forEach((name, src) -> {
+            if (src == null || registered.contains(name)) return;
+            try {
+                parsed.put(name, new Builtin(PontifParser.parseModule(src, name), src));
+            } catch (ParseException e) {
+                // present but unparseable: a different fact from absent, and still not worth a failure
+            }
+        });
+        this.extras = java.util.Collections.unmodifiableMap(parsed);
+    }
+
+    /** A navigator over the registered builtins and the editor's own folder, and nothing else. */
+    public static DefinitionNavigator builtinsOnly() {
+        return new DefinitionNavigator(Map.of());
+    }
 
     public static boolean isPrimitive(String name) {
         return PRIMITIVES.contains(name);
@@ -96,10 +130,10 @@ public final class DefinitionNavigator {
     /**
      * Module names that <em>export</em> {@code name} — the candidates a {@code requires}
      * could pull it from. Searches sibling {@code .ptf} modules (by their declared
-     * {@code module} name) and the builtins (+ the GUI extension). Only exported names
+     * {@code module} name), the builtins and this navigator's extra modules. Only exported names
      * qualify: importing a non-exported name would be a link error.
      */
-    public static List<String> exporters(String editorContent, String name, Path resolveDir) {
+    public List<String> exporters(String editorContent, String name, Path resolveDir) {
         List<String> out = new ArrayList<>();
         if (resolveDir != null && Files.isDirectory(resolveDir)) {
             for (Map.Entry<String, String> e : siblingSources(resolveDir).entrySet()) {
@@ -203,11 +237,11 @@ public final class DefinitionNavigator {
 
     /**
      * Every importable module with its exported names — sibling project modules first
-     * (alphabetical by file), then the builtins (+ the GUI extension). The browse-side
+     * (alphabetical by file), then the builtins and the extra modules. The browse-side
      * complement of {@link #exporters}: for "I don't know the name, show me what's there."
      * Modules that export nothing are omitted.
      */
-    public static List<ModuleExports> allModules(String editorContent, Path resolveDir) {
+    public List<ModuleExports> allModules(String editorContent, Path resolveDir) {
         List<ModuleExports> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.HashSet<>();
         if (resolveDir != null && Files.isDirectory(resolveDir)) {
@@ -257,7 +291,7 @@ public final class DefinitionNavigator {
      * live editor buffer; {@code resolveDir} is the open file's directory (null
      * for an unsaved buffer — sibling search is then skipped). Never throws.
      */
-    public static Optional<Target> resolve(String editorContent, String name, Path resolveDir) {
+    public Optional<Target> resolve(String editorContent, String name, Path resolveDir) {
         if (name == null || name.isEmpty()) return Optional.empty();
 
         // 1. This file.
@@ -306,32 +340,16 @@ public final class DefinitionNavigator {
 
     /**
      * Builtin modules to search: the default-registered set ({@link BuiltinModules#all()},
-     * with {@link BuiltinModules#sourceOf real source} where it exists) plus the GUI
-     * extension's module, parsed locally for <em>lookup only</em>. The editor runs GUI
-     * programs in a subprocess, so it never installs the GUI extension globally — parsing
-     * its source here keeps {@code pontif.gui} names navigable without changing the
-     * in-process Run path.
+     * with {@link BuiltinModules#sourceOf real source} where it exists), then the extra
+     * modules this navigator was made with, parsed for <em>lookup only</em> (the Pontif
+     * Editor's {@code pontif.gui}, which it never installs globally).
      */
-    private static Map<String, Builtin> candidateBuiltins() {
+    private Map<String, Builtin> candidateBuiltins() {
         Map<String, Builtin> out = new LinkedHashMap<>();
         for (Map.Entry<String, IrModule> e : BuiltinModules.all().entrySet()) {
             out.put(e.getKey(), new Builtin(e.getValue(), BuiltinModules.sourceOf(e.getKey())));
         }
-        out.computeIfAbsent("pontif.gui", k -> {
-            // Through OptionalGui: the windowed extension is optional (and outlived by this editor), so its
-            // absence costs one navigable module rather than a NoClassDefFoundError on startup. The parse is
-            // caught separately and narrowly — a module that is present but does not parse is a different
-            // fact from one that is not here, and the old catch-all could not tell them apart.
-            String src = OptionalGui.moduleSource();
-            if (src == null) {
-                return null;
-            }
-            try {
-                return new Builtin(PontifParser.parseModule(src, "pontif.gui"), src);
-            } catch (ParseException e) {
-                return null;
-            }
-        });
+        extras.forEach(out::putIfAbsent);
         return out;
     }
 
@@ -409,7 +427,7 @@ public final class DefinitionNavigator {
         return out;
     }
 
-    // --- text helpers (identifier-boundary aware; mirror PontifHighlighter rules) ---
+    // --- text helpers (identifier-boundary aware; PontifTokens' rules) ---
 
     private static IrModule tryParse(String source, String name) {
         try {
@@ -447,7 +465,6 @@ public final class DefinitionNavigator {
     }
 
     private static boolean isIdentPart(char c) {
-        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-                || (c >= '0' && c <= '9') || c == '_' || c == '$';
+        return PontifTokens.isIdentPart(c);
     }
 }

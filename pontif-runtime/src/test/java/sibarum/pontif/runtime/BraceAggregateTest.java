@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BraceAggregateTest {
 
     private String run(String src) {
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(src, "brace.ptf"), PontifRunner.Engine.INTERPRETER);
         assertTrue(!r.isError(), () -> "expected success; got " + r.text());
         return r.text();
@@ -48,7 +48,7 @@ class BraceAggregateTest {
     @Test
     void parenTuple_isRetired() {
         // S5: paren-tuples are a parse error — braces are the only aggregate form.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("module m\n(1, 2, 3)", "brace.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertTrue(r.isError(), () -> "paren-tuple should be rejected; got " + r.text());
@@ -120,7 +120,7 @@ class BraceAggregateTest {
     @Test
     void parenSort_isRetired() {
         // S5: the paren tuple-sort `[(Int, Int)]` is a parse error too.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(
                         "module m\nfunction f(p:[(Int, Int)]):Int -> 0\nf({3, 5})", "brace.ptf"),
                 PontifRunner.Engine.INTERPRETER);

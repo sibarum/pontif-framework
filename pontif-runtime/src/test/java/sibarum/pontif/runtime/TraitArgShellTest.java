@@ -28,7 +28,7 @@ class TraitArgShellTest {
         CompileResult r = compiler.compile(src, "trait-argshell.ptf");
         CompileResult.Compiled c = assertInstanceOf(
                 CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
-        PontifRunner.RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
+        RunResult rr = runner.run(c.program(), Engine.INTERPRETER);
         assertFalse(rr.isError(), () -> "run error: " + rr.text());
         return rr.text();
     }

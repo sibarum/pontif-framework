@@ -1,5 +1,6 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.core.types.StringValue;
@@ -248,7 +249,7 @@ class RenderLoweringTest {
         // The README comment claims attrAt(ball, 0.0, 0.0, 0.5) == 0.5 — pin it. No layer here: the
         // program is a comparison, so it never reaches the renderer.
         Extensions.install(new ShapeExtension());
-        PontifRunner.RunResult v = new PontifRunner().run(new PontifCompiler().compile("""
+        RunResult v = new PontifRunner().run(new PontifCompiler().compile("""
                 requires pontif.shape.{Sphere, ScalarField, attr, attrAt}
                 struct Height()
                 assign trait Height:ScalarField { valueAt(x:Decimal, y:Decimal, z:Decimal):Decimal -> z }

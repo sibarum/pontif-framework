@@ -1,8 +1,9 @@
-package sibarum.pontif.playground;
+package sibarum.pontif.tooling;
 
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -16,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DefinitionNavigatorTest {
 
+    private static final DefinitionNavigator NAV = DefinitionNavigator.builtinsOnly();
+
     /** The highlighted slice of a resolved target — what the editor selects. */
     private static String highlighted(DefinitionNavigator.Target t) {
         return t.sourceText().substring(t.selStart(), t.selEnd());
@@ -27,7 +30,7 @@ class DefinitionNavigatorTest {
                 function twice(n:Int):Int -> n + n
                 twice(21)
                 """;
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(src, "twice", null);
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(src, "twice", null);
         assertTrue(t.isPresent());
         assertEquals("(this file)", t.get().moduleLabel());
         // The highlighted span is the declaration's name, not the call site.
@@ -70,7 +73,7 @@ class DefinitionNavigatorTest {
                 struct Point(x:Int, y:Int)
                 Point(1, 2)
                 """;
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(src, "Point", null);
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(src, "Point", null);
         assertTrue(t.isPresent());
         assertEquals("Point", highlighted(t.get()));
         assertEquals(src.indexOf("Point"), t.get().selStart());
@@ -84,7 +87,7 @@ class DefinitionNavigatorTest {
                 let Point.zero = Point(0, 0)
                 Point.zero
                 """;
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(src, "zero", null);
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(src, "zero", null);
         assertTrue(t.isPresent());
         assertEquals("zero", highlighted(t.get()));
     }
@@ -97,7 +100,7 @@ class DefinitionNavigatorTest {
                 requires std.proof.{Split, Leaf}
                 0
                 """;
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(src, "Split", null);
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(src, "Split", null);
         assertTrue(t.isPresent());
         assertTrue(t.get().moduleLabel().contains("std.proof"), () -> t.get().moduleLabel());
         assertEquals("Split", highlighted(t.get()));
@@ -108,7 +111,7 @@ class DefinitionNavigatorTest {
 
     @Test
     void resolvesBuiltin_pontifCoreStream_showsRealSource() {
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(
                 "requires pontif.core.{Stream}\n0", "Stream", null);
         assertTrue(t.isPresent());
         assertTrue(t.get().moduleLabel().contains("pontif.core"), () -> t.get().moduleLabel());
@@ -133,16 +136,16 @@ class DefinitionNavigatorTest {
 
     @Test
     void exporters_findsBuiltinModuleThatExportsTheName() {
-        var mods = DefinitionNavigator.exporters("0", "Stream", null);
+        var mods = NAV.exporters("0", "Stream", null);
         assertTrue(mods.contains("pontif.core"), () -> mods.toString());
         // A name nothing exports yields no candidates.
-        assertTrue(DefinitionNavigator.exporters("0", "Nonexistent", null).isEmpty());
+        assertTrue(NAV.exporters("0", "Nonexistent", null).isEmpty());
     }
 
     @Test
     void exporters_ambiguousNameListsAllModules() {
         // Leaf is exported by both std.common and std.proof (a re-export).
-        var mods = DefinitionNavigator.exporters("0", "Leaf", null);
+        var mods = NAV.exporters("0", "Leaf", null);
         assertTrue(mods.contains("std.common") && mods.contains("std.proof"), () -> mods.toString());
     }
 
@@ -181,7 +184,7 @@ class DefinitionNavigatorTest {
 
     @Test
     void allModules_listsBuiltinsWithTheirExports() {
-        var modules = DefinitionNavigator.allModules("0", null);
+        var modules = NAV.allModules("0", null);
         // pontif.core is present and exports Stream + Nothing.
         var core = modules.stream().filter(m -> m.module().equals("pontif.core")).findFirst();
         assertTrue(core.isPresent(), () -> modules.toString());
@@ -204,15 +207,31 @@ class DefinitionNavigatorTest {
         }
     }
 
+    // --- extra modules (what the Pontif Editor does for pontif.gui) ----------
+
+    private static final String EXTRA = """
+            exports @.{Widget}
+            struct Widget(size:Int)
+            """;
+
     @Test
-    void resolvesGuiExtensionStruct_withoutGlobalInstall() {
-        // Box lives in the GUI extension, which the editor never installs globally;
-        // the navigator parses its source locally for lookup.
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(
-                "requires pontif.gui.{Box}\n0", "Box", null);
+    void extraModule_resolvesWithoutBeingInstalled() {
+        DefinitionNavigator nav = new DefinitionNavigator(Map.of("demo.extra", EXTRA));
+        Optional<DefinitionNavigator.Target> t = nav.resolve("requires demo.extra.{Widget}\n0", "Widget", null);
         assertTrue(t.isPresent());
-        assertTrue(t.get().moduleLabel().contains("pontif.gui"), () -> t.get().moduleLabel());
-        assertEquals("Box", highlighted(t.get()));
+        assertTrue(t.get().moduleLabel().contains("demo.extra"), () -> t.get().moduleLabel());
+        assertEquals("Widget", highlighted(t.get()));
+        // ...and it is importable from there.
+        assertTrue(nav.exporters("0", "Widget", null).contains("demo.extra"));
+        // A navigator not told of it does not find it.
+        assertTrue(NAV.resolve("0", "Widget", null).isEmpty());
+    }
+
+    @Test
+    void extraModule_thatDoesNotParse_isLeftOut() {
+        DefinitionNavigator nav = new DefinitionNavigator(Map.of("demo.broken", "struct (((", "demo.extra", EXTRA));
+        assertTrue(nav.allModules("0", null).stream().noneMatch(m -> m.module().equals("demo.broken")));
+        assertTrue(nav.allModules("0", null).stream().anyMatch(m -> m.module().equals("demo.extra")));
     }
 
     @Test
@@ -224,7 +243,7 @@ class DefinitionNavigatorTest {
 
     @Test
     void unknownName_resolvesToNothing() {
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(
                 "function f(n:Int):Int -> n\nf(1)", "nonexistent", null);
         assertTrue(t.isEmpty());
     }
@@ -233,7 +252,7 @@ class DefinitionNavigatorTest {
     void unparseableEditorBuffer_stillResolvesBuiltins() {
         // A mid-edit buffer that doesn't parse must not block navigating to a builtin.
         String broken = "function (((  \nrequires std.proof.{Split}";
-        Optional<DefinitionNavigator.Target> t = DefinitionNavigator.resolve(broken, "Split", null);
+        Optional<DefinitionNavigator.Target> t = NAV.resolve(broken, "Split", null);
         assertTrue(t.isPresent());
         assertEquals("Split", highlighted(t.get()));
     }

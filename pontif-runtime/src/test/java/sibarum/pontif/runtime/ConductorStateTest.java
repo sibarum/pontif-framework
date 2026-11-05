@@ -2,7 +2,7 @@ package sibarum.pontif.runtime;
 
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifRunner.Engine;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;

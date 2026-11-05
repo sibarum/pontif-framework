@@ -1,5 +1,7 @@
 package sibarum.pontif.playground;
 
+import sibarum.pontif.runtime.RunResult;
+import sibarum.pontif.tooling.DefinitionNavigator;
 import sibarum.dasum.gui.core.GlfwContext;
 import sibarum.dasum.gui.core.component.AlignItems;
 import sibarum.dasum.gui.core.component.Component;
@@ -1765,10 +1767,10 @@ public final class App {
         // read-only Definition view can only follow to what it can already resolve.
         boolean editor = source == codeText;
         java.util.List<String> exporters = editor
-                ? DefinitionNavigator.exporters(content, name, resolveDir())
+                ? OptionalGui.navigator().exporters(content, name, resolveDir())
                 : java.util.List.of();
         if (exporters.isEmpty()) {
-            if (DefinitionNavigator.resolve(content, name, resolveDir()).isPresent()) {
+            if (OptionalGui.navigator().resolve(content, name, resolveDir()).isPresent()) {
                 openDefinition(content, name);   // resolvable but not importable — just show it
             } else if (editor) {
                 Status.bad("No definition or exporting module found for '" + name + "'.");
@@ -1832,7 +1834,7 @@ public final class App {
         if (OverlayStack.isActive()) return;
         String content = TextStates.contentOf(codeText);
         java.util.List<DefinitionNavigator.ModuleExports> modules =
-                DefinitionNavigator.allModules(content, resolveDir());
+                OptionalGui.navigator().allModules(content, resolveDir());
 
         java.util.List<Component> rows = new java.util.ArrayList<>();
         rows.add(new Component.Text("Modules", Em.of(1.15f), MENU_TITLE_FG));
@@ -1953,7 +1955,7 @@ public final class App {
             Status.notify("'" + name + "' is a builtin primitive — no source to open.");
             return;
         }
-        Optional<DefinitionNavigator.Target> found = DefinitionNavigator.resolve(
+        Optional<DefinitionNavigator.Target> found = OptionalGui.navigator().resolve(
                 fromContent, name, resolveDir());
         if (found.isEmpty()) {
             Status.bad("No definition found for '" + name + "'.");
@@ -2118,7 +2120,7 @@ public final class App {
      *  </ol>
      *  Package-visible for {@code LiveCompileMarksTest}. */
     static List<ErrorMark> computeMarks(String content, String sourceName,
-                                        PontifRunner.RunResult error) {
+                                        RunResult error) {
         String message = error.text();
         Optional<Origin> originOpt = error.origin();
         // (1) A precise in-buffer origin wins over the "Link error" prefix: an
@@ -2319,7 +2321,7 @@ public final class App {
     private static String computeHint(String content, String name) {
         if (DefinitionNavigator.isPrimitive(name)) return null;
         if (!DefinitionNavigator.inScope(content, name)) {
-            return DefinitionNavigator.exporters(content, name, resolveDir()).isEmpty()
+            return OptionalGui.navigator().exporters(content, name, resolveDir()).isEmpty()
                     ? null   // an unknown name we can't auto-require — no hint to offer
                     : "Hint: Ctrl+click '" + name + "' to auto-require it.";
         }

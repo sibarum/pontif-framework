@@ -1,5 +1,6 @@
 package sibarum.pontif.shape;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
@@ -22,7 +23,7 @@ class DiscoveryTest {
 
     @Test
     void shapeModule_autoDiscovered_withNoExplicitInstall() {
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(
                         "requires pontif.shape.{Sphere, distanceAt}\n"
                       + "distanceAt(Sphere(1.0), 0.0, 0.0, 0.0) == -1.0", "disc.ptf"),

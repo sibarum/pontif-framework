@@ -143,12 +143,12 @@ change needed.
 
 | Piece | File |
 |-------|------|
-| Resolution, references, reflection, `inScope`/`exporters`/`insertRequires`/`allModules` | `pontif-playground/.../DefinitionNavigator.java` |
+| Resolution, references, reflection, `inScope`/`exporters`/`insertRequires`/`allModules` | `pontif-tooling/.../DefinitionNavigator.java`, shared with the VexelRay IDE. The module searches are on an instance; this editor's adds `pontif.gui` (`OptionalGui.navigator()`) |
 | IR → Pontif-source unparser | `pontif-ir/.../IrSourcePrinter.java` |
-| Real-source accessor for builtins | `pontif-runtime/.../module/BuiltinModules.java` (`sourceOf`) |
+| Real-source accessor for builtins | `pontif-compiler/.../module/BuiltinModules.java` (`sourceOf`) |
 | Editor wiring (tab, Ctrl+click / Ctrl+Enter, underline, Esc, highlight, `addRequires`, module explorer) | `pontif-playground/.../App.java` |
-| Stateless foreground colorizer | `pontif-playground/.../PontifHighlighter.java` (`foreground`) |
-| Tests | `pontif-playground/.../DefinitionNavigatorTest.java` |
+| Token scan / stateless foreground colorizer | `pontif-tooling/.../PontifTokens.java` / `pontif-playground/.../PontifHighlighter.java` (`foreground`) |
+| Tests | `pontif-tooling/.../DefinitionNavigatorTest.java`, `PontifTokensTest.java`; `pontif-playground/.../GuiNavigationTest.java` |
 
 ## Deferred
 

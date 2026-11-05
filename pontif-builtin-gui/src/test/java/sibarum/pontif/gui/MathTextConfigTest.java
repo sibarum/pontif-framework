@@ -1,5 +1,6 @@
 package sibarum.pontif.gui;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import sibarum.dasum.gui.mathtext.MathConstants;
@@ -63,7 +64,7 @@ class MathTextConfigTest {
                 """, "app.ptf", dir);
         assertInstanceOf(CompileResult.Compiled.class, r,
                 () -> "config data module should compile; got " + ((CompileResult.Failed) r).error().text());
-        PontifRunner.RunResult run = new PontifRunner().run(r, PontifRunner.Engine.INTERPRETER);
+        RunResult run = new PontifRunner().run(r, PontifRunner.Engine.INTERPRETER);
         assertFalse(run.isError(), () -> "should read the field; got " + run.text());
         assertEquals("0.25", run.text(), "mathstyle.axisHeight read from the data module");
     }

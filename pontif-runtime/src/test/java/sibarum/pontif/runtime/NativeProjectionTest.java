@@ -7,7 +7,7 @@ import sibarum.pontif.conservation.ConservationQueries;
 import sibarum.pontif.parser.PontifParser;
 import sibarum.pontif.runtime.PontifCompiler.CompileResult;
 import sibarum.pontif.runtime.PontifRunner.Engine;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

@@ -1,5 +1,6 @@
 package sibarum.pontif.gui;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.ir.NativeCalls;
@@ -56,7 +57,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderCurve", stub);
         NativeCalls.register("pontif.plot/renderCurve", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, plotLine}
                         struct Parabola()
@@ -87,7 +88,7 @@ class PlotExtensionTest {
         // (1 → 2D curve, 2 → surface, 3 → volume), by the x/y/z axis convention. usesVar/varCount
         // walk the closed AlgExpr union. Here x*x + y*y names x and y → dimensionality 2.
         Extensions.install(new PlotExtension());
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{AlgExpr, Param, Add, Mul}
                         requires pontif.plot.{varCount}
@@ -116,7 +117,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderSurface", stub);
         NativeCalls.register("pontif.plot/renderSurface", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{AlgExpr, Param, Add, Mul}
                         requires pontif.plot.{plotSurfaceExpr}
@@ -146,7 +147,7 @@ class PlotExtensionTest {
 
         // plotLine(f, 5): 5 points over [-10, 10] via the runtime `indexRange` generator (NOT the
         // 65-point static preset). step = 20/4 = 5 → x = {-10,-5,0,5,10}, y = x^2.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, plotLine}
                         struct Parabola()
@@ -182,7 +183,7 @@ class PlotExtensionTest {
         // REGRESSION (the "ghost curve"): a domain of INTEGER bounds ({-2, 2}, as when the user
         // writes `let radius = 2`) makes `hi - lo` a Long; step = (hi-lo)/(n-1) must NOT be integer
         // division (which truncated to 0 for n >= 6, collapsing every sample onto x = lo).
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, plotLine}
                         struct Line()
@@ -217,7 +218,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderCloud", stub);
         NativeCalls.register("pontif.plot/renderCloud", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Cloud3D, plotCloud}
                         struct Tetra()
@@ -250,7 +251,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderSurface", stub);
         NativeCalls.register("pontif.plot/renderSurface", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{HeightMap3D, plotSurface}
                         struct Bowl()
@@ -284,7 +285,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{HeightMap3D, Cloud3D, surface, cloud, fade, text3d, scene}
                         struct Bowl()
@@ -340,7 +341,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{HeightMap3D, surface, scene}
                         struct Flat()
@@ -375,7 +376,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, curve, at, scene}
                         struct Diagonal()
@@ -407,7 +408,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{AlgExpr, Param, Add, Mul}
                         requires pontif.plot.{Curve2D, curve, surfaceExpr, onTop, scene}
@@ -443,7 +444,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{AlgExpr, Param, Add, Mul}
                         requires pontif.plot.{Curve2D, curve, surfaceExpr, scene}
@@ -478,7 +479,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderChart", stub);
         NativeCalls.register("pontif.plot/renderChart", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, curve, chart}
                         struct Parabola()
@@ -514,7 +515,7 @@ class PlotExtensionTest {
         NativeCalls.register("pontif.plot/renderChart", stub);
 
         // First curve gets an explicit red; second is left auto (palette slot 0 = cyan).
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, curve, color, chart}
                         struct Parabola()
@@ -560,7 +561,7 @@ class PlotExtensionTest {
         NativeCalls.register("pontif.plot/renderChart", stub);
 
         // curve(f, 10) — the arity overload — inside a chart: the series carries 10 points.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Curve2D, curve, chart}
                         struct Parabola()
@@ -622,7 +623,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{HeightMap3D, surface, cmap, scene}
                         struct Bowl()
@@ -652,7 +653,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderScene", stub);
         NativeCalls.register("pontif.plot/renderScene", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{HeightMap3D, surfaceFine, wire, scene}
                         struct Bowl()
@@ -687,7 +688,7 @@ class PlotExtensionTest {
         NativeCalls.register("pontif.plot/renderScene", stub);
 
         // f = x  → gradient (1,0,0) everywhere → every voxel lights the RED channel only.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Volume3D, volume, scene}
                         struct Ramp()
@@ -730,7 +731,7 @@ class PlotExtensionTest {
 
         // f = x → gradient (1,0,0) everywhere: uniform magnitude, so every strided voxel clears the
         // flat-region threshold and every glyph points along +x.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.plot.{Volume3D, volume, normals, scene}
                         struct Ramp()
@@ -779,7 +780,7 @@ class PlotExtensionTest {
 
         // 1/x over [-2, 2]: a pole at x = 0. Point sampling would blow up; interval enclosure marks
         // the column straddling 0 as Unbounded and leaves the rest as bounded curve spans.
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{AlgExpr, Const, Param, Div}
                         requires pontif.plot.{plotExpr}
@@ -817,7 +818,7 @@ class PlotExtensionTest {
         NativeCalls.register("renderReliable", stub);
         NativeCalls.register("pontif.plot/renderReliable", stub);
 
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{Algebraic}
                         requires pontif.plot.{plotExpr}
@@ -848,7 +849,7 @@ class PlotExtensionTest {
         };
         NativeCalls.register("renderReliable", stub);
         NativeCalls.register("pontif.plot/renderReliable", stub);
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(body, "autoframe.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "auto-framed plotExpr should run; got " + r.text());
         assertTrue(got[0], "renderReliable should have been reached");
@@ -990,7 +991,7 @@ class PlotExtensionTest {
         };
         NativeCalls.register("renderChart", stub);
         NativeCalls.register("pontif.plot/renderChart", stub);
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile(program, "layers.ptf"), PontifRunner.Engine.INTERPRETER);
         assertFalse(r.isError(), () -> "chart program should run; got " + r.text());
         assertNotNull(captured[0], "renderChart should have received the {layers} tuple");

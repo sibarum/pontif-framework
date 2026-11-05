@@ -24,7 +24,7 @@ class SpecOnlySynthesisTest {
                 """;
 
         // Body synthesized → ackermann(0,4) evaluates to 5.
-        PontifRunner.RunResult run = new PontifRunner().run(
+        RunResult run = new PontifRunner().run(
                 new PontifCompiler().compile(src, "ack.ptf"),
                 PontifRunner.Engine.INTERPRETER);
         assertTrue(!run.isError(), () -> "Expected synthesis to run; got " + run.text());

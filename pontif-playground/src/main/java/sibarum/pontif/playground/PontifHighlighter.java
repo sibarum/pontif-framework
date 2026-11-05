@@ -6,6 +6,7 @@ import sibarum.pontif.core.Origin;
 import sibarum.pontif.ir.IrModule;
 import sibarum.pontif.ir.IrStmt;
 import sibarum.pontif.parser.PontifParser;
+import sibarum.pontif.tooling.PontifTokens;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,17 +14,11 @@ import java.util.List;
 /**
  * Editor colorizer for Pontif surface syntax. Two independent passes:
  *
- * <p><b>Foreground</b> — a single-pass, error-tolerant token scanner:
- * comments, literals (numbers, chars, strings — dimmed neutral, never hued),
- * and the {@code @} principal subject; keywords keep the base color. User
- * names get the hue rainbow (the only semantic color). Deliberately NOT built on
- * {@link sibarum.pontif.parser.PontifLexer}: the real lexer throws on invalid
- * input (mid-edit source usually is invalid), skips comments entirely, and
- * reports line/column rather than the flat char offsets {@link TextStyle}
- * wants. The scanning mirrors the lexer's token shapes tolerantly —
- * anything that doesn't scan just stays uncolored. The keyword vocabulary
- * is NOT mirrored: it is read from {@link PontifParser#KEYWORDS}, so a keyword
- * added to the parser highlights here with no second list to update.
+ * <p><b>Foreground</b> — {@link PontifTokens}' error-tolerant scan (pontif-tooling,
+ * which says why it is not the real lexer), coloured here: comments, literals
+ * (numbers, chars, strings — dimmed neutral, never hued), and the {@code @}
+ * principal subject; keywords keep the base color. User names get the hue
+ * rainbow (the only semantic color). Anything that doesn't scan stays uncolored.
  *
  * <p><b>Background</b> — function-body tints, parser-backed: where a body
  * starts and ends (the lets through the final expression) is not decidable
@@ -107,76 +102,23 @@ final class PontifHighlighter {
 
     // --- Tolerant token scan: foreground colors + paren-block tints ---
 
+    // The scan is PontifTokens' (pontif-tooling), shared with the VexelRay IDE; this
+    // editor decides only the colours. EXPERIMENT (2026-06-05): paren-block tints
+    // (PAREN_BG over targetStart(...)..')') are OFF while trying the identifier
+    // rainbow. The scan used to pair parens for them; re-enabling them means pairing
+    // '(' and ')' in the gaps between PontifTokens' tokens, so none in a comment or
+    // literal counts.
     private static void scanTokens(String content, List<TextStyle> fg, List<TextStyle> bg) {
-        List<Integer> openParens = new ArrayList<>();
-        int n = content.length();
-        int i = 0;
-        while (i < n) {
-            char c = content.charAt(i);
-            if (c == '#') {
-                // Comment — to end of line, same as PontifLexer's skip rule.
-                int start = i;
-                while (i < n && content.charAt(i) != '\n') i++;
-                fg.add(new TextStyle(start, i, COMMENT));
-            } else if (c == '@') {
-                fg.add(new TextStyle(i, i + 1, SUBJECT));
-                i++;
-            } else if (c == '(') {
-                openParens.add(i);
-                i++;
-            } else if (c == ')') {
-                // Matched pairs only; a stray close is ignored and an
-                // unclosed open at EOF gets no span (tolerant mid-edit).
-                // The span reaches back over the call target in front of
-                // the open paren — "target(...)" tints as one block.
-                // EXPERIMENT (2026-06-05): paren tints OFF while trying the
-                // identifier rainbow — re-enable by restoring the add.
-                if (!openParens.isEmpty()) {
-                    int open = openParens.remove(openParens.size() - 1);
-                    // bg.add(new TextStyle(targetStart(content, open), i + 1, PAREN_BG));
-                }
-                i++;
-            } else if (c == '\'') {
-                int end = charLiteralEnd(content, i);
-                if (end > 0) {
-                    fg.add(new TextStyle(i, end, LITERAL));
-                    i = end;
-                } else {
-                    i++;    // doesn't scan as a char literal — leave uncolored
-                }
-            } else if (c == '"') {
-                int end = stringLiteralEnd(content, i);
-                if (end > 0) {
-                    fg.add(new TextStyle(i, end, LITERAL));
-                    i = end;
-                } else {
-                    i++;    // doesn't scan as a string literal — leave uncolored
-                }
-            } else if (isDigit(c)) {
-                // Integer / decimal. The '.' joins only when a digit follows
-                // immediately — same rule the lexer uses to keep field access
-                // (x.y) out of decimal literals. Leading '-' stays uncolored;
-                // the lexer treats it as sign-vs-operator by context, which a
-                // basic pass doesn't imitate.
-                int start = i;
-                while (i < n && isDigit(content.charAt(i))) i++;
-                if (i + 1 < n && content.charAt(i) == '.' && isDigit(content.charAt(i + 1))) {
-                    i++;
-                    while (i < n && isDigit(content.charAt(i))) i++;
-                }
-                fg.add(new TextStyle(start, i, LITERAL));
-            } else if (isIdentStart(c)) {
-                int start = i;
-                while (i < n && isIdentPart(content.charAt(i))) i++;
-                // Reserved words keep the editor's default color — structure
-                // words stay quiet; only user-defined names get the hue
-                // rainbow.
-                String word = content.substring(start, i);
-                if (!isReserved(word, content, start)) {
-                    fg.add(new TextStyle(start, i, identColor(word)));
-                }
-            } else {
-                i++;
+        for (PontifTokens.Token t : PontifTokens.scan(content)) {
+            switch (t.kind()) {
+                case COMMENT -> fg.add(new TextStyle(t.start(), t.end(), COMMENT));
+                case SUBJECT -> fg.add(new TextStyle(t.start(), t.end(), SUBJECT));
+                case STRING, CHAR, NUMBER -> fg.add(new TextStyle(t.start(), t.end(), LITERAL));
+                // Reserved words keep the editor's default color — structure words
+                // stay quiet; only names get the hue rainbow.
+                case KEYWORD -> { }
+                case NAME -> fg.add(new TextStyle(t.start(), t.end(),
+                        identColor(content.substring(t.start(), t.end()))));
             }
         }
     }
@@ -458,86 +400,11 @@ final class PontifHighlighter {
         return after >= content.length() || !isIdentPart(content.charAt(after));
     }
 
-    /**
-     * End index (exclusive) of a char literal opening at {@code i}, or -1
-     * if it doesn't scan. Mirrors {@code PontifLexer.readChar}: one escape
-     * from {@code \n \t \' \\} or one code point (surrogate pairs
-     * included), then the mandatory closing quote. Where the lexer throws
-     * (empty, unknown escape, unterminated), this returns -1.
-     */
     private static int charLiteralEnd(String content, int i) {
-        int n = content.length();
-        int p = i + 1;                          // past the opening quote
-        if (p >= n) return -1;
-        char c = content.charAt(p);
-        if (c == '\'') return -1;               // '' names no character
-        if (c == '\\') {
-            p++;
-            if (p >= n) return -1;
-            char esc = content.charAt(p);
-            if (esc != 'n' && esc != 't' && esc != '\'' && esc != '\\') return -1;
-            p++;
-        } else {
-            p += Character.charCount(content.codePointAt(p));
-        }
-        if (p >= n || content.charAt(p) != '\'') return -1;
-        return p + 1;                           // past the closing quote
+        return PontifTokens.charLiteralEnd(content, i);
     }
 
-    /**
-     * End index (exclusive) of a string literal opening at {@code i}, or -1
-     * if it doesn't scan. Mirrors {@code PontifLexer.readString}: zero or more
-     * code points (surrogate pairs included) or escapes from
-     * {@code \n \t \" \\}, then the mandatory closing quote. Where the lexer
-     * throws (unknown escape, unterminated), this returns -1.
-     */
-    private static int stringLiteralEnd(String content, int i) {
-        int n = content.length();
-        int p = i + 1;                          // past the opening quote
-        while (p < n) {
-            char c = content.charAt(p);
-            if (c == '"') return p + 1;         // past the closing quote
-            if (c == '\\') {
-                p++;
-                if (p >= n) return -1;
-                char esc = content.charAt(p);
-                if (esc != 'n' && esc != 't' && esc != '"' && esc != '\\') return -1;
-                p++;
-            } else {
-                p += Character.charCount(content.codePointAt(p));
-            }
-        }
-        return -1;                              // unterminated
+    private static boolean isIdentPart(char c) {
+        return PontifTokens.isIdentPart(c);
     }
-
-    /**
-     * Whether an identifier should render in the neutral default color rather
-     * than the user-name rainbow. Three sources, all reserved: the parser's
-     * {@link PontifParser#KEYWORDS}; the contextual receiver {@code this}; and the
-     * reserved {@code type} accessor in {@code this.type} (recognized
-     * positionally — {@code type} elsewhere is an ordinary name). The last two
-     * are NOT parser keywords (so they can't go in {@code KEYWORDS} without
-     * disturbing name validation), hence this highlighter-local check.
-     */
-    private static boolean isReserved(String word, String content, int start) {
-        if (PontifParser.KEYWORDS.contains(word)) return true;
-        if (word.equals("this")) return true;
-        return word.equals("type") && precededByThisDot(content, start);
-    }
-
-    /** True when the identifier at {@code start} is immediately preceded by
-     *  {@code this.} (contiguous, as field/accessor syntax is written). */
-    private static boolean precededByThisDot(String content, int start) {
-        int dot = start - 1;
-        if (dot < 0 || content.charAt(dot) != '.') return false;
-        int s = dot;
-        while (s > 0 && isIdentPart(content.charAt(s - 1))) s--;
-        return content.substring(s, dot).equals("this");
-    }
-
-    // ASCII predicates matching PontifLexer's identifier rules: start is a
-    // letter or underscore; continue adds digits and '$'.
-    private static boolean isDigit(char c)      { return c >= '0' && c <= '9'; }
-    private static boolean isIdentStart(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
-    private static boolean isIdentPart(char c)  { return isIdentStart(c) || isDigit(c) || c == '$'; }
 }

@@ -23,7 +23,7 @@ class TraitExtendsTest {
         CompileResult r = compiler.compile(src, "t.ptf");
         CompileResult.Compiled c =
                 assertInstanceOf(CompileResult.Compiled.class, r, () -> "expected compile success; got " + r);
-        PontifRunner.RunResult rr = runner.run(c.program(), PontifRunner.Engine.INTERPRETER);
+        RunResult rr = runner.run(c.program(), PontifRunner.Engine.INTERPRETER);
         assertTrue(!rr.isError(), () -> "run error: " + rr.text());
         return rr.text();
     }

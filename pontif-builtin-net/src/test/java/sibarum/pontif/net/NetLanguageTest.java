@@ -1,5 +1,6 @@
 package sibarum.pontif.net;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import sibarum.pontif.runtime.PontifCompiler;
@@ -20,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class NetLanguageTest {
 
-    private static PontifRunner.RunResult run(String source) {
+    private static RunResult run(String source) {
         Extensions.install(new NetExtension());
         return new PontifRunner()
                 .run(new PontifCompiler().compile(source, "net-lang-test"), PontifRunner.Engine.INTERPRETER);
@@ -31,7 +32,7 @@ class NetLanguageTest {
     void sendAndReceiveOverLocalTransportFromPontifSource() {
         // Open a listener + a client on the same in-VM endpoint, send two events, then pull them
         // back as a bounded stream and spread over it. The result is the received batch.
-        PontifRunner.RunResult result = run("""
+        RunResult result = run("""
                 requires pontif.net.{localListen, local, send, receiveN}
                 struct Tick(n:Int)
                 main (
@@ -54,7 +55,7 @@ class NetLanguageTest {
     @Test
     @Timeout(value = 20, unit = TimeUnit.SECONDS)
     void sendOnlyRunsCleanly() {
-        PontifRunner.RunResult result = run("""
+        RunResult result = run("""
                 requires pontif.net.{localListen, local, send}
                 struct Ping(seq:Int)
                 main (

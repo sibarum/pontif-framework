@@ -1,5 +1,9 @@
 package sibarum.pontif.playground;
 
+import sibarum.pontif.tooling.DefinitionNavigator;
+
+import java.util.Map;
+
 /**
  * The editor's one door to {@code pontif-builtin-gui}, and the only place in Playground that names it.
  *
@@ -78,6 +82,23 @@ final class OptionalGui {
             return (String) extension.getMethod("pontifSource").invoke(instance);
         } catch (ReflectiveOperationException e) {
             return null;   // present but unusable: navigation loses one module, which is not worth a failure
+        }
+    }
+
+    /**
+     * The editor's go-to-definition navigator: the builtins, and {@code pontif.gui} when the extension is here
+     * and its source parses. Built once, on first use, so the reflective probe runs once rather than per Ctrl.
+     */
+    static DefinitionNavigator navigator() {
+        return Navigator.INSTANCE;
+    }
+
+    private static final class Navigator {
+        static final DefinitionNavigator INSTANCE = build();
+
+        private static DefinitionNavigator build() {
+            String gui = moduleSource();
+            return gui == null ? DefinitionNavigator.builtinsOnly() : new DefinitionNavigator(Map.of("pontif.gui", gui));
         }
     }
 

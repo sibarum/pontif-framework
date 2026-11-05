@@ -18,7 +18,7 @@ class TernionReproTest {
         // prints the outcome; never fails the suite.
         try {
             PontifCompiler.CompileResult r = new PontifCompiler().compile(src, "ternion.ptf");
-            PontifRunner.RunResult run = new PontifRunner().run(r, PontifRunner.Engine.INTERPRETER);
+            RunResult run = new PontifRunner().run(r, PontifRunner.Engine.INTERPRETER);
             System.out.println("isError=" + run.isError());
             System.out.println("origin=" + run.origin());
             System.out.println("text=" + run.text());

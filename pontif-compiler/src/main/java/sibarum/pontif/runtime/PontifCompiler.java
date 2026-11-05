@@ -3,7 +3,7 @@ package sibarum.pontif.runtime;
 import sibarum.pontif.defaults.DefaultRules;
 import sibarum.pontif.core.symbolic.RewriteRule;
 import sibarum.pontif.core.symbolic.Simplifier;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 import sibarum.pontif.ir.AlgebraicCheck;
 import sibarum.pontif.ir.CompileException;
 import sibarum.pontif.ir.CompiledModule;

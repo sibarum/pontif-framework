@@ -1,5 +1,6 @@
 package sibarum.pontif.anybox;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.IrInterpreter;
@@ -47,7 +48,7 @@ class BoxSurfaceTest {
             captured[0] = args.size() > 1 ? args.get(1) : null;
             return new IrInterpreter.DriveResult();
         });
-        PontifRunner.RunResult r;
+        RunResult r;
         try {
             r = new PontifRunner().run(compiled, PontifRunner.Engine.INTERPRETER);
         } finally {

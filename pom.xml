@@ -18,7 +18,9 @@
         <module>pontif-receipts</module>
         <module>pontif-conservation</module>
         <module>pontif-parser</module>
+        <module>pontif-compiler</module>
         <module>pontif-runtime</module>
+        <module>pontif-tooling</module>
         <module>pontif-demo</module>
         <module>pontif-playground</module>
         <module>pontif-cli</module>
@@ -113,6 +115,16 @@
             <dependency>
                 <groupId>sibarum.pontif</groupId>
                 <artifactId>pontif-parser</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.pontif</groupId>
+                <artifactId>pontif-compiler</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>sibarum.pontif</groupId>
+                <artifactId>pontif-tooling</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

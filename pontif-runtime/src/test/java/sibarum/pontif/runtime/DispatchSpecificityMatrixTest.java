@@ -56,7 +56,7 @@ class DispatchSpecificityMatrixTest {
         if (r instanceof CompileResult.Failed f) {
             return isAmbiguity(f.error().text()) ? AMB : "COMPILE_ERR: " + f.error().text();
         }
-        PontifRunner.RunResult rr = runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER);
+        RunResult rr = runner.run(((CompileResult.Compiled) r).program(), Engine.INTERPRETER);
         if (rr.isError()) return isAmbiguity(rr.text()) ? AMB : "RUNTIME_ERR: " + rr.text();
         return rr.text();
     }

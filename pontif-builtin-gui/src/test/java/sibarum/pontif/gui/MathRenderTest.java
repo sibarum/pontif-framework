@@ -1,5 +1,6 @@
 package sibarum.pontif.gui;
 
+import sibarum.pontif.runtime.RunResult;
 import org.junit.jupiter.api.Test;
 import sibarum.pontif.core.types.RecordValue;
 import sibarum.pontif.ir.IrInterpreter;
@@ -36,7 +37,7 @@ class MathRenderTest {
         };
         NativeCalls.register("exportMathSvg", stub);
         NativeCalls.register("pontif.plot/exportMathSvg", stub);
-        PontifRunner.RunResult r = new PontifRunner().run(
+        RunResult r = new PontifRunner().run(
                 new PontifCompiler().compile("""
                         requires pontif.algebra.{Algebraic}
                         requires pontif.plot.{exportMathSvg}

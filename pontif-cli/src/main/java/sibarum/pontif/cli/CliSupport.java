@@ -2,7 +2,7 @@ package sibarum.pontif.cli;
 
 import sibarum.pontif.runtime.PontifCompiler;
 import sibarum.pontif.runtime.PontifRunner;
-import sibarum.pontif.runtime.PontifRunner.RunResult;
+import sibarum.pontif.runtime.RunResult;
 
 /**
  * Shared compile/run plumbing for the subcommands. One {@link PontifCompiler}
