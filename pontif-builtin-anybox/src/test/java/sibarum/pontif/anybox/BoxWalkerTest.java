@@ -73,7 +73,7 @@ class BoxWalkerTest {
     }
 
     static RetainedNode frame(Gui gui) {
-        return gui.frame(800f, 600f, MEASURER);
+        return dev.vexelray.gui.core.spi.Seams.of(gui).frame(800f, 600f, MEASURER);
     }
 
     private static RetainedNode only(RetainedNode parent) {
@@ -112,10 +112,10 @@ class BoxWalkerTest {
             gui.root().children(root);
 
             RetainedNode n = only(frame(gui));
-            assertEquals(gui.theme().color(Role.PANEL), n.background());
+            assertEquals(gui.theme().color(Role.PANEL), n.background().in(gui.theme()));
             assertTrue(n.cornerPx > 0f, "a corner radius resolves to pixels");
             assertTrue(n.elevationPx > 0f, "an elevation resolves to pixels");
-            assertTrue(n.lit(), "Glows(true) draws the fill lit");
+            assertTrue(n.lit(gui.theme()), "Glows(true) draws the fill lit");
         }
     }
 
@@ -128,7 +128,7 @@ class BoxWalkerTest {
                     rec("pontif.gui/Fills", "role", role("DANGER"))), tuple()));
             gui.root().children(root);
 
-            assertEquals(gui.theme().color(Role.DANGER), only(frame(gui)).background());
+            assertEquals(gui.theme().color(Role.DANGER), only(frame(gui)).background().in(gui.theme()));
         }
     }
 

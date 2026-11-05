@@ -37,7 +37,12 @@ public interface LaneTransport {
      */
     void start(Set<String> conductors, Fire fire);
 
-    /** Whether the calling thread is the one that owns {@code lane}; if so the interpreter folds inline. */
+    /**
+     * Whether the interpreter may fold an event for {@code lane} inline on the calling thread rather than send it.
+     * The thread tier answers "the calling thread owns {@code lane}". A transport whose order is a tick's rounds
+     * answers no once its ticks run, even on the owning lane, so a lane's own emits wait for the next round like
+     * everyone else's and a run replays.
+     */
     boolean onLane(String lane);
 
     /**
@@ -66,6 +71,8 @@ public interface LaneTransport {
      * Whether the run continues after {@link #drive} returns. The thread tier is over when the orchestra
      * drains, so the interpreter tears its lanes down and later events fold inline. A windowed host is not:
      * the loop outlives {@code main}, and a click arriving afterwards must still reach the lane that owns it.
+     * Such a transport is started even for a program that seats nothing {@code over thread}, because it is the
+     * one carrying the main lane once {@code main} returns.
      */
     default boolean survivesMain() {
         return false;

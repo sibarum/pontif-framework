@@ -24,8 +24,11 @@
     -->
     <properties>
         <main.class>sibarum.pontif.anybox.AnyboxLauncher</main.class>
-        <vexelray.version>0.1.0-SNAPSHOT</vexelray.version>
-        <tactroller.version>1.0-SNAPSHOT</tactroller.version>
+        <!-- The widget library is on the 0.2 message model; the window provider and the input backend under it
+             are not versioned with it. -->
+        <vexelray.gui.version>0.2.0-SNAPSHOT</vexelray.gui.version>
+        <vexelray.version>0.1.3-SNAPSHOT</vexelray.version>
+        <tactroller.version>1.3-SNAPSHOT</tactroller.version>
     </properties>
 
     <dependencies>
@@ -47,13 +50,13 @@
         <dependency>
             <groupId>dev.vexelray.gui</groupId>
             <artifactId>vexelray-gui-core</artifactId>
-            <version>${vexelray.version}</version>
+            <version>${vexelray.gui.version}</version>
         </dependency>
         <!-- Widgets whose machinery we must not re-derive: TextField (caret/selection/undo), Slider. -->
         <dependency>
             <groupId>dev.vexelray.gui</groupId>
             <artifactId>vexelray-gui-widget</artifactId>
-            <version>${vexelray.version}</version>
+            <version>${vexelray.gui.version}</version>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

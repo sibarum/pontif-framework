@@ -4,6 +4,7 @@ import dev.vexelray.framework.shell.AppInfo;
 import dev.vexelray.framework.shell.Shell;
 import dev.vexelray.framework.shell.VexelApplication;
 import org.junit.jupiter.api.Test;
+import sibarum.pontif.ir.IrInterpreter;
 import sibarum.pontif.runtime.CompiledProgram;
 import sibarum.pontif.runtime.PontifCompiler;
 
@@ -16,8 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A whole Pontif program as a framework application, built headlessly through {@code VexelApplication.tree}:
- * two {@code over thread} conductors become two components, the interpreter hands events between them through
- * the framework's mailboxes, and the main conductor is served by the frame hook rather than a drive loop.
+ * two {@code over thread} conductors become two components on lanes of their own, the interpreter hands events
+ * between them through the logic tick's inboxes, and {@code main}'s lane is an inbox on the logic lane, served by
+ * the framework and never by the main thread.
  */
 class PontifWiringTest {
 
@@ -35,7 +37,7 @@ class PontifWiringTest {
             """;
 
     @Test
-    void conductorsAreComponents_andTheMainLaneIsServedInTheFrame() throws Exception {
+    void conductorsAreComponents_andTheTickCarriesEveryHop() throws Exception {
         var compiled = new PontifCompiler().compile(PROGRAM, "hosted.ptf");
         CompiledProgram program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
         PontifWiring wiring = new PontifWiring(new AppInfo("pontif-host-test", "Pontif", 640, 480), program);
@@ -47,11 +49,10 @@ class PontifWiringTest {
             System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
             shell = VexelApplication.tree(wiring, new String[0]);
 
-            // The hops App -> Display -> main happen on component threads; the last one lands in the main
-            // lane's mailbox, which only a frame's APP stage (here: this thread) serves.
+            // The hops App -> Display -> main happen on the conductors' declared lanes; the last one lands in
+            // main's inbox on the logic lane. Nobody has to drain anything: the framework's tick runs them all.
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (printed(out).split("done ", -1).length - 1 < 3) {
-                wiring.lanes().mainDrain().run();
                 if (System.nanoTime() > deadline) break;
                 Thread.sleep(2);
             }
@@ -106,11 +107,9 @@ class PontifWiringTest {
 
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (printed(out).split(" ", -1).length - 1 < 2 && System.nanoTime() < deadline) {
-                wiring.lanes().mainDrain().run();
                 Thread.sleep(2);
             }
             Thread.sleep(50);
-            wiring.lanes().mainDrain().run();
         } finally {
             System.setOut(orig);
             if (shell != null) shell.disposer().close();
@@ -148,7 +147,6 @@ class PontifWiringTest {
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (printed(out).split(" ", -1).length - 1 < 3 && System.nanoTime() < deadline) {
                 shell.hooks().run();            // the frame: fires a beat when one is due
-                wiring.lanes().mainDrain().run();
                 Thread.sleep(2);
             }
         } finally {
@@ -157,5 +155,50 @@ class PontifWiringTest {
         }
 
         assertEquals("t1 t2 t3 ", printed(out), "three beats, 30 ms apart, each reaching the clock's conductor");
+    }
+    private static final String UNTHREADED = """
+            requires pontif.events.{Event, StdOut}
+            requires pontif.orchestra.{conduct, Tick, Fixed}
+            conductor Clock { onTick(t:Tick) -> emit StdOut("t" + t.n + " ")  t }
+            spawn Clock
+            main ( conduct(2, Fixed(10)) )
+            """;
+
+    /**
+     * T7.1, for a program that seats nothing {@code over thread}: its beats are fired by a frame hook on the
+     * framework's thread (here, this one), but every handler runs in the logic tick, on {@code vexel-logic}.
+     */
+    @Test
+    void anUnthreadedProgramsHandlersRunInTheLogicTick_notOnTheThreadThatFiredTheEvent() throws Exception {
+        var compiled = new PontifCompiler().compile(UNTHREADED, "unthreaded.ptf");
+        if (compiled instanceof PontifCompiler.CompileResult.Failed f) throw new AssertionError(f.error().text());
+        CompiledProgram program = ((PontifCompiler.CompileResult.Compiled) compiled).program();
+        PontifWiring wiring = new PontifWiring(new AppInfo("pontif-host-test", "Pontif", 640, 480), program);
+
+        java.util.Set<String> handlerThreads = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        IrInterpreter.installEventListener((event, seq, origin) -> {
+            if (event.typeName().endsWith("Tick")) handlerThreads.add(Thread.currentThread().getName());
+        });
+        PrintStream orig = System.out;
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        Shell shell = null;
+        try {
+            System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+            shell = VexelApplication.tree(wiring, new String[0]);
+            shell.hooks().seal();
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (printed(out).split(" ", -1).length - 1 < 2 && System.nanoTime() < deadline) {
+                shell.hooks().run();
+                Thread.sleep(2);
+            }
+        } finally {
+            IrInterpreter.installEventListener(null);
+            System.setOut(orig);
+            if (shell != null) shell.disposer().close();
+        }
+
+        assertEquals("t1 t2 ", printed(out));
+        assertEquals(java.util.Set.of("vexel-logic"), handlerThreads,
+                "every beat was handled in the logic tick, none on the thread that fired it");
     }
 }

@@ -52,7 +52,7 @@ public final class AnyboxLauncher {
 
         VexelApplication.run(
                 new PontifWiring(appInfo(displayName), compiled.program(),
-                        shell -> Mounts.install(new FrameworkWindowHost(shell))),
+                        (shell, lanes) -> Mounts.install(new FrameworkWindowHost(shell, lanes))),
                 frameworkArgs);
     }
 

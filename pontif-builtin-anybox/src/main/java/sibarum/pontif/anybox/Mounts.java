@@ -31,6 +31,12 @@ final class Mounts {
          * {@code ctx} is how the handlers the walk installs fire events back into the running program.
          */
         Object open(String title, Object root, NativeCalls.Context ctx);
+
+        /**
+         * Send {@code SetText} towards the GUI thread, from whichever thread the program's handler runs on. The host
+         * applies it there with {@link #apply}; it never touches a widget itself.
+         */
+        void setText(String id, String text);
     }
 
     /** One window's retained registries - id to node, and id to field. */
@@ -61,13 +67,18 @@ final class Mounts {
         return () -> mounted.remove(m);
     }
 
+    /** The {@code pontif.gui/SetText} sink, on the program's lane: the command leaves for the GUI thread. */
+    static void setText(String id, String text) {
+        host().setText(id, text);
+    }
+
     /**
-     * The {@code pontif.gui/SetText} sink: set the text of the retained widget with this id, in place. A field
+     * {@code SetText} arriving on the GUI thread: set the text of the retained widget with this id, in place. A field
      * is written through its {@link TextField} rather than its node, because its text lives in a Document the
      * caret and undo log are keyed to - writing the node would desynchronise both. An unknown id is reported
      * and dropped rather than thrown: a stale command should not take down a running window.
      */
-    static void setText(String id, String text) {
+    static void apply(String id, String text) {
         for (Mounted m : mounted) {
             TextField field = m.fields().get(id);
             if (field != null) {

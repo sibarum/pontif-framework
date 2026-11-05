@@ -58,12 +58,14 @@ The tree is walked **once**. Every update afterwards is isolated: a command name
 sink posts a single mutation for the single node registered under it. Nothing is rebuilt — which is
 what keeps a field's caret, selection, undo log and scroll offset alive across an update.
 
-vexelray handles are write-only and thread-safe by construction, so a sink runs wherever the conduit
-runs and needs no marshalling back to the GUI thread. That is the framework's normal path, not an
-exception to it.
+The conduit runs in the framework's logic tick, never on the GUI thread, so a sink does not touch a widget:
+`SetText` is a message on a state topic keyed by the widget's id, and the window applies it on the GUI thread in
+the next frame. Within one tick only the last write to each widget reaches the frame. That is the framework's
+normal path (vexelray-framework's `docs/threading.md`, T3.8), not an exception to it.
 
 **Fields are uncontrolled.** A `field(id, initial)` owns its buffer after construction; `initial` is
-a seed, not a binding. Every edit fires `TextChanged{id, text}`; fold that and drive *other* widgets.
+a seed, not a binding. An edit fires `TextChanged{id, text}`, from the widget's own `CHANGED` state topic, so a
+burst of keystrokes within one frame arrives as its last text; fold that and drive *other* widgets.
 Writing the same field back from the conduit fights the caret.
 
 ## What is Pontif's and what is vexelray's
@@ -171,6 +173,11 @@ with its static single-window registries and its `System.err` logging) is delete
 - **Size and title.** The framework sizes and remembers the window from the application's facts, fixed before the
   program runs, so a program's `width`/`height` no longer apply and a window comes back where the user left it.
   The program's `title` is shown in the framework's title bar.
+- **No Pontif code runs on the GUI thread** (VexelRay 0.2's message model, `threading.md` T7.1). The window is a
+  view: a button's click and look are heard as messages (`Gui.hear`), a field's edits arrive on `TextField.CHANGED`,
+  and each event leaves for the program's lane, which the framework's logic tick delivers. Only `main` runs on the
+  thread building the tree, before any tick.
 - **A program is an application:** its settings directory is `pontif-<program>`, so each program remembers its own
   window, and everything after the positional arguments on the launcher's command line (`--automation`, ...) is
-  the framework's own.
+  the framework's own. With `--automation=0` the program can be driven by `ottermate` like any framework
+  application.

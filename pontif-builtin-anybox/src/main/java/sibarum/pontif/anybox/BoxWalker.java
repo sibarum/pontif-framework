@@ -2,7 +2,9 @@ package sibarum.pontif.anybox;
 
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.Node;
+import dev.vexelray.gui.core.NodeEvent;
 import dev.vexelray.gui.core.layout.Length;
+import dev.vexelray.gui.core.style.Paint;
 import dev.vexelray.gui.core.style.Role;
 import dev.vexelray.gui.widget.TextField;
 import dev.vexelray.text.TextLayout;
@@ -112,14 +114,16 @@ final class BoxWalker {
         Node b = gui.text(label)
                 .height(Length.rem(2.25f))
                 .padding(Length.rem(0.4f), Length.rem(1.0f))
-                .background(gui.theme().color(Role.ACTION))
-                .textColor(gui.theme().color(Role.ON_ACTION))
+                .background(Role.ACTION)
+                .textColor(Role.ON_ACTION)
                 .corner(Length.rem(0.625f))
                 .align(TextLayout.HAlign.CENTER, TextLayout.VAlign.MIDDLE)
                 .lit(gui.theme().lit())
                 .elevation(Length.rem(0.375f));
-        gui.onState(b, state -> {
-            b.background(gui.theme().color(Role.ACTION, state));
+        // Heard as messages, on the GUI thread in the frame the input arrived (threading.md T7.4): the look is
+        // the window's own business, and the click leaves for the program's lane, where its handlers run.
+        gui.hear(b, NodeEvent.STATE, state -> {
+            b.background(Paint.of(Role.ACTION, state));
             b.elevation(switch (state) {
                 case NORMAL -> Length.rem(0.375f);
                 case HOVER -> Length.rem(0.625f);
@@ -127,7 +131,7 @@ final class BoxWalker {
             });
         });
         if (!id.isEmpty()) {
-            gui.onClick(b, () -> ctx.fireEvent(event("pontif.gui/Clicked", "id", id)));
+            gui.hear(b, NodeEvent.CLICK, click -> ctx.fireEvent(event("pontif.gui/Clicked", "id", id)));
         }
         return b;
     }
@@ -135,14 +139,17 @@ final class BoxWalker {
     /**
      * An editable field. The widget owns its buffer — caret, selection, undo and the clipboard are
      * vexelray's, and re-deriving any of that here would be re-implementing what the platform
-     * ships. Every edit fires {@code TextChanged{id, text}}; the conduit folds that and drives
-     * OTHER widgets. Writing this same field back from the conduit would fight the caret.
+     * ships. The field is named by its id, so what it says is {@code TextField.CHANGED} addressed to it, a state
+     * topic: the program hears {@code TextChanged{id, text}} with the last text of a frame, not each keystroke.
+     * Writing this same field back from the program would fight the caret.
      */
     private Node makeField(String id, String initial) {
         TextField f = new TextField(gui, initial);
         if (!id.isEmpty()) {
             fieldsById.put(id, f);
-            f.onChange(s -> ctx.fireEvent(event("pontif.gui/TextChanged", "id", id, "text", s)));
+            f.name(id);
+            gui.mailbox(TextField.CHANGED, f.address(),
+                    changed -> ctx.fireEvent(event("pontif.gui/TextChanged", "id", id, "text", changed.text())));
         }
         return f.node();
     }
@@ -159,9 +166,9 @@ final class BoxWalker {
             case "Sized" -> node.textSize(length(m.get("size")));
             case "Rounds" -> node.corner(length(m.get("radius")));
             case "Raises" -> node.elevation(length(m.get("blur")));
-            case "Fills" -> node.background(gui.theme().color(role(m.get("role"))));
-            case "Inks" -> node.textColor(gui.theme().color(role(m.get("role"))));
-            case "Edged" -> node.border(length(m.get("width")), gui.theme().color(role(m.get("role"))));
+            case "Fills" -> node.background(role(m.get("role")));
+            case "Inks" -> node.textColor(role(m.get("role")));
+            case "Edged" -> node.border(length(m.get("width")), role(m.get("role")));
             case "Glows" -> node.lit(bool(atom, "on"));
             case "Shows" -> node.visible(bool(atom, "on"));
             case "Runs" -> node.justify(justify(m.get("way")));
@@ -185,6 +192,6 @@ final class BoxWalker {
     }
 
     private Node error(String message) {
-        return gui.text(message).textColor(gui.theme().color(Role.DANGER));
+        return gui.text(message).textColor(Role.DANGER);
     }
 }

@@ -21,8 +21,8 @@
       never learns that a container exists.
     -->
     <properties>
-        <framework.version>0.1.0-SNAPSHOT</framework.version>
-        <atchung.version>1.0-SNAPSHOT</atchung.version>
+        <framework.version>0.2.0-SNAPSHOT</framework.version>
+        <atchung.version>1.4-SNAPSHOT</atchung.version>
     </properties>
 
     <dependencies>
@@ -37,6 +37,13 @@
         <dependency>
             <groupId>dev.vexelray.framework</groupId>
             <artifactId>vexelray-framework-shell</artifactId>
+            <version>${framework.version}</version>
+        </dependency>
+        <!-- The driving socket, off unless the launch asks for one (the automation flag), so ottermate can drive a
+             Pontif program as it drives any framework application. -->
+        <dependency>
+            <groupId>dev.vexelray.framework</groupId>
+            <artifactId>vexelray-framework-automation</artifactId>
             <version>${framework.version}</version>
         </dependency>
         <dependency>

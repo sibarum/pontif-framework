@@ -24,9 +24,9 @@ import sibarum.pontif.runtime.module.OrchestraBridge;
  *   <li>{@code Retained} - a beat on any frame something else caused, and no deadline: zero frames when idle.</li>
  * </ul>
  *
- * <p>The beat is fired from {@code FrameStage.APP} on the main thread, so a conductor seated {@code over thread}
- * receives it as a mailbox send and a main-lane one folds it inline, in the frame. {@code Tick} is a {@code
- * Sample}, so a conductor that falls behind sees the newest beat and never a backlog.
+ * <p>The beat is fired from the framework's own {@code FrameStage.APP} hook on the main thread, which serves no lane,
+ * so it is sent: whichever conductor owns {@code Tick} handles it in the next logic tick, never in the frame (T7.1).
+ * {@code Tick} is a {@code Sample}, so a conductor that falls behind sees the newest beat and never a backlog.
  */
 final class FrameworkTickHost implements OrchestraBridge.TickHost {
 

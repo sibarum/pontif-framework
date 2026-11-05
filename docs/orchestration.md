@@ -480,6 +480,28 @@ macOS wrinkle (noted, not yet paid): a window is happiest on a consistent thread
 *demands* the true main thread, so "spawn the GUI onto any pool thread" is a Windows-only convenience.
 The main lane exists precisely so the display Player can be pinned there when we cross that bridge.
 
+### Hosted on VexelRay 0.2 — the tick is the transport (2026-11-04)
+
+VexelRay 0.2's message model (vexelray-framework's `docs/threading.md`) is this section restated for a GUI
+framework: a component owns its state and an inbox, a channel is its payload type, loss is a topic's kind (state
+or edge), sends are declared, a loop is caught by a hop limit, placement is fixed in the wiring, and a run
+replays. So `pontif-host` carries a program on the framework's logic tick rather than beside it. Three rulings,
+taken when the host moved to 0.2:
+
+1. **`main`'s lane is not the main thread.** Under a host, the *main* tier above is an inbox on the framework's
+   logic lane, like any other part: no Pontif handler runs on the GUI thread (T7.1). Only `main` itself runs on
+   the thread building the tree, before the first tick. The cooperative "between render ticks" behaviour is the
+   framework's single-thread mode (`--logic=main`), which the program cannot tell from the default.
+2. **Every emit goes through the tick's rounds.** Once ticks run, an emit is queued for the next round even when
+   its owner is the lane that emitted it, and leaves through the sender of the inbox whose delivery made it. The
+   inline fold of the thread tier is gone under a host, because replay, the hop limit (64) and the order across
+   lanes only hold if the tick sees every send. A chain of emits deeper than the hop limit is a loop, and halts.
+3. **One logic lane by default.** Every conductor shares the logic lane; one seated `over thread` gets a declared
+   lane of its own (`vexel-component-<name>`), in the same rounds. A conductor asks for a core, and is never
+   handed one by default.
+
+The thread tier (`ThreadLaneTransport`, the CLI and headless default) is unchanged.
+
 ### The journal is the wire format
 
 Because every message is immutable static data, a **per-inbox journal** — an ordered list of those
@@ -607,13 +629,13 @@ language already guarantees it, so the declaration is sound by construction rath
 an edge. (A key field in the declaration is the obvious refinement, and unbuilt on purpose: the cell is the
 type until a program needs more.)
 
-**Ordering.** One mailbox per lane, not one per class, because superseding moves the surviving event to the
-back of the queue, at the position of its newest write: the lane still sees its events in arrival order across
-both classes, with the superseded ones simply absent.
+**Ordering.** One inbox per lane, not one per class: under the framework host a lane hears an edge topic and a
+state topic keyed by the event's type, and an atchung inbox keeps one arrival order across all its topics, so the
+lane still sees its events in arrival order across both classes, with the superseded ones simply absent.
 
 **What a transport does with it** is the transport's. `LaneTransport.send` carries the class; the interpreter
 reads it off the event's sort (`satisfies pontif.events.Sample`) on the cross-lane path only, so an inline fold
-pays nothing. The framework host folds as above. The thread tier queues everything and never drops: it has no
+pays nothing. The framework host folds as above, as a state topic. The thread tier queues everything and never drops: it has no
 bounded queue to fall behind into, and an author must not depend on a sample being delivered, which is the
 contract of the word.
 

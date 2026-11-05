@@ -255,11 +255,14 @@ public final class IrInterpreter {
     /** Stand up a lane per THREAD conductor (+ the main lane) before any event flows. */
     private void startLanes(CompiledModule module) {
         Set<String> threaded = module.threadedConductors();
-        if (threaded.isEmpty()) return;   // no `over thread` seats — stay fully synchronous
+        LaneTransport t = transportFactory.get();
+        // No `over thread` seats: stay fully synchronous, unless the transport carries the main lane past main
+        // (a hosted application), whose events then arrive from the host's threads and must reach main's lane.
+        if (threaded.isEmpty() && !t.survivesMain()) return;
         routing(module);                  // publish the routing table before any lane reads it
         threadedSeats = threaded;
-        LaneTransport t = transportFactory.get();
-        t.start(threaded, (event, origin) -> fireEvent(event, module, origin));
+        // A delivery fires HERE: the event was routed when it was sent, so the lane that drained it owns it.
+        t.start(threaded, (event, origin) -> fireOnThisLane(event, module, origin));
         lanes = t;
     }
 
@@ -574,6 +577,16 @@ public final class IrInterpreter {
                 return;
             }
         }
+        fireOnThisLane(rec, module, origin);
+    }
+
+    /**
+     * Fire an event that has already reached its owner: the half of {@link #fireEvent} after routing. A lane's
+     * delivery comes here, never back through the routing, because a transport that queues even a lane's own
+     * emits (a hosted tick, whose rounds are the only order) would otherwise send the delivery to itself again.
+     */
+    private void fireOnThisLane(RecordValue rec, CompiledModule module, Origin origin) {
+        String typeName = rec.typeName();
         if (eventListener != null) {
             eventListener.onEmit(rec, emitSeq.incrementAndGet(), origin);
         }

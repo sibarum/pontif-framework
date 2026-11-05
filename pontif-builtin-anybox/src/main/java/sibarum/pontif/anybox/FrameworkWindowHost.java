@@ -1,12 +1,14 @@
 package sibarum.pontif.anybox;
 
 import dev.vexelray.framework.shell.Shell;
+import dev.vexelray.framework.shell.Views;
 import dev.vexelray.gui.core.Gui;
 import dev.vexelray.gui.core.Node;
 import dev.vexelray.gui.core.layout.LayoutEnums.Direction;
 import dev.vexelray.gui.core.layout.Length;
 import dev.vexelray.gui.core.style.Role;
 import sibarum.pontif.ir.IrInterpreter;
+import sibarum.pontif.host.FrameworkLaneTransport;
 import sibarum.pontif.ir.NativeCalls;
 
 /**
@@ -24,14 +26,29 @@ import sibarum.pontif.ir.NativeCalls;
  * facts, which are fixed before the program runs; a program's {@code width} and {@code height} therefore no
  * longer apply, and that is the better answer - a window comes back where the user left it. The program's
  * {@code title} is shown in the framework's title bar, when the application draws its own frame.
+ *
+ * <p><b>The window is a view</b> (vexelray-framework's {@code docs/threading.md}, T7.4): its widgets are heard as
+ * messages on the GUI thread and leave for the program's lane, and what the program writes back ({@code SetText})
+ * arrives as a message in the frame's widget tick. No Pontif handler runs on the GUI thread.
  */
 final class FrameworkWindowHost implements Mounts.Host {
 
+    /** Capacity is for edges; {@code SetText} is a state topic and holds one write per widget. */
+    private static final int CAPACITY = 64;
+
     private final Shell shell;
+    private final FrameworkLaneTransport.Outlet<SetText> setText;
     private AutoCloseable mounted;
 
-    FrameworkWindowHost(Shell shell) {
+    FrameworkWindowHost(Shell shell, FrameworkLaneTransport lanes) {
         this.shell = shell;
+        this.setText = lanes.outlet(SetText.TOPIC);
+        Views.mailbox(shell.gui(), "pontif.gui#SetText", SetText.TOPIC, c -> Mounts.apply(c.id(), c.text()), CAPACITY);
+    }
+
+    @Override
+    public void setText(String id, String text) {
+        setText.send(new SetText(id, text));
     }
 
     @Override
@@ -45,10 +62,10 @@ final class FrameworkWindowHost implements Mounts.Host {
 
         Node page = gui.box()
                 .width(Length.FILL).height(Length.grow(1f))
-                .background(gui.theme().color(Role.PAGE))
+                .background(Role.PAGE)
                 .padding(Length.dp(12))
                 .children(tree);
-        Node window = gui.root().direction(Direction.COLUMN).background(gui.theme().color(Role.PAGE));
+        Node window = gui.root().direction(Direction.COLUMN).background(Role.PAGE);
         if (shell.appearance().drawsOwnFrame()) {
             window.children(shell.titleBar().title(title).node(), page);
         } else {
