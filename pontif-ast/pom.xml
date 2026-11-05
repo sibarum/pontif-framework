@@ -9,6 +9,9 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
     <artifactId>pontif-ast</artifactId>
+    <!-- The Truffle backend: the Truffle runtime classes (package sibarum.pontif.core), the node
+         tree, and the IR -> Truffle lowering (package sibarum.pontif.ir). It depends on the IR,
+         never the other way round, so the front end stays Truffle-free. -->
 
     <dependencies>
         <dependency>
@@ -16,8 +19,22 @@
             <artifactId>pontif-core</artifactId>
         </dependency>
         <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-ir</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.graalvm.truffle</groupId>
             <artifactId>truffle-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>sibarum.pontif</groupId>
+            <artifactId>pontif-defaults</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

@@ -9,12 +9,7 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
     <artifactId>pontif-core</artifactId>
-
-    <dependencies>
-        <dependency>
-            <groupId>org.graalvm.truffle</groupId>
-            <artifactId>truffle-api</artifactId>
-        </dependency>
-    </dependencies>
+    <!-- No Truffle here, on purpose: the front end (parser, IR, predicates) builds on core and
+         must stay backend-free. Truffle's runtime classes live in pontif-ast. -->
 
 </project>
