@@ -27,7 +27,7 @@
         <!-- The widget library is on the 0.2 message model; the window provider and the input backend under it
              are not versioned with it. -->
         <vexelray.gui.version>0.2.0-SNAPSHOT</vexelray.gui.version>
-        <vexelray.version>0.1.3-SNAPSHOT</vexelray.version>
+        <vexelray.version>0.2.0-SNAPSHOT</vexelray.version>
         <tactroller.version>1.3-SNAPSHOT</tactroller.version>
     </properties>
 
